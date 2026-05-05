@@ -51,28 +51,33 @@ def _handle_codegraph_index_job_sync(job: dict[str, Any]) -> dict[str, Any]:
     index_db_path = _required_path(payload, "index_db_path").resolve(strict=False)
     _validate_index_path(index_db_path=index_db_path, index_base_dir=index_base_dir)
 
-    repository = CodeGraphRepository(index_db_path)
-    indexer = CodeGraphIndexer(settings=settings, registry=CodeGraphLanguageRegistry())
     languages = _coerce_languages(payload.get("languages"))
     max_files = _coerce_optional_int(payload.get("max_files"), "max_files")
 
-    if operation == "index":
-        result = indexer.index_workspace(
-            workspace_root,
-            workspace_key,
-            repository,
-            force=bool(payload.get("force", False)),
-            languages=languages,
-            max_files=max_files,
-        )
-    else:
-        result = indexer.sync_workspace(
-            workspace_root,
-            workspace_key,
-            repository,
-            languages=languages,
-            max_files=max_files,
-        )
+    try:
+        repository = CodeGraphRepository(index_db_path)
+        indexer = CodeGraphIndexer(settings=settings, registry=CodeGraphLanguageRegistry())
+        if operation == "index":
+            result = indexer.index_workspace(
+                workspace_root,
+                workspace_key,
+                repository,
+                force=bool(payload.get("force", False)),
+                languages=languages,
+                max_files=max_files,
+            )
+        else:
+            result = indexer.sync_workspace(
+                workspace_root,
+                workspace_key,
+                repository,
+                languages=languages,
+                max_files=max_files,
+            )
+    except CodeGraphJobError:
+        raise
+    except Exception as exc:
+        raise CodeGraphJobError("codegraph_job_execution_failed", retryable=False) from exc
 
     return _job_result_to_dict(
         result,

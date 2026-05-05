@@ -90,6 +90,33 @@ async def test_codegraph_jobs_worker_syncs_workspace(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_codegraph_jobs_worker_wraps_indexer_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _payload(tmp_path, operation="index")
+
+    class _ExplodingIndexer:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def index_workspace(self, *_args, **_kwargs):
+            raise RuntimeError("indexer exploded")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.CodeGraph.jobs_worker.CodeGraphIndexer",
+        _ExplodingIndexer,
+    )
+
+    with pytest.raises(CodeGraphJobError) as excinfo:
+        await handle_codegraph_index_job({"job_type": CODEGRAPH_INDEX_JOB_TYPE, "payload": payload})
+
+    assert excinfo.value.retryable is False
+    assert "codegraph_job_execution_failed" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+
+@pytest.mark.asyncio
 async def test_codegraph_jobs_worker_rejects_unsupported_job_type(tmp_path: Path) -> None:
     payload = _payload(tmp_path, operation="index")
 

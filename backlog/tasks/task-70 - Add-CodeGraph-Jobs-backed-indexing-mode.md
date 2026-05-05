@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 14:15'
-updated_date: '2026-05-05 14:41'
+updated_date: '2026-05-05 14:44'
 labels:
   - codegraph
   - mcp
@@ -58,6 +58,14 @@ PR review fixes implemented:
 - Jobs payloads now serialize workspace_root, index_db_path, and settings.index_base_dir as absolute paths.
 - CodeGraphJobError now lives in tldw_Server_API.app.core.exceptions.
 - MCP index/sync write dispatch now uses a shared helper for foreground and queued modes.
+- CodeRabbit follow-up: wrap repository/indexer execution failures as non-retryable CodeGraphJobError values so WorkerSDK retry semantics stay stable.
+
+Final review-fix verification passed:
+
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_jobs.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs_worker.py tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q (61 passed)
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/CodeGraph/workspace.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs_worker.py tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/CodeGraph/workspace.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py -f json -o /tmp/bandit_codegraph_jobs_review_fixes.json (0 findings)
+- git diff --check
 
 Review-fix verification passed:
 
@@ -85,4 +93,6 @@ Added a Jobs-backed execution path for native CodeGraph index and sync work whil
 No known blockers. Automatic worker deployment/startup remains intentionally out of scope for this task.
 
 Review follow-up addressed Qodo and Gemini comments on PR #1304. The worker now uses a local index-base boundary, payload paths are absolute across process boundaries, CodeGraphJobError is centralized, and duplicate MCP write-mode dispatch is factored through a helper.
+
+Additional CodeRabbit follow-up wraps repository and indexer execution failures into non-retryable CodeGraphJobError values while preserving the original exception as the cause.
 <!-- SECTION:FINAL_SUMMARY:END -->
