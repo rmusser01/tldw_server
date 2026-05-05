@@ -42,7 +42,7 @@ Continue issue #1116 Phase 2.2 after PR #1324. Convert the next small minimal-te
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Started after PR #1324 merge was verified on origin/dev as 8b87d7b2a in the git log. Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase2-2-minimal-study-router-conditionals-am. Branch: codex/phase2-2-minimal-study-router-conditionals-am. Baseline focused Kanban minimal tests passed with 3 passed before edits.
+Started after PR #1324 merge was verified on origin/dev as 8b87d7b2a in the git log. Worktree: local feature worktree for phase2-2-minimal-study-router-conditionals-am. Branch: codex/phase2-2-minimal-study-router-conditionals-am. Baseline focused Kanban minimal tests passed with 3 passed before edits.
 
 RED verification: focused study tests failed before production changes because flashcards, quizzes, and study_suggestions were imported during spec construction and no named lazy study specs existed for registration-time skip/propagation assertions.
 
