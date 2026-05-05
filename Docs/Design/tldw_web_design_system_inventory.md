@@ -441,5 +441,6 @@ anchor files:
 - `apps/tldw-frontend/components/ui/ConfirmDialog.tsx`
 - `apps/packages/ui/src/components/Option/Settings/health-status.tsx`
 - `apps/packages/ui/src/components/Option/Admin/ServerAdminPage.tsx`
-- `apps/packages/ui/src/components/Option/Playground`
+- `apps/packages/ui/src/components/Option/Playground` 
+- `apps/packages/ui/src/components/Common/Playground` 
 - `apps/packages/ui/src/components/Sidepanel/Chat`
