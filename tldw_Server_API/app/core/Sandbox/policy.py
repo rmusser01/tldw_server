@@ -9,7 +9,10 @@ from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .models import RunSpec, RuntimeType, SessionSpec, TrustLevel
-from .runtime_capabilities import RuntimePreflightResult
+from .runtime_capabilities import (
+    RuntimePreflightResult,
+    runtime_network_policy_metadata,
+)
 
 _POLICY_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -236,6 +239,48 @@ class SandboxPolicy:
                 reasons=["trust_level_not_supported"],
             )
 
+    @staticmethod
+    def _network_policy_unsupported_reason(network_policy: str) -> str:
+        if network_policy == "allowlist":
+            return "strict_allowlist_not_supported"
+        return "strict_deny_all_not_supported"
+
+    @staticmethod
+    def _require_network_policy_supported(
+        runtime: RuntimeType,
+        network_policy: str | None,
+    ) -> str:
+        requested_policy = (
+            str(network_policy or "deny_all").strip().lower() or "deny_all"
+        )
+        if requested_policy not in {"deny_all", "allowlist"}:
+            raise SandboxPolicy.PolicyUnsupported(
+                runtime,
+                requirement=requested_policy,
+                reasons=["unsupported_network_policy"],
+            )
+
+        contract = runtime_network_policy_metadata(runtime)
+        mode = (
+            contract.deny_all
+            if requested_policy == "deny_all"
+            else contract.allowlist
+        )
+        if (
+            mode.support_state not in {"supported", "host_gated"}
+            or not mode.strict_enforcement
+        ):
+            raise SandboxPolicy.PolicyUnsupported(
+                runtime,
+                requirement=requested_policy,
+                reasons=[
+                    SandboxPolicy._network_policy_unsupported_reason(
+                        requested_policy
+                    )
+                ],
+            )
+        return requested_policy
+
     def select_runtime(
         self,
         requested: RuntimeType | None,
@@ -283,8 +328,15 @@ class SandboxPolicy:
         )
         profile = TRUST_PROFILES.get(trust, TRUST_PROFILES[TrustLevel.standard])
 
-        if not spec.network_policy:
-            spec.network_policy = profile.get("network_policy", self.cfg.network_default)
+        if not str(spec.network_policy or "").strip():
+            spec.network_policy = profile.get(
+                "network_policy",
+                self.cfg.network_default,
+            )
+        spec.network_policy = self._require_network_policy_supported(
+            spec.runtime,
+            spec.network_policy,
+        )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
         profile_max_cpu = float(profile.get("max_cpu", self.cfg.max_cpu))
@@ -342,8 +394,15 @@ class SandboxPolicy:
         )
         profile = TRUST_PROFILES.get(trust, TRUST_PROFILES[TrustLevel.standard])
 
-        if not spec.network_policy:
-            spec.network_policy = profile.get("network_policy", self.cfg.network_default)
+        if not str(spec.network_policy or "").strip():
+            spec.network_policy = profile.get(
+                "network_policy",
+                self.cfg.network_default,
+            )
+        spec.network_policy = self._require_network_policy_supported(
+            spec.runtime,
+            spec.network_policy,
+        )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
         profile_max_cpu = float(profile.get("max_cpu", self.cfg.max_cpu))
