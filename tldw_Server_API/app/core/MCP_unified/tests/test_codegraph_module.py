@@ -268,6 +268,70 @@ async def test_codegraph_search_finds_typescript_component_after_index(tmp_path:
     assert [item["file_path"] for item in search["results"]] == ["Card.tsx"]  # nosec B101
 
 
+@pytest.mark.asyncio
+async def test_codegraph_search_finds_java_kotlin_symbols_after_index(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "Service.java").write_text(
+        """
+package com.example.app;
+
+public class Service {
+    public String greet(String name) {
+        return helper(name);
+    }
+
+    private String helper(String value) {
+        return value.trim();
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    (workspace_root / "Greeter.kt").write_text(
+        """
+package com.example.app
+
+class Greeter {
+    fun greet(name: String): String {
+        return helper(name)
+    }
+
+    private fun helper(value: String): String {
+        return value.trim()
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    index_result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    java_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "method", "language": "java", "limit": 10},
+        context=_context(),
+    )
+    kotlin_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "function", "language": "kotlin", "limit": 10},
+        context=_context(),
+    )
+
+    assert index_result["status"] == "complete"  # nosec B101
+    assert index_result["counters"]["files_indexed"] == 2  # nosec B101
+    assert [item["qualified_name"] for item in java_search["results"]] == [  # nosec B101
+        "com.example.app.Service.helper"
+    ]
+    assert [item["qualified_name"] for item in kotlin_search["results"]] == [  # nosec B101
+        "com.example.app.Greeter.helper"
+    ]
+
+
 def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()

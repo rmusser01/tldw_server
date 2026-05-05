@@ -384,13 +384,13 @@ git commit -m "feat: wire codegraph java kotlin extractors"
 **Files:**
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py`
 
-- [ ] **Step 1: Write RED MCP search test**
+- [x] **Step 1: Write RED MCP search test**
 
 Add a test that creates Java/Kotlin files in a temp workspace, runs `codegraph.index`, then calls existing `codegraph.search` for a Java/Kotlin symbol.
 
 Expected before wiring: search returns no Java/Kotlin symbol because files were planned-language skipped or no extractor was registered.
 
-- [ ] **Step 2: Run RED MCP test**
+- [x] **Step 2: Run RED MCP test**
 
 Run:
 
@@ -400,15 +400,17 @@ Run:
 
 Expected: fail before implementation.
 
-- [ ] **Step 3: Ensure existing MCP code needs no new tool changes**
+Observed after Task 5 wiring: passed without MCP implementation changes because the existing module delegates to the newly wired registry/indexer/repository path.
+
+- [x] **Step 3: Ensure existing MCP code needs no new tool changes**
 
 The MCP module should already surface Java/Kotlin through `status`, `index`, `files`, `search`, `node`, and context/impact tools. Only change MCP implementation if validation blocks known language IDs after registry changes.
 
-- [ ] **Step 4: Run GREEN MCP test**
+- [x] **Step 4: Run GREEN MCP test**
 
 Run the same pytest command. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
