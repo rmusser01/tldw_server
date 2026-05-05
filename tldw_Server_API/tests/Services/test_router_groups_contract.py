@@ -2510,6 +2510,131 @@ def test_iter_content_router_specs_defers_audio_voice_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_kanban_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify kanban specs keep import and attr lookup lazy."""
+    import importlib
+
+    router_definitions = [
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards",
+            "expected_name": "kanban_boards",
+            "path": "/boards",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists",
+            "expected_name": "kanban_lists",
+            "path": "/lists",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards",
+            "expected_name": "kanban_cards",
+            "path": "/cards",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels",
+            "expected_name": "kanban_labels",
+            "path": "/labels",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists",
+            "expected_name": "kanban_checklists",
+            "path": "/checklists",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments",
+            "expected_name": "kanban_comments",
+            "path": "/comments",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search",
+            "expected_name": "kanban_search",
+            "path": "/search",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links",
+            "expected_name": "kanban_links",
+            "path": "/links",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow",
+            "expected_name": "kanban_workflow",
+            "path": "/workflow",
+        },
+    ]
+    routers_by_module: dict[str, APIRouter] = {}
+    access_count = {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake kanban router."""
+            return {"status": "ok"}
+
+        routers_by_module[module_name] = router
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected kanban routers."""
+        if module_name in routers_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    assert import_calls == []
+
+    kanban_specs = [spec for spec in specs if spec.route_key == "kanban"]
+    assert len(kanban_specs) == len(router_definitions)
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in kanban_specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == "/api/v1/kanban"
+        assert spec.tags == ("kanban",)
+        assert spec.route_key == "kanban"
+        assert spec.name == definition["expected_name"]
+        assert spec.default_stable is True
+
+    assert set(import_calls) == {
+        str(definition["module_name"]) for definition in router_definitions
+    }
+    assert access_count == {
+        str(definition["module_name"]): 1 for definition in router_definitions
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,

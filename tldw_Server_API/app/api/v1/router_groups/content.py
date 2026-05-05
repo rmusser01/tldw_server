@@ -439,38 +439,72 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, audio_voice_spec)
 
     # Kanban Board endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards import router as kanban_boards_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards import router as kanban_cards_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists import router as kanban_checklists_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments import router as kanban_comments_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels import router as kanban_labels_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links import router as kanban_links_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists import router as kanban_lists_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search import router as kanban_search_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow import router as kanban_workflow_router
-
-        specs.extend([
-            RouterSpec(
-                router=kanban_router,
-                prefix=f"{API_V1_PREFIX}/kanban",
-                tags=("kanban",),
-                route_key="kanban",
-            )
-            for kanban_router in (
-                kanban_boards_router,
-                kanban_lists_router,
-                kanban_cards_router,
-                kanban_labels_router,
-                kanban_checklists_router,
-                kanban_comments_router,
-                kanban_search_router,
-                kanban_links_router,
-                kanban_workflow_router,
-            )
-        ])
-    except ImportError as e:
-        logger.debug(f"Kanban endpoints unavailable; skipping import: {e}")
+    for kanban_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards",
+            log_name="kanban_boards",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists",
+            log_name="kanban_lists",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards",
+            log_name="kanban_cards",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels",
+            log_name="kanban_labels",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists",
+            log_name="kanban_checklists",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments",
+            log_name="kanban_comments",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search",
+            log_name="kanban_search",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links",
+            log_name="kanban_links",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow",
+            log_name="kanban_workflow",
+            prefix=f"{API_V1_PREFIX}/kanban",
+            tags=("kanban",),
+            route_key="kanban",
+        ),
+    ):
+        append_imported_router_spec(specs, kanban_spec)
 
     # Ingestion and adapter endpoints
     for adapter_spec in (
