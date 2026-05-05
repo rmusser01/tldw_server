@@ -588,29 +588,23 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, learning_spec)
 
     # Chatbooks and sharing endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
-
-        specs.append(RouterSpec(
-            router=chatbooks_router,
+    for collaboration_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chatbooks",
+            log_name="chatbooks",
             prefix=f"{API_V1_PREFIX}",
             tags=("chatbooks",),
             route_key="chatbooks",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chatbooks router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router
-
-        specs.append(RouterSpec(
-            router=sharing_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.sharing",
+            log_name="sharing",
             prefix=f"{API_V1_PREFIX}",
             tags=("sharing",),
             route_key="sharing",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping sharing router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, collaboration_spec)
 
     # Persona endpoints are force-included in explicit pytest runtime for WS/unit coverage.
     try:
