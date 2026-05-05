@@ -2,6 +2,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { usePrototypeWorkspaceStore } from "@/store/prototype-workspace"
 import { PrototypeWorkspacePage } from "../PrototypeWorkspacePage"
 
 const searchParamsState = vi.hoisted(() => ({
@@ -41,14 +42,17 @@ vi.mock("../PrototypeWorkspaceOwnerView", () => ({
 
 vi.mock("../PrototypeWorkspaceSessionView", () => ({
   PrototypeWorkspaceSessionView: ({
+    prototypeWorkspaceId,
     sessionToken,
     shareToken
   }: {
+    prototypeWorkspaceId?: string | null
     sessionToken?: string | null
     shareToken?: string | null
   }) => (
     <div data-testid="prototype-workspace-session-view">
-      Session:{sessionToken ?? "none"} Share:{shareToken ?? "none"}
+      Workspace:{prototypeWorkspaceId ?? "none"} Session:{sessionToken ?? "none"}{" "}
+      Share:{shareToken ?? "none"}
     </div>
   )
 }))
@@ -56,6 +60,7 @@ vi.mock("../PrototypeWorkspaceSessionView", () => ({
 describe("PrototypeWorkspacePage", () => {
   beforeEach(() => {
     searchParamsState.value = new URLSearchParams()
+    usePrototypeWorkspaceStore.getState().reset()
     hookState.usePrototypeWorkspace.mockReturnValue({
       data: null
     })
@@ -121,5 +126,19 @@ describe("PrototypeWorkspacePage", () => {
     expect(
       screen.queryByTestId("prototype-workspace-owner-view")
     ).not.toBeInTheDocument()
+  })
+
+  it("does not pass a stale active workspace id to token-only collaborator entries", () => {
+    usePrototypeWorkspaceStore.getState().setActiveWorkspaceId("pw_stale_owner")
+    searchParamsState.value = new URLSearchParams({
+      share_token: "share-token-1"
+    })
+
+    render(<PrototypeWorkspacePage />)
+
+    expect(hookState.usePrototypeWorkspace).toHaveBeenCalledWith(null)
+    expect(
+      screen.getByTestId("prototype-workspace-session-view")
+    ).toHaveTextContent("Workspace:none Session:none Share:share-token-1")
   })
 })

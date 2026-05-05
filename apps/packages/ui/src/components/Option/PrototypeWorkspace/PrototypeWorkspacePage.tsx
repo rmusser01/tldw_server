@@ -37,8 +37,10 @@ export const PrototypeWorkspacePage = () => {
     }
   }, [sessionToken, shareToken, setCollaboratorEntry])
 
-  const resolvedWorkspaceId = workspaceId ?? activeWorkspaceId
   const isCollaboratorEntry = Boolean(sessionToken || shareToken)
+  const resolvedWorkspaceId = isCollaboratorEntry
+    ? workspaceId ?? null
+    : workspaceId ?? activeWorkspaceId
   const workspaceDetail = usePrototypeWorkspace(
     isCollaboratorEntry ? null : resolvedWorkspaceId
   )
