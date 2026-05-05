@@ -56,10 +56,19 @@ Add a narrow sandbox maintenance slice that verifies runtime capability/discover
 - Verification: `python -m ruff check tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed after import ordering fix.
 - Verification: `git diff --check` passed.
 - Bandit skipped: this slice touched only tests and documentation, not production Python.
+- Review fix RED: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py::test_portable_runtime_capability_gate_covers_emitted_status_reason_aliases -q` failed after adding the Lima `limactl_missing` alias because it normalized to `runtime_error`.
+- Review fix: added `limactl_missing` to the runtime-unavailable taxonomy, made runtime discovery assertions use explicit string keys, switched docs lookup to `pytestconfig.rootpath`, and made runtime-name documentation matching format-agnostic.
+- Review verification: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/sandbox/test_run_status_reason_codes.py -q` passed with 34 tests.
+- Review verification: `python -m py_compile tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/app/core/Sandbox/run_status_taxonomy.py` passed.
+- Review verification: `python -m ruff check tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/app/core/Sandbox/run_status_taxonomy.py` passed.
+- Review verification: `python -m bandit -r tldw_Server_API/app/core/Sandbox/run_status_taxonomy.py -f json -o /tmp/bandit_sandbox_runtime_capability_gate_review.json` reported 0 findings.
+- Review verification: `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added a portable sandbox runtime capability gate that injects synthetic preflight rows for every runtime and validates the API-facing discovery projection through the public schema. The gate asserts complete runtime metadata maps, normalized preflight reasons, emitted run-status reason aliases, host-local isolation/session constraints, and inventory documentation coverage without requiring host-specific runtime availability. Updated the runtime capability inventory to document the gate and clarify that real execution remains covered by host-gated smoke paths.
+
+Review follow-up tightened the gate by explicitly covering Lima's `limactl_missing` emitted reason, avoiding brittle docs path/Markdown formatting assumptions, and avoiding implicit enum/string equality in runtime discovery assertions.
 <!-- SECTION:FINAL_SUMMARY:END -->

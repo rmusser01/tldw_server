@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,7 @@ _EMITTED_POLICY_FAILURE_MESSAGES = (
 _EMITTED_RUNTIME_UNAVAILABLE_MESSAGES = (
     "docker_unavailable",
     "firecracker_unavailable",
+    "limactl_missing",
     "vz_linux_unavailable",
     "vz_macos_unavailable",
     "seatbelt_unavailable",
@@ -60,6 +62,11 @@ def _synthetic_preflights() -> dict[RuntimeType, RuntimePreflightResult]:
     }
 
 
+def _runtime_name_is_documented(text: str, runtime: RuntimeType) -> bool:
+    pattern = rf"(?<![\w`])`?{re.escape(runtime.value)}`?(?![\w`])"
+    return re.search(pattern, text) is not None
+
+
 def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -72,16 +79,19 @@ def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
 
     rows = SandboxService().feature_discovery()
     response = SandboxRuntimesResponse(runtimes=rows)
-    discovery = {row.name: row for row in response.runtimes}
+    discovery = {
+        row.name.value if isinstance(row.name, RuntimeType) else str(row.name): row
+        for row in response.runtimes
+    }
 
-    assert set(discovery) == set(RuntimeType)
+    assert set(discovery) == {runtime.value for runtime in RuntimeType}
     assert set(runtime_caps.RUNTIME_IMPLEMENTATION_STATES) == set(RuntimeType)
     assert set(runtime_caps.RUNTIME_ISOLATION_METADATA) == set(RuntimeType)
     assert set(runtime_caps.RUNTIME_NETWORK_POLICY_METADATA) == set(RuntimeType)
     assert set(runtime_caps.RUNTIME_SESSION_CONTRACT_METADATA) == set(RuntimeType)
 
     for runtime in RuntimeType:
-        row = discovery[runtime]
+        row = discovery[runtime.value]
         assert row.implementation_state in {
             "supported",
             "unsupported",
@@ -96,15 +106,15 @@ def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
         assert "unknown" not in row.normalized_reasons
 
     for runtime in (RuntimeType.seatbelt, RuntimeType.worktree):
-        row = discovery[runtime]
+        row = discovery[runtime.value]
         assert row.boundary_class == "host_local"
         assert row.vm_grade_isolation is False
         assert row.untrusted_eligible is False
         assert row.session_contract.reuse_model == "workspace_only"
         assert row.session_contract.repair_state == "unsupported"
 
-    assert discovery[RuntimeType.vz_linux].session_contract.requires_live_health_check is True
-    assert discovery[RuntimeType.vz_linux].session_contract.repair_state == "host_gated"
+    assert discovery[RuntimeType.vz_linux.value].session_contract.requires_live_health_check is True
+    assert discovery[RuntimeType.vz_linux.value].session_contract.repair_state == "host_gated"
 
 
 def test_portable_runtime_capability_gate_covers_emitted_status_reason_aliases() -> None:
@@ -125,11 +135,15 @@ def test_portable_runtime_capability_gate_covers_emitted_status_reason_aliases()
         ) == "runtime_unavailable"
 
 
-def test_portable_runtime_capability_gate_is_documented_for_every_runtime() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
+def test_portable_runtime_capability_gate_is_documented_for_every_runtime(
+    pytestconfig: pytest.Config,
+) -> None:
+    repo_root = Path(pytestconfig.rootpath)
     inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
     text = inventory.read_text(encoding="utf-8")
 
     assert "Portable Runtime Capability Gate" in text
     for runtime in RuntimeType:
-        assert f"`{runtime.value}`" in text
+        assert _runtime_name_is_documented(text, runtime), (
+            f"{runtime.value} missing from inventory"
+        )
