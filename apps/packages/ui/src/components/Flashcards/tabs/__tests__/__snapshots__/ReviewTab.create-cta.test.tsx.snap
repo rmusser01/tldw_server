@@ -124,6 +124,50 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for active 
       </label>
     </div>
   </div>
+  <div
+    aria-label="segmented control"
+    aria-orientation="horizontal"
+    class="ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"
+    data-testid="flashcards-review-prompt-side-toggle"
+    role="radiogroup"
+    tabindex="0"
+  >
+    <div
+      class="ant-segmented-group"
+    >
+      <label
+        class="ant-segmented-item ant-segmented-item-selected"
+      >
+        <input
+          checked=""
+          class="ant-segmented-item-input"
+          name="test-id"
+          type="radio"
+        />
+        <div
+          class="ant-segmented-item-label"
+          title="Front first"
+        >
+          Front first
+        </div>
+      </label>
+      <label
+        class="ant-segmented-item"
+      >
+        <input
+          class="ant-segmented-item-input"
+          name="test-id"
+          type="radio"
+        />
+        <div
+          class="ant-segmented-item-label"
+          title="Back first"
+        >
+          Back first
+        </div>
+      </label>
+    </div>
+  </div>
 </div>
 `;
 
@@ -688,6 +732,50 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for caught-
           title="Cram"
         >
           Cram
+        </div>
+      </label>
+    </div>
+  </div>
+  <div
+    aria-label="segmented control"
+    aria-orientation="horizontal"
+    class="ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"
+    data-testid="flashcards-review-prompt-side-toggle"
+    role="radiogroup"
+    tabindex="0"
+  >
+    <div
+      class="ant-segmented-group"
+    >
+      <label
+        class="ant-segmented-item ant-segmented-item-selected"
+      >
+        <input
+          checked=""
+          class="ant-segmented-item-input"
+          name="test-id"
+          type="radio"
+        />
+        <div
+          class="ant-segmented-item-label"
+          title="Front first"
+        >
+          Front first
+        </div>
+      </label>
+      <label
+        class="ant-segmented-item"
+      >
+        <input
+          class="ant-segmented-item-input"
+          name="test-id"
+          type="radio"
+        />
+        <div
+          class="ant-segmented-item-label"
+          title="Back first"
+        >
+          Back first
         </div>
       </label>
     </div>
