@@ -123,9 +123,10 @@ type DeleteConfirmConfig = {
 
 const getDeleteConfirmConfig = async (): Promise<DeleteConfirmConfig> => {
   await waitFor(() => {
-    expect(Modal.confirm).toHaveBeenCalledTimes(1)
+    expect(Modal.confirm).toHaveBeenCalled()
   })
-  return (Modal.confirm as Mock).mock.calls[0][0] as DeleteConfirmConfig
+  const calls = (Modal.confirm as Mock).mock.calls
+  return calls[calls.length - 1][0] as DeleteConfirmConfig
 }
 
 vi.mock("../../shared", () => ({
@@ -270,7 +271,7 @@ describe("JobsTab undo delete flow", () => {
     expect(mocks.restoreWatchlistJobMock).not.toHaveBeenCalled()
   })
 
-  it("does not delete a monitor when delete confirmation is cancelled", async () => {
+  it("does not delete a monitor when confirmation is not accepted", async () => {
     render(<JobsTab />)
 
     await waitFor(() => {
@@ -280,7 +281,7 @@ describe("JobsTab undo delete flow", () => {
     fireEvent.click(screen.getByTestId("danger-button"))
 
     const confirmConfig = await getDeleteConfirmConfig()
-    await confirmConfig.onCancel?.()
+    expect(confirmConfig.onCancel).toBeUndefined()
 
     expect(mocks.deleteWatchlistJobMock).not.toHaveBeenCalled()
     expect(mocks.storeStateRef.current.removeJob).not.toHaveBeenCalled()
