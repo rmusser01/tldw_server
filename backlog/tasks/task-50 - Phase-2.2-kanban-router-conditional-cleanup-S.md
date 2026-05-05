@@ -4,7 +4,7 @@ title: Phase 2.2 kanban router conditional cleanup S
 status: Done
 assignee: []
 created_date: '2026-05-05 01:02'
-updated_date: '2026-05-05 01:08'
+updated_date: '2026-05-05 01:19'
 labels: []
 dependencies: []
 references:
@@ -34,12 +34,14 @@ Added focused router contract coverage for the nine kanban endpoint modules. The
 Converted the kanban block in content.py to lazy ImportedRouterSpec entries for kanban_boards, kanban_lists, kanban_cards, kanban_labels, kanban_checklists, kanban_comments, kanban_search, kanban_links, and kanban_workflow.
 
 Verification: focused red failed as expected; focused green passed 1 selected; full router group contract passed 61; main router contract passed 6; OpenAPI contract suite passed 69; Bandit content router group source reported 0 results and 0 errors; git diff --check passed.
+
+Review follow-up: collapsed the repetitive nine-entry kanban ImportedRouterSpec block into a loop over module names after Gemini review. The existing focused kanban laziness contract still covers module names, metadata, lazy imports, and attr lookup behavior.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Deferred all kanban content router registrations to lazy ImportedRouterSpec entries while preserving the /api/v1/kanban prefix, kanban tags, route_key, and default_stable behavior. Added contract coverage proving iter_content_router_specs does not import kanban modules or touch router attributes during spec construction.
+Deferred all kanban content router registrations to lazy ImportedRouterSpec entries while preserving the /api/v1/kanban prefix, kanban tags, route_key, and default_stable behavior. Added contract coverage proving iter_content_router_specs does not import kanban modules or touch router attributes during spec construction. Addressed review feedback by using a compact loop over kanban module names.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
