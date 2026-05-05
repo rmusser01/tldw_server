@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
+    SandboxAdminRuntimeDiagnosticsResponse,
     SandboxRuntimeInfo,
     SandboxRuntimesResponse,
 )
@@ -358,7 +359,120 @@ def test_feature_discovery_validates_against_runtime_response_schema(
     )
 
     assert response.runtimes
-    assert response.runtimes[0].session_contract is not None
+
+
+def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(
+        svc,
+        "feature_discovery",
+        lambda: [
+            {
+                "name": "docker",
+                "available": True,
+                "implementation_state": "supported",
+                "reasons": [],
+                "normalized_reasons": [],
+                "boundary_class": "container",
+                "vm_grade_isolation": False,
+                "untrusted_eligible": True,
+                "isolation_warnings": [],
+                "strict_deny_all_supported": True,
+                "strict_allowlist_supported": False,
+                "session_contract": {
+                    "support_state": "supported",
+                    "reuse_model": "workspace_only",
+                    "requires_live_health_check": False,
+                    "recovery_state": "unsupported",
+                    "repair_state": "unsupported",
+                },
+            },
+            {
+                "name": "vz_linux",
+                "available": False,
+                "implementation_state": "host_gated",
+                "reasons": ["macos_virtualization_helper_unavailable"],
+                "normalized_reasons": ["helper_unavailable"],
+                "boundary_class": "vm_grade",
+                "vm_grade_isolation": True,
+                "untrusted_eligible": True,
+                "isolation_warnings": [],
+                "strict_deny_all_supported": False,
+                "strict_allowlist_supported": False,
+                "session_contract": {
+                    "support_state": "host_gated",
+                    "reuse_model": "warm_vm",
+                    "requires_live_health_check": True,
+                    "recovery_state": "host_gated",
+                    "repair_state": "host_gated",
+                },
+            },
+            {
+                "name": "worktree",
+                "available": False,
+                "implementation_state": "supported",
+                "reasons": ["linux_unshare_unavailable"],
+                "normalized_reasons": ["host_prerequisite_missing"],
+                "boundary_class": "host_local",
+                "vm_grade_isolation": False,
+                "untrusted_eligible": False,
+                "isolation_warnings": [
+                    "host_local_boundary",
+                    "not_vm_grade_isolation",
+                    "not_untrusted_eligible",
+                ],
+                "strict_deny_all_supported": False,
+                "strict_allowlist_supported": False,
+                "session_contract": {
+                    "support_state": "scaffold",
+                    "reuse_model": "workspace_only",
+                    "requires_live_health_check": False,
+                    "recovery_state": "unsupported",
+                    "repair_state": "unsupported",
+                },
+            },
+        ],
+    )
+
+    summary = svc.runtime_diagnostics_summary()
+
+    assert summary["source"] == "feature_discovery"
+    assert summary["summary"] == {
+        "total": 3,
+        "ready": 1,
+        "unavailable": 2,
+        "host_gated": 1,
+        "scaffold": 0,
+        "host_local_warning_runtimes": ["worktree"],
+        "repair_supported_runtimes": ["vz_linux"],
+    }
+    rows = {row["name"]: row for row in summary["runtimes"]}
+    assert rows["docker"]["readiness"] == "ready"
+    assert rows["docker"]["recommended_action"] == "none"
+    assert rows["vz_linux"]["readiness"] == "host_gated"
+    assert rows["vz_linux"]["recommended_action"] == "check_helper"
+    assert rows["vz_linux"]["repair_supported"] is True
+    assert rows["worktree"]["readiness"] == "unavailable"
+    assert rows["worktree"]["recommended_action"] == "prepare_host"
+    assert rows["worktree"]["vm_grade_isolation"] is False
+    assert rows["worktree"]["untrusted_eligible"] is False
+
+
+def test_runtime_diagnostics_summary_validates_against_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    payload = SandboxService().runtime_diagnostics_summary()
+    model = SandboxAdminRuntimeDiagnosticsResponse.model_validate(payload)
+
+    assert model.source == "feature_discovery"
+    assert {item.name for item in model.runtimes} == {
+        runtime.value for runtime in RuntimeType
+    }
+    assert model.runtimes[0].session_reuse_model is not None
 
 
 def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:

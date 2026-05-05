@@ -168,6 +168,7 @@ Current limitations:
   - `/api/v1/sandbox/health`
   - `/api/v1/sandbox/runtimes`
   - `/api/v1/admin/startup-warnings`
+  - `/api/v1/sandbox/admin/runtime-diagnostics`
   - `/api/v1/sandbox/admin/macos-diagnostics`
   - `/api/v1/sandbox/admin/macos-image-store/cleanup-plan`
   - `POST /api/v1/sandbox/admin/macos-image-store/cleanup`
@@ -182,6 +183,15 @@ or maturity guarantees from availability alone.
 Runtime entries also preserve raw preflight `reasons` for operator diagnostics
 and expose additive `normalized_reasons` for stable client grouping across
 runtime-specific failures.
+`/api/v1/sandbox/admin/runtime-diagnostics` is an admin-only read-only operator
+summary derived from the same discovery data. It groups every runtime by
+readiness posture, preserves raw and normalized reason codes, exposes
+host-local isolation warnings, and identifies runtimes with explicit repair
+support. When the app startup-warning registry is available, it also includes
+the same compact `startup_warning_summary` used by macOS diagnostics. Today
+repair support remains scoped to `vz_linux`; this summary does
+not add generic repair or reconciliation behavior for Docker, Firecracker, Lima,
+`seatbelt`, `worktree`, or `vz_macos`.
 Run status responses preserve raw `phase`, `message`, and `exit_code` while
 adding additive `status_reason_code` for stable client grouping of queued,
 completed, timeout, cancellation, policy, runtime-unavailable, nonzero-exit, and

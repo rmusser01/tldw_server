@@ -45,6 +45,7 @@ from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminMacOSImageStoreCleanupResponse,
     SandboxAdminMacOSReconciliationRepairRequest,
     SandboxAdminMacOSReconciliationRepairResponse,
+    SandboxAdminRuntimeDiagnosticsResponse,
     SandboxAdminRunDetails,
     SandboxAdminRunListResponse,
     SandboxAdminRunSummary,
@@ -2260,6 +2261,37 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
 # Admin API (list/details)
 # -----------------------
 
+def _sandbox_startup_warning_summary(request: Request) -> dict[str, object] | None:
+    registry = getattr(request.app.state, "startup_warning_registry", None)
+    if registry is None:
+        return None
+    records = registry.list_warnings(component_prefix="sandbox.")
+    summary = registry.summary(component_prefix="sandbox.")
+    return {
+        "present": bool(records),
+        "blocking": bool(summary["has_blocking"]),
+        "codes": sorted({record.code for record in records}),
+    }
+
+
+@router.get(
+    "/admin/runtime-diagnostics",
+    response_model=SandboxAdminRuntimeDiagnosticsResponse,
+    summary="Admin: sandbox runtime diagnostics summary",
+)
+async def admin_runtime_diagnostics(
+    request: Request,
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
+    _current_user: User = Depends(get_request_user),
+) -> SandboxAdminRuntimeDiagnosticsResponse:
+    """Return read-only operator diagnostics derived from runtime discovery."""
+    payload = dict(_service.runtime_diagnostics_summary())
+    warning_summary = _sandbox_startup_warning_summary(request)
+    if warning_summary is not None:
+        payload["startup_warning_summary"] = warning_summary
+    return SandboxAdminRuntimeDiagnosticsResponse.model_validate(payload)
+
+
 @router.get(
     "/admin/macos-diagnostics",
     response_model=SandboxAdminMacOSDiagnosticsResponse,
@@ -2272,15 +2304,9 @@ async def admin_macos_diagnostics(
 ) -> SandboxAdminMacOSDiagnosticsResponse:
     """Return detailed macOS sandbox diagnostics for admin troubleshooting."""
     payload = dict(_service.macos_diagnostics())
-    registry = getattr(request.app.state, "startup_warning_registry", None)
-    if registry is not None:
-        records = registry.list_warnings(component_prefix="sandbox.")
-        summary = registry.summary(component_prefix="sandbox.")
-        payload["startup_warning_summary"] = {
-            "present": bool(records),
-            "blocking": bool(summary["has_blocking"]),
-            "codes": sorted({record.code for record in records}),
-        }
+    warning_summary = _sandbox_startup_warning_summary(request)
+    if warning_summary is not None:
+        payload["startup_warning_summary"] = warning_summary
 
     return SandboxAdminMacOSDiagnosticsResponse.model_validate(payload)
 

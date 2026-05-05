@@ -67,6 +67,15 @@ Discovery is intentionally summarized. Admin/operator diagnostics can expose
 helper, template, reconciliation, and image-store details that should not be
 duplicated into the public discovery payload.
 
+`/api/v1/sandbox/admin/runtime-diagnostics` is the cross-runtime operator
+summary. It is read-only and derived from `/api/v1/sandbox/runtimes` discovery
+rows, so it does not introduce another readiness source. The summary groups
+runtimes by readiness posture, preserves raw and normalized reasons, reports
+host-local isolation warnings, and identifies runtimes with explicit repair
+support. Repair support remains scoped to runtimes whose session contract
+advertises it; current generalized diagnostics must not imply generic repair
+for Docker, Firecracker, Lima, `seatbelt`, `worktree`, or `vz_macos`.
+
 ## Portable Runtime Capability Gate
 
 The portable gate in

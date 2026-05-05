@@ -44,6 +44,7 @@ def test_admin_endpoints_require_admin_role(monkeypatch) -> None:
         client.app.dependency_overrides[get_request_user] = _non_admin_dep
         for path in (
             "/api/v1/sandbox/admin/runs",
+            "/api/v1/sandbox/admin/runtime-diagnostics",
             "/api/v1/sandbox/admin/macos-diagnostics",
             "/api/v1/sandbox/admin/macos-image-store/cleanup-plan",
             "/api/v1/sandbox/admin/idempotency",

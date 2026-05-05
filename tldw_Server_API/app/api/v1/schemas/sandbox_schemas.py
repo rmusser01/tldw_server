@@ -450,6 +450,75 @@ class SandboxAdminUsageResponse(BaseModel):
         return _default_offset_pagination_aliases(self)
 
 
+RuntimeDiagnosticsReadiness = Literal[
+    "ready",
+    "unavailable",
+    "host_gated",
+    "scaffold",
+    "unsupported",
+    "not_applicable",
+]
+RuntimeDiagnosticsAction = Literal[
+    "none",
+    "check_helper",
+    "configure_template",
+    "prepare_host",
+    "adjust_request_policy",
+    "use_different_runtime",
+    "inspect_reasons",
+]
+
+
+class SandboxAdminRuntimeDiagnosticsSummary(BaseModel):
+    """Aggregate operator posture for all sandbox runtimes."""
+
+    total: int
+    ready: int
+    unavailable: int
+    host_gated: int
+    scaffold: int
+    host_local_warning_runtimes: list[RuntimeType] = Field(default_factory=list)
+    repair_supported_runtimes: list[RuntimeType] = Field(default_factory=list)
+
+
+class SandboxAdminRuntimeDiagnosticsItem(BaseModel):
+    """Read-only operator projection for one sandbox runtime."""
+
+    name: RuntimeType
+    available: bool
+    implementation_state: RuntimeImplementationState | None = None
+    readiness: RuntimeDiagnosticsReadiness
+    reasons: list[str] = Field(default_factory=list)
+    normalized_reasons: list[RuntimeReasonCode] = Field(default_factory=list)
+    boundary_class: RuntimeBoundaryClass | None = None
+    vm_grade_isolation: bool = False
+    untrusted_eligible: bool = False
+    isolation_warnings: list[RuntimeIsolationWarningCode] = Field(default_factory=list)
+    strict_deny_all_supported: bool = False
+    strict_allowlist_supported: bool = False
+    session_reuse_model: RuntimeSessionReuseModel | None = None
+    requires_live_health_check: bool = False
+    repair_supported: bool = False
+    recommended_action: RuntimeDiagnosticsAction
+
+
+class SandboxAdminStartupWarningSummary(BaseModel):
+    """Compact startup warning summary projected into sandbox diagnostics."""
+
+    present: bool
+    blocking: bool
+    codes: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminRuntimeDiagnosticsResponse(BaseModel):
+    """Admin-facing cross-runtime diagnostics derived from runtime discovery."""
+
+    source: Literal["feature_discovery"]
+    summary: SandboxAdminRuntimeDiagnosticsSummary
+    runtimes: list[SandboxAdminRuntimeDiagnosticsItem]
+    startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
+
+
 class SandboxAdminMacOSHostDiagnostics(BaseModel):
     """Admin-facing host facts for macOS sandbox readiness checks."""
 
@@ -621,14 +690,6 @@ class SandboxAdminMacOSObservabilityDiagnostics(BaseModel):
     live_vms: int = 0
     vms: list[SandboxAdminMacOSVMObservability] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
-
-
-class SandboxAdminStartupWarningSummary(BaseModel):
-    """Compact startup warning summary projected into sandbox diagnostics."""
-
-    present: bool
-    blocking: bool
-    codes: list[str] = Field(default_factory=list)
 
 
 class SandboxAdminMacOSRecoverySummary(BaseModel):
