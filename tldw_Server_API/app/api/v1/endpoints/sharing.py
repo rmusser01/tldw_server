@@ -984,6 +984,7 @@ async def public_prototype_session_exchange(
             raise HTTPException(status_code=404, detail="Resource not found")
 
     claim_released = False
+    provisioning_succeeded = False
     try:
         access_context = await access_service.exchange_external_collaborator(
             prototype_workspace_id=prototype_workspace_id,
@@ -993,9 +994,11 @@ async def public_prototype_session_exchange(
             allow_create=claimed_new_use,
             expires_at=validated.get("expires_at"),
         )
+        provisioning_succeeded = bool(access_context.shared_actor_id or access_context.session_token)
     except PrototypeAccessError as exc:
         if claimed_new_use:
             await svc.release_token_use(validated["id"])
+            claim_released = True
         if exc.code == "workspace_not_found":
             raise HTTPException(status_code=404, detail="Prototype workspace not found") from exc
         if exc.code == "workspace_archived":
@@ -1045,7 +1048,7 @@ async def public_prototype_session_exchange(
             runtime_policy_profile=access_context.runtime_policy_profile,
         )
     except Exception:
-        if claimed_new_use and not claim_released:
+        if claimed_new_use and not claim_released and not provisioning_succeeded:
             await svc.release_token_use(validated["id"])
         raise
 

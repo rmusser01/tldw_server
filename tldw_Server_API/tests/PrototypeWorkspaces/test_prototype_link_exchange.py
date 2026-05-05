@@ -381,7 +381,7 @@ def test_public_prototype_exchange_releases_claim_on_unexpected_error(
     assert token_row["use_count"] == 0
 
 
-def test_public_prototype_exchange_releases_claim_on_post_exchange_failure(
+def test_public_prototype_exchange_retains_claim_on_post_exchange_failure(
     client,
     monkeypatch,
     sharing_repo,
@@ -405,7 +405,7 @@ def test_public_prototype_exchange_releases_claim_on_post_exchange_failure(
 
     token_row = asyncio.run(sharing_repo.get_token(single_use_prototype_share["id"]))
     assert token_row is not None
-    assert token_row["use_count"] == 0
+    assert token_row["use_count"] == 1
 
 
 def test_public_prototype_exchange_non_prototype_token_returns_422(client, non_prototype_share_token):
