@@ -348,71 +348,51 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, collections_social_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.files import router as files_router
-
-        specs.append(RouterSpec(
-            router=files_router,
+    for data_resource_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.files",
+            log_name="files",
             prefix=f"{API_V1_PREFIX}",
             tags=("files",),
-        ))
-    except ImportError as e:
-        logger.debug(f"Skipping files router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.storage import router as storage_router
-
-        specs.append(RouterSpec(
-            router=storage_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.storage",
+            log_name="storage",
             prefix=f"{API_V1_PREFIX}",
             tags=("storage",),
-        ))
-    except ImportError as e:
-        logger.debug(f"Skipping storage router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.data_tables import router as data_tables_router
-
-        specs.append(RouterSpec(
-            router=data_tables_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.data_tables",
+            log_name="data_tables",
             prefix=f"{API_V1_PREFIX}",
             tags=("data-tables",),
-        ))
-    except ImportError as e:
-        logger.debug(f"Skipping data_tables router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.reading_highlights import router as reading_highlights_router
-
-        specs.append(RouterSpec(
-            router=reading_highlights_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.reading_highlights",
+            log_name="reading_highlights",
             prefix=f"{API_V1_PREFIX}",
             tags=("reading-highlights",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping reading_highlights router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.items import router as items_router
-
-        specs.append(RouterSpec(
-            router=items_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.items",
+            log_name="items",
             prefix=f"{API_V1_PREFIX}",
             tags=("items",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping items router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.reminders import router as reminders_router
-
-        specs.append(RouterSpec(
-            router=reminders_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.reminders",
+            log_name="reminders",
             prefix=f"{API_V1_PREFIX}",
             tags=("tasks",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping reminders router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, data_resource_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.integrations_control_plane import (
