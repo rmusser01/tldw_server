@@ -134,7 +134,7 @@ active. This slice added direct `SandboxRuntimesResponse` validation around
 `SandboxService.feature_discovery()` to cover the endpoint response model
 without starting the full app lifespan.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Docs/API-related/Sandbox_API.md Docs/Published/API-related/Sandbox_API.md Docs/Sandbox/sandbox-runtime-capability-inventory.md Docs/superpowers/specs/2026-05-05-sandbox-session-semantics-contract-design.md Docs/superpowers/plans/2026-05-05-sandbox-session-semantics-contract-implementation-plan.md "backlog/tasks/task-59 - Add-sandbox-runtime-session-semantics-discovery-contract.md" tldw_Server_API/app/core/Sandbox/runtime_capabilities.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py
