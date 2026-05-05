@@ -1902,9 +1902,12 @@ def test_iter_content_router_specs_defers_notes_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify notes and clipper specs keep router attr lookup lazy."""
+    import importlib
+
     router_definitions = (
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.notes_graph",
+            "expected_name": "notes_graph",
             "path": "/graph",
             "prefix": "/api/v1/notes",
             "tags": ("notes",),
@@ -1912,6 +1915,7 @@ def test_iter_content_router_specs_defers_notes_router_attr_lookup(
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.notes",
+            "expected_name": "notes",
             "path": "/{note_id}",
             "prefix": "/api/v1/notes",
             "tags": ("notes",),
@@ -1919,6 +1923,7 @@ def test_iter_content_router_specs_defers_notes_router_attr_lookup(
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.web_clipper",
+            "expected_name": "web_clipper",
             "path": "/clip",
             "prefix": "/api/v1/web-clipper",
             "tags": ("web-clipper",),
@@ -1956,24 +1961,54 @@ def test_iter_content_router_specs_defers_notes_router_attr_lookup(
         fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
+    real_import_module = importlib.import_module
+    target_modules = set(access_count)
+    import_calls: list[str] = []
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected notes router modules."""
+        if module_name in target_modules:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
     specs = list(iter_content_router_specs())
     assert access_count == {
         str(definition["module_name"]): 0
         for definition in router_definitions
     }
+    assert import_calls == []
 
-    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {str(definition["expected_name"]) for definition in router_definitions}
+    }
+    assert set(selected_specs) == {
+        str(definition["expected_name"])
+        for definition in router_definitions
+    }
+
     for definition in router_definitions:
-        spec = by_first_path[str(definition["path"])]
+        spec = selected_specs[str(definition["expected_name"])]
         assert spec.prefix == definition["prefix"]
         assert spec.tags == definition["tags"]
         assert spec.route_key == definition["route_key"]
         assert spec.default_stable is True
+        assert _first_router_path(spec.router) == definition["path"]
 
     assert access_count == {
         str(definition["module_name"]): 1
         for definition in router_definitions
     }
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
 
 
 def test_iter_content_router_specs_defers_integration_router_attr_lookup(
