@@ -15,6 +15,7 @@ import { useIsConnected } from "@/hooks/useConnectionState";
 import { useHelpModal } from "@/store/tutorials";
 import { buildResearchLaunchPath } from "@/routes/route-paths";
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
+import { EmptyState } from "@/components/ui/feedback";
 
 const actionButtonFocusClassName =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
@@ -131,13 +132,14 @@ export const PlaygroundEmpty = () => {
     [dispatchStarter, handleOpenDeepResearch, t],
   );
 
+  const isDisconnected = !demoEnabled && !isConnected;
   const description = demoEnabled ? (
     t("playground:empty.demoDescription", {
       defaultValue:
         "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
     })
-  ) : !isConnected ? (
-    <>
+  ) : isDisconnected ? (
+    <div className="mx-auto flex max-w-2xl flex-col items-center gap-2 sm:text-base">
       <span>
         {t("playground:empty.disconnectedDescription", {
           defaultValue: "Connect to a tldw server to start chatting.",
@@ -152,7 +154,7 @@ export const PlaygroundEmpty = () => {
           defaultValue: "Open Settings",
         })}
       </button>
-    </>
+    </div>
   ) : (
     t("playground:empty.description", {
       defaultValue:
@@ -162,52 +164,28 @@ export const PlaygroundEmpty = () => {
 
   return (
     <div className="mx-auto mt-10 max-w-5xl px-4">
-      <section
+      <EmptyState
         data-testid="playground-empty-shell"
-        className="mx-auto max-w-4xl rounded-[28px] border border-border/80 bg-surface/90 p-5 text-sm text-text shadow-card backdrop-blur sm:p-7"
+        icon={MessageSquarePlus}
+        title={t("playground:empty.title", {
+          defaultValue: "Start a new chat",
+        })}
+        description={description}
+        primaryAction={{
+          label: t("playground:empty.primaryCta", {
+            defaultValue: "Start chatting",
+          }),
+          onClick: handleStartChat,
+        }}
+        secondaryAction={{
+          label: t("option:header.quickIngest", "Quick Ingest"),
+          onClick: handleOpenQuickIngest,
+        }}
+        variant="card"
+        size="lg"
+        className="max-w-4xl rounded-[28px] p-5 text-sm sm:p-7"
       >
         <div className="flex flex-col gap-6">
-          <div className="space-y-4 text-center">
-            <div className="flex justify-center">
-              <div className="rounded-full border border-border/50 bg-surface2/80 p-3 shadow-sm">
-                <MessageSquarePlus
-                  className="h-8 w-8 text-text-subtle"
-                  aria-hidden="true"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <h2 className="text-2xl font-semibold text-text">
-                {t("playground:empty.title", {
-                  defaultValue: "Start a new chat",
-                })}
-              </h2>
-              <div className="mx-auto flex max-w-2xl flex-col items-center gap-2 text-sm text-text-muted sm:text-base">
-                {description}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-2.5">
-              <button
-                type="button"
-                onClick={handleStartChat}
-                className={`inline-flex items-center justify-center rounded-full bg-primary px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-95 ${actionButtonFocusClassName}`}
-              >
-                {t("playground:empty.primaryCta", {
-                  defaultValue: "Start chatting",
-                })}
-              </button>
-              <button
-                type="button"
-                onClick={handleOpenQuickIngest}
-                className={`inline-flex items-center justify-center rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-text transition hover:bg-surface2 ${actionButtonFocusClassName}`}
-              >
-                {t("option:header.quickIngest", "Quick Ingest")}
-              </button>
-            </div>
-          </div>
-
           <div className="border-t border-border/60 pt-5">
             <div className="flex flex-col gap-1 text-center sm:text-left">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
@@ -281,7 +259,7 @@ export const PlaygroundEmpty = () => {
             </div>
           </div>
         </div>
-      </section>
+      </EmptyState>
     </div>
   );
 };

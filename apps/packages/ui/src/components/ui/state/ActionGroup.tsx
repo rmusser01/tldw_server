@@ -1,30 +1,31 @@
-import React from "react"
-import { Button } from "@/components/Common/Button"
-import { cn } from "@/libs/utils"
+import React from "react";
+import { Button } from "@/components/Common/Button";
+import { cn } from "@/libs/utils";
 
 export interface StateAction {
-  label: React.ReactNode
-  onClick?: () => void
-  loading?: boolean
-  disabled?: boolean
-  "data-testid"?: string
+  label: React.ReactNode;
+  onClick?: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  ref?: React.Ref<HTMLButtonElement>;
+  "data-testid"?: string;
 }
 
 export interface ActionGroupProps {
-  primaryAction?: StateAction
-  secondaryActions?: StateAction[]
-  className?: string
-  "data-testid"?: string
+  primaryAction?: StateAction;
+  secondaryActions?: StateAction[];
+  className?: string;
+  "data-testid"?: string;
 }
 
 export function ActionGroup({
   primaryAction,
   secondaryActions = [],
   className,
-  "data-testid": dataTestId
+  "data-testid": dataTestId,
 }: ActionGroupProps) {
   if (!primaryAction && secondaryActions.length === 0) {
-    return null
+    return null;
   }
 
   return (
@@ -34,6 +35,7 @@ export function ActionGroup({
     >
       {primaryAction ? (
         <Button
+          ref={primaryAction.ref}
           variant="primary"
           onClick={primaryAction.onClick}
           loading={primaryAction.loading}
@@ -46,6 +48,7 @@ export function ActionGroup({
       {secondaryActions.map((action, index) => (
         <Button
           key={index}
+          ref={action.ref}
           variant="outline"
           onClick={action.onClick}
           loading={action.loading}
@@ -56,5 +59,5 @@ export function ActionGroup({
         </Button>
       ))}
     </div>
-  )
+  );
 }
