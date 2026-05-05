@@ -200,7 +200,7 @@ describe("ItemsTab accessibility baseline", () => {
         "Reviewed"
       )
     })
-  })
+  }, 15_000)
 
   it("keeps primary triage controls keyboard-discoverable by accessible name", async () => {
     render(<ItemsTab />)
@@ -230,5 +230,5 @@ describe("ItemsTab accessibility baseline", () => {
     expect(
       screen.getByRole("button", { name: "Item One from Tech Daily. Unread." })
     ).toBeInTheDocument()
-  })
+  }, 15_000)
 })

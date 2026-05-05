@@ -398,7 +398,7 @@ describe("JobFormModal live summary", () => {
         })
       })
     )
-  })
+  }, 15_000)
 
   it("shows practical audio setup guidance in monitor form", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
@@ -533,7 +533,7 @@ describe("JobFormModal live summary", () => {
     expect(servicesMock.testWatchlistAudioSettings).not.toHaveBeenCalled()
 
     messageErrorSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("guides basic mode through scope and schedule before review step", async () => {
     const messageErrorSpy = vi

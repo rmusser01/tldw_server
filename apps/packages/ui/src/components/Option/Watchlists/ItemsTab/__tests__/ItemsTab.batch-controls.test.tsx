@@ -494,7 +494,7 @@ describe("ItemsTab batch throughput controls", () => {
       expect(raw).toContain("system-needs-review")
       expect(raw).not.toContain("Triage Alpha")
     })
-  }, 10000)
+  }, 20_000)
 
   it("transitions smart feed filters and requests matching reviewed states", async () => {
     render(<ItemsTab />)

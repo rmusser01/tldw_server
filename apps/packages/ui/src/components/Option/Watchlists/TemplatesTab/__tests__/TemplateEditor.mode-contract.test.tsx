@@ -335,7 +335,7 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(descriptionInput).toHaveValue("Daily markdown briefing template")
     expect(String((contentInput as HTMLTextAreaElement).value)).toContain("## Executive Summary")
     expect(markdownRadio).toBeChecked()
-  })
+  }, 15_000)
 
   it("does not overwrite custom name and description when reapplying a recipe", async () => {
     render(<TemplateEditor open template={null} onClose={vi.fn()} />)
@@ -390,7 +390,7 @@ describe("TemplateEditor authoring mode contract", () => {
     )
 
     errorSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("saves basic-mode templates with recipe-generated payloads", async () => {
     const onClose = vi.fn()

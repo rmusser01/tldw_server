@@ -66,6 +66,15 @@ vi.mock("antd", () => {
     Button,
     Popconfirm,
     Space: ({ children }: any) => <>{children}</>,
+    Modal: {
+      confirm: vi.fn((config: any) => {
+        config?.onOk?.()
+        return {
+          destroy: vi.fn(),
+          update: vi.fn()
+        }
+      })
+    },
     Switch: () => null,
     Table,
     Tag: ({ children }: any) => <span>{children}</span>,
