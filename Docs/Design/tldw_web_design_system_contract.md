@@ -408,6 +408,11 @@ Create a lightweight inventory of primitives and near-duplicates:
 The inventory should identify canonical owners, duplicates, migration targets,
 and proof-surface consumers.
 
+Stage 2 inventory lives at
+`Docs/Design/tldw_web_design_system_inventory.md`. Treat that document as the
+current migration map for component ownership decisions until a later migration
+updates it.
+
 ### Stage 3: Proof Surface
 
 Apply the contract to setup, recovery, and admin health. This means proving the
