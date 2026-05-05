@@ -1025,6 +1025,44 @@ def test_probe_vz_linux_observability_handles_helper_unavailable(
     assert data["reasons"] == ["macos_virtualization_helper_unavailable"]
 
 
+def test_collect_macos_diagnostics_maps_unexpected_helper_list_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_macos_host(monkeypatch)
+
+    class _BuggyListHelper:
+        def ping(self) -> HelperPingReply:
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def list_vms(self) -> HelperVMListReply:
+            raise KeyError("unexpected helper payload shape")
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _BuggyListHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=False,
+                reasons=["vz_reconciliation_unavailable"],
+                execution_mode="none",
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics()
+
+    assert data["reconciliation"]["reasons"] == ["vz_reconciliation_unavailable"]
+    assert data["observability"]["reasons"] == ["vz_linux_observability_unavailable"]
+    assert data["recovery_summary"]["status"] == "unavailable"
+
+
 def test_probe_vz_linux_observability_default_log_dir_is_not_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

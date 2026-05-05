@@ -526,7 +526,8 @@ def _fetch_live_vms_for_diagnostics() -> tuple[Any | None, str | None, str | Non
     except MacOSVirtualizationHelperFailure as exc:
         logger.debug("VZ helper returned failure while listing VMs for diagnostics: {}", exc.error_code)
         return None, REASON_HELPER_FAILURE, REASON_HELPER_FAILURE
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Diagnostics must remain best-effort when helper payload parsing changes unexpectedly.
         logger.debug("Unable to collect VZ helper VM list for diagnostics: {}", exc)
         return None, REASON_RECONCILIATION_UNAVAILABLE, _VZ_LINUX_OBSERVABILITY_UNAVAILABLE_REASON
 
