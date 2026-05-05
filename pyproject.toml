@@ -182,6 +182,8 @@ codegraph = [
   "tree-sitter-python>=0.25,<0.26",
   "tree-sitter-javascript>=0.25,<0.26",
   "tree-sitter-typescript>=0.23,<0.24",
+  "tree-sitter-java>=0.23,<0.24",
+  "tree-sitter-kotlin>=1.1,<1.2",
 ]
 
 # Multi-User

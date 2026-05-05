@@ -64,6 +64,7 @@ class CodeGraphModule(BaseModule):
             "initialized": True,
             "workspace_root_resolver": self._workspace is not None,
             "dependencies_available": self._dependency_health.available,
+            "dependencies_all_optional_available": self._dependency_health.all_optional_available,
         }
 
     async def get_tools(self) -> list[dict[str, Any]]:
@@ -497,6 +498,8 @@ class CodeGraphModule(BaseModule):
 
         return {
             "dependency_available": self._dependency_health.available,
+            "dependency_available_core": self._dependency_health.available,
+            "dependency_available_all_optional": self._dependency_health.all_optional_available,
             "dependency_missing": list(self._dependency_health.missing),
             "dependency_present": list(self._dependency_health.present),
             "languages": [asdict(language) for language in self._language_registry.list_languages()],

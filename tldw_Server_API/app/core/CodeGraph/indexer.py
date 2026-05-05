@@ -14,7 +14,9 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 from .config import CodeGraphSettings
+from .extractors.java_extractor import JavaTreeSitterExtractor
 from .extractors.javascript_extractor import JavaScriptTreeSitterExtractor
+from .extractors.kotlin_extractor import KotlinTreeSitterExtractor
 from .extractors.python_extractor import PythonAstExtractor
 from .extractors.tree_sitter_loader import load_parser
 from .extractors.typescript_extractor import TypeScriptTreeSitterExtractor
@@ -39,6 +41,7 @@ class _Candidate:
     relative_path: str
     language_id: str
     stage: str
+    symbol_extraction: bool
     size: int
     modified_at: float
 
@@ -79,6 +82,10 @@ class CodeGraphIndexer:
             self._extractors["javascript"] = JavaScriptTreeSitterExtractor()
         if load_parser("typescript").available:
             self._extractors["typescript"] = TypeScriptTreeSitterExtractor()
+        if load_parser("java").available:
+            self._extractors["java"] = JavaTreeSitterExtractor()
+        if load_parser("kotlin").available:
+            self._extractors["kotlin"] = KotlinTreeSitterExtractor()
 
     def index_workspace(
         self,
@@ -157,7 +164,11 @@ class CodeGraphIndexer:
                 return IndexingResult(status=discovery.status, counters=counters, errors=tuple(errors))
 
             candidates = discovery.candidates
-            foundation_candidates = [candidate for candidate in candidates if candidate.stage == "foundation"]
+            foundation_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.stage == "foundation" and candidate.symbol_extraction
+            ]
             total_bytes = sum(candidate.size for candidate in foundation_candidates)
 
             if len(foundation_candidates) > limit or total_bytes > self._settings.foreground_max_bytes:
@@ -311,11 +322,20 @@ class CodeGraphIndexer:
                 if language.stage == "planned":
                     counters["planned_language_skipped"] += 1
                     counters["files_skipped"] += 1
+                    continue
+
+                has_extractor = language.language_id in self._extractors
+                if language.stage == "foundation" and (not language.symbol_extraction or not has_extractor):
+                    counters["dependency_missing_language_skipped"] += 1
+                    counters["files_skipped"] += 1
+                    continue
+
                 candidate = _Candidate(
                     path=resolved,
                     relative_path=relative_path,
                     language_id=language.language_id,
                     stage=language.stage,
+                    symbol_extraction=language.symbol_extraction,
                     size=int(stat_result.st_size),
                     modified_at=float(stat_result.st_mtime),
                 )
@@ -386,6 +406,7 @@ def _empty_counters() -> dict[str, int]:
         "files_skipped": 0,
         "files_too_large": 0,
         "planned_language_skipped": 0,
+        "dependency_missing_language_skipped": 0,
         "unsupported_language": 0,
         "errors": 0,
     }

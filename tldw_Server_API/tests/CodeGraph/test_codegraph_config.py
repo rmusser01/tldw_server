@@ -45,3 +45,20 @@ def test_dependency_probe_reports_missing_without_importing_tree_sitter(monkeypa
 
     assert health.available is False
     assert "tree_sitter" in health.missing
+
+
+def test_dependency_probe_keeps_core_available_when_optional_jvm_parsers_are_missing(monkeypatch) -> None:
+    present_modules = {
+        "tree_sitter",
+        "tree_sitter_javascript",
+        "tree_sitter_typescript",
+    }
+
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object() if name in present_modules else None)
+
+    health = probe_codegraph_dependencies()
+
+    assert health.available is True
+    assert health.all_optional_available is False
+    assert "tree_sitter_java" in health.missing
+    assert "tree_sitter_kotlin" in health.missing

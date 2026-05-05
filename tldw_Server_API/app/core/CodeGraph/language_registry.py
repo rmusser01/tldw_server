@@ -24,18 +24,6 @@ _PLANNED_LANGUAGES = (
         extensions=(".cs",),
         stage="planned",
     ),
-    LanguageInfo(
-        language_id="java",
-        display_name="Java",
-        extensions=(".java",),
-        stage="planned",
-    ),
-    LanguageInfo(
-        language_id="kotlin",
-        display_name="Kotlin",
-        extensions=(".kt", ".kts"),
-        stage="planned",
-    ),
 )
 
 
@@ -73,6 +61,8 @@ def _foundation_languages(dependency_health: DependencyHealth) -> tuple[Language
     missing = set(dependency_health.missing)
     javascript_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_javascript"))
     typescript_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_typescript"))
+    java_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_java"))
+    kotlin_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_kotlin"))
     return (
         LanguageInfo(
             language_id="python",
@@ -96,6 +86,22 @@ def _foundation_languages(dependency_health: DependencyHealth) -> tuple[Language
             stage="foundation",
             dependency_missing=typescript_missing,
             symbol_extraction=not typescript_missing,
+        ),
+        LanguageInfo(
+            language_id="java",
+            display_name="Java",
+            extensions=(".java",),
+            stage="foundation",
+            dependency_missing=java_missing,
+            symbol_extraction=not java_missing,
+        ),
+        LanguageInfo(
+            language_id="kotlin",
+            display_name="Kotlin",
+            extensions=(".kt", ".kts"),
+            stage="foundation",
+            dependency_missing=kotlin_missing,
+            symbol_extraction=not kotlin_missing,
         ),
     )
 
