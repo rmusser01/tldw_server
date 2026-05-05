@@ -51,8 +51,14 @@ _RUNTIME_UNAVAILABLE_MESSAGES = frozenset({
     "vz_macos_unavailable",
     "seatbelt_unavailable",
     "worktree_unavailable",
+})
+
+_POLICY_FAILED_MESSAGES = frozenset({
+    "lima_policy_failed",
     "vz_linux_policy_failed",
     "vz_macos_policy_failed",
+    "seatbelt_policy_failed",
+    "worktree_policy_failed",
 })
 
 _RUNTIME_CONTEXT_TERMS = ("runtime", "provision")
@@ -102,6 +108,14 @@ def _is_runtime_unavailable_message(message_value: str) -> bool:
     return has_runtime_context and has_unavailable_signal
 
 
+def _is_policy_failed_message(message_value: str) -> bool:
+    if message_value in _POLICY_FAILED_MESSAGES:
+        return True
+    return "policy_failed" in message_value or (
+        "policy" in message_value and "failed" in message_value
+    )
+
+
 def normalize_run_status_reason(
     *,
     phase: RunPhase | str | None,
@@ -138,12 +152,10 @@ def normalize_run_status_reason(
     if phase_value == "failed":
         if message_value == "queue_ttl_expired":
             return "queue_ttl_expired"
+        if _is_policy_failed_message(message_value):
+            return "policy_failed"
         if _is_runtime_unavailable_message(message_value):
             return "runtime_unavailable"
-        if "policy_failed" in message_value or (
-            "policy" in message_value and "failed" in message_value
-        ):
-            return "policy_failed"
         if "startup_timeout" in message_value:
             return "startup_timeout"
         if "execution_timeout" in message_value or message_value == "timeout":

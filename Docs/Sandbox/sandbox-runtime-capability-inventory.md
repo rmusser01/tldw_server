@@ -140,6 +140,12 @@ separate persisted state machine.
 | `runtime_error` | The runtime failed without a more specific normalized reason. |
 | `unknown` | Existing status data does not map to a known reason code. |
 
+The first Phase 3 taxonomy pass centralizes known runtime aliases for policy
+failures, runtime-unavailable failures, queue expiry, timeout, cancellation, and
+limit signals. Raw runner messages remain available for operator diagnostics;
+clients should group by `status_reason_code` instead of matching runtime
+message strings.
+
 ## Trust-Level Support
 
 | Runtime | `trusted` | `standard` | `untrusted` | Notes |
@@ -227,7 +233,7 @@ an equally clear ownership model.
 | --- | --- | --- |
 | Host-local runtimes need clearer docs/API warnings that they are not VM-grade. | `seatbelt`, `worktree` | Phase 2 |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
-| Detailed runner-internal error strings still vary by runtime behind `runtime_error`. | all | Phase 3 |
+| Rich structured error metadata beyond the first normalized alias pass remains incomplete. | all | Phase 3 |
 | Session semantics are not normalized across warm VM, container, and host-local reuse. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | CI has no single cross-runtime capability gate. | all | Phase 5 |
