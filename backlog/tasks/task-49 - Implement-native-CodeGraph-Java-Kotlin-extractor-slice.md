@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 00:52'
-updated_date: '2026-05-05 01:11'
+updated_date: '2026-05-05 01:13'
 labels:
   - codegraph
   - mcp
@@ -15,6 +15,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/1270'
   - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
+  - 'https://github.com/rmusser01/tldw_server/pull/1277'
 documentation:
   - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
   - >-
@@ -69,6 +70,8 @@ Final verification: python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the native CodeGraph Java/Kotlin extractor slice. Added optional parser dependency pins and loader support, shared JVM Tree-sitter helpers, Java and Kotlin extractors, dependency-aware language registry/indexer wiring, and MCP search regression coverage. The implementation stays conservative: it extracts package/import/type/function or method symbols and same-file simple call edges while leaving imports, receiver calls, constructor calls without modeled targets, and build-system/type-resolution cases unresolved for later slices.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1277
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
