@@ -509,43 +509,30 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # Notes graph routes must be registered before generic notes routes so
     # /graph is not shadowed by /{note_id}.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.notes_graph import router as notes_graph_router
-
-        specs.append(RouterSpec(
-            router=notes_graph_router,
+    for notes_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph",
+            log_name="notes_graph",
             prefix=f"{API_V1_PREFIX}/notes",
             tags=("notes",),
             route_key="notes",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping notes_graph router: {e}")
-
-    # Notes
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
-
-        specs.append(RouterSpec(
-            router=notes_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes",
+            log_name="notes",
             prefix=f"{API_V1_PREFIX}/notes",
             tags=("notes",),
             route_key="notes",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping notes router: {e}")
-
-    # Web clipper
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.web_clipper import router as web_clipper_router
-
-        specs.append(RouterSpec(
-            router=web_clipper_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.web_clipper",
+            log_name="web_clipper",
             prefix=f"{API_V1_PREFIX}/web-clipper",
             tags=("web-clipper",),
             route_key="web-clipper",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping web_clipper router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, notes_spec)
 
     for learning_spec in (
         ImportedRouterSpec(
