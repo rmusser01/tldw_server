@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@Codex'
 created_date: '2026-05-05 00:52'
-updated_date: '2026-05-05 01:06'
+updated_date: '2026-05-05 01:09'
 labels:
   - codegraph
   - mcp
@@ -57,6 +57,8 @@ Task 1 dependency gate complete: installed tree-sitter-java 0.23.5 and tree-sitt
 Task 3 Java extractor complete: added shared JVM helpers plus Java Tree-sitter extraction for package/import/type/method/constructor nodes, same-file bare method call resolution, unresolved imports/receiver calls, parse errors, and deterministic node IDs. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_java_extractor.py -q (3 passed).
 
 Task 4 Kotlin extractor complete: added Kotlin Tree-sitter extraction for package/import/class/object/interface/function nodes, same-file simple function call resolution, unresolved imports/receiver calls, parse errors, and deterministic node IDs. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_kotlin_extractor.py -q (3 passed).
+
+Task 5 registry/indexer wiring complete: promoted Java/Kotlin to foundation metadata with dependency_missing tracking, added dependency probe coverage, exported/register Java/Kotlin extractors when parsers are available, and added indexer coverage for persisted Java/Kotlin graph rows. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_language_registry.py tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py::test_indexer_extracts_java_kotlin_graph_rows_during_index -q (7 passed) and python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py -q (18 passed).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

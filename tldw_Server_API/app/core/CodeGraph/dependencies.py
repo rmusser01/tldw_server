@@ -8,6 +8,8 @@ _REQUIRED_MODULES = (
     "tree_sitter_python",
     "tree_sitter_javascript",
     "tree_sitter_typescript",
+    "tree_sitter_java",
+    "tree_sitter_kotlin",
 )
 
 

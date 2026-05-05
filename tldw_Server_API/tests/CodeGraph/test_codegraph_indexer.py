@@ -110,6 +110,62 @@ def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path
     assert [node.file_path for node in repo.search_nodes("Card", kind="component", limit=10)] == ["Card.tsx"]
 
 
+def test_indexer_extracts_java_kotlin_graph_rows_during_index(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Service.java").write_text(
+        """
+package com.example.app;
+
+public class Service {
+    public String greet(String name) {
+        return helper(name);
+    }
+
+    private String helper(String value) {
+        return value.trim();
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    (workspace / "Greeter.kt").write_text(
+        """
+package com.example.app
+
+class Greeter {
+    fun greet(name: String): String {
+        return helper(name)
+    }
+
+    private fun helper(value: String): String {
+        return value.trim()
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    files = {item.path: item for item in repo.list_files(limit=10)}
+    helper_paths = sorted(node.file_path for node in repo.search_nodes("helper", limit=10))
+
+    assert result.status == "complete"
+    assert files["Service.java"].node_count > 0
+    assert files["Greeter.kt"].node_count > 0
+    assert helper_paths == ["Greeter.kt", "Service.java"]
+
+
 def test_indexer_marks_python_extraction_errors_without_claiming_indexed_status(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

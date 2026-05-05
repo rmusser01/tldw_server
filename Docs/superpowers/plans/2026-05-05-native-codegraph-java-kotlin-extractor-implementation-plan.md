@@ -328,13 +328,13 @@ git commit -m "feat: add codegraph kotlin extractor"
 - Modify: `tldw_Server_API/tests/CodeGraph/test_codegraph_language_registry.py`
 - Modify: `tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py`
 
-- [ ] **Step 1: Write RED registry test**
+- [x] **Step 1: Write RED registry test**
 
 Update registry tests so Java/Kotlin are foundation-stage language entries with `symbol_extraction=True` only when their parser packages are present.
 
 Expected before implementation: Java/Kotlin still report `stage == "planned"`.
 
-- [ ] **Step 2: Write RED indexer test**
+- [x] **Step 2: Write RED indexer test**
 
 Add a test with `Service.java` and `Greeter.kt`, then assert:
 
@@ -342,7 +342,7 @@ Add a test with `Service.java` and `Greeter.kt`, then assert:
 - both files have `node_count > 0`
 - `repo.search_nodes("Greeter", limit=10)` returns Java/Kotlin symbols as appropriate
 
-- [ ] **Step 3: Implement registry and indexer wiring**
+- [x] **Step 3: Implement registry and indexer wiring**
 
 Move Java/Kotlin out of `_PLANNED_LANGUAGES` into `_foundation_languages()` with dependency-missing checks:
 
@@ -355,7 +355,7 @@ In `CodeGraphIndexer.__init__`, register extractors only when `load_parser("java
 
 In `_extract()`, pass `workspace_root` to Java/Kotlin only if extractors need it. Do not use build-system globals.
 
-- [ ] **Step 4: Run focused registry/indexer tests**
+- [x] **Step 4: Run focused registry/indexer tests**
 
 Run:
 
@@ -368,7 +368,7 @@ Run:
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/CodeGraph/language_registry.py \

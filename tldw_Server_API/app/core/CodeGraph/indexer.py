@@ -14,7 +14,9 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 from .config import CodeGraphSettings
+from .extractors.java_extractor import JavaTreeSitterExtractor
 from .extractors.javascript_extractor import JavaScriptTreeSitterExtractor
+from .extractors.kotlin_extractor import KotlinTreeSitterExtractor
 from .extractors.python_extractor import PythonAstExtractor
 from .extractors.tree_sitter_loader import load_parser
 from .extractors.typescript_extractor import TypeScriptTreeSitterExtractor
@@ -79,6 +81,10 @@ class CodeGraphIndexer:
             self._extractors["javascript"] = JavaScriptTreeSitterExtractor()
         if load_parser("typescript").available:
             self._extractors["typescript"] = TypeScriptTreeSitterExtractor()
+        if load_parser("java").available:
+            self._extractors["java"] = JavaTreeSitterExtractor()
+        if load_parser("kotlin").available:
+            self._extractors["kotlin"] = KotlinTreeSitterExtractor()
 
     def index_workspace(
         self,
