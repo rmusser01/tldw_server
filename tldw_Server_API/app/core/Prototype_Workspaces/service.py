@@ -426,14 +426,14 @@ class PrototypeWorkspaceService:
         if str(actor_type or "").strip().lower() != "external_collaborator":
             return
         actor = await self._repo.get_shared_actor(str(actor_shared_actor_id or ""))
-        if not actor or actor.get("is_revoked"):
+        if not actor or actor.get("is_revoked") or actor.get("revoked_at"):
             raise RuntimeError("revoked shared actor cannot create or reuse branch sessions")
         expires_at = _normalize_datetime(actor.get("expires_at"))
         if expires_at and expires_at <= datetime.now(timezone.utc):
             raise RuntimeError("expired shared actor cannot create or reuse branch sessions")
 
     async def _assert_session_is_active(self, session: dict[str, Any]) -> None:
-        if session.get("is_revoked"):
+        if session.get("is_revoked") or session.get("revoked_at"):
             raise RuntimeError("revoked session cannot save snapshots")
         expires_at = _normalize_datetime(session.get("expires_at"))
         if expires_at and expires_at <= datetime.now(timezone.utc):
@@ -442,7 +442,7 @@ class PrototypeWorkspaceService:
         if actor_type != "external_collaborator":
             return
         actor = await self._repo.get_shared_actor(str(session.get("actor_shared_actor_id") or ""))
-        if not actor or actor.get("is_revoked"):
+        if not actor or actor.get("is_revoked") or actor.get("revoked_at"):
             raise RuntimeError("revoked shared actor cannot save snapshots")
         actor_expires_at = _normalize_datetime(actor.get("expires_at"))
         if actor_expires_at and actor_expires_at <= datetime.now(timezone.utc):
