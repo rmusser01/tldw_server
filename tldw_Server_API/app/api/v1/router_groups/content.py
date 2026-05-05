@@ -640,120 +640,73 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, persona_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.files import router as files_router
-
-        specs.append(RouterSpec(
-            router=files_router,
+    for tail_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.files",
+            log_name="files",
             prefix=f"{API_V1_PREFIX}",
             tags=("files",),
             route_key="files",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping files router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.data_tables import router as data_tables_router
-
-        specs.append(RouterSpec(
-            router=data_tables_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.data_tables",
+            log_name="data_tables",
             prefix=f"{API_V1_PREFIX}",
             tags=("data-tables",),
             route_key="data-tables",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping data_tables router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.items import router as items_router
-
-        specs.append(RouterSpec(
-            router=items_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.items",
+            log_name="items",
             prefix=f"{API_V1_PREFIX}",
             tags=("items",),
             route_key="items",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping items router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.reminders import router as reminders_router
-
-        specs.append(RouterSpec(
-            router=reminders_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.reminders",
+            log_name="reminders",
             prefix=f"{API_V1_PREFIX}",
             tags=("tasks",),
             route_key="tasks",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping reminders router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.notifications import (
-            router as notifications_router,
-        )
-
-        specs.append(RouterSpec(
-            router=notifications_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notifications",
+            log_name="notifications",
             prefix=f"{API_V1_PREFIX}",
             tags=("notifications",),
             route_key="notifications",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping notifications router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.watchlists import router as watchlists_router
-
-        specs.append(RouterSpec(
-            router=watchlists_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.watchlists",
+            log_name="watchlists",
             prefix=f"{API_V1_PREFIX}",
             tags=("watchlists",),
             route_key="watchlists",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping watchlists router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.integrations_control_plane import (
-            router as integrations_control_plane_router,
-        )
-
-        specs.append(RouterSpec(
-            router=integrations_control_plane_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.integrations_control_plane",
+            log_name="integrations_control_plane",
             prefix=f"{API_V1_PREFIX}",
             tags=("integrations",),
             route_key="integrations",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping integrations_control_plane router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane import (
-            router as scheduled_tasks_control_plane_router,
-        )
-
-        specs.append(RouterSpec(
-            router=scheduled_tasks_control_plane_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane",
+            log_name="scheduled_tasks_control_plane",
             prefix=f"{API_V1_PREFIX}",
             tags=("scheduled-tasks",),
             route_key="scheduled-tasks",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping scheduled_tasks_control_plane router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
-
-        specs.append(RouterSpec(
-            router=vn_assets_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vn_assets",
+            log_name="vn_assets",
             prefix=f"{API_V1_PREFIX}",
             tags=("vn-assets",),
             route_key="vn-assets",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping VN assets router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, tail_spec)
 
     return specs
