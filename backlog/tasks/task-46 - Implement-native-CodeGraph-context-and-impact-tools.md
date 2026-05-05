@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-04 19:17'
-updated_date: '2026-05-04 20:08'
+updated_date: '2026-05-05 00:04'
 labels:
   - codegraph
   - mcp
@@ -15,6 +15,7 @@ dependencies:
   - TASK-38
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1259'
+  - 'https://github.com/rmusser01/tldw_server/pull/1270'
 documentation:
   - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
   - >-
@@ -55,6 +56,8 @@ Added CodeGraphContextBuilder for workspace-bounded snippets, file-size handling
 Exposed codegraph.impact and codegraph.context through the Unified MCP CodeGraph module with readOnlyHint metadata, strict argument validation, missing-index read-only responses, limit bounds, and asyncio.to_thread offload for repository/source IO.
 
 Verification on 2026-05-04 after rebasing onto origin/dev: pytest focused CodeGraph/MCP suite -> 92 passed, 5 warnings; Ruff touched scopes -> All checks passed; Bandit report /tmp/bandit_codegraph_context_impact.json -> zero findings; git diff --check -> clean.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1270
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
