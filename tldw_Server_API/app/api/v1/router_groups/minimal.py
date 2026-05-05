@@ -591,30 +591,29 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, utility_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards import router as kanban_boards_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards import router as kanban_cards_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists import router as kanban_checklists_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments import router as kanban_comments_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels import router as kanban_labels_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links import router as kanban_links_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists import router as kanban_lists_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search import router as kanban_search_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow import router as kanban_workflow_router
-
-        specs.extend([
-            RouterSpec(router=kanban_boards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_lists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_cards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_labels_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_checklists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_comments_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_search_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_links_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-            RouterSpec(router=kanban_workflow_router, prefix=f"{API_V1_PREFIX}/kanban", tags=("kanban",), route_key="kanban"),
-        ])
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping kanban router in minimal test app: {e}")
+    for kanban_module in (
+        "kanban_boards",
+        "kanban_lists",
+        "kanban_cards",
+        "kanban_labels",
+        "kanban_checklists",
+        "kanban_comments",
+        "kanban_search",
+        "kanban_links",
+        "kanban_workflow",
+    ):
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path=f"tldw_Server_API.app.api.v1.endpoints.kanban.{kanban_module}",
+                log_name=kanban_module,
+                prefix=f"{API_V1_PREFIX}/kanban",
+                tags=("kanban",),
+                route_key="kanban",
+                skip_context=minimal_skip_context,
+                skip_exceptions=(ImportError, AttributeError),
+            ),
+        )
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
