@@ -4909,6 +4909,7 @@ def test_iter_minimal_optional_router_specs_defers_experience_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is definition["default_stable"]
+        assert spec.skip_exceptions == (ImportError, AttributeError)
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
