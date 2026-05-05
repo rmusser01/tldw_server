@@ -1458,6 +1458,98 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_ingestion_adapter_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered ingestion/adapters specs keep router attr lookup lazy."""
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.connectors",
+            "path": "/connectors/status",
+            "prefix": "/api/v1",
+            "tags": ("connectors",),
+            "route_key": "connectors",
+            "default_stable": False,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.ingestion_sources",
+            "path": "/ingestion-sources/status",
+            "prefix": "/api/v1",
+            "tags": ("ingestion-sources",),
+            "route_key": "ingestion-sources",
+            "default_stable": False,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.web_scraping",
+            "path": "/web-scraping/status",
+            "prefix": "/api/v1",
+            "tags": ("web-scraping",),
+            "route_key": "web-scraping",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.reading_highlights",
+            "path": "/reading-highlights/status",
+            "prefix": "/api/v1",
+            "tags": ("reading-highlights",),
+            "route_key": "reading-highlights",
+        },
+    )
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    selected_route_keys = {
+        str(definition["route_key"])
+        for definition in router_definitions
+    }
+    selected_specs = [
+        spec for spec in specs if spec.route_key in selected_route_keys
+    ]
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.default_stable is definition.get("default_stable", True)
+
+    assert access_count == {
+        str(definition["module_name"]): 1
+        for definition in router_definitions
+    }
+
+
 def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
