@@ -66,16 +66,16 @@ export const StatusDot = () => {
   const renderStatusIcon = () => {
     if (isChecking) {
       return (
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-warn" />
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-current" />
       )
     }
     if (isConnectedUx) {
       return (
-        <Check className="h-3.5 w-3.5 text-success" />
+        <Check className="h-3.5 w-3.5 text-current" />
       )
     }
     return (
-      <AlertCircle className="h-3.5 w-3.5 text-danger" />
+      <AlertCircle className="h-3.5 w-3.5 text-current" />
     )
   }
 
@@ -103,7 +103,6 @@ export const StatusDot = () => {
           variant={badgeVariant}
           size="sm"
           outline
-          srLabel={tooltip}
           className="gap-0 leading-none"
         >
           {renderStatusIcon()}

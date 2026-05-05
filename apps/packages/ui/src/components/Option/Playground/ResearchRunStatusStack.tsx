@@ -74,7 +74,7 @@ export const ResearchRunStatusStack: React.FC<ResearchRunStatusStackProps> = ({
                   <div className="truncate text-sm font-medium text-text">{run.query}</div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-text-subtle">
                     <Badge
-                      data-testid="research-run-status-badge"
+                      data-testid={`research-run-status-badge-${run.run_id}`}
                       variant={STATUS_BADGE_VARIANT[statusLabel] ?? "secondary"}
                       size="sm"
                     >

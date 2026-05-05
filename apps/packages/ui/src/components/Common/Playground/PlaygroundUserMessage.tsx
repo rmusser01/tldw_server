@@ -43,6 +43,20 @@ const getMessageTypeBadgeVariant = (messageType?: string): BadgeVariant => {
   return MESSAGE_TYPE_BADGE_VARIANT[messageType] ?? "info"
 }
 
+const formatMessageTypeFallback = (messageType?: string): string => {
+  if (!messageType) return "Unknown"
+  const words = messageType
+    .split(/[:_\-\s]+/)
+    .filter(Boolean)
+  if (words.length === 0) return "Unknown"
+  return words
+    .map((word) => word.toLowerCase())
+    .map((word, index) =>
+      index === 0 ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word
+    )
+    .join(" ")
+}
+
 type Props = {
   message: string
   message_type?: string
@@ -209,7 +223,10 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
               size="sm"
               className="!m-0"
             >
-              {t(`copilot.${props?.message_type}`)}
+              {t(
+                `copilot.${props.message_type}`,
+                formatMessageTypeFallback(props.message_type)
+              )}
             </Badge>
           )}
         </div>

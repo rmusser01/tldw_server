@@ -71,6 +71,8 @@ describe("Chat status design-system badges", () => {
 
     expect(statusButton).toHaveAccessibleName("Connection failed. Click to retry.")
     expect(badge).toHaveAttribute("data-ds-component", "Badge")
+    expect(badge.querySelector(".sr-only")).toBeNull()
+    expect(badge.querySelector("svg")).toHaveClass("text-current")
 
     fireEvent.click(statusButton)
 
@@ -93,9 +95,32 @@ describe("Chat status design-system badges", () => {
 
     expect(statusButton).toHaveAccessibleName("Saved to server")
     expect(badge).toHaveAttribute("data-ds-component", "Badge")
+    expect(badge.querySelector(".sr-only")).toBeNull()
 
     fireEvent.click(statusButton)
 
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps configured-but-unavailable status colors aligned with the Badge variant", () => {
+    connectionState.ux = {
+      uxState: "error_config",
+      mode: "full",
+      isConnectedUx: false,
+      isChecking: false,
+      isConfigOrError: true
+    }
+
+    render(<StatusDot />)
+
+    const badge = screen.getByTestId("status-dot-badge")
+    const icon = badge.querySelector("svg")
+
+    expect(screen.getByTestId("status-dot")).toHaveAccessibleName(
+      "Not connected. Open Settings to configure."
+    )
+    expect(badge).toHaveAttribute("data-ds-component", "Badge")
+    expect(icon).toHaveClass("text-current")
+    expect(icon).not.toHaveClass("text-danger")
   })
 })

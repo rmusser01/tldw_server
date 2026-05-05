@@ -108,7 +108,6 @@ export const SaveStatusIcon = ({
           variant={badgeVariant}
           size="sm"
           outline
-          srLabel={tooltip}
           className="gap-0 leading-none"
         >
           <Save className="size-4 transition-colors" aria-hidden="true" />

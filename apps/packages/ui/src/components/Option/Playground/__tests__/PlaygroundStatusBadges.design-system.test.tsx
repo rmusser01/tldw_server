@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { ResearchRunStatusStack } from "../ResearchRunStatusStack"
@@ -26,13 +26,35 @@ const linkedRun = (overrides: Partial<ChatLinkedResearchRun>): ChatLinkedResearc
   }) as ChatLinkedResearchRun
 
 describe("Playground status design-system badges", () => {
-  it("renders linked research run status through the shared Badge", () => {
-    render(<ResearchRunStatusStack runs={[linkedRun({})]} />)
+  it("renders linked research run statuses through uniquely addressed shared Badges", () => {
+    render(
+      <ResearchRunStatusStack
+        runs={[
+          linkedRun({ run_id: "research-run-1" }),
+          linkedRun({
+            run_id: "research-run-2",
+            query: "Summarize the finished bundle",
+            status: "completed",
+            phase: "completed",
+            latest_checkpoint_id: null
+          })
+        ]}
+      />
+    )
 
-    const badge = screen.getByTestId("research-run-status-badge")
+    const rows = screen.getAllByTestId("research-run-status-row")
+    const reviewBadge = within(rows[0]).getByTestId(
+      "research-run-status-badge-research-run-1"
+    )
+    const completedBadge = within(rows[1]).getByTestId(
+      "research-run-status-badge-research-run-2"
+    )
 
-    expect(badge).toHaveAttribute("data-ds-component", "Badge")
-    expect(badge).toHaveTextContent("Needs review")
+    expect(reviewBadge).toHaveAttribute("data-ds-component", "Badge")
+    expect(reviewBadge).toHaveTextContent("Needs review")
+    expect(completedBadge).toHaveAttribute("data-ds-component", "Badge")
+    expect(completedBadge).toHaveTextContent("Completed")
+    expect(screen.queryAllByTestId("research-run-status-badge")).toHaveLength(0)
     expect(screen.getByText("Plan review needed")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Review in Research" })).toHaveAttribute(
       "href",

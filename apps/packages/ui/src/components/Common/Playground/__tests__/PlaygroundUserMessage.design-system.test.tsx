@@ -104,7 +104,20 @@ describe("Playground user message design-system badges", () => {
       "Badge"
     )
     expect(screen.getByTestId("playground-message-type-badge")).toHaveTextContent(
-      "copilot.summary"
+      "Summary"
     )
+  })
+
+  it("renders a human-readable fallback for unknown message-type chips", () => {
+    renderUserMessage({
+      message_type: "custom_review",
+      messageId: "message-2"
+    })
+
+    const badge = screen.getByTestId("playground-message-type-badge")
+
+    expect(badge).toHaveAttribute("data-ds-component", "Badge")
+    expect(badge).toHaveTextContent("Custom review")
+    expect(badge).not.toHaveTextContent("copilot.custom_review")
   })
 })
