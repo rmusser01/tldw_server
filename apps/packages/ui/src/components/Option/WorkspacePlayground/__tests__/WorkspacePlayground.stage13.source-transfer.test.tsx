@@ -265,7 +265,12 @@ vi.mock("@/store/tutorials", () => ({
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState)
+    selector(testState),
+  createWorkspaceStorage: () => ({
+    getItem: vi.fn(() => null),
+    setItem: vi.fn(),
+    removeItem: vi.fn()
+  })
 }))
 
 vi.mock("@/utils/workspace-playground-prefill", () => ({

@@ -94,7 +94,12 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: useWorkspaceStoreMock
+  useWorkspaceStore: useWorkspaceStoreMock,
+  createWorkspaceStorage: () => ({
+    getItem: vi.fn(() => null),
+    setItem: vi.fn(),
+    removeItem: vi.fn()
+  })
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -213,8 +218,11 @@ describe("WorkspacePlayground stage 9 persistence resilience", () => {
     expect(screen.getByRole("button", { name: "Save as new workspace" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Keep this version" })).toBeInTheDocument()
     expect(
+      screen.getByText("Recommended: Reload to get the latest version.")
+    ).toBeInTheDocument()
+    expect(
       screen.getByText(
-        "Reload from other tab refreshes this tab. Keep this version ignores the update. Save as new workspace copies your current state."
+        "Keep this version ignores the update. Save as new workspace copies your current state."
       )
     ).toBeInTheDocument()
   })
