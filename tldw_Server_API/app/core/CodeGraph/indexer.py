@@ -24,6 +24,7 @@ from .extractors.tree_sitter_loader import load_parser
 from .extractors.typescript_extractor import TypeScriptTreeSitterExtractor
 from .language_registry import CodeGraphLanguageRegistry
 from .models import ExtractionResult
+from .resolver import CodeGraphReferenceResolver
 
 
 @dataclass(frozen=True)
@@ -258,6 +259,12 @@ class CodeGraphIndexer:
 
             if status == "complete" and not languages:
                 repository.delete_missing_files(discovered_paths or indexed_paths)
+
+            if status == "complete":
+                resolution = CodeGraphReferenceResolver(repository).resolve()
+                counters["cross_file_calls_resolved"] = resolution.resolved_calls
+                counters["cross_file_imports_resolved"] = resolution.resolved_imports
+                counters["stale_reference_resolutions_cleared"] = resolution.stale_resolutions_cleared
 
             repository.finish_index_run(
                 run_id,

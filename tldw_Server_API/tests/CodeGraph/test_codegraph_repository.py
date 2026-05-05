@@ -276,6 +276,69 @@ def test_repository_replacement_removes_stale_symbols_from_search(tmp_path: Path
     assert [node.id for node in repo.search_nodes("new_helper", limit=10)] == ["node_new"]
 
 
+def test_repository_marks_references_resolved_without_counting_them_unresolved(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_cross_file_resolution_graph(repo)
+
+    references = repo.list_references_for_resolution()
+    repo.mark_reference_resolved(
+        references[0].id,
+        edge=CodeGraphEdge(
+            id="edge_cross_file_call",
+            source="node_entry",
+            target="node_helper",
+            kind="calls",
+            file_path="pkg/app.py",
+            line=4,
+            column=12,
+            provenance="codegraph_resolver",
+        ),
+        resolution_kind="python_import",
+    )
+
+    all_references = repo.list_references_for_resolution(include_resolved=True)
+
+    assert repo.counts()["unresolved_refs"] == 0
+    assert [relationship["target"]["id"] for relationship in repo.list_callees("node_entry", limit=10)] == [
+        "node_helper"
+    ]
+    assert len(all_references) == 1
+    assert all_references[0].resolved_target == "node_helper"
+    assert all_references[0].resolved_edge == "edge_cross_file_call"
+
+
+def test_repository_clears_stale_reference_resolution_when_target_file_is_deleted(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_cross_file_resolution_graph(repo)
+    reference = repo.list_references_for_resolution()[0]
+    repo.mark_reference_resolved(
+        reference.id,
+        edge=CodeGraphEdge(
+            id="edge_cross_file_call",
+            source="node_entry",
+            target="node_helper",
+            kind="calls",
+            file_path="pkg/app.py",
+            line=4,
+            column=12,
+            provenance="codegraph_resolver",
+        ),
+        resolution_kind="python_import",
+    )
+
+    repo.delete_file("pkg/util.py")
+
+    references = repo.list_references_for_resolution(include_resolved=True)
+
+    assert repo.counts()["edges"] == 0
+    assert repo.counts()["unresolved_refs"] == 1
+    assert len(references) == 1
+    assert references[0].resolved_target is None
+    assert references[0].resolved_edge is None
+
+
 def test_repository_atomic_file_and_graph_replacement_rolls_back_on_graph_error(tmp_path: Path) -> None:
     repo = CodeGraphRepository(tmp_path / "codegraph.db")
     repo.initialize()
@@ -499,4 +562,58 @@ def _seed_impact_graph(repo: CodeGraphRepository) -> None:
             },
         ],
         unresolved_refs=[],
+    )
+
+
+def _seed_cross_file_resolution_graph(repo: CodeGraphRepository) -> None:
+    """Seed source and target files plus one cross-file call reference."""
+    repo.upsert_file(
+        path="pkg/app.py",
+        language="python",
+        size=64,
+        content_hash="app",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+    )
+    repo.upsert_file(
+        path="pkg/util.py",
+        language="python",
+        size=64,
+        content_hash="util",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+    )
+    repo.seed_graph_rows_for_test(
+        nodes=[
+            {
+                "id": "node_entry",
+                "identity_key": "entry",
+                "kind": "function",
+                "name": "entry",
+                "qualified_name": "entry",
+                "file_path": "pkg/app.py",
+            },
+            {
+                "id": "node_helper",
+                "identity_key": "helper",
+                "kind": "function",
+                "name": "helper",
+                "qualified_name": "helper",
+                "file_path": "pkg/util.py",
+            },
+        ],
+        edges=[],
+        unresolved_refs=[
+            {
+                "from_node_id": "node_entry",
+                "reference_name": "helper",
+                "reference_kind": "call",
+                "file_path": "pkg/app.py",
+                "line": 4,
+                "column": 12,
+                "language": "python",
+            }
+        ],
     )
