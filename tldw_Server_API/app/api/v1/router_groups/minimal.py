@@ -471,38 +471,33 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         route_key="monitoring",
     ))
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router
-
-        specs.append(RouterSpec(
-            router=sharing_router,
+    for experience_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.sharing",
+            log_name="sharing",
             prefix=f"{API_V1_PREFIX}",
             tags=("sharing",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping sharing router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.personalization import router as personalization_router
-
-        specs.append(RouterSpec(
-            router=personalization_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.personalization",
+            log_name="personalization",
             prefix=f"{API_V1_PREFIX}/personalization",
             tags=("personalization",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping personalization router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router
-
-        specs.append(RouterSpec(
-            router=companion_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.companion",
+            log_name="companion",
             prefix=f"{API_V1_PREFIX}/companion",
             tags=("companion",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping companion router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+    ):
+        append_imported_router_spec(specs, experience_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router
