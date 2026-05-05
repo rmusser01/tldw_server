@@ -10,7 +10,7 @@ from tldw_Server_API.app.core.CodeGraph.extractors.typescript_extractor import (
 )
 
 pytestmark = pytest.mark.skipif(
-    not (load_parser("typescript").available and load_parser("tsx").available),
+    not load_parser("typescript").available,
     reason="tree-sitter-typescript parser is not available",
 )
 
@@ -71,6 +71,10 @@ class Service {
     assert result.errors == ()
 
 
+@pytest.mark.skipif(
+    not load_parser("tsx").available,
+    reason="tree-sitter-typescript TSX parser is not available",
+)
 def test_tsx_extractor_records_component_function() -> None:
     result = TypeScriptTreeSitterExtractor().extract(
         workspace_key="ws",

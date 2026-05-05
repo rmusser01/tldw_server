@@ -73,21 +73,25 @@ def _context() -> RequestContext:
 
 
 def _require_c_family_parsers() -> None:
+    """Skip C/C++ MCP coverage unless both C-family parsers load."""
     if not (load_parser("c").available and load_parser("cpp").available):
         pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
 def _require_jvm_parsers() -> None:
+    """Skip JVM MCP coverage unless both Java and Kotlin parsers load."""
     if not (load_parser("java").available and load_parser("kotlin").available):
         pytest.skip("tree-sitter-java/kotlin parsers are not available")
 
 
 def _require_typescript_parsers() -> None:
+    """Skip TypeScript MCP coverage unless TS and TSX parsers load."""
     if not (load_parser("typescript").available and load_parser("tsx").available):
         pytest.skip("tree-sitter-typescript parser is not available")
 
 
 def _require_csharp_parser() -> None:
+    """Skip C# MCP coverage unless the C# parser loads."""
     if not load_parser("csharp").available:
         pytest.skip("tree-sitter-c-sharp parser is not available")
 
