@@ -67,6 +67,21 @@ Discovery is intentionally summarized. Admin/operator diagnostics can expose
 helper, template, reconciliation, and image-store details that should not be
 duplicated into the public discovery payload.
 
+## Portable Runtime Capability Gate
+
+The portable gate in
+`tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` protects this
+inventory and `/api/v1/sandbox/runtimes` from drifting apart. It injects
+synthetic `RuntimePreflightResult` rows for `docker`, `firecracker`, `lima`,
+`vz_linux`, `vz_macos`, `seatbelt`, and `worktree` so the check does not require
+Docker, Lima, Firecracker, Apple Virtualization.framework, `sandbox-exec`, or a
+prepared VM host.
+
+The gate verifies every `RuntimeType` has implementation-state, isolation,
+network-policy, session-contract, normalized-reason, run-status taxonomy, schema,
+and inventory coverage. Host-gated smoke tests still own real runtime execution;
+this gate only proves the portable capability contract remains complete.
+
 ## Runtime Isolation Metadata
 
 Isolation posture is exposed as structured discovery metadata so clients do not
