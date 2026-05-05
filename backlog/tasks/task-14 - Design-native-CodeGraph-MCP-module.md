@@ -25,7 +25,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create a design spec for a native Python CodeGraph-style Unified MCP module in tldw_server. The approved direction is a native service with optional .[codegraph] dependencies, deep first support for Python plus JavaScript/TypeScript, and adapter-ready architecture for C, C++, C#, Java, and Kotlin. The design should cover storage, parser adapters, workspace safety, MCP tool surface, staging, testing, and operational constraints.
+Create a design spec for a native Python CodeGraph-style Unified MCP module in tldw_server. The approved direction is a native service with optional .[codegraph] dependencies, in-depth, first-class support for Python plus JavaScript/TypeScript, and adapter-ready architecture for C, C++, C#, Java, and Kotlin. The design should cover storage, parser adapters, workspace safety, MCP tool surface, staging, testing, and operational constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

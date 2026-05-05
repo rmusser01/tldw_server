@@ -1,2 +1,2 @@
-// Placeholder - add shared UI components here
-export {}
+export * from "./src/design-system"
+export * from "./src/components/ui"

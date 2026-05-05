@@ -29,6 +29,7 @@ describe("BackendUnavailableRecovery", () => {
       screen.getByText("Check that your server is running and accessible.")
     ).toBeInTheDocument()
 
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Reload page" })).toBeInTheDocument()
     expect(
@@ -36,6 +37,7 @@ describe("BackendUnavailableRecovery", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Open Settings" })).toBeInTheDocument()
 
+    expect(screen.getByLabelText("Diagnostics")).toBeInTheDocument()
     expect(screen.getByText("GET")).toBeInTheDocument()
     expect(screen.getByText("/api/v1/llm/models/metadata")).toBeInTheDocument()
     expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
