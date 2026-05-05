@@ -7,6 +7,7 @@ from typing import Any
 from tldw_Server_API.app.core.CodeGraph.extractors.jvm_common import (
     JvmCallSite,
     column,
+    declaration_payload_text,
     first_named_child_of_type,
     line,
     make_jvm_node,
@@ -114,7 +115,7 @@ class _KotlinGraphBuilder:
             self._visit_function_declaration(node)
 
     def _visit_package_header(self, node: Any) -> None:
-        package_name = _kotlin_qualified_child_text(self.source, node)
+        package_name = declaration_payload_text(self.source, node, "package")
         if not package_name:
             return
         self._package_name = package_name
@@ -128,7 +129,7 @@ class _KotlinGraphBuilder:
         )
 
     def _visit_import(self, node: Any) -> None:
-        imported = _kotlin_qualified_child_text(self.source, node)
+        imported = declaration_payload_text(self.source, node, "import")
         if not imported:
             return
         import_node = self._make_node(
@@ -161,6 +162,7 @@ class _KotlinGraphBuilder:
             name=name,
             qualified_name_value=qualified_name(self._package_name, *self._type_stack, name),
             node=node,
+            visibility=_visibility(self.source, node),
         )
         self.nodes.append(type_node)
 
@@ -266,16 +268,11 @@ class _KotlinGraphBuilder:
         )
 
 
-def _kotlin_qualified_child_text(source: bytes, node: Any) -> str:
-    qualified_child = first_named_child_of_type(node, "qualified_identifier", "identifier")
-    return node_text(source, qualified_child)
-
-
 def _kotlin_type_kind(source: bytes, node: Any) -> str:
     if node.type == "object_declaration":
         return "object"
-    source_text = node_text(source, node).lstrip()
-    if source_text.startswith("interface "):
+    del source
+    if any(child.type == "interface" for child in node.children):
         return "interface"
     return "class"
 
@@ -289,8 +286,7 @@ def _visibility(source: bytes, node: Any) -> str | None:
 
 
 def _navigation_reference_name(source: bytes, node: Any) -> str:
-    parts = [node_text(source, child) for child in node.named_children if child.type == "identifier"]
-    return ".".join(part for part in parts if part)
+    return node_text(source, node)
 
 
 __all__ = ["KotlinTreeSitterExtractor"]

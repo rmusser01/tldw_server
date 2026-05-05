@@ -6,6 +6,7 @@ from typing import Any
 
 import tldw_Server_API.app.core.CodeGraph.indexer as indexer_module
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
+from tldw_Server_API.app.core.CodeGraph.dependencies import DependencyHealth
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer, _Candidate, _DiscoveryResult
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult, LanguageInfo
@@ -166,6 +167,43 @@ class Greeter {
     assert helper_paths == ["Greeter.kt", "Service.java"]
 
 
+def test_indexer_does_not_count_non_extractable_jvm_files_against_foreground_limits(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_load_parser(language_id: str) -> SimpleNamespace:
+        return SimpleNamespace(available=language_id not in {"java", "kotlin"})
+
+    monkeypatch.setattr(indexer_module, "load_parser", fake_load_parser)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "A.java").write_text("class A {}\n", encoding="utf-8")
+    (workspace / "B.java").write_text("class B {}\n", encoding="utf-8")
+    (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    registry = CodeGraphLanguageRegistry(
+        dependency_health=DependencyHealth(
+            available=True,
+            missing=("tree_sitter_java", "tree_sitter_kotlin"),
+            present=("tree_sitter", "tree_sitter_javascript", "tree_sitter_typescript"),
+        )
+    )
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=registry)
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=1,
+    )
+
+    assert result.status == "complete"
+    assert result.counters["dependency_missing_language_skipped"] == 2
+    assert [item.path for item in repo.list_files(limit=10)] == ["app.py"]
+
+
 def test_indexer_marks_python_extraction_errors_without_claiming_indexed_status(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -301,6 +339,7 @@ def test_indexer_does_not_read_full_inventory_only_file_into_memory(tmp_path: Pa
             relative_path=result.candidates[0].relative_path,
             language_id=result.candidates[0].language_id,
             stage=result.candidates[0].stage,
+            symbol_extraction=result.candidates[0].symbol_extraction,
             size=result.candidates[0].size,
             modified_at=result.candidates[0].modified_at,
         )
@@ -360,6 +399,7 @@ def test_indexer_records_unreadable_files_without_aborting_run(tmp_path: Path) -
                 relative_path=candidate.relative_path,
                 language_id=candidate.language_id,
                 stage=candidate.stage,
+                symbol_extraction=candidate.symbol_extraction,
                 size=candidate.size,
                 modified_at=candidate.modified_at,
             )
@@ -436,6 +476,7 @@ def test_indexer_opens_each_candidate_once_for_probe_and_content(tmp_path: Path)
                     relative_path=candidate.relative_path,
                     language_id=candidate.language_id,
                     stage=candidate.stage,
+                    symbol_extraction=candidate.symbol_extraction,
                     size=candidate.size,
                     modified_at=candidate.modified_at,
                 )
@@ -599,6 +640,7 @@ def test_indexer_stops_discovery_once_file_limit_is_exceeded(tmp_path: Path) -> 
                 display_name="Python",
                 extensions=(".py",),
                 stage="foundation",
+                symbol_extraction=True,
             )
 
     registry = _CountingRegistry()

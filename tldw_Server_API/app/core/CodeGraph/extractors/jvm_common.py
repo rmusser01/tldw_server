@@ -32,6 +32,16 @@ def node_text(source: bytes, node: Any | None) -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8")
 
 
+def declaration_payload_text(source: bytes, node: Any, keyword: str) -> str:
+    """Return declaration text after a leading keyword while preserving syntax."""
+    text = node_text(source, node).strip()
+    if text.startswith(keyword):
+        text = text[len(keyword) :].strip()
+    if text.endswith(";"):
+        text = text[:-1].strip()
+    return " ".join(text.split())
+
+
 def named_descendants_of_type(node: Any, *node_types: str) -> tuple[Any, ...]:
     """Return named descendants matching any requested Tree-sitter node type."""
     matches: list[Any] = []
@@ -181,6 +191,7 @@ def end_column(node: Any) -> int:
 __all__ = [
     "JvmCallSite",
     "column",
+    "declaration_payload_text",
     "end_column",
     "end_line_number",
     "first_named_child_of_type",

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 00:52'
-updated_date: '2026-05-05 01:13'
+updated_date: '2026-05-05 03:20'
 labels:
   - codegraph
   - mcp
@@ -64,6 +64,12 @@ Task 5 registry/indexer wiring complete: promoted Java/Kotlin to foundation meta
 Task 6 MCP regression complete: added codegraph.index plus codegraph.search coverage for Java method and Kotlin function symbols. No MCP implementation changes were needed because the existing module delegates through the registry/indexer/repository path. Verified with python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py::test_codegraph_search_finds_java_kotlin_symbols_after_index -q (1 passed).
 
 Final verification: python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py -q passed with 108 passed and 5 warnings. Ruff passed on touched CodeGraph/MCP scope. Bandit JSON at /tmp/bandit_codegraph_java_kotlin.json reported errors [] and results []. git diff --check exited 0 with no output. Dependency versions verified in the shared venv: tree-sitter-java 0.23.5 and tree-sitter-kotlin 1.1.0. Known limits remain intentional: no classpath, build-system, overload, inheritance, or full type-resolution semantics in this slice.
+
+PR #1277 review-fix pass started. Active actionable items: avoid counting non-extractable optional JVM files in foreground size guards, keep dependency_available tied to core availability rather than all optional parser packages, preserve Java/Kotlin import syntax more faithfully, add type visibility for Java/Kotlin declarations, and harden Kotlin interface/navigation parsing.
+
+PR #1277 review-fix pass completed. Addressed active review issues: core dependency health no longer fails when optional Java/Kotlin parsers are missing; non-extractable JVM files are skipped before foreground file/byte guards with dependency_missing_language_skipped; Java imports preserve static and wildcard syntax and type declarations record visibility; Kotlin imports preserve alias and wildcard syntax, type declarations record visibility, interface detection no longer depends on source-text prefix, and nested navigation call refs preserve the full expression.
+
+Review-fix verification: focused review regressions passed (4 passed); focused config/indexer/Java/Kotlin extractor suite passed (31 passed); full CodeGraph plus MCP module/dynamic catalog suite passed (110 passed); Ruff passed on touched CodeGraph/MCP/test scope; Bandit on touched production scope reported 0 results and 0 errors in /tmp/bandit_codegraph_java_kotlin_review_fixes.json; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -72,6 +78,8 @@ Final verification: python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server
 Implemented the native CodeGraph Java/Kotlin extractor slice. Added optional parser dependency pins and loader support, shared JVM Tree-sitter helpers, Java and Kotlin extractors, dependency-aware language registry/indexer wiring, and MCP search regression coverage. The implementation stays conservative: it extracts package/import/type/function or method symbols and same-file simple call edges while leaving imports, receiver calls, constructor calls without modeled targets, and build-system/type-resolution cases unresolved for later slices.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1277
+
+PR #1277 review follow-up: fixed optional dependency health semantics, skipped unavailable JVM language files before foreground guard accounting, and tightened Java/Kotlin extraction to preserve import syntax, declaration visibility, Kotlin interface detection, and nested navigation call references.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

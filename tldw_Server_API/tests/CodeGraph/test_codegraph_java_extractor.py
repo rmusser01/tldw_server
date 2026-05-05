@@ -7,6 +7,8 @@ JAVA_FIXTURE = b"""
 package com.example.app;
 
 import java.util.List;
+import static java.util.Collections.emptyList;
+import java.util.*;
 import com.example.tools.Helper;
 
 public class Greeter {
@@ -38,6 +40,8 @@ def test_java_extractor_records_package_imports_types_methods_and_calls() -> Non
     assert ("module", "Greeter") in nodes_by_kind_name
     assert ("package", "com.example.app") in nodes_by_kind_name
     assert ("import", "java.util.List") in nodes_by_kind_name
+    assert ("import", "static java.util.Collections.emptyList") in nodes_by_kind_name
+    assert ("import", "java.util.*") in nodes_by_kind_name
     assert ("import", "com.example.tools.Helper") in nodes_by_kind_name
     assert ("class", "Greeter") in nodes_by_kind_name
     assert ("constructor", "Greeter") in nodes_by_kind_name
@@ -50,6 +54,7 @@ def test_java_extractor_records_package_imports_types_methods_and_calls() -> Non
     helper = nodes_by_kind_name[("method", "helper")]
 
     assert greeter.qualified_name == "com.example.app.Greeter"
+    assert greeter.visibility == "public"
     assert constructor.qualified_name == "com.example.app.Greeter.Greeter"
     assert greet.qualified_name == "com.example.app.Greeter.greet"
     assert helper.qualified_name == "com.example.app.Greeter.helper"
@@ -60,6 +65,14 @@ def test_java_extractor_records_package_imports_types_methods_and_calls() -> Non
     )
     assert any(
         ref.reference_kind == "import" and ref.reference_name == "java.util.List"
+        for ref in result.unresolved_refs
+    )
+    assert any(
+        ref.reference_kind == "import" and ref.reference_name == "static java.util.Collections.emptyList"
+        for ref in result.unresolved_refs
+    )
+    assert any(
+        ref.reference_kind == "import" and ref.reference_name == "java.util.*"
         for ref in result.unresolved_refs
     )
     assert result.errors == ()

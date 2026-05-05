@@ -7,9 +7,11 @@ KOTLIN_FIXTURE = b"""
 package com.example.app
 
 import com.example.tools.Helper
+import com.example.tools.Helper as ToolHelper
+import kotlin.collections.*
 import kotlin.collections.List
 
-class Greeter {
+internal class Greeter {
     fun greet(name: String): String {
         return helper(name)
     }
@@ -21,8 +23,14 @@ class Greeter {
 
 object Registry {
     fun create(): Greeter {
+        com.example.factories.GreeterFactory.create()
         return Greeter()
     }
+}
+
+@Deprecated("use NewMarker")
+internal interface Marker {
+    fun mark()
 }
 """
 
@@ -40,20 +48,27 @@ def test_kotlin_extractor_records_package_imports_types_functions_and_calls() ->
     assert ("module", "Greeter") in nodes_by_kind_name
     assert ("package", "com.example.app") in nodes_by_kind_name
     assert ("import", "com.example.tools.Helper") in nodes_by_kind_name
+    assert ("import", "com.example.tools.Helper as ToolHelper") in nodes_by_kind_name
+    assert ("import", "kotlin.collections.*") in nodes_by_kind_name
     assert ("import", "kotlin.collections.List") in nodes_by_kind_name
     assert ("class", "Greeter") in nodes_by_kind_name
     assert ("function", "greet") in nodes_by_kind_name
     assert ("function", "helper") in nodes_by_kind_name
     assert ("object", "Registry") in nodes_by_kind_name
     assert ("function", "create") in nodes_by_kind_name
+    assert ("interface", "Marker") in nodes_by_kind_name
 
     greeter = nodes_by_kind_name[("class", "Greeter")]
+    marker = nodes_by_kind_name[("interface", "Marker")]
     registry = nodes_by_kind_name[("object", "Registry")]
     greet = nodes_by_kind_name[("function", "greet")]
     helper = nodes_by_kind_name[("function", "helper")]
     create = nodes_by_kind_name[("function", "create")]
 
     assert greeter.qualified_name == "com.example.app.Greeter"
+    assert greeter.visibility == "internal"
+    assert marker.qualified_name == "com.example.app.Marker"
+    assert marker.visibility == "internal"
     assert registry.qualified_name == "com.example.app.Registry"
     assert greet.qualified_name == "com.example.app.Greeter.greet"
     assert helper.qualified_name == "com.example.app.Greeter.helper"
@@ -65,6 +80,18 @@ def test_kotlin_extractor_records_package_imports_types_functions_and_calls() ->
     )
     assert any(
         ref.reference_kind == "import" and ref.reference_name == "com.example.tools.Helper"
+        for ref in result.unresolved_refs
+    )
+    assert any(
+        ref.reference_kind == "import" and ref.reference_name == "com.example.tools.Helper as ToolHelper"
+        for ref in result.unresolved_refs
+    )
+    assert any(
+        ref.reference_kind == "import" and ref.reference_name == "kotlin.collections.*"
+        for ref in result.unresolved_refs
+    )
+    assert any(
+        ref.reference_kind == "call" and ref.reference_name == "com.example.factories.GreeterFactory.create"
         for ref in result.unresolved_refs
     )
     assert result.errors == ()

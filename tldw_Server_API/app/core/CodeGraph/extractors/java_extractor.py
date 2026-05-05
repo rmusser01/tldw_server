@@ -7,6 +7,7 @@ from typing import Any
 from tldw_Server_API.app.core.CodeGraph.extractors.jvm_common import (
     JvmCallSite,
     column,
+    declaration_payload_text,
     first_named_child_of_type,
     line,
     make_jvm_node,
@@ -113,7 +114,7 @@ class _JavaGraphBuilder:
             self._visit_type_declaration(node)
 
     def _visit_package_declaration(self, node: Any) -> None:
-        package_name = _java_qualified_child_text(self.source, node)
+        package_name = declaration_payload_text(self.source, node, "package")
         if not package_name:
             return
         self._package_name = package_name
@@ -127,7 +128,7 @@ class _JavaGraphBuilder:
         )
 
     def _visit_import_declaration(self, node: Any) -> None:
-        imported = _java_qualified_child_text(self.source, node)
+        imported = declaration_payload_text(self.source, node, "import")
         if not imported:
             return
         import_node = self._make_node(
@@ -160,6 +161,7 @@ class _JavaGraphBuilder:
             name=name,
             qualified_name_value=qualified_name(self._package_name, *self._type_stack, name),
             node=node,
+            visibility=_visibility(node),
         )
         self.nodes.append(type_node)
 
@@ -282,11 +284,6 @@ class _JavaGraphBuilder:
             visibility=visibility,
             metadata=metadata,
         )
-
-
-def _java_qualified_child_text(source: bytes, node: Any) -> str:
-    qualified_child = first_named_child_of_type(node, "scoped_identifier", "identifier")
-    return node_text(source, qualified_child)
 
 
 def _visibility(node: Any) -> str | None:
