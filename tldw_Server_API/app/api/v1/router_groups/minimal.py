@@ -395,53 +395,38 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, data_resource_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.integrations_control_plane import (
-            router as integrations_control_plane_router,
-        )
-
-        specs.append(RouterSpec(
-            router=integrations_control_plane_router,
+    control_support_skip_context = "in minimal test app"
+    for control_support_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.integrations_control_plane",
+            log_name="integrations_control_plane",
             prefix=f"{API_V1_PREFIX}",
             tags=("integrations",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping integrations control plane router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane import (
-            router as scheduled_tasks_control_plane_router,
-        )
-
-        specs.append(RouterSpec(
-            router=scheduled_tasks_control_plane_router,
+            skip_context=control_support_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane",
+            log_name="scheduled_tasks_control_plane",
             prefix=f"{API_V1_PREFIX}",
             tags=("scheduled-tasks",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping scheduled tasks control plane router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router
-
-        specs.append(RouterSpec(
-            router=notifications_router,
+            skip_context=control_support_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notifications",
+            log_name="notifications",
             prefix=f"{API_V1_PREFIX}",
             tags=("notifications",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping notifications router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
-
-        specs.append(RouterSpec(
-            router=chatbooks_router,
+            skip_context=control_support_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chatbooks",
+            log_name="chatbooks",
             prefix=f"{API_V1_PREFIX}",
             tags=("chatbooks",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chatbooks router in minimal test app: {e}")
+            skip_context=control_support_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, control_support_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.chat_workflows import router as chat_workflows_router
