@@ -4,7 +4,7 @@ title: Add cross-runtime sandbox diagnostics summary
 status: Done
 assignee: []
 created_date: '2026-05-05 21:01'
-updated_date: '2026-05-05 21:09'
+updated_date: '2026-05-05 21:26'
 labels:
   - sandbox
   - diagnostics
@@ -35,12 +35,16 @@ Add a narrow read-only operator diagnostics summary for all sandbox runtimes usi
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented additive GET /api/v1/sandbox/admin/runtime-diagnostics backed by SandboxService.feature_discovery(), with schema coverage, admin RBAC coverage, startup warning projection, and docs updates. Verification: focused pytest 28 passed; py_compile passed; ruff F/E9 passed; Bandit touched production files produced zero findings; git diff --check passed. Full default Ruff remains blocked by pre-existing file-level I/SIM/B904 findings in touched files.
+
+PR #1328 review follow-up: Qodo posted five actionable findings. Verified against current branch: async handler calls synchronous runtime_diagnostics_summary directly, host_gated/scaffold summary uses implementation_state instead of readiness, new helpers lack docstrings, and new test monkeypatch parameter lacks type annotation.
+
+PR #1328 review follow-up fixed: runtime diagnostics now offloads synchronous discovery with asyncio.to_thread, summary host_gated/scaffold counts use readiness rather than static implementation_state, new helpers have docstrings, and the new test monkeypatch parameter is typed. Added regression coverage for offloading and ready host-gated runtime aggregation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added an admin-only, read-only cross-runtime diagnostics endpoint backed by existing sandbox runtime discovery. The new response groups runtime readiness, preserves raw and normalized reason codes, surfaces host-local isolation warnings and startup warning summaries, and keeps repair semantics scoped to runtimes that explicitly advertise repair support. Updated focused tests, admin RBAC coverage, and sandbox docs. Verification: targeted sandbox pytest 28 passed, py_compile passed, Ruff F/E9 passed, Bandit touched production scope reported zero findings, and git diff --check passed. Full default Ruff remains blocked by pre-existing file-level I/SIM/B904 findings in touched files.
+Added an admin-only, read-only cross-runtime diagnostics endpoint backed by existing sandbox runtime discovery. The response groups runtime readiness, preserves raw and normalized reason codes, surfaces host-local isolation warnings and startup warning summaries, and keeps repair semantics scoped to runtimes that explicitly advertise repair support. PR review follow-up fixed async event-loop blocking, readiness aggregation, docstrings, and test typing. Verification: targeted sandbox pytest 29 passed, py_compile passed, Ruff F/E9 passed, Bandit touched production scope reported zero findings, test-file Ruff passed, and git diff --check passed. Full default Ruff on all touched production files remains blocked by pre-existing file-level I001/SIM300/B904 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -2262,6 +2262,8 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
 # -----------------------
 
 def _sandbox_startup_warning_summary(request: Request) -> dict[str, object] | None:
+    """Return compact sandbox startup warnings when the app registry exists."""
+
     registry = getattr(request.app.state, "startup_warning_registry", None)
     if registry is None:
         return None
@@ -2285,7 +2287,7 @@ async def admin_runtime_diagnostics(
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminRuntimeDiagnosticsResponse:
     """Return read-only operator diagnostics derived from runtime discovery."""
-    payload = dict(_service.runtime_diagnostics_summary())
+    payload = dict(await asyncio.to_thread(_service.runtime_diagnostics_summary))
     warning_summary = _sandbox_startup_warning_summary(request)
     if warning_summary is not None:
         payload["startup_warning_summary"] = warning_summary

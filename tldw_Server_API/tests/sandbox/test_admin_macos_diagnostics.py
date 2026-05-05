@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -220,7 +223,9 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     }
 
 
-def test_admin_runtime_diagnostics_returns_structured_payload(monkeypatch) -> None:
+def test_admin_runtime_diagnostics_returns_structured_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tldw_Server_API.app.services.startup_warning_models import (
         StartupWarningRecord,
     )
@@ -311,6 +316,45 @@ def test_admin_runtime_diagnostics_returns_structured_payload(monkeypatch) -> No
         "blocking": False,
         "codes": ["vz_stale_session_controls_detected"],
     }
+
+
+def test_admin_runtime_diagnostics_offloads_runtime_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_to_thread(
+        func: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        calls.append(getattr(func, "__name__", "unknown"))
+        return func(*args, **kwargs)
+
+    fake_service = SimpleNamespace(
+        runtime_diagnostics_summary=lambda: {
+            "source": "feature_discovery",
+            "summary": {
+                "total": 0,
+                "ready": 0,
+                "unavailable": 0,
+                "host_gated": 0,
+                "scaffold": 0,
+                "host_local_warning_runtimes": [],
+                "repair_supported_runtimes": [],
+            },
+            "runtimes": [],
+        }
+    )
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr(sandbox_mod.asyncio, "to_thread", fake_to_thread)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/runtime-diagnostics")
+
+    assert resp.status_code == 200
+    assert calls == ["<lambda>"]
 
 
 def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:

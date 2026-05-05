@@ -410,6 +410,26 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
                 },
             },
             {
+                "name": "vz_macos",
+                "available": True,
+                "implementation_state": "host_gated",
+                "reasons": [],
+                "normalized_reasons": [],
+                "boundary_class": "vm_grade",
+                "vm_grade_isolation": True,
+                "untrusted_eligible": True,
+                "isolation_warnings": [],
+                "strict_deny_all_supported": False,
+                "strict_allowlist_supported": False,
+                "session_contract": {
+                    "support_state": "scaffold",
+                    "reuse_model": "scaffold",
+                    "requires_live_health_check": True,
+                    "recovery_state": "scaffold",
+                    "repair_state": "host_gated",
+                },
+            },
+            {
                 "name": "worktree",
                 "available": False,
                 "implementation_state": "supported",
@@ -440,13 +460,13 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
 
     assert summary["source"] == "feature_discovery"
     assert summary["summary"] == {
-        "total": 3,
-        "ready": 1,
+        "total": 4,
+        "ready": 2,
         "unavailable": 2,
         "host_gated": 1,
         "scaffold": 0,
         "host_local_warning_runtimes": ["worktree"],
-        "repair_supported_runtimes": ["vz_linux"],
+        "repair_supported_runtimes": ["vz_linux", "vz_macos"],
     }
     rows = {row["name"]: row for row in summary["runtimes"]}
     assert rows["docker"]["readiness"] == "ready"
@@ -454,6 +474,8 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
     assert rows["vz_linux"]["readiness"] == "host_gated"
     assert rows["vz_linux"]["recommended_action"] == "check_helper"
     assert rows["vz_linux"]["repair_supported"] is True
+    assert rows["vz_macos"]["readiness"] == "ready"
+    assert rows["vz_macos"]["recommended_action"] == "none"
     assert rows["worktree"]["readiness"] == "unavailable"
     assert rows["worktree"]["recommended_action"] == "prepare_host"
     assert rows["worktree"]["vm_grade_isolation"] is False
