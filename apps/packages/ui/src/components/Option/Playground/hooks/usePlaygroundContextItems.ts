@@ -1,7 +1,6 @@
 import React from "react"
 import type { ComposerContextItem } from "../ComposerToolbar"
 import type { KnowledgeTab } from "@/components/Knowledge"
-import type { TFunction } from "i18next"
 import { toText } from "./utils"
 
 export type UsePlaygroundContextItemsDeps = {
@@ -41,7 +40,7 @@ export type UsePlaygroundContextItemsDeps = {
   openContextWindowModal: () => void
   openSessionInsightsModal: () => void
   updateChatModelSetting: (key: string, value: any) => void
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 export function usePlaygroundContextItems(

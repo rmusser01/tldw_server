@@ -152,7 +152,6 @@ const createSessionStorage = (): StateStorage => {
   if (typeof window === "undefined") {
     return createMemoryStorage()
   }
-
   return {
     getItem: (name: string): string | null => {
       try {
@@ -434,6 +433,8 @@ const sanitizeSession = (
       ? session.updatedAt
       : createdAt
 
+  const customBasePreset = session.customBasePreset as IngestPreset | undefined
+
   return {
     id: session.id || generateSessionId(),
     visibility: session.visibility === "hidden" ? "hidden" : "visible",
@@ -442,8 +443,8 @@ const sanitizeSession = (
     queueItems: sanitizeQueueItems(session.queueItems),
     selectedPreset: session.selectedPreset || DEFAULT_PRESET,
     customBasePreset:
-      session.customBasePreset && session.customBasePreset !== "custom"
-        ? session.customBasePreset
+      customBasePreset && customBasePreset !== "custom"
+        ? customBasePreset
         : DEFAULT_PRESET,
     presetConfig: session.presetConfig || DEFAULT_PRESETS[DEFAULT_PRESET],
     customOptions: session.customOptions || {},

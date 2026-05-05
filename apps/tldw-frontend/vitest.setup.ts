@@ -109,7 +109,7 @@ if (typeof window !== 'undefined') {
             isError: false,
             error: null,
             refetch: vi.fn(),
-          } as ReturnType<typeof actualHooks.useQuery>;
+          } as unknown as ReturnType<typeof actualHooks.useQuery>;
         }
       }) as typeof actualHooks.useQuery,
       useMutation: ((...args: Parameters<typeof actualHooks.useMutation>) => {
@@ -132,7 +132,7 @@ if (typeof window !== 'undefined') {
             submittedAt: 0,
             variables: undefined,
             context: undefined,
-          } as ReturnType<typeof actualHooks.useMutation>;
+          } as unknown as ReturnType<typeof actualHooks.useMutation>;
         }
       }) as typeof actualHooks.useMutation,
       useQueryClient: (() => {

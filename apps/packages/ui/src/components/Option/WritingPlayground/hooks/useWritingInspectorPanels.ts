@@ -6,6 +6,7 @@
  */
 
 import React from "react"
+import type { TFunction } from "i18next"
 import {
   countWritingTokens,
   createWritingWordcloud,
@@ -62,7 +63,7 @@ export interface UseWritingInspectorPanelsDeps {
   settings: { logprobs: boolean; top_logprobs: number | null }
   lastGenerationContextRef: React.MutableRefObject<LastGenerationContext | null>
   handleGenerate: (overrideText?: string) => void
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  t: TFunction
 }
 
 export function useWritingInspectorPanels(deps: UseWritingInspectorPanelsDeps) {
@@ -502,11 +503,15 @@ export function useWritingInspectorPanels(deps: UseWritingInspectorPanelsDeps) {
   const requestedTokenizerAvailable =
     requestedCaps?.requested?.tokenizer_available === true
   const requestedTokenizerError =
-    requestedCaps?.requested?.tokenization_error?.trim() || null
+    typeof requestedCaps?.requested?.tokenization_error === "string"
+      ? requestedCaps.requested.tokenization_error.trim() || null
+      : null
   const tokenizerName =
-    tokenCountResult?.meta.tokenizer ||
-    tokenizeResult?.meta.tokenizer ||
-    requestedCaps?.requested?.tokenizer ||
+    [
+      tokenCountResult?.meta.tokenizer,
+      tokenizeResult?.meta.tokenizer,
+      requestedCaps?.requested?.tokenizer
+    ].find((value): value is string => typeof value === "string" && value.length > 0) ??
     null
   const tokenInspectorBusy = isCountingTokens || isTokenizingText
   const responseInspectorHasRows = responseInspectorRowsAll.length > 0

@@ -91,6 +91,7 @@ export interface CommandPaletteProps {
   onSearchHistory?: () => void
   onSwitchChat?: (chatId: string) => void
   sidepanelChats?: { id: string; label: string }[]
+  onQueryChange?: (query: string) => void
   scope?: "global" | "sidepanel"
   openSignal?: number
   registerGlobalOpenShortcut?: boolean
@@ -108,6 +109,7 @@ export function CommandPalette({
   onSearchHistory,
   onSwitchChat,
   sidepanelChats,
+  onQueryChange,
   scope = "global",
   openSignal,
   registerGlobalOpenShortcut = true,
@@ -687,7 +689,11 @@ export function CommandPalette({
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const nextQuery = e.target.value
+              setQuery(nextQuery)
+              onQueryChange?.(nextQuery)
+            }}
             placeholder={t("common:commandPalette.placeholder", "Type a command or search...")}
             className={cn(
               "flex-1 rounded-md bg-transparent text-base text-text placeholder:text-text-subtle",

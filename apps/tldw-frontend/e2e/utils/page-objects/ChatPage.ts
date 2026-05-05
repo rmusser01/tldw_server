@@ -121,23 +121,18 @@ export class ChatPage {
             if (!(await candidate.isVisible().catch(() => false))) {
               continue
             }
-            const hasNamedOption =
+            const hasSelectableOption =
               (await candidate
-                .getByRole("option", { name })
+                .getByRole("option")
                 .first()
                 .isVisible()
                 .catch(() => false)) ||
               (await candidate
-                .getByRole("menuitem", { name })
-                .first()
-                .isVisible()
-                .catch(() => false)) ||
-              (await candidate
-                .getByText(name, { exact: true })
+                .getByRole("menuitem")
                 .first()
                 .isVisible()
                 .catch(() => false))
-            if (hasNamedOption) {
+            if (hasSelectableOption) {
               pickerSurface = candidate
               return true
             }

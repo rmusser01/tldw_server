@@ -121,6 +121,9 @@ export type StudyAssistantContextResponse = {
   messages: StudyAssistantMessage[]
   context_snapshot: Record<string, unknown>
   available_actions: StudyAssistantAction[]
+  citations?: unknown
+  primary_citation?: unknown
+  deep_dive_target?: unknown
 }
 
 export type StudyAssistantRespondResponse = {

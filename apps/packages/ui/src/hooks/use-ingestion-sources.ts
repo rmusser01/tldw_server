@@ -19,8 +19,7 @@ import type {
   UpdateIngestionSourceRequest
 } from "@/types/ingestion-sources"
 
-type IngestionSourcesApiClient = Pick<
-  TldwApiClient,
+type IngestionSourceApiMethodName =
   | "listIngestionSources"
   | "getIngestionSource"
   | "listIngestionSourceItems"
@@ -29,7 +28,14 @@ type IngestionSourcesApiClient = Pick<
   | "syncIngestionSource"
   | "uploadIngestionSourceArchive"
   | "reattachIngestionSourceItem"
->
+
+type BoundApiMethod<T> = T extends (this: any, ...args: infer Args) => infer Result
+  ? (...args: Args) => Result
+  : T
+
+type IngestionSourcesApiClient = {
+  [Key in IngestionSourceApiMethodName]: BoundApiMethod<TldwApiClient[Key]>
+}
 
 export const ingestionSourceKeys = {
   all: () => ["ingestion-sources"] as const,

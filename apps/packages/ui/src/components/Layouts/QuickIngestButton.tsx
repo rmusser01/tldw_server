@@ -161,7 +161,12 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
     })
 
     if (!(persistApi.hasHydrated?.() ?? true)) {
-      void persistApi.rehydrate?.().then(syncHydrationState)
+      const rehydrateResult = persistApi.rehydrate?.()
+      if (rehydrateResult && typeof rehydrateResult.then === "function") {
+        void rehydrateResult.then(syncHydrationState)
+      } else {
+        syncHydrationState()
+      }
     }
 
     return () => {

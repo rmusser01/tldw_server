@@ -870,7 +870,7 @@ export function FamilyGuardrailsWizard({
             displayName: member.display_name,
             userId: member.user_id ?? "",
             email: member.email ?? "",
-            accountMode: "existing_account"
+            accountMode: "existing_account" as AccountMode
           }))
         : createGuardianMembersForPreset(fallbackPreset)
     const nextDependents =
@@ -880,7 +880,7 @@ export function FamilyGuardrailsWizard({
             displayName: member.display_name,
             userId: member.user_id ?? "",
             email: member.email ?? "",
-            accountMode: member.account_mode ?? "existing_account"
+            accountMode: (member.account_mode ?? "existing_account") as AccountMode
           }))
         : createDependents(DEFAULT_DEPENDENT_COUNT)
 

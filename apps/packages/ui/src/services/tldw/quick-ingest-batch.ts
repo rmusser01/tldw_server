@@ -218,7 +218,10 @@ const hasExtensionMessagingRuntime = (): boolean =>
 
 const getRuntimeManifestVersion = (): number | null => {
   try {
-    const manifestVersion = Number(browser?.runtime?.getManifest?.()?.manifest_version);
+    const manifest = browser?.runtime?.getManifest?.() as
+      | { manifest_version?: number }
+      | undefined;
+    const manifestVersion = Number(manifest?.manifest_version);
     return Number.isFinite(manifestVersion) && manifestVersion > 0
       ? Math.trunc(manifestVersion)
       : null;

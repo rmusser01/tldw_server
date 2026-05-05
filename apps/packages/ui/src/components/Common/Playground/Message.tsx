@@ -38,6 +38,7 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus"
 import { getSourceFeedbackKey } from "@/utils/feedback"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { ChatScope } from "@/types/chat-scope"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import type { MessageVariant } from "@/store/option"
@@ -261,7 +262,7 @@ type Props = {
   onDeleteAllImageVariants?: (payload: {
     messageId?: string
   }) => void
-  scope?: string
+  scope?: ChatScope
 }
 
 export type MessageResearchActions = {
@@ -2062,12 +2063,13 @@ export const PlaygroundMessage = (props: Props) => {
             <Tooltip
               title={
                 fallbackAudit.fallbackApplied && fallbackAudit.requestedTarget && fallbackAudit.resolvedTarget
-                  ? t("playground:routing.fallbackTooltip",
+                  ? String(t("playground:routing.fallbackTooltip",
                       "Requested: {{requested}}. Fell back to: {{resolved}}",
                       {
                         requested: fallbackAudit.requestedTarget,
                         resolved: fallbackAudit.resolvedTarget
                       } as any)
+                    )
                   : undefined
               }
             >
@@ -2077,9 +2079,9 @@ export const PlaygroundMessage = (props: Props) => {
               >
                 {fallbackAudit.resolvedTarget && (
                   <span>
-                    {t("playground:routing.using", "Using: {{target}}", {
+                    {String(t("playground:routing.using", "Using: {{target}}", {
                       target: fallbackAudit.resolvedTarget
-                    } as any)}
+                    } as any))}
                   </span>
                 )}
                 {!fallbackAudit.resolvedTarget && fallbackAuditPolicyLabel}

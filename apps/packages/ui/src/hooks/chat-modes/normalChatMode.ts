@@ -137,6 +137,7 @@ type NormalChatModeParams = {
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
   historyId: string | null
+  serverChatId?: string | null
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings

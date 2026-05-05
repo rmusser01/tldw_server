@@ -131,7 +131,7 @@ export const PRESET_ORDER: IngestPreset[] = ["quick", "standard", "deep", "custo
 /**
  * Default preset for new users.
  */
-export const DEFAULT_PRESET: IngestPreset = "standard"
+export const DEFAULT_PRESET: Exclude<IngestPreset, "custom"> = "standard"
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (!value || typeof value !== "object") return false

@@ -31,7 +31,7 @@ const gettingStarted: TutorialDefinition = {
       contentKey: "tutorials:gettingStarted.welcome.content",
       contentFallback:
         "This is your home dashboard. From here you can access all of tldw's features. Let's take a quick tour.",
-      placement: "center",
+      placement: "bottom",
       disableBeacon: true,
     },
     {
@@ -68,7 +68,7 @@ const gettingStarted: TutorialDefinition = {
       contentKey: "tutorials:gettingStarted.nextStep.content",
       contentFallback:
         "To start using Chat, go to Settings > tldw Server and add an LLM provider API key (e.g., OpenAI, Anthropic). Then come back and open Chat!",
-      placement: "center",
+      placement: "bottom",
     },
   ],
 }

@@ -8,6 +8,7 @@
 import React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Modal } from "antd"
+import type { TFunction } from "i18next"
 import {
   createWritingSession,
   exportWritingSnapshot,
@@ -43,7 +44,7 @@ export interface UseWritingImportExportDeps {
   setSelectedModel: (model: string) => Promise<void> | void
   apiProviderOverride: string | undefined
   setApiProvider: (provider: string) => void
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  t: TFunction
 }
 
 export function useWritingImportExport(deps: UseWritingImportExportDeps) {

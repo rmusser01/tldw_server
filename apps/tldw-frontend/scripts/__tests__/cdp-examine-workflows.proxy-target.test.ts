@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { OutgoingHttpHeaders } from "http"
 
 import { buildApiProxyRequestOptions } from "../cdp-examine-workflows"
 
@@ -22,11 +23,12 @@ describe("buildApiProxyRequestOptions", () => {
     expect(options.port).toBe("8443")
     expect(options.method).toBe("POST")
     expect(options.path).toBe("/api/v1/admin?steal=1")
-    expect(options.headers.authorization).toBe("Bearer token")
-    expect(options.headers["content-type"]).toBe("application/json")
-    expect(options.headers.host).toBeUndefined()
-    expect(options.headers["x-forwarded-host"]).toBeUndefined()
-    expect(options.headers["x-forwarded-proto"]).toBeUndefined()
+    const headers = options.headers as OutgoingHttpHeaders
+    expect(headers.authorization).toBe("Bearer token")
+    expect(headers["content-type"]).toBe("application/json")
+    expect(headers.host).toBeUndefined()
+    expect(headers["x-forwarded-host"]).toBeUndefined()
+    expect(headers["x-forwarded-proto"]).toBeUndefined()
   })
 
   it("keeps API request paths pinned to the backend origin for relative URLs", () => {

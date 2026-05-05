@@ -85,7 +85,12 @@ export const isChatSubmitSuccess = (result: ChatSubmitResult) =>
 
 export const normalizeChatSubmitResult = (
   result: ChatSubmitResult | void | undefined,
-): ChatSubmitResult => result ?? chatSubmitSubmitted();
+): ChatSubmitResult => {
+  if (typeof result === "undefined") {
+    return chatSubmitSubmitted();
+  }
+  return result;
+};
 
 export const getChatSubmitIssueMessage = (result: ChatSubmitResult): string => {
   if (result.status === "failed") return result.errorMessage;

@@ -15,10 +15,10 @@ import {
 export interface UseCharacterBulkOpsDeps {
   t: (key: string, opts?: Record<string, any>) => string
   notification: {
-    error: (args: { message: string; description?: any }) => void
-    warning: (args: { message: string; description?: any }) => void
-    success: (args: { message: string; description?: any }) => void
-    info: (args: { message: string; description?: any }) => void
+    error: (args: { message: string; description?: any; duration?: number }) => void
+    warning: (args: { message: string; description?: any; duration?: number }) => void
+    success: (args: { message: string; description?: any; duration?: number }) => void
+    info: (args: { message: string; description?: any; duration?: number }) => void
   }
   qc: QueryClient
   /** Current page data from useCharacterData */

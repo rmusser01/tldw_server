@@ -198,6 +198,7 @@ type QuizGenerateRequestBase = {
   difficulty?: "easy" | "medium" | "hard" | "mixed"
   focus_topics?: string[]
   model?: string
+  api_provider?: string
   workspace_id?: string | null
   workspace_tag?: string | null
 }

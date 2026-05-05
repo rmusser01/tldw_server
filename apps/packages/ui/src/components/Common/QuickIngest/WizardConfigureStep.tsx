@@ -74,8 +74,9 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     detectedTypes.has("ebook") ||
     detectedTypes.has("image")
 
+  const rawTranscriptionModel = presetConfig.advancedValues?.transcription_model
   const normalizedTranscriptionModel =
-    presetConfig.advancedValues?.transcription_model?.trim() || ""
+    typeof rawTranscriptionModel === "string" ? rawTranscriptionModel.trim() : ""
   const shouldLoadTranscriptionModels =
     hasTranscriptionItems && isStepVisible
 

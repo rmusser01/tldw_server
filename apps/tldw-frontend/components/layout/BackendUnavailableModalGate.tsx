@@ -1,5 +1,6 @@
 import React from "react"
 import { Button, Modal } from "antd"
+import type { TFunction } from "i18next"
 
 import type { BackendUnreachableDetail } from "@/services/request-events"
 
@@ -11,7 +12,7 @@ export type BackendUnavailableModalGateProps = {
   onConsumeHiddenDetail?: () => void
   onOpenHealth: () => void
   onRetry: () => void
-  t: (key: string, fallback?: string) => string
+  t: TFunction
 }
 
 export const BackendUnavailableModalGate: React.FC<

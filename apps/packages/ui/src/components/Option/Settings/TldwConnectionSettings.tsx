@@ -11,7 +11,7 @@ import {
 } from "antd"
 import type { FormInstance } from "antd"
 import React from "react"
-import type { TFunction } from "react-i18next"
+import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
 import {
   getCoreStatusLabel,

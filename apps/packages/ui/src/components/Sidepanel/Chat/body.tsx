@@ -278,9 +278,15 @@ export const SidePanelBody = ({
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
-                  onEditFormSubmit={handleEditMessage}
-                  onDeleteMessage={handleDeleteMessage}
-                  onNewBranch={handleNewBranch}
+                  onEditFormSubmit={(value) => {
+                    void handleEditMessage(index, value, !message.isBot)
+                  }}
+                  onDeleteMessage={() => {
+                    void handleDeleteMessage(index)
+                  }}
+                  onNewBranch={() => {
+                    void handleNewBranch(index)
+                  }}
                   isTTSEnabled={ttsEnabled}
                   generationInfo={message?.generationInfo}
                   toolCalls={message?.toolCalls}
@@ -311,8 +317,8 @@ export const SidePanelBody = ({
                   moodTopic={message.moodTopic ?? null}
                   variants={message.variants}
                   activeVariantIndex={message.activeVariantIndex}
-                  onSwipePrev={handleSwipePrev}
-                  onSwipeNext={handleSwipeNext}
+                  onSwipePrev={() => handleSwipePrev(message.id)}
+                  onSwipeNext={() => handleSwipeNext(message.id)}
                 />
               </div>
             )

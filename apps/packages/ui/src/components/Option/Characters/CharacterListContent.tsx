@@ -1486,14 +1486,14 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
                             key: 'export-json',
                             icon: <Download className="w-4 h-4" />,
                             label: t("settings:manageCharacters.export.json", { defaultValue: "Export as JSON" }),
-                            disabled: exporting === (record.id || record.slug || record.name),
+                            disabled: exporting === String(record.id || record.slug || record.name),
                             onClick: () => handleExport(record, 'json')
                           },
                           {
                             key: 'export-png',
                             icon: <Download className="w-4 h-4" />,
                             label: t("settings:manageCharacters.export.png", { defaultValue: "Export as PNG (with metadata)" }),
-                            disabled: exporting === (record.id || record.slug || record.name),
+                            disabled: exporting === String(record.id || record.slug || record.name),
                             onClick: () => handleExport(record, 'png')
                           }
                         ]
@@ -1636,11 +1636,15 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
             attachedWorldBooks={previewCharacterWorldBooks}
             attachedWorldBooksLoading={previewCharacterWorldBooksLoading}
             launchedFromWorldBooks={crossNavigationContext.launchedFromWorldBooks}
-            launchedFromWorldBookId={crossNavigationContext.focusWorldBookId}
+            launchedFromWorldBookId={
+              typeof crossNavigationContext.focusWorldBookId === "number"
+                ? crossNavigationContext.focusWorldBookId
+                : null
+            }
             deleting={deleting}
             exporting={
               !!exporting &&
-              exporting === (previewCharacter.id || previewCharacter.slug || previewCharacter.name)
+              exporting === String(previewCharacter.id || previewCharacter.slug || previewCharacter.name)
             }
           />
         </React.Suspense>

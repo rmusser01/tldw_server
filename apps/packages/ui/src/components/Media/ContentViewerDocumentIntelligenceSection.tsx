@@ -2,7 +2,8 @@ import React from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import {
   ANNOTATION_COLOR_OPTIONS,
-  DOCUMENT_INTELLIGENCE_TABS
+  DOCUMENT_INTELLIGENCE_TABS,
+  type MediaAnnotationColor
 } from './hooks/useContentViewerModals'
 
 type DocumentIntelligenceTab =
@@ -29,8 +30,8 @@ type DocumentIntelligenceModals = {
   setAnnotationManualText: (value: string) => void
   annotationDraftNote: string
   setAnnotationDraftNote: (value: string) => void
-  annotationDraftColor: string
-  setAnnotationDraftColor: (value: string) => void
+  annotationDraftColor: MediaAnnotationColor
+  setAnnotationDraftColor: React.Dispatch<React.SetStateAction<MediaAnnotationColor>>
   handleCreateAnnotation: () => Promise<void>
   annotationCreating: boolean
   handleSyncAnnotations: () => Promise<void>

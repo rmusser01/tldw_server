@@ -5,7 +5,7 @@ import { downloadBlob } from '@/utils/download-blob'
 import type { MediaResultItem } from '../types'
 
 type MediaExportFormat = 'json' | 'markdown' | 'text' | 'bibtex'
-type MediaAnnotationColor = 'yellow' | 'green' | 'blue' | 'pink'
+export type MediaAnnotationColor = 'yellow' | 'green' | 'blue' | 'pink'
 type ReingestSchedulePreset = 'hourly' | 'daily' | 'weekly'
 type DocumentIntelligenceTab =
   | 'outline'

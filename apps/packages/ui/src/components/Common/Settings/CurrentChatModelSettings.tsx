@@ -447,8 +447,9 @@ export const CurrentChatModelSettings = ({
       let tempSystemPrompt = ""
 
       if (selectedSystemPrompt) {
-        const prompt = await getPromptById(selectedSystemPrompt)
-        tempSystemPrompt = prompt?.content ?? ""
+        tempSystemPrompt = await resolveSelectedSystemPromptContent(
+          selectedSystemPrompt
+        )
       }
 
       const baseValues = buildBaseValues(data, tempSystemPrompt)

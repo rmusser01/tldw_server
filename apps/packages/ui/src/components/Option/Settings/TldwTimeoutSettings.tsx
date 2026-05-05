@@ -6,7 +6,7 @@ import {
   Tag
 } from "antd"
 import React from "react"
-import type { TFunction } from "react-i18next"
+import type { TFunction } from "i18next"
 import type { MessageInstance } from "antd/es/message/interface"
 
 export type TimeoutPresetKey = "balanced" | "extended"
@@ -147,7 +147,6 @@ export const TldwTimeoutSettings = ({
 
   return (
     <Collapse
-      id="tldw-settings-timeouts"
       className="mt-4 scroll-mt-24"
       items={[
         {

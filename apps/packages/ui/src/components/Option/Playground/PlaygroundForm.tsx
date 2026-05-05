@@ -403,7 +403,12 @@ export const PlaygroundForm = ({
   stickyDockEnabled = false,
   onComposerLayoutChange,
 }: Props) => {
-  const { t } = useTranslation(["playground", "common", "option"]);
+  const { t: translate } = useTranslation(["playground", "common", "option"]);
+  const t = React.useCallback(
+    (key: string, defaultValueOrOptions?: any, options?: any) =>
+      translate(key as any, defaultValueOrOptions as any, options as any) as string,
+    [translate],
+  );
   const notificationApi = useAntdNotification();
   const navigate = useNavigate();
   const [attachedResearchContextDraft, setAttachedResearchContextDraft] =

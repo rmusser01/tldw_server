@@ -22,6 +22,17 @@ type NavigateOptions = {
   state?: unknown
 }
 
+type NavigateTo =
+  | string
+  | number
+  | {
+      pathname?: string
+      search?: string
+      hash?: string
+    }
+
+export type NavigateFunction = (to: NavigateTo, options?: NavigateOptions) => void
+
 type RouteParams = Record<string, string | undefined>
 
 type BlockerHookArg = boolean | ((...args: unknown[]) => boolean)
@@ -78,7 +89,7 @@ NavLink.displayName = "NavLink"
 
 export const useNavigate = () => {
   const router = useRouter()
-  return (to: string | number, options?: NavigateOptions) => {
+  return (to: NavigateTo, options?: NavigateOptions) => {
     if (typeof to === "number") {
       if (to < 0) {
         runNavigationTransition(() => {
@@ -87,22 +98,26 @@ export const useNavigate = () => {
       }
       return
     }
+    const href =
+      typeof to === "string"
+        ? to
+        : `${to.pathname ?? ""}${to.search ?? ""}${to.hash ?? ""}` || router.asPath
     const doFallback = () => {
       if (typeof window === "undefined") return
       const proto = window.location.protocol
       if (proto === "chrome-extension:" || proto === "moz-extension:") {
-        window.location.hash = `#${to}`
+        window.location.hash = `#${href}`
         return
       }
-      window.location.assign(to)
+      window.location.assign(href)
     }
 
     try {
       runNavigationTransition(() => {
         if (options?.replace) {
-          void router.replace(to)
+          void router.replace(href)
         } else {
-          void router.push(to)
+          void router.push(href)
         }
       })
     } catch (err) {

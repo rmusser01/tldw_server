@@ -6,7 +6,7 @@ import cytoscape, {
   type Core,
   type ElementDefinition,
   type LayoutOptions,
-  type Stylesheet,
+  type StylesheetJson,
 } from "cytoscape"
 import dagre from "cytoscape-dagre"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
@@ -107,7 +107,7 @@ export function ConnectionWebModal({ open, onClose }: ConnectionWebModalProps) {
       })
     }
 
-    const styles: Stylesheet[] = [
+    const styles: StylesheetJson = [
       {
         selector: "node",
         style: {
@@ -167,7 +167,7 @@ export function ConnectionWebModal({ open, onClose }: ConnectionWebModalProps) {
       nodeSep: 50,
       rankSep: 100,
       animate: false,
-    }
+    } as LayoutOptions
 
     const cy = cytoscape({
       container: containerRef.current,

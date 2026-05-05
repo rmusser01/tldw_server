@@ -255,7 +255,13 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           currentChatModelSettings.reasoningEffort === "high"
             ? currentChatModelSettings.reasoningEffort
             : undefined,
-        tool_choice: effectiveTools ? toolChoice : undefined,
+        tool_choice:
+          effectiveTools &&
+          (toolChoice === "auto" ||
+            toolChoice === "none" ||
+            toolChoice === "required")
+            ? toolChoice
+            : undefined,
         tools: effectiveTools,
         save_to_db: !temporaryChat && Boolean(serverChatId),
         conversation_id: !temporaryChat && serverChatId ? serverChatId : undefined,
@@ -268,7 +274,11 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         extra_body: parseJsonObject(currentChatModelSettings.extraBody),
         thinking_budget_tokens:
           currentChatModelSettings.llamaThinkingBudgetTokens,
-        grammar_mode: currentChatModelSettings.llamaGrammarMode,
+        grammar_mode:
+          currentChatModelSettings.llamaGrammarMode === "library" ||
+          currentChatModelSettings.llamaGrammarMode === "inline"
+            ? currentChatModelSettings.llamaGrammarMode
+            : "none",
         grammar_id: currentChatModelSettings.llamaGrammarId,
         grammar_inline: currentChatModelSettings.llamaGrammarInline,
         grammar_override: currentChatModelSettings.llamaGrammarOverride,

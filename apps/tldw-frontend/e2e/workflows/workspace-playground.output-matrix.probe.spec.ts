@@ -368,7 +368,7 @@ const validateDownloadedArtifact = (
       validateFlashcardsArtifact(content)
       return
     default:
-      throw new Error(`Unhandled artifact validation kind: ${String(output.validation)}`)
+      throw new Error("Unhandled artifact validation kind")
   }
 }
 

@@ -19,7 +19,7 @@ export interface UsePlaygroundPersistenceDeps {
   setServerChatState: (state: string) => void
   serverChatSource: string | null
   setServerChatSource: (source: string | null) => void
-  setServerChatVersion: (version: string | null) => void
+  setServerChatVersion: (version: number | null) => void
   history: Array<{ role: string; content?: string; image?: string }>
   clearChat: () => void
   selectedCharacter: Character | null

@@ -77,7 +77,7 @@ export function WritingTipTapEditor({
     const currentJson = JSON.stringify(editor.getJSON())
     const nextJson = JSON.stringify(nextContent)
     if (currentJson !== nextJson) {
-      editor.commands.setContent(nextContent, false)
+      editor.commands.setContent(nextContent, { emitUpdate: false })
     }
   }, [editor, content])
 

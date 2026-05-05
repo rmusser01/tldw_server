@@ -220,16 +220,17 @@ export function ThemePicker() {
         const jsonString = reader.result as string
         const result = parseImportedTheme(jsonString)
 
-        if (result.valid) {
-          saveCustomTheme(result.theme)
-          setThemeId(result.theme.id)
-          if (result.warnings.length > 0) {
-            void message.warning(result.warnings.join(" "))
-          } else {
-            void message.success(`Theme "${result.theme.name}" imported successfully.`)
-          }
-        } else {
+        if (result.valid === false) {
           void message.error(result.error)
+          return
+        }
+
+        saveCustomTheme(result.theme)
+        setThemeId(result.theme.id)
+        if (result.warnings.length > 0) {
+          void message.warning(result.warnings.join(" "))
+        } else {
+          void message.success(`Theme "${result.theme.name}" imported successfully.`)
         }
       }
       reader.onerror = () => {

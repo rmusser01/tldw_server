@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from "react"
 import { Download, PanelLeftOpen, PanelLeftClose } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
+import { DEFAULT_RAG_SETTINGS, type RagSettings } from "@/services/rag/unified-rag"
 import { isKnowledgeQaHistoryItem, sortHistoryNewestFirst } from "../historyUtils"
 import { KnowledgeContextBar } from "../context/KnowledgeContextBar"
 import { CompactToolbar } from "../context/CompactToolbar"
@@ -130,7 +131,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const queryStage = knowledgeQa.queryStage ?? "idle"
   const preset = knowledgeQa.preset ?? "balanced"
   const setPreset = knowledgeQa.setPreset ?? (() => undefined)
-  const settings = knowledgeQa.settings ?? {
+  const settings: RagSettings = knowledgeQa.settings ?? {
+    ...DEFAULT_RAG_SETTINGS,
     sources: [],
     enable_web_fallback: true,
     top_k: 10,

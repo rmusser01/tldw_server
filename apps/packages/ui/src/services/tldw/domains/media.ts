@@ -214,7 +214,7 @@ export const mediaMethods = {
     options?: { signal?: AbortSignal }
   ): Promise<ReferenceImageListResponse> {
     const response = await bgRequest<any>({
-      path: "/api/v1/files/reference-images" as PathOrUrl,
+      path: "/api/v1/files/reference-images" as any,
       method: "GET",
       abortSignal: options?.signal
     })

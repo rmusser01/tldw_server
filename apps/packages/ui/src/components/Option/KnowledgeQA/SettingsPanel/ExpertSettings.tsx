@@ -541,10 +541,12 @@ function AutoOptionRow({
   fieldKey,
   settings,
   updateSetting,
+  sourceOptions,
 }: {
   fieldKey: RagKey
   settings: RagSettings
   updateSetting: <K extends keyof RagSettings>(key: K, value: RagSettings[K]) => void
+  sourceOptions: Array<{ value: string; label: string }>
 }) {
   const value = settings[fieldKey]
   const setValue = (next: unknown) =>
@@ -698,6 +700,10 @@ function AutoOptionRow({
 
 function AllOptionsSection({ settings, updateSetting }: SectionSettingsProps) {
   const [keyFilter, setKeyFilter] = useState("")
+  const sourceOptions = useMemo(
+    () => getRagSourceOptions((_key, fallback) => fallback),
+    []
+  )
   const normalizedFilter = keyFilter.trim().toLowerCase()
   const allKeys = useMemo(() => AUTO_OPTION_KEYS(settings), [settings])
   const filteredKeys = useMemo(
@@ -733,6 +739,7 @@ function AllOptionsSection({ settings, updateSetting }: SectionSettingsProps) {
               fieldKey={fieldKey}
               settings={settings}
               updateSetting={updateSetting}
+              sourceOptions={sourceOptions}
             />
           ))
         )}

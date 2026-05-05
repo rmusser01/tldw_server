@@ -717,6 +717,9 @@ export interface ServerChatSummary {
   external_ref?: string | null
   bm25_norm?: number | null
   character_id?: string | number | null
+  assistant_kind?: "character" | "persona" | null
+  assistant_id?: string | number | null
+  persona_memory_mode?: "read_only" | "read_write" | null
   parent_conversation_id?: string | null
   root_id?: string | null
   forked_from_message_id?: string | null
@@ -1309,7 +1312,7 @@ export class TldwApiClientBase {
     return cfg
   }
 
-  async request<T>(init: any, requireAuth = true): Promise<T> {
+  async request<T = any>(init: any, requireAuth = true): Promise<T> {
     await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
     return await bgRequest<T>(init)
   }
@@ -2126,7 +2129,10 @@ export class TldwApiClientBase {
     })
   }
 
-  async createChatCompletion(request: ChatCompletionRequest): Promise<Response> {
+  async createChatCompletion(
+    request: ChatCompletionRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<Response> {
     // Non-stream request via background
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
@@ -2134,7 +2140,13 @@ export class TldwApiClientBase {
       mode: "non-stream",
       body: request
     })
-    const res = await bgRequest<Response>({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request })
+    const res = await bgRequest<Response>({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: request,
+      abortSignal: options?.signal
+    })
     // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
     // For simplicity, return a minimal object with json() and text()
     const data = res as any
@@ -3256,7 +3268,7 @@ export class TldwApiClientBase {
   }
 
   // Characters API
-  private normalizeCharacterListResponse(payload: unknown): any[] {
+  normalizeCharacterListResponse(payload: unknown): any[] {
     if (Array.isArray(payload)) {
       return payload
     }
@@ -3554,7 +3566,7 @@ export class TldwApiClientBase {
     }
   }
 
-  private getCharacterListIdentity(character: any, fallbackIndex: number): string {
+  getCharacterListIdentity(character: any, fallbackIndex: number): string {
     const id = character?.id ?? character?.character_id ?? character?.characterId
     if (id !== undefined && id !== null && String(id).trim().length > 0) {
       return `id:${String(id)}`
@@ -4173,7 +4185,7 @@ export class TldwApiClientBase {
     }
   }
 
-  private normalizeChatSummary(input: any): ServerChatSummary {
+  normalizeChatSummary(input: any): ServerChatSummary {
     const created_at = String(input?.created_at || input?.createdAt || "")
     const updated_at =
       input?.updated_at ??
@@ -4240,9 +4252,9 @@ export class TldwApiClientBase {
 
   async listChats(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatSummary[]> {
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...params })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4271,9 +4283,9 @@ export class TldwApiClientBase {
 
   async listChatsWithMeta(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...params })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4310,12 +4322,12 @@ export class TldwApiClientBase {
     }
   }
 
-  async createChat(payload: Record<string, any>): Promise<ServerChatSummary> {
+  async createChat(payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
     const res = await bgRequest<any>({
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: { ...toChatScopeParams(options?.scope), ...payload }
     })
     return this.normalizeChatSummary(res)
   }
@@ -4333,10 +4345,14 @@ export class TldwApiClientBase {
     })
   }
 
-  async getChat(chat_id: string | number): Promise<ServerChatSummary> {
+  async getChat(
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<ServerChatSummary> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}`,
+      path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET"
     })
     return this.normalizeChatSummary(res)
@@ -4411,10 +4427,11 @@ export class TldwApiClientBase {
 
   async getChatLorebookDiagnostics(
     chat_id: string | number,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<LorebookDiagnosticExportResponse> {
     const cid = String(chat_id)
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...params })
     return await bgRequest<LorebookDiagnosticExportResponse>({
       path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
       method: "GET"
@@ -4494,11 +4511,16 @@ export class TldwApiClientBase {
       permission?: ConversationSharePermission
       ttl_seconds?: number
       label?: string
-    }
+    },
+    options?: { scope?: ChatScope }
   ): Promise<ConversationShareLinkCreateResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinkCreateResponse>({
-      path: `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {},
@@ -4541,10 +4563,13 @@ export class TldwApiClientBase {
   async listChatMessages(
     chat_id: string | number,
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatMessage[]> {
     const cid = String(chat_id)
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(params || {})
+    })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const cached = this.chatMessagesCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) {
@@ -4685,11 +4710,13 @@ export class TldwApiClientBase {
 
   async addChatMessage(
     chat_id: string | number,
-    payload: Record<string, any>
+    payload: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<ServerChatMessage>({
-      path: `/api/v1/chats/${cid}/messages`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload
@@ -4869,9 +4896,10 @@ export class TldwApiClientBase {
     snippet: string
     tags?: string[]
     make_flashcard?: boolean
-  }): Promise<any> {
+  }, options?: { scope?: ChatScope }): Promise<any> {
     const body = {
       ...payload,
+      ...toChatScopeParams(options?.scope),
       conversation_id: String(payload.conversation_id),
       message_id: String(payload.message_id)
     }
@@ -6368,6 +6396,7 @@ export class TldwApiClientBase {
     title?: string
     tags?: string[]
     notes?: string
+    archive_mode?: "use_default" | "always" | "never"
     status?: string
     favorite?: boolean
     summary?: string
@@ -7049,17 +7078,24 @@ import { webClipperMethods } from "./domains/web-clipper"
 export class TldwApiClient extends TldwApiClientBase {}
 
 // Declaration merging: extend the class type with all domain methods
+type TldwDomainMethodOverride =
+  | keyof TldwApiClientBase
+  | "normalizeCharacterListResponse"
+  | "getCharacterListIdentity"
+  | "normalizeChatSummary"
+type TldwDomainMethods<T> = Omit<T, TldwDomainMethodOverride>
+
 export interface TldwApiClient
   extends
-    Omit<typeof adminMethods, never>,
-    Omit<typeof mediaMethods, never>,
-    Omit<typeof characterMethods, never>,
-    Omit<typeof chatRagMethods, never>,
-    Omit<typeof collectionsMethods, never>,
-    Omit<typeof modelsAudioMethods, never>,
-    Omit<typeof presentationsMethods, never>,
-    Omit<typeof workspaceApiMethods, never>,
-    Omit<typeof webClipperMethods, never> {}
+    TldwDomainMethods<typeof adminMethods>,
+    TldwDomainMethods<typeof mediaMethods>,
+    TldwDomainMethods<typeof characterMethods>,
+    TldwDomainMethods<typeof chatRagMethods>,
+    TldwDomainMethods<typeof collectionsMethods>,
+    TldwDomainMethods<typeof modelsAudioMethods>,
+    TldwDomainMethods<typeof presentationsMethods>,
+    TldwDomainMethods<typeof workspaceApiMethods>,
+    TldwDomainMethods<typeof webClipperMethods> {}
 
 // Apply domain methods to the prototype
 Object.assign(

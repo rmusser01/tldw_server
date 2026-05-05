@@ -658,7 +658,7 @@ export const toCharactersSortBy = (column: string | null): import("@/services/tl
 }
 
 export const toCharactersSortOrder = (
-  order: "ascend" | "descend" | null
+  order: string | null
 ): import("@/services/tldw/TldwApiClient").CharacterListSortOrder => (order === "descend" ? "desc" : "asc")
 
 export const withCharacterNameInLabel = (

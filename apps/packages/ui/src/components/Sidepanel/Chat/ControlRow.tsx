@@ -662,7 +662,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         {/* Prompt, Model & Character selectors */}
         <PromptSelect
           selectedSystemPrompt={selectedSystemPrompt}
+          systemPrompt={selectedSystemPrompt}
           setSelectedSystemPrompt={setSelectedSystemPrompt}
+          setSystemPrompt={(prompt) => setSelectedSystemPrompt(prompt || undefined)}
           setSelectedQuickPrompt={setSelectedQuickPrompt}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"

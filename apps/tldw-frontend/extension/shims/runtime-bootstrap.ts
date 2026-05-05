@@ -60,7 +60,7 @@ if (typeof globalThis !== "undefined") {
   }
 
   if (!isRecord(globalScope.chrome)) {
-    globalScope.chrome = browser as unknown as Record<string, unknown>
+    ;(globalScope as any).chrome = browser
   } else {
     mergeMissingProperties(
       globalScope.chrome as Record<string, unknown>,

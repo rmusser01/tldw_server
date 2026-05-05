@@ -268,7 +268,7 @@ export type CharacterDialogsProps = {
   handleBulkAddTagsForSelection: () => void
   selectedCount: number
   popularTags: Array<{ tag: string; count: number }>
-  tagOptionsWithCounts: Array<{ value: string; label: string }>
+  tagOptionsWithCounts: Array<{ value: string; label: React.ReactNode }>
 
   // --- confirm ---
   confirmDanger: (opts: {
@@ -722,10 +722,10 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                       </div>
                       {item.parseError && (
                         <div className="text-xs text-danger">
-                          {t(item.parseError.key, {
+                          {String(t(item.parseError.key, {
                             defaultValue: item.parseError.fallback,
                             ...(item.parseError.values || {})
-                          })}
+                          }))}
                         </div>
                       )}
                       {runtimeMessage && !item.parseError && (
@@ -1340,7 +1340,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                 setEditFormDirty(false)
                 setShowEditSystemPromptExample(false)
                 setTimeout(() => {
-                  lastEditTriggerRef.current?.focus()
+                  if (lastEditTriggerRef.current instanceof HTMLElement) {
+                    lastEditTriggerRef.current.focus()
+                  }
                 }, 0)
               }
             })
@@ -1352,7 +1354,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             editWorldBooksInitializedRef.current = false
             setShowEditSystemPromptExample(false)
             setTimeout(() => {
-              lastEditTriggerRef.current?.focus()
+              if (lastEditTriggerRef.current instanceof HTMLElement) {
+                lastEditTriggerRef.current.focus()
+              }
             }, 0)
           }
         }}

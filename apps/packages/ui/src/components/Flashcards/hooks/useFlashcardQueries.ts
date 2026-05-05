@@ -65,6 +65,7 @@ export interface UseFlashcardQueriesOptions {
 }
 
 export interface UseFlashcardDeckRecentCardsQueryOptions extends UseFlashcardQueriesOptions {
+  limit?: number
 }
 export interface UseGlobalFlashcardTagSuggestionsQueryOptions {
   enabled?: boolean

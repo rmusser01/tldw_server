@@ -8,7 +8,7 @@ type TldwAuthLike = {
 
 export const loadTldwClient = async (): Promise<TldwClientLike> => {
   const clientModule = await import("@/services/tldw/TldwApiClient")
-  return clientModule.tldwClient as TldwClientLike
+  return clientModule.tldwClient as unknown as TldwClientLike
 }
 
 export const loadTldwAuth = async (): Promise<TldwAuthLike> => {

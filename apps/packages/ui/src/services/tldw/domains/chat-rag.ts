@@ -49,7 +49,11 @@ const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
               !Array.isArray(candidate.details)
           ? candidate.details
           : null
-  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+  const detailRecord = detail as Record<string, unknown> | null
+  return (
+    detailRecord?.code === "persist_validation_degraded" &&
+    detailRecord?.saved === true
+  )
 }
 
 const buildSanitizedRagSearchError = (
@@ -617,6 +621,52 @@ export const chatRagMethods = {
       path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
       method: "GET"
     })
+  },
+
+  async getLatestChatVersion(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<number | undefined> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    const current = this.normalizeChatSummary(
+      await bgRequest<any>({
+        path: appendPathQuery(`/api/v1/chats/${cid}`, query),
+        method: "GET"
+      })
+    )
+    return typeof current?.version === "number" ? current.version : undefined
+  },
+
+  isVersionConflictError(this: TldwApiClientCore, error: unknown): boolean {
+    const candidate = error as
+      | {
+          status?: unknown
+          statusCode?: unknown
+          response?: { status?: unknown }
+          message?: unknown
+          code?: unknown
+        }
+      | null
+      | undefined
+    const rawStatus =
+      candidate?.status ?? candidate?.statusCode ?? candidate?.response?.status
+    const status =
+      typeof rawStatus === "number"
+        ? rawStatus
+        : typeof rawStatus === "string"
+          ? Number(rawStatus)
+          : Number.NaN
+    const message = String(candidate?.message ?? candidate?.code ?? "")
+      .toLowerCase()
+    return (
+      status === 409 ||
+      status === 412 ||
+      message.includes("version conflict") ||
+      message.includes("expected_version") ||
+      message.includes("stale")
+    )
   },
 
   async updateChat(

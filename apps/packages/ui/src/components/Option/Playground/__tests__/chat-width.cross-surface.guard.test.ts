@@ -9,6 +9,7 @@ describe("chat width cross-surface guard", () => {
   it("keeps wider default chat content caps aligned across webui and extension surfaces", () => {
     const playgroundSource = readSource("../Playground.tsx")
     const playgroundChatSource = readSource("../PlaygroundChat.tsx")
+    const playgroundCompareClusterSource = readSource("../PlaygroundCompareCluster.tsx")
     const playgroundFormSource = readSource("../PlaygroundForm.tsx")
     const messageSource = readSource("../../../Common/Playground/Message.tsx")
     const messageContentSource = readSource("../../../Common/Playground/MessageContent.tsx")
@@ -25,7 +26,10 @@ describe("chat width cross-surface guard", () => {
     const combinedMessageSource = messageSource + messageContentSource
 
     expect(playgroundSource).toContain("max-w-[64rem]")
-    expect(playgroundChatSource).toContain("w-full max-w-5xl md:px-4 mb-4 space-y-2")
+    expect(playgroundChatSource).toContain("LazyPlaygroundCompareCluster")
+    expect(playgroundCompareClusterSource).toContain(
+      "w-full max-w-5xl md:px-4 mb-4 space-y-2"
+    )
     expect(playgroundFormSource).toContain("max-w-[64rem]")
     expect(combinedMessageSource).toContain("max-w-5xl")
     const messageInsetMatches = combinedMessageSource.match(

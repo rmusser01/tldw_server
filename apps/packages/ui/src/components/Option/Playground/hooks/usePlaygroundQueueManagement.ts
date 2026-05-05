@@ -14,7 +14,7 @@ import {
   type ChatSubmitResult
 } from "@/hooks/chat/chat-action-utils"
 import { projectTokenBudget } from "../usage-metrics"
-import type { QueuedRequest } from "@/utils/chat-request-queue"
+import type { QueuedRequest, QueuedRequestSnapshot } from "@/utils/chat-request-queue"
 import type { ChatDocuments } from "@/models/ChatTypes"
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ export interface UsePlaygroundQueueManagementDeps {
   toolChoice: string
   useOCR: boolean
   selectedDocuments: Array<{
-    id: string
+    id: number
     title?: string
     url?: string
     favIconUrl?: string
@@ -178,9 +178,10 @@ export function usePlaygroundQueueManagement(
   )
 
   const buildQueuedRequestSnapshot = React.useCallback(
-    () => ({
+    (): Partial<QueuedRequestSnapshot> => ({
       selectedModel,
-      chatMode,
+      chatMode:
+        chatMode === "rag" || chatMode === "vision" ? chatMode : "normal",
       webSearch,
       compareMode: compareModeActive,
       compareSelectedModels,

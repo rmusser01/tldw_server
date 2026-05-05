@@ -3,7 +3,7 @@ import path from 'path'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react() as any],
   resolve: {
     alias: {
       '@tldw/ui': path.resolve(__dirname, '../packages/ui/src'),

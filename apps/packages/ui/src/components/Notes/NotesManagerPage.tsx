@@ -2145,7 +2145,9 @@ const NotesManagerPage: React.FC = () => {
         setSearchTipsQuery={list.setSearchTipsQuery}
         handleNewNote={handleNewNote}
         switchListMode={ed.switchListMode}
-        handleSelectNote={ed.handleSelectNote}
+        handleSelectNote={async (id) => {
+          await ed.handleSelectNote(id)
+        }}
         handleClearFilters={list.handleClearFilters}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
@@ -2284,8 +2286,12 @@ const NotesManagerPage: React.FC = () => {
         handleOpenNotesStudio={handleOpenNotesStudio}
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
-        deleteNote={deleteNote}
-        handleSelectNote={ed.handleSelectNote}
+        deleteNote={async () => {
+          await deleteNote()
+        }}
+        handleSelectNote={async (id) => {
+          await ed.handleSelectNote(id)
+        }}
         openGraphModal={openGraphModal}
         createManualLink={createManualLink}
         removeManualLink={removeManualLink}

@@ -29,6 +29,15 @@ type LocalQuickTestPrompt = {
   userText?: string
 }
 
+type PromptSegment = "custom" | "copilot" | "studio" | "trash"
+
+const PROMPT_SEGMENTS: PromptSegment[] = ["custom", "copilot", "studio", "trash"]
+
+const normalizePromptSegment = (value: string | undefined): PromptSegment =>
+  PROMPT_SEGMENTS.includes(value as PromptSegment)
+    ? (value as PromptSegment)
+    : "custom"
+
 export interface UsePromptInteractionsDeps {
   queryClient: QueryClient
   isOnline: boolean
@@ -98,7 +107,9 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false)
 
   // Segment state
-  const [selectedSegment, setSelectedSegment] = useState<string>(initialSegment)
+  const [selectedSegment, setSelectedSegment] = useState<PromptSegment>(
+    normalizePromptSegment(initialSegment)
+  )
   const previousInitialSegmentRef = useRef(initialSegment)
 
   // Copilot queries
@@ -222,7 +233,7 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
   useEffect(() => {
     if (previousInitialSegmentRef.current === initialSegment) return
     previousInitialSegmentRef.current = initialSegment
-    setSelectedSegment(initialSegment)
+    setSelectedSegment(normalizePromptSegment(initialSegment))
   }, [initialSegment])
 
   const closeInspector = React.useCallback(() => {
