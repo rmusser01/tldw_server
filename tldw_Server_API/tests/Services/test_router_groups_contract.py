@@ -1898,6 +1898,84 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
     assert access_count == {module_name: 1 for module_name in module_paths}
 
 
+def test_iter_content_router_specs_defers_notes_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify notes and clipper specs keep router attr lookup lazy."""
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.notes_graph",
+            "path": "/graph",
+            "prefix": "/api/v1/notes",
+            "tags": ("notes",),
+            "route_key": "notes",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.notes",
+            "path": "/{note_id}",
+            "prefix": "/api/v1/notes",
+            "tags": ("notes",),
+            "route_key": "notes",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.web_clipper",
+            "path": "/clip",
+            "prefix": "/api/v1/web-clipper",
+            "tags": ("web-clipper",),
+            "route_key": "web-clipper",
+        },
+    )
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake notes router."""
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.default_stable is True
+
+    assert access_count == {
+        str(definition["module_name"]): 1
+        for definition in router_definitions
+    }
+
+
 def test_iter_content_router_specs_defers_integration_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
