@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Drawer,
   Form,
@@ -19,6 +18,7 @@ import { fetchChatModels } from "@/services/tldw-server"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { Alert } from "@/components/ui/primitives"
 import { RefreshCw, Trash2 } from "lucide-react"
 
 const Markdown = React.lazy(() => import("../Markdown"))
@@ -111,6 +111,16 @@ const extractDocumentList = (res: unknown): GeneratedDocument[] => {
   const list = data.documents || data.items || data.results
   return Array.isArray(list) ? (list as GeneratedDocument[]) : []
 }
+
+const getErrorMessage = (err: unknown, fallback: string) => {
+  if (err instanceof Error) return err.message
+  if (!err || typeof err !== "object" || !("message" in err)) return fallback
+  const messageValue = (err as { message?: unknown }).message
+  return typeof messageValue === "string" && messageValue ? messageValue : fallback
+}
+
+const hasValidationErrorFields = (err: unknown) =>
+  Boolean(err && typeof err === "object" && "errorFields" in err)
 
 export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = ({
   open,
@@ -286,8 +296,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
       })
       const list = extractDocumentList(res)
       setDocuments(list)
-    } catch (err: any) {
-      message.error(err?.message || t("common:somethingWentWrong"))
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err, t("common:somethingWentWrong")))
     } finally {
       setDocsLoading(false)
     }
@@ -309,8 +319,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
         temperature: res?.temperature ?? 0.7,
         max_tokens: res?.max_tokens ?? 2000
       })
-    } catch (err: any) {
-      message.error(err?.message || t("common:somethingWentWrong"))
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err, t("common:somethingWentWrong")))
     } finally {
       setPromptLoading(false)
     }
@@ -425,8 +435,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
         )
         void refreshDocuments()
       }
-    } catch (err: any) {
-      message.error(err?.message || t("common:somethingWentWrong"))
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err, t("common:somethingWentWrong")))
     } finally {
       setIsGenerating(false)
     }
@@ -448,8 +458,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
           await tldwClient.deleteChatDocument(documentId)
           setDocuments((prev) => prev.filter((doc) => doc.id !== documentId))
           message.success(t("common:deleted", "Deleted"))
-        } catch (err: any) {
-          message.error(err?.message || t("common:somethingWentWrong"))
+        } catch (err: unknown) {
+          message.error(getErrorMessage(err, t("common:somethingWentWrong")))
         }
       }
     })
@@ -470,8 +480,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
           "Job cancelled."
         )
       )
-    } catch (err: any) {
-      message.error(err?.message || t("common:somethingWentWrong"))
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err, t("common:somethingWentWrong")))
     }
   }
 
@@ -492,9 +502,9 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
           "Prompt preset saved."
         )
       )
-    } catch (err: any) {
-      if (err?.errorFields) return
-      message.error(err?.message || t("common:somethingWentWrong"))
+    } catch (err: unknown) {
+      if (hasValidationErrorFields(err)) return
+      message.error(getErrorMessage(err, t("common:somethingWentWrong")))
     }
   }
 
@@ -518,25 +528,31 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
     >
       {capabilities && !capabilities.hasChatDocuments && (
         <Alert
-          type="warning"
-          showIcon
-          title={t(
+          variant="warning"
+          role="status"
+          aria-live="polite"
+          data-testid="document-generator-capability-alert"
+          className="mb-4"
+        >
+          {t(
             "playground:documentGenerator.unavailable",
             "Document generation is not available on this server."
           )}
-          className="mb-4"
-        />
+        </Alert>
       )}
       {!conversationId && (
         <Alert
-          type="info"
-          showIcon
-          title={t(
+          variant="info"
+          role="status"
+          aria-live="polite"
+          data-testid="document-generator-conversation-alert"
+          className="mb-4"
+        >
+          {t(
             "playground:documentGenerator.noConversation",
             "Start a server-backed chat to generate documents."
           )}
-          className="mb-4"
-        />
+        </Alert>
       )}
 
       <div className="space-y-4">

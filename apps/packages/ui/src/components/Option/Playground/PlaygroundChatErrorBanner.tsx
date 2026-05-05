@@ -1,7 +1,7 @@
 import React from "react"
-import { X } from "lucide-react"
 import { Link } from "react-router-dom"
 
+import { Alert } from "@/components/ui/primitives"
 import {
   decodeChatErrorPayload,
   TLDW_ERROR_BUBBLE_PREFIX,
@@ -93,11 +93,9 @@ export const usePlaygroundChatErrorBanner = (
   messages: readonly ChatErrorMessageCandidate[]
 ) => {
   const scanSignature = getChatErrorBannerScanSignature(messages)
-  const messagesRef = React.useRef(messages)
-  messagesRef.current = messages
   const latestError = React.useMemo(
-    () => getLatestChatErrorBannerEntry(messagesRef.current),
-    [scanSignature]
+    () => (scanSignature ? getLatestChatErrorBannerEntry(messages) : null),
+    [messages, scanSignature]
   )
   const latestErrorRef = React.useRef<PlaygroundChatErrorBannerEntry | null>(
     latestError
@@ -157,32 +155,24 @@ export const PlaygroundChatErrorBanner: React.FC<
   }
 
   return (
-    <div
-      role="alert"
+    <Alert
+      variant="error"
       data-testid="playground-chat-error-banner"
-      className="mb-2 flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-text shadow-sm sm:flex-row sm:items-start sm:justify-between"
+      title={error.summary}
+      dismissible
+      dismissLabel={dismissLabel}
+      onDismiss={() => onDismiss(error.key)}
+      className="mb-2"
     >
-      <div className="min-w-0">
-        <p className="font-medium text-destructive">{error.summary}</p>
-        <p className="mt-1 text-xs text-text-muted">{error.hint}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex flex-col gap-2 text-xs text-text-muted sm:flex-row sm:items-center sm:justify-between">
+        <p>{error.hint}</p>
         <Link
           to="/settings/health"
-          className="text-xs font-medium text-destructive underline hover:text-destructive"
+          className="shrink-0 font-medium text-danger underline hover:text-danger"
         >
           {diagnosticsLabel}
         </Link>
-        <button
-          type="button"
-          onClick={() => onDismiss(error.key)}
-          className="inline-flex items-center rounded-full p-1 text-destructive hover:bg-destructive/10"
-          aria-label={dismissLabel}
-          title={dismissLabel}
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
       </div>
-    </div>
+    </Alert>
   )
 }
