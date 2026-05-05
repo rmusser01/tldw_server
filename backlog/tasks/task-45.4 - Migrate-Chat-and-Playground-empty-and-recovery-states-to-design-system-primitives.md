@@ -60,12 +60,26 @@ Verification:
 - PASS: full frontend tsc output filtered for this slice's touched files shows no local type errors
 - KNOWN BASELINE: bunx tsc --noEmit --pretty false -p tsconfig.json still exits 2 on unrelated pre-existing frontend type errors across packages/ui, e2e, generated client, and Vite/Vitest config typing.
 - SKIP: Bandit is not applicable; this slice touched frontend TypeScript/TSX and Backlog docs only.
+
+PR review pass:
+- Address Gemini/Qodo feedback on first-run focus management by moving focus back to a component-scoped ref exposed through design-system action props.
+- Address Gemini feedback on disconnected Playground visual hierarchy by keeping Open Settings adjacent to the disconnected message.
+- Address Gemini feedback on ConnectionBanner secondary action readability.
+- Address Gemini feedback on Sidepanel step summary styling by using StatePanel diagnostics instead of a custom child block.
+
+PR review verification:
+- PASS: bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundEmpty.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundEmpty.disconnected.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx ../packages/ui/src/components/Sidepanel/Chat/__tests__/ConnectionBanner.test.tsx ../packages/ui/src/components/Sidepanel/Chat/__tests__/empty.test.tsx --reporter=dot
+- PASS: apps/tldw-frontend/node_modules/.bin/eslint -c apps/tldw-frontend/eslint.config.mjs <touched UI files> (the Next plugin still reports the existing pages-directory notice, but exits 0 with no lint warnings/errors)
+- PASS: bunx prettier --check <touched UI files>
+- PASS: git diff --check
+- PASS: full frontend tsc output filtered for this slice's touched files shows no local type errors
+- KNOWN BASELINE: bunx tsc --noEmit --pretty false -p tsconfig.json still exits 2 on unrelated pre-existing frontend type errors.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the first Chat/Playground state slice to the design-system primitives. Playground empty now renders through EmptyState, Sidepanel Chat connection empty states render through RecoveryCallout, and ConnectionBanner now uses canonical recovery states while preserving the existing user actions and inline API-key repair path.
+Migrated the first Chat/Playground state slice to the design-system primitives. Playground empty now renders through EmptyState, Sidepanel Chat connection empty states render through RecoveryCallout, and ConnectionBanner now uses canonical recovery states while preserving the existing user actions and inline API-key repair path. PR review fixes keep disconnected Settings guidance adjacent to the message, restore scoped focus management through design-system action refs, simplify secondary-action logic, and render setup progress via diagnostics.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

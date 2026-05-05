@@ -1,67 +1,67 @@
-import React from "react"
-import type { LucideIcon } from "lucide-react"
-import { cn } from "@/libs/utils"
-import { Button } from "@/components/Common/Button"
+import React from "react";
+import type { LucideIcon } from "lucide-react";
+import { cn } from "@/libs/utils";
+import { Button } from "@/components/Common/Button";
 
-export type EmptyStateVariant = "card" | "inline" | "fullPage"
-export type EmptyStateSize = "sm" | "md" | "lg"
+export type EmptyStateVariant = "card" | "inline" | "fullPage";
+export type EmptyStateSize = "sm" | "md" | "lg";
 
 export interface EmptyStateAction {
   /** Button label */
-  label: React.ReactNode
+  label: React.ReactNode;
   /** Click handler */
-  onClick?: () => void
+  onClick?: () => void;
   /** Show loading spinner */
-  loading?: boolean
+  loading?: boolean;
   /** Disable the button */
-  disabled?: boolean
+  disabled?: boolean;
 }
 
 export interface EmptyStateStep {
   /** Step icon */
-  icon: LucideIcon
+  icon: LucideIcon;
   /** Step text */
-  text: string
+  text: string;
 }
 
 export interface EmptyStateSuggestion {
   /** Suggestion icon */
-  icon: LucideIcon
+  icon: LucideIcon;
   /** Suggestion label */
-  label: string
+  label: string;
   /** Click handler */
-  onClick: () => void
+  onClick: () => void;
 }
 
 export interface EmptyStateProps {
   /** Main title */
-  title: React.ReactNode
+  title: React.ReactNode;
   /** Description text */
-  description?: React.ReactNode
+  description?: React.ReactNode;
   /** Icon to display above title */
-  icon?: LucideIcon
+  icon?: LucideIcon;
   /** Icon color class */
-  iconClassName?: string
+  iconClassName?: string;
   /** Example items to display as bullets */
-  examples?: React.ReactNode[]
+  examples?: React.ReactNode[];
   /** Steps to display */
-  steps?: EmptyStateStep[]
+  steps?: EmptyStateStep[];
   /** Quick action suggestions */
-  suggestions?: EmptyStateSuggestion[]
+  suggestions?: EmptyStateSuggestion[];
   /** Primary action button */
-  primaryAction?: EmptyStateAction
+  primaryAction?: EmptyStateAction;
   /** Secondary action button */
-  secondaryAction?: EmptyStateAction
+  secondaryAction?: EmptyStateAction;
   /** Layout variant */
-  variant?: EmptyStateVariant
+  variant?: EmptyStateVariant;
   /** Size variant */
-  size?: EmptyStateSize
+  size?: EmptyStateSize;
   /** Additional CSS classes */
-  className?: string
+  className?: string;
   /** Test ID */
-  "data-testid"?: string
+  "data-testid"?: string;
   /** Additional content after the standard empty-state header and actions */
-  children?: React.ReactNode
+  children?: React.ReactNode;
 }
 
 const sizeConfig = {
@@ -86,13 +86,13 @@ const sizeConfig = {
     title: "text-lg",
     description: "text-sm",
   },
-} as const
+} as const;
 
 const variantConfig = {
   card: "rounded-2xl border border-border/80 bg-surface/90 shadow-card backdrop-blur",
   inline: "bg-transparent",
   fullPage: "min-h-[400px] flex items-center justify-center",
-} as const
+} as const;
 
 /**
  * EmptyState component for displaying when there's no content.
@@ -141,10 +141,20 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
       "data-testid": dataTestId,
       children,
     },
-    ref
+    ref,
   ) => {
-    const sizeStyles = sizeConfig[size]
-    const variantStyles = variantConfig[variant]
+    const sizeStyles = sizeConfig[size];
+    const variantStyles = variantConfig[variant];
+    const descriptionNode =
+      typeof description === "string" || typeof description === "number" ? (
+        <p className={cn("text-text-muted", sizeStyles.description)}>
+          {description}
+        </p>
+      ) : description ? (
+        <div className={cn("text-text-muted", sizeStyles.description)}>
+          {description}
+        </div>
+      ) : null;
 
     return (
       <div
@@ -153,7 +163,7 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
           "mx-auto text-center",
           sizeStyles.container,
           variantStyles,
-          className
+          className,
         )}
         data-testid={dataTestId}
         data-ds-component="EmptyState"
@@ -164,13 +174,13 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
               <div
                 className={cn(
                   "rounded-full bg-surface2/80",
-                  sizeStyles.iconWrapper
+                  sizeStyles.iconWrapper,
                 )}
               >
                 <Icon
                   className={cn(
                     sizeStyles.icon,
-                    iconClassName || "text-text-subtle"
+                    iconClassName || "text-text-subtle",
                   )}
                   aria-hidden="true"
                 />
@@ -182,24 +192,20 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
             className={cn(
               "font-semibold text-text",
               sizeStyles.title,
-              Icon && "text-center"
+              Icon && "text-center",
             )}
           >
             {title}
           </h2>
 
-          {description && (
-            <p className={cn("text-text-muted", sizeStyles.description)}>
-              {description}
-            </p>
-          )}
+          {descriptionNode}
 
           {examples && examples.length > 0 && (
             <div className="text-left">
               <ul
                 className={cn(
                   "list-disc space-y-1 pl-4 text-text-muted",
-                  sizeStyles.description
+                  sizeStyles.description,
                 )}
               >
                 {examples.map((example, index) => (
@@ -269,10 +275,10 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
           {children}
         </div>
       </div>
-    )
-  }
-)
+    );
+  },
+);
 
-EmptyState.displayName = "EmptyState"
+EmptyState.displayName = "EmptyState";
 
-export default EmptyState
+export default EmptyState;

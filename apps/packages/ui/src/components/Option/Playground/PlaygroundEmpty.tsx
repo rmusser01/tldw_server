@@ -133,19 +133,34 @@ export const PlaygroundEmpty = () => {
   );
 
   const isDisconnected = !demoEnabled && !isConnected;
-  const description = demoEnabled
-    ? t("playground:empty.demoDescription", {
-        defaultValue:
-          "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
-      })
-    : isDisconnected
-      ? t("playground:empty.disconnectedDescription", {
+  const description = demoEnabled ? (
+    t("playground:empty.demoDescription", {
+      defaultValue:
+        "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
+    })
+  ) : isDisconnected ? (
+    <div className="mx-auto flex max-w-2xl flex-col items-center gap-2 sm:text-base">
+      <span>
+        {t("playground:empty.disconnectedDescription", {
           defaultValue: "Connect to a tldw server to start chatting.",
-        })
-      : t("playground:empty.description", {
-          defaultValue:
-            "Experiment with different models, prompts, and knowledge sources here.",
-        });
+        })}
+      </span>
+      <button
+        type="button"
+        onClick={() => navigate("/settings/tldw")}
+        className={`inline-flex items-center text-sm font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
+      >
+        {t("playground:empty.openSettings", {
+          defaultValue: "Open Settings",
+        })}
+      </button>
+    </div>
+  ) : (
+    t("playground:empty.description", {
+      defaultValue:
+        "Experiment with different models, prompts, and knowledge sources here.",
+    })
+  );
 
   return (
     <div className="mx-auto mt-10 max-w-5xl px-4">
@@ -171,20 +186,6 @@ export const PlaygroundEmpty = () => {
         className="max-w-4xl rounded-[28px] p-5 text-sm sm:p-7"
       >
         <div className="flex flex-col gap-6">
-          {isDisconnected ? (
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={() => navigate("/settings/tldw")}
-                className={`inline-flex items-center text-sm font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
-              >
-                {t("playground:empty.openSettings", {
-                  defaultValue: "Open Settings",
-                })}
-              </button>
-            </div>
-          ) : null}
-
           <div className="border-t border-border/60 pt-5">
             <div className="flex flex-col gap-1 text-center sm:text-left">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
