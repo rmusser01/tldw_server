@@ -357,6 +357,37 @@ def test_admin_runtime_diagnostics_offloads_runtime_discovery(
     assert calls == ["<lambda>"]
 
 
+def test_sandbox_startup_warning_summary_fails_open_without_registry() -> None:
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+
+    assert sandbox_mod._sandbox_startup_warning_summary(request) == {
+        "present": False,
+        "blocking": False,
+        "codes": [],
+    }
+
+
+def test_sandbox_startup_warning_summary_fails_open_on_registry_error() -> None:
+    class BrokenRegistry:
+        def list_warnings(self, *, component_prefix: str) -> list[object]:
+            raise RuntimeError("registry unavailable")
+
+        def summary(self, *, component_prefix: str) -> dict[str, object]:
+            raise RuntimeError("registry unavailable")
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(startup_warning_registry=BrokenRegistry())
+        )
+    )
+
+    assert sandbox_mod._sandbox_startup_warning_summary(request) == {
+        "present": False,
+        "blocking": False,
+        "codes": [],
+    }
+
+
 def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:
     payload = _diagnostics_payload()
     payload["helper"]["configured"] = True

@@ -4,7 +4,7 @@ title: Add cross-runtime sandbox diagnostics summary
 status: Done
 assignee: []
 created_date: '2026-05-05 21:01'
-updated_date: '2026-05-05 21:26'
+updated_date: '2026-05-05 21:34'
 labels:
   - sandbox
   - diagnostics
@@ -39,12 +39,16 @@ Implemented additive GET /api/v1/sandbox/admin/runtime-diagnostics backed by San
 PR #1328 review follow-up: Qodo posted five actionable findings. Verified against current branch: async handler calls synchronous runtime_diagnostics_summary directly, host_gated/scaffold summary uses implementation_state instead of readiness, new helpers lack docstrings, and new test monkeypatch parameter lacks type annotation.
 
 PR #1328 review follow-up fixed: runtime diagnostics now offloads synchronous discovery with asyncio.to_thread, summary host_gated/scaffold counts use readiness rather than static implementation_state, new helpers have docstrings, and the new test monkeypatch parameter is typed. Added regression coverage for offloading and ready host-gated runtime aggregation.
+
+PR #1328 CodeRabbit follow-up: accepting fail-open startup-warning helper handling; skipping the bucket reclassification suggestion because it conflicts with the readiness-posture contract and would again make available host-gated runtimes not count as ready.
+
+PR #1328 CodeRabbit accepted fix: _sandbox_startup_warning_summary now fail-opens to {present:false, blocking:false, codes:[]} when registry is missing or errors, and both diagnostics endpoints always project the same summary shape. Added regression tests for missing and broken registries. Kept readiness-based bucket logic; CodeRabbit's alternative implementation-state-first suggestion was skipped because it conflicts with the documented readiness posture semantics.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added an admin-only, read-only cross-runtime diagnostics endpoint backed by existing sandbox runtime discovery. The response groups runtime readiness, preserves raw and normalized reason codes, surfaces host-local isolation warnings and startup warning summaries, and keeps repair semantics scoped to runtimes that explicitly advertise repair support. PR review follow-up fixed async event-loop blocking, readiness aggregation, docstrings, and test typing. Verification: targeted sandbox pytest 29 passed, py_compile passed, Ruff F/E9 passed, Bandit touched production scope reported zero findings, test-file Ruff passed, and git diff --check passed. Full default Ruff on all touched production files remains blocked by pre-existing file-level I001/SIM300/B904 findings.
+Added an admin-only, read-only cross-runtime diagnostics endpoint backed by existing sandbox runtime discovery. The response groups runtime readiness, preserves raw and normalized reason codes, surfaces host-local isolation warnings and startup warning summaries, and keeps repair semantics scoped to runtimes that explicitly advertise repair support. PR review follow-up fixed async event-loop blocking, readiness aggregation, docstrings, test typing, and fail-open startup-warning projection. Verification: targeted sandbox pytest 31 passed, py_compile passed, Ruff F/E9 passed, Bandit touched production scope reported zero findings, test-file Ruff passed, and git diff --check passed. Full default Ruff on all touched production files remains blocked by pre-existing file-level I001/SIM300/B904 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
