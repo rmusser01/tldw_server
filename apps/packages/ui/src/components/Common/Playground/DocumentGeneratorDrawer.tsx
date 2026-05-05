@@ -19,6 +19,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { Alert } from "@/components/ui/primitives"
+import { ModalFooter } from "@/components/ui/layout"
 import { RefreshCw, Trash2 } from "lucide-react"
 
 const Markdown = React.lazy(() => import("../Markdown"))
@@ -793,24 +794,31 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="primary"
-            onClick={handleGenerate}
-            loading={isGenerating}
-            disabled={!canGenerate}
-            title={t("common:generate", "Generate") as string}
-          >
-            {t("common:generate", "Generate")}
-          </Button>
-          <Button
-            onClick={refreshDocuments}
-            disabled={!conversationId}
-            title={t("common:refresh", "Refresh") as string}
-          >
-            {t("common:refresh", "Refresh")}
-          </Button>
-        </div>
+        <ModalFooter
+          align="left"
+          hideCancel
+          data-testid="document-generator-drawer-footer"
+          actions={[
+            {
+              label: t("common:generate", "Generate"),
+              onClick: () => {
+                void handleGenerate()
+              },
+              loading: isGenerating,
+              disabled: !canGenerate,
+              title: t("common:generate", "Generate") as string,
+              variant: "primary"
+            },
+            {
+              label: t("common:refresh", "Refresh"),
+              onClick: () => {
+                void refreshDocuments()
+              },
+              disabled: !conversationId,
+              title: t("common:refresh", "Refresh") as string
+            }
+          ]}
+        />
 
         <div className="space-y-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-text-subtle">

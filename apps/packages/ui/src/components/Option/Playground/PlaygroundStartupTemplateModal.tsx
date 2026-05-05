@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, Modal } from "antd"
+import { Modal } from "antd"
+import { ModalFooter } from "@/components/ui/layout"
 import type { StartupTemplateBundle } from "./startup-template-bundles"
 import type { ParameterPreset } from "./ParameterPresets"
 import { toText } from "./hooks"
@@ -47,36 +48,34 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
         destroyOnHidden
         data-testid="startup-template-preview-modal"
         footer={
-          <div className="flex flex-wrap justify-between gap-2">
-            <Button
-              danger
-              onClick={() => {
-                if (!preview) return
-                onDelete(preview.id)
-              }}
-              disabled={!preview}
-            >
-              {t(
-                "playground:composer.startupTemplateDelete",
-                "Delete template"
-              )}
-            </Button>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={onClose}>
-                {t("common:cancel", "Cancel")}
-              </Button>
-              <Button
-                type="primary"
-                onClick={onApply}
-                disabled={!preview}
-              >
-                {t(
-                  "playground:composer.startupTemplateApply",
-                  "Apply template"
-                )}
-              </Button>
-            </div>
-          </div>
+          <ModalFooter
+            align="between"
+            data-testid="startup-template-preview-modal-footer"
+            leftActions={[
+              {
+                label: t(
+                  "playground:composer.startupTemplateDelete",
+                  "Delete template"
+                ),
+                onClick: () => {
+                  if (!preview) return
+                  onDelete(preview.id)
+                },
+                disabled: !preview,
+                danger: true
+              }
+            ]}
+            onCancel={onClose}
+            cancelLabel={t("common:cancel", "Cancel")}
+            primaryAction={{
+              label: t(
+                "playground:composer.startupTemplateApply",
+                "Apply template"
+              ),
+              onClick: onApply,
+              disabled: !preview
+            }}
+          />
         }
       >
         {preview ? (

@@ -113,7 +113,7 @@ vi.mock("../Markdown", () => ({
 }))
 
 describe("DocumentGeneratorDrawer design-system recovery alerts", () => {
-  it("renders availability and conversation recovery through shared alerts", () => {
+  it("renders availability recovery and drawer actions through shared primitives", () => {
     capabilitiesState.hasChatDocuments = false
 
     render(
@@ -154,5 +154,10 @@ describe("DocumentGeneratorDrawer design-system recovery alerts", () => {
     expect(
       screen.getByText("Start a server-backed chat to generate documents.")
     ).toBeInTheDocument()
+
+    const footer = screen.getByTestId("document-generator-drawer-footer")
+    expect(footer).toHaveAttribute("data-ds-component", "ModalFooter")
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled()
   })
 })
