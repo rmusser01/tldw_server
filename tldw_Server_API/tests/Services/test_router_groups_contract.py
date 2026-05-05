@@ -3109,6 +3109,175 @@ def test_iter_content_router_specs_defers_persona_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_tail_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify tail content specs keep import and attr lookup lazy."""
+    import importlib
+
+    router_definitions = [
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.files",
+            "expected_name": "files",
+            "path": "/files",
+            "prefix": "/api/v1",
+            "tags": ("files",),
+            "route_key": "files",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.data_tables",
+            "expected_name": "data_tables",
+            "path": "/data-tables",
+            "prefix": "/api/v1",
+            "tags": ("data-tables",),
+            "route_key": "data-tables",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.items",
+            "expected_name": "items",
+            "path": "/items",
+            "prefix": "/api/v1",
+            "tags": ("items",),
+            "route_key": "items",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.reminders",
+            "expected_name": "reminders",
+            "path": "/tasks",
+            "prefix": "/api/v1",
+            "tags": ("tasks",),
+            "route_key": "tasks",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.notifications",
+            "expected_name": "notifications",
+            "path": "/notifications",
+            "prefix": "/api/v1",
+            "tags": ("notifications",),
+            "route_key": "notifications",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.watchlists",
+            "expected_name": "watchlists",
+            "path": "/watchlists",
+            "prefix": "/api/v1",
+            "tags": ("watchlists",),
+            "route_key": "watchlists",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.integrations_control_plane",
+            "expected_name": "integrations_control_plane",
+            "path": "/integrations",
+            "prefix": "/api/v1",
+            "tags": ("integrations",),
+            "route_key": "integrations",
+            "default_stable": False,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane",
+            "expected_name": "scheduled_tasks_control_plane",
+            "path": "/scheduled-tasks",
+            "prefix": "/api/v1",
+            "tags": ("scheduled-tasks",),
+            "route_key": "scheduled-tasks",
+            "default_stable": False,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.vn_assets",
+            "expected_name": "vn_assets",
+            "path": "/vn-assets",
+            "prefix": "/api/v1",
+            "tags": ("vn-assets",),
+            "route_key": "vn-assets",
+            "default_stable": True,
+        },
+    ]
+    routers_by_module: dict[str, APIRouter] = {}
+    access_count = {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake tail router."""
+            return {"status": "ok"}
+
+        routers_by_module[module_name] = router
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected tail routers."""
+        if module_name in routers_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {
+            str(definition["expected_name"])
+            for definition in router_definitions
+        }
+    }
+    assert set(selected_specs) == {
+        str(definition["expected_name"]) for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        spec = selected_specs[str(definition["expected_name"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.default_stable is definition["default_stable"]
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(definition["module_name"]) for definition in router_definitions
+    ]
+    assert access_count == {
+        str(definition["module_name"]): 1 for definition in router_definitions
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
