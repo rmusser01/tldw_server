@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-04 17:49'
-updated_date: '2026-05-05 00:54'
+updated_date: '2026-05-05 03:14'
 labels:
   - frontend
   - design-system
@@ -55,6 +55,10 @@ Final verification recorded on 2026-05-04: focused proof-surface Vitest suite pa
 Draft PR opened on 2026-05-04: https://github.com/rmusser01/tldw_server/pull/1272
 
 PR #1272 review pass complete on rebased branch codex/tldw-web-design-system-proof-surface. Addressed Gemini/CodeRabbit comments: StatePanel now avoids rounded-pill and paragraph-wrapped ReactNode messages, DiagnosticRow no longer wraps arbitrary ReactNode values in span, ServerAdminPage no longer relies on ant-alert, secondary actions forward loading/disabled state, state-key guard uses own-property checks, static proof guards resolve from import.meta.url, setup CTA focuses the server URL input, onboarding runtime-state tests no longer mock React primitives, and the TASK-14 wording nit is clarified. The old TASK-16 status nit became obsolete after rebasing onto origin/dev because that task is already Done with DoD checked.
+
+2026-05-05 follow-up PR review refresh: Qodo added two actionable findings on PR #1272 after the prior review pass. Planned narrow fixes: replace tldw-frontend deep UI state imports with the exported @tldw/ui package root, and add noopener to ServerAdminPage external documentation links. CI is still queued/pending with no failures to debug yet.
+
+Validation update: package-root imports failed local Vitest/Vite resolution because current tldw-frontend aliases map @tldw/ui to apps/packages/ui/src rather than apps/packages/ui/index.ts. Using the reviewer-supported alternative instead: keep the established deep imports and add an explicit @tldw/ui ./components/ui/state subpath export in apps/packages/ui/package.json.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -81,6 +85,10 @@ Verification:
 
 Known skips:
 - Bandit skipped because this review pass touched frontend TypeScript/TSX and Backlog/docs metadata only; no Python code was touched.
+
+Follow-up PR #1272 review pass addressed Qodo's two latest actionable findings: added an explicit @tldw/ui ./components/ui/state subpath export instead of changing imports because current frontend aliases resolve @tldw/ui to apps/packages/ui/src, and updated ServerAdminPage external documentation anchors to rel="noopener noreferrer".
+
+Follow-up verification: focused Vitest for ConfigurationErrorScreen, ServerReadinessGate, and ServerAdminPage design-system tests passed with 3 files / 9 tests; git diff --check passed; NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile passed with token sync OK; apps/extension bun run build:chrome:dev passed with token sync OK and only existing duplicate-import/font/chunk-size warnings. Bandit skipped because no Python code was touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

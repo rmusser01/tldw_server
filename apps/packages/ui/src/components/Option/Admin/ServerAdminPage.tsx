@@ -466,7 +466,7 @@ export const ServerAdminPage: React.FC = () => {
                 <a
                   href={TLDW_SERVER_DOCUMENTATION_URL}
                   target="_blank"
-                  rel="noreferrer">
+                  rel="noopener noreferrer">
                   {t(
                     "settings:admin.adminGuardLearnMore",
                     "Learn more in the tldw server documentation."
@@ -497,7 +497,7 @@ export const ServerAdminPage: React.FC = () => {
               <a
                 href={TLDW_SERVER_DOCUMENTATION_URL}
                 target="_blank"
-                rel="noreferrer">
+                rel="noopener noreferrer">
                 {t(
                   "settings:admin.adminGuardLearnMore",
                   "Learn more in the tldw server documentation."
