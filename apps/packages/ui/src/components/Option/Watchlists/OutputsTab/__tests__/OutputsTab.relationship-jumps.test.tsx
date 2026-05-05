@@ -176,9 +176,14 @@ describe("OutputsTab relationship jump actions", () => {
     expect(mocks.storeStateRef.current.openJobForm).toHaveBeenCalledWith(7)
 
     fireEvent.click(screen.getByTestId("watchlists-outputs-advanced-toggle"))
+    const statusFilterCallsBefore =
+      mocks.storeStateRef.current.setRunsStatusFilter.mock.calls.length
     fireEvent.click(screen.getByTestId("watchlists-output-open-run-44"))
     expect(mocks.storeStateRef.current.setRunsJobFilter).toHaveBeenCalledWith(7)
-    expect(mocks.storeStateRef.current.setRunsStatusFilter).toHaveBeenCalledWith(null)
+    expect(mocks.storeStateRef.current.setRunsStatusFilter).toHaveBeenCalledTimes(
+      statusFilterCallsBefore + 1
+    )
+    expect(mocks.storeStateRef.current.setRunsStatusFilter).toHaveBeenLastCalledWith(null)
     expect(mocks.storeStateRef.current.setActiveTab).toHaveBeenLastCalledWith("runs")
     expect(mocks.storeStateRef.current.openRunDetail).toHaveBeenCalledWith(101)
   })
