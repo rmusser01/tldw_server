@@ -1,10 +1,10 @@
 ---
 id: TASK-42.1
 title: 'PR 1271 review fix: audio voice import call assertion'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-05 00:15'
-updated_date: '2026-05-05 00:18'
+updated_date: '2026-05-05 00:23'
 labels: []
 dependencies: []
 references:
@@ -26,7 +26,7 @@ Address the actionable Qodo review thread on PR #1271 by making the new audio/vo
 - [x] #1 The audio/voice laziness test no longer asserts a specific import call order for behavior that is order-insensitive.
 - [x] #2 The test still verifies module import deferral before router resolution and exact lazy router attribute resolution counts after resolution.
 - [x] #3 Focused router-group contract verification passes after the review fix.
-- [ ] #4 The PR review thread is replied to or resolved with the verification summary.
+- [x] #4 The PR review thread is replied to or resolved with the verification summary.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -35,12 +35,14 @@ Address the actionable Qodo review thread on PR #1271 by making the new audio/vo
 Changed the review-fix assertion to compare the set of imported modules, preserving the pre-resolution empty import assertion and exact post-resolution attribute access counts.
 
 Verification: focused audio/voice test passed; full router group contracts passed; main router contracts passed; OpenAPI contracts passed; Bandit on test file passed with pytest assert rule B101 skipped; git diff hygiene passed.
+
+Replied to Qodo review thread with fix commit and verification summary, then resolved thread `PRRT_kwDOL1aGf85_gbK5`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved the Qodo PR #1271 maintainability finding by removing order-sensitive import call list equality from the audio/voice laziness test. The test now verifies selected modules were imported by resolution time without depending on spec ordering or duplicate import counts, while retaining exact lazy attribute resolution checks.
+Resolved the Qodo PR #1271 maintainability finding by removing order-sensitive import call list equality from the audio/voice laziness test. The test now verifies selected modules were imported by resolution time without depending on spec ordering or duplicate import counts, while retaining exact lazy attribute resolution checks. Replied to and resolved the Qodo review thread after pushing the fix.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
