@@ -15,5 +15,5 @@ export interface RecoveryCalloutProps extends Omit<StatePanelProps, "state"> {
 }
 
 export function RecoveryCallout(props: RecoveryCalloutProps) {
-  return <StatePanel {...props} />
+  return <StatePanel {...props} data-ds-component="RecoveryCallout" />
 }

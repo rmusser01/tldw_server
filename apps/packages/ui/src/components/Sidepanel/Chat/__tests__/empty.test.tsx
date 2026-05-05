@@ -67,6 +67,10 @@ describe("EmptySidePanel", () => {
   it("frames setup around Companion Home instead of a chat-only launch", () => {
     renderPanel()
 
+    const panel = screen.getByTestId("chat-empty-connection")
+
+    expect(panel).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(screen.getByText("Setup required")).toBeInTheDocument()
     expect(screen.getByText("Finish setup to open Companion Home")).toBeInTheDocument()
     expect(
       screen.getByText(
@@ -86,6 +90,11 @@ describe("EmptySidePanel", () => {
 
     renderPanel()
 
+    expect(screen.getByTestId("chat-empty-connection")).toHaveAttribute(
+      "data-ds-component",
+      "RecoveryCallout"
+    )
+    expect(screen.getByText("Sign in required")).toBeInTheDocument()
     expect(screen.getByText("API key needs attention")).toBeInTheDocument()
     expect(
       screen.getByText(
@@ -110,6 +119,11 @@ describe("EmptySidePanel", () => {
 
     renderPanel()
 
+    expect(screen.getByTestId("chat-empty-connection")).toHaveAttribute(
+      "data-ds-component",
+      "RecoveryCallout"
+    )
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
     expect(screen.getByText("Can’t reach your tldw server")).toBeInTheDocument()
     expect(
       screen.getByText(/We couldn’t reach \{\{host\}\}\./)

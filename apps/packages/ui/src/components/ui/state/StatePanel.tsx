@@ -20,6 +20,7 @@ export interface StatePanelProps {
   className?: string
   children?: React.ReactNode
   "data-testid"?: string
+  "data-ds-component"?: string
 }
 
 const severityClasses: Record<DesignSystemSeverity, string> = {
@@ -49,7 +50,8 @@ export function StatePanel({
   secondaryActions,
   className,
   children,
-  "data-testid": dataTestId
+  "data-testid": dataTestId,
+  "data-ds-component": dataDesignSystemComponent = "StatePanel"
 }: StatePanelProps) {
   const definition = getDesignSystemState(state)
   const toneClass = stateToneClasses[state] ?? severityClasses[definition.severity]
@@ -59,6 +61,7 @@ export function StatePanel({
     <section
       className={cn("rounded-lg border bg-surface p-4 text-text shadow-sm", className)}
       data-testid={dataTestId}
+      data-ds-component={dataDesignSystemComponent}
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2">

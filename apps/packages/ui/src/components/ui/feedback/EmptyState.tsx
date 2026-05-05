@@ -60,6 +60,8 @@ export interface EmptyStateProps {
   className?: string
   /** Test ID */
   "data-testid"?: string
+  /** Additional content after the standard empty-state header and actions */
+  children?: React.ReactNode
 }
 
 const sizeConfig = {
@@ -137,6 +139,7 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
       size = "md",
       className,
       "data-testid": dataTestId,
+      children,
     },
     ref
   ) => {
@@ -153,6 +156,7 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
           className
         )}
         data-testid={dataTestId}
+        data-ds-component="EmptyState"
       >
         <div className="space-y-3">
           {Icon && (
@@ -261,6 +265,8 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
               )}
             </div>
           )}
+
+          {children}
         </div>
       </div>
     )

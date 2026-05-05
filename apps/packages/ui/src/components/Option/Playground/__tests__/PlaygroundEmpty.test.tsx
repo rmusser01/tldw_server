@@ -44,6 +44,7 @@ describe("PlaygroundEmpty", () => {
 
     const shell = screen.getByTestId("playground-empty-shell");
 
+    expect(shell).toHaveAttribute("data-ds-component", "EmptyState");
     expect(
       within(shell).getByRole("heading", { name: "Start a new chat" }),
     ).toBeInTheDocument();

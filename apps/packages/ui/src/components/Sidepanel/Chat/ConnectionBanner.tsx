@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Alert, Button, Input, message } from "antd"
-import { Settings, RefreshCw, WifiOff, KeyRound, Loader2, Check } from "lucide-react"
+import { Button, Input, message } from "antd"
+import { Check } from "lucide-react"
 import {
   useConnectionState,
   useConnectionUxState,
@@ -9,6 +9,11 @@ import {
 } from "@/hooks/useConnectionState"
 import { ConnectionPhase } from "@/types/connection"
 import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+import {
+  RecoveryCallout,
+  type RecoveryState,
+  type StateAction
+} from "@/components/ui/state"
 
 type ConnectionBannerProps = {
   className?: string
@@ -93,7 +98,7 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
       setShowApiKeyForm(false)
       setApiKeyInput("")
       void checkOnce()
-    } catch (err) {
+    } catch {
       message.error(t("sidepanel:connectionBanner.apiKeySaveError", "Failed to save API key"))
     } finally {
       setIsSaving(false)
@@ -104,8 +109,7 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
   const getBannerConfig = () => {
     if (isChecking || uxState === "testing") {
       return {
-        type: "info" as const,
-        icon: <Loader2 className="size-4 animate-spin" />,
+        state: "retrying" as RecoveryState,
         message: t(
           "sidepanel:connectionBanner.connecting",
           "Connecting to your tldw server..."
@@ -118,8 +122,7 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
 
     if (uxState === "error_auth") {
       return {
-        type: "warning" as const,
-        icon: <KeyRound className="size-4" />,
+        state: "auth_required" as RecoveryState,
         message: t(
           "sidepanel:connectionBanner.authErrorTitle",
           "API key needs attention"
@@ -135,8 +138,7 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
 
     if (uxState === "error_unreachable") {
       return {
-        type: "error" as const,
-        icon: <WifiOff className="size-4" />,
+        state: "unavailable" as RecoveryState,
         message: t(
           "sidepanel:connectionBanner.unreachableTitle",
           "Can't reach your tldw server"
@@ -157,8 +159,7 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
 
     // Default: unconfigured or unknown state
     return {
-      type: "info" as const,
-      icon: <Settings className="size-4" />,
+      state: "setup_required" as RecoveryState,
       message: hasCompletedFirstRun
         ? t(
             "sidepanel:connectionBanner.disconnectedTitle",
@@ -183,106 +184,108 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
   }
 
   const config = getBannerConfig()
+  const showInlineApiKeyForm = canInlineRepairApiKey && showApiKeyForm
+
+  const primaryAction: StateAction = (() => {
+    if (canInlineRepairApiKey && !showApiKeyForm) {
+      return {
+        label: t("sidepanel:connectionBanner.enterApiKey", "Enter API Key"),
+        onClick: () => setShowApiKeyForm(true)
+      }
+    }
+
+    if (config.showRetry) {
+      return {
+        label: t("common:retry", "Retry"),
+        onClick: handleRetry,
+        loading: isChecking
+      }
+    }
+
+    if (config.showSettings) {
+      return {
+        label: t("sidepanel:connectionBanner.openSettings", "Open Settings"),
+        onClick: openSettings
+      }
+    }
+
+    return {
+      label: t("sidepanel:connectionBanner.connectingCta", "Connecting"),
+      disabled: true
+    }
+  })()
+
+  const secondaryActionCandidates: Array<StateAction | null> = [
+    canInlineRepairApiKey && !showApiKeyForm && config.showRetry
+      ? {
+          label: t("common:retry", "Retry"),
+          onClick: handleRetry,
+          loading: isChecking
+        }
+      : null,
+    config.showSettings &&
+    !(config.showRetry === false && !canInlineRepairApiKey)
+      ? {
+          label: t("sidepanel:connectionBanner.openSettings", "Open Settings"),
+          onClick: openSettings
+        }
+      : null
+  ]
+  const secondaryActions = secondaryActionCandidates.filter(
+    (action): action is StateAction => Boolean(action)
+  )
 
   return (
     <div className={`px-3 py-2 ${className || ""}`}>
-      <Alert
-        type={config.type}
-        showIcon
-        icon={config.icon}
-        title={
-          <span className="text-sm font-medium">{config.message}</span>
-        }
-        description={
-          config.description && (
-            <div className="mt-1">
-              <p className="text-xs text-text-muted">
-                {config.description}
-              </p>
-
-              {/* Inline API key form for auth errors */}
-              {canInlineRepairApiKey && showApiKeyForm ? (
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Input.Password
-                      size="small"
-                      placeholder={t("sidepanel:connectionBanner.apiKeyPlaceholder", "Enter your API key")}
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      onPressEnter={handleSaveApiKey}
-                      visibilityToggle={{
-                        visible: showApiKey,
-                        onVisibleChange: setShowApiKey
-                      }}
-                      className="flex-1"
-                      autoFocus
-                    />
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<Check className="size-3" />}
-                      onClick={handleSaveApiKey}
-                      loading={isSaving}
-                      title={t("common:save", "Save")}
-                    >
-                      {t("common:save", "Save")}
-                    </Button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowApiKeyForm(false)
-                      setApiKeyInput("")
-                    }}
-                    className="text-xs text-text-subtle hover:text-text underline"
-                    title={t("common:cancel", "Cancel")}
-                  >
-                    {t("common:cancel", "Cancel")}
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {/* Quick fix button for auth errors */}
-                  {canInlineRepairApiKey && (
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<KeyRound className="size-3" />}
-                      onClick={() => setShowApiKeyForm(true)}
-                      title={t("sidepanel:connectionBanner.enterApiKey", "Enter API Key")}
-                    >
-                      {t("sidepanel:connectionBanner.enterApiKey", "Enter API Key")}
-                    </Button>
-                  )}
-                  {config.showRetry && (
-                    <Button
-                      size="small"
-                      icon={<RefreshCw className="size-3" />}
-                      onClick={handleRetry}
-                      loading={isChecking}
-                      title={t("common:retry", "Retry")}
-                    >
-                      {t("common:retry", "Retry")}
-                    </Button>
-                  )}
-                  {config.showSettings && (
-                    <Button
-                      size="small"
-                      type={canInlineRepairApiKey ? "default" : "primary"}
-                      icon={<Settings className="size-3" />}
-                      onClick={openSettings}
-                      title={t("sidepanel:connectionBanner.openSettings", "Open Settings")}
-                    >
-                      {t("sidepanel:connectionBanner.openSettings", "Open Settings")}
-                    </Button>
-                  )}
-                </div>
-              )}
+      <RecoveryCallout
+        state={config.state}
+        title={config.message}
+        message={config.description ?? undefined}
+        primaryAction={primaryAction}
+        secondaryActions={secondaryActions}
+        data-testid="sidepanel-connection-banner"
+      >
+        {showInlineApiKeyForm ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Input.Password
+                size="small"
+                placeholder={t("sidepanel:connectionBanner.apiKeyPlaceholder", "Enter your API key")}
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                onPressEnter={handleSaveApiKey}
+                visibilityToggle={{
+                  visible: showApiKey,
+                  onVisibleChange: setShowApiKey
+                }}
+                className="flex-1"
+                autoFocus
+              />
+              <Button
+                size="small"
+                type="primary"
+                icon={<Check className="size-3" />}
+                onClick={handleSaveApiKey}
+                loading={isSaving}
+                title={t("common:save", "Save")}
+              >
+                {t("common:save", "Save")}
+              </Button>
             </div>
-          )
-        }
-        className="border-0"
-      />
+            <button
+              type="button"
+              onClick={() => {
+                setShowApiKeyForm(false)
+                setApiKeyInput("")
+              }}
+              className="text-xs text-text-subtle hover:text-text underline"
+              title={t("common:cancel", "Cancel")}
+            >
+              {t("common:cancel", "Cancel")}
+            </button>
+          </div>
+        ) : null}
+      </RecoveryCallout>
     </div>
   )
 }

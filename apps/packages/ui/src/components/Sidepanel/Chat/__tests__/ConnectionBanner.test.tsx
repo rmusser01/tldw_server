@@ -131,6 +131,11 @@ describe("ConnectionBanner", () => {
   it("repairs single-user auth through shared config instead of legacy api key storage", async () => {
     render(<ConnectionBanner />)
 
+    const banner = screen.getByTestId("sidepanel-connection-banner")
+
+    expect(banner).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(screen.getByText("Sign in required")).toBeInTheDocument()
+
     fireEvent.click(
       screen.getByRole("button", { name: "Enter API Key" })
     )

@@ -1,6 +1,5 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Button, Tooltip } from "antd"
 import { browser } from "wxt/browser"
 import {
   useConnectionState,
@@ -10,15 +9,13 @@ import { ConnectionPhase } from "@/types/connection"
 import { cleanUrl } from "@/libs/clean-url"
 import {
   MessageSquare,
-  Settings,
-  KeyRound,
   Wifi,
-  WifiOff,
   Sparkles,
   FileText,
   Search,
   BookOpen
 } from "lucide-react"
+import { RecoveryCallout, type RecoveryState } from "@/components/ui/state"
 
 type EmptySidePanelProps = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
@@ -31,7 +28,6 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
     useConnectionUxState()
   const isConnectionReady =
     isConnected && phase === ConnectionPhase.CONNECTED
-  const primaryButtonRef = React.useRef<HTMLButtonElement | null>(null)
 
   const openExtensionUrl = (
     path: `/options.html${string}` | `/sidepanel.html${string}`
@@ -186,96 +182,53 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
 
   React.useEffect(() => {
     if (!showConnectionCard) return
-    if (!primaryButtonRef.current) return
     if (hasCompletedFirstRun) return
     try {
-      primaryButtonRef.current.focus()
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="chat-connection-cta"]')
+        ?.focus()
     } catch {
       // ignore focus failures
     }
   }, [showConnectionCard, hasCompletedFirstRun])
 
   if (showConnectionCard) {
-    // Determine the icon based on error state
-    const StatusIcon = uxState === "error_auth"
-      ? KeyRound
-      : uxState === "error_unreachable"
-        ? WifiOff
-        : Settings
-
-    const iconColorClass = uxState === "error_auth" || uxState === "error_unreachable"
-      ? "text-warn"
-      : "text-primary"
+    const recoveryState: RecoveryState =
+      uxState === "error_auth"
+        ? "auth_required"
+        : uxState === "error_unreachable"
+          ? "unavailable"
+          : "setup_required"
+    const primaryLabel = !hasCompletedFirstRun
+      ? t("sidepanel:firstRun.finishSetup", "Finish setup")
+      : uxState === "error_auth" || uxState === "error_unreachable"
+        ? t("sidepanel:firstRun.reviewSettings", "Review settings")
+        : t("sidepanel:firstRun.openOptionsPrimary", "Open tldw Settings")
 
     return (
       <div
         className="mt-5 flex w-full flex-col items-stretch gap-3 px-4"
-        data-testid="chat-empty-connection"
       >
-        {/* Main card with icon */}
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-surface/95 shadow-sm">
-          {/* Header with icon */}
-          <div className="flex items-center gap-3 border-b border-border/70 px-4 py-4">
-            <div className={`flex-shrink-0 rounded-2xl p-2 ${
-              uxState === "error_auth" || uxState === "error_unreachable"
-                ? "bg-warn/10"
-                : "bg-primary/10"
-            }`}>
-              <StatusIcon className={`size-5 ${iconColorClass}`} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-text">
-                {bannerHeading}
-              </p>
-            </div>
-          </div>
-
-          {/* Body */}
-          <div className="space-y-3 px-4 py-4">
-            <p className="text-xs text-text-muted leading-relaxed">
-              {bannerBody}
-            </p>
-
-            {/* Action button */}
-            <button
-              type="button"
-              onClick={openOnboarding}
-              ref={primaryButtonRef}
-              data-testid="chat-connection-cta"
-              className={`flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-xs font-medium transition-colors ${
-                uxState === "error_auth" || uxState === "error_unreachable"
-                  ? "bg-warn hover:bg-warn/90 text-white"
-                  : "bg-primary hover:bg-primaryStrong text-white"
-              }`}
-              title={
-                !hasCompletedFirstRun
-                  ? t("sidepanel:firstRun.finishSetup", "Finish setup")
-                  : uxState === "error_auth" || uxState === "error_unreachable"
-                    ? t("sidepanel:firstRun.reviewSettings", "Review settings")
-                    : t(
-                        "sidepanel:firstRun.openOptionsPrimary",
-                        "Open tldw Settings"
-                      )
-              }
-            >
-              <Settings className="size-3.5" />
-              {!hasCompletedFirstRun
-                ? t("sidepanel:firstRun.finishSetup", "Finish setup")
-                : uxState === "error_auth" || uxState === "error_unreachable"
-                  ? t("sidepanel:firstRun.reviewSettings", "Review settings")
-                  : t("sidepanel:firstRun.openOptionsPrimary", "Open tldw Settings")}
-            </button>
-          </div>
-
-          {/* Step indicator for first-run */}
+        <RecoveryCallout
+          state={recoveryState}
+          title={bannerHeading}
+          message={bannerBody}
+          primaryAction={{
+            label: primaryLabel,
+            onClick: openOnboarding,
+            "data-testid": "chat-connection-cta"
+          }}
+          data-testid="chat-empty-connection"
+          className="rounded-2xl border-border/70 bg-surface/95"
+        >
           {stepSummary && (
-            <div className="border-t border-border/70 bg-surface2/70 px-4 py-2">
+            <div className="rounded-md border border-border bg-surface2 px-3 py-2">
               <p className="text-label text-text-subtle">
                 {stepSummary}
               </p>
             </div>
           )}
-        </div>
+        </RecoveryCallout>
 
         {/* Quick tips for first-time users */}
         {!hasCompletedFirstRun && (
