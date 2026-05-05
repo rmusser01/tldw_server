@@ -643,38 +643,33 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, study_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.writing import router as writing_router
-
-        specs.append(RouterSpec(
-            router=writing_router,
+    for writing_email_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.writing",
+            log_name="writing",
             prefix=f"{API_V1_PREFIX}/writing",
             tags=("writing",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping writing router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.writing_manuscripts import router as manuscripts_router
-
-        specs.append(RouterSpec(
-            router=manuscripts_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(ImportError, AttributeError),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.writing_manuscripts",
+            log_name="manuscripts",
             prefix=f"{API_V1_PREFIX}/writing/manuscripts",
             tags=("manuscripts",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping manuscripts router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.email import router as email_router
-
-        specs.append(RouterSpec(
-            router=email_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(ImportError, AttributeError),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.email",
+            log_name="email",
             prefix=f"{API_V1_PREFIX}/email",
             tags=("email",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping email router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+            skip_exceptions=(ImportError, AttributeError),
+        ),
+    ):
+        append_imported_router_spec(specs, writing_email_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.jobs_admin import router as jobs_admin_router
