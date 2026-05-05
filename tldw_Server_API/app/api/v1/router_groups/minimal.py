@@ -247,15 +247,15 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping claims router in minimal test app: {e}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.rag_unified import router as rag_unified_router
-
-        specs.append(RouterSpec(
-            router=rag_unified_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.rag_unified",
+            log_name="rag_unified",
             tags=("rag-unified",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping rag_unified router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    )
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.text2sql import router as text2sql_router
@@ -290,15 +290,15 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping vlm router in minimal test app: {e}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.rag_health import router as rag_health_router
-
-        specs.append(RouterSpec(
-            router=rag_health_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.rag_health",
+            log_name="rag_health",
             tags=("rag-health",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping rag_health router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    )
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.consent import router as consent_router
