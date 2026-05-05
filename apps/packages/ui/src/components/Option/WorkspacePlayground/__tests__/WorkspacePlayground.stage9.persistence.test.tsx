@@ -7,10 +7,30 @@ import {
 } from "@/store/workspace-events"
 import { WorkspacePlayground } from "../index"
 
-const { mockGetMediaDetails, useWorkspaceStoreMock } = vi.hoisted(() => ({
-  mockGetMediaDetails: vi.fn(),
-  useWorkspaceStoreMock: vi.fn()
-}))
+const {
+  mockGetMediaDetails,
+  useWorkspaceStoreMock,
+  workspaceStorage,
+  workspaceStorageItems
+} = vi.hoisted(() => {
+  const storageItems = new Map<string, string>()
+  const storage = {
+    getItem: vi.fn((key: string) => storageItems.get(key) ?? null),
+    setItem: vi.fn(async (key: string, value: string) => {
+      storageItems.set(key, value)
+    }),
+    removeItem: vi.fn(async (key: string) => {
+      storageItems.delete(key)
+    })
+  }
+
+  return {
+    mockGetMediaDetails: vi.fn(),
+    useWorkspaceStoreMock: vi.fn(),
+    workspaceStorage: storage,
+    workspaceStorageItems: storageItems
+  }
+})
 
 const testState = {
   isMobile: false,
@@ -95,11 +115,7 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: useWorkspaceStoreMock,
-  createWorkspaceStorage: () => ({
-    getItem: vi.fn(() => null),
-    setItem: vi.fn(),
-    removeItem: vi.fn()
-  })
+  createWorkspaceStorage: () => workspaceStorage
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -169,6 +185,7 @@ describe("WorkspacePlayground stage 9 persistence resilience", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    workspaceStorageItems.clear()
     useWorkspaceStoreMock.mockImplementation(
       (selector: (state: typeof testState) => unknown) => selector(testState)
     )
