@@ -17,6 +17,8 @@
   - Stream run events over WebSocket
   - Serve guarded artifact download URLs
   - Expose runtime discovery with preflight reasons, host facts, and supported trust levels
+  - Expose admin-only read-only diagnostics for cross-runtime readiness and
+    macOS VZ operator troubleshooting
 
 ## Runtime Model
 
@@ -55,6 +57,13 @@ Trust-level rules:
   `Docs/Sandbox/sandbox-runtime-capability-inventory.md`. It classifies each
   runtime's current trust, network, lifecycle, recovery, diagnostics, and CI
   support states without treating host availability as a security guarantee.
+- The public Sandbox API quick guide lives in
+  `Docs/API-related/Sandbox_API.md`. It is the concise external-facing contract
+  for runtime discovery, run/session responses, admin diagnostics, and explicit
+  repair/cleanup surfaces.
+- macOS operator notes live in `Docs/Sandbox/macos-runtime-operator-notes.md`
+  and remain the source of truth for prepared-host `vz_linux` helper,
+  image-store, smoke-test, and repair workflows.
 - The sandbox security policy matrix lives in
   `Docs/Sandbox/sandbox-security-policy-matrix.md`. It records the trust,
   network, workspace, user, artifact, helper/request allowlisting, and audit

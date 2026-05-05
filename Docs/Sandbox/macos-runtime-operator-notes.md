@@ -234,9 +234,19 @@ item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
 
 - runtime availability
 - preflight reasons
+- normalized runtime reason codes
+- isolation boundary metadata and host-local warnings
+- session contract metadata
 - supported trust levels
 - enforcement readiness
 - host facts
+
+`/api/v1/sandbox/admin/runtime-diagnostics` is the cross-runtime operator
+summary. It is admin-only, read-only, and derived from `/api/v1/sandbox/runtimes`
+rather than a separate readiness source. Use it for dashboard-style triage
+across Docker, Firecracker, Lima, `vz_linux`, `vz_macos`, `seatbelt`, and
+`worktree`; use `/api/v1/sandbox/admin/macos-diagnostics` when you need
+helper/template/image-store details for the macOS runtime family.
 
 `/api/v1/sandbox/admin/macos-diagnostics` is the operator-focused companion surface.
 It is admin-only and returns:
@@ -262,7 +272,7 @@ It is admin-only and returns:
 
 `GET /api/v1/admin/startup-warnings` is the generic app-level companion surface
 for the same startup records. It is also admin-only and returns the full
-current-process startup warning list plus grouped summary counts. In this PR the
+current-process startup warning list plus grouped summary counts. The warning
 scope is intentionally limited to the current API process and current boot; it
 is not cluster-wide or persisted across restarts.
 

@@ -234,6 +234,87 @@ is currently limited to the host-gated `vz_linux` path; host-local runtimes only
 participate through workspace-oriented session inputs and do not provide warm
 runtime reuse.
 
+## Admin diagnostics and recovery
+
+Admin diagnostics are operator surfaces. They are not substitutes for
+client-facing runtime discovery, and diagnostics endpoints do not mutate runtime
+state.
+
+### Cross-runtime diagnostics
+
+GET `/api/v1/sandbox/admin/runtime-diagnostics`
+
+This admin-only, read-only endpoint derives from `/api/v1/sandbox/runtimes` and
+groups every runtime by readiness posture. It preserves raw `reasons`, additive
+`normalized_reasons`, isolation warning metadata, session reuse posture, and a
+`recommended_action` value for operator triage.
+
+The response includes:
+
+- `source`: currently `feature_discovery`.
+- `summary`: counts for `total`, `ready`, `host_gated`, `scaffold`,
+  `unavailable`, plus `host_local_warning_runtimes` and
+  `repair_supported_runtimes`.
+- `runtimes`: one row per runtime with readiness, isolation, network, session,
+  repair, and recommended-action fields.
+- `startup_warning_summary`: compact current-process startup warning status
+  when the app startup-warning registry is present.
+
+Repair support remains scoped to runtimes whose session contract explicitly
+advertises it. Today that means `vz_linux`; this endpoint does not add generic
+repair or reconciliation behavior for Docker, Firecracker, Lima, `seatbelt`,
+`worktree`, or `vz_macos`.
+
+### macOS diagnostics
+
+GET `/api/v1/sandbox/admin/macos-diagnostics`
+
+This admin-only, read-only endpoint exposes macOS/VZ operator details that are
+intentionally omitted from public discovery:
+
+- host readiness, including macOS and Apple silicon checks
+- helper readiness, protocol, version, and transport metadata
+- `vz_linux` and `vz_macos` template readiness
+- runtime execution mode and remediation hints
+- reconciliation between persisted `vz_linux` session controls and live helper
+  VM state
+- image-store correlation for templates, persisted run manifests, and dry-run GC
+  candidate classification
+- helper stdout/stderr log pointers, per-VM serial log pointers, guest-agent
+  readiness metadata, and helper-provided resource counters when available
+- read-only `recovery_summary` with status, severity, issue codes, counts,
+  recommended action, and pointers to the existing dry-run-first admin actions
+- `startup_warning_summary` for current-process sandbox startup warnings
+
+Log diagnostics report paths, existence, and byte sizes only. They do not read
+or return log file contents.
+
+### Image-store cleanup
+
+GET `/api/v1/sandbox/admin/macos-image-store/cleanup-plan`
+
+Returns a read-only cleanup plan for image-store run directories and manifests,
+including planned actions, live-match blockers, planning-only manifests,
+inactive runs, and legacy run directories.
+
+POST `/api/v1/sandbox/admin/macos-image-store/cleanup`
+
+Runs the same plan through an explicit admin action. It defaults to
+`dry_run=true`; unfiltered mutating cleanup requires `confirm_all=true`.
+
+### VZ reconciliation repair
+
+POST `/api/v1/sandbox/admin/macos-reconciliation/repair`
+
+Runs explicit `vz_linux` repair actions. It defaults to dry-run, skips active
+sessions, and can delete stale or unhealthy inactive persisted session-control
+rows when requested. Orphan VM termination is never automatic: it requires
+`terminate_orphaned_vms=true` and helper metadata proving the VM is owned by
+this `tldw` `vz_linux` sandbox control plane.
+
+Helper-unavailable and helper-protocol-mismatch conditions fail closed and block
+mutating repair.
+
 ## Create a session
 POST `/api/v1/sandbox/sessions`
 Headers: `Idempotency-Key: <uuid>` (recommended)
@@ -288,11 +369,19 @@ Response (scaffold example):
   "runtime": "docker",
   "base_image": "python:3.11-slim",
   "phase": "completed",
+  "status_reason_code": "completed",
   "exit_code": 0,
   "policy_hash": "<hash>",
   "log_stream_url": "ws://host/api/v1/sandbox/runs/<run_id>/stream?from_seq=100"
 }
 ```
+
+`status_reason_code` is additive and derived from existing status data. Clients
+should use it for stable grouping of queued, starting, running, completed,
+limit-applied, nonzero-exit, policy-failed, runtime-unavailable, timeout,
+canceled, killed, queue-expired, runtime-error, and unknown outcomes. Raw
+`phase`, `message`, and `exit_code` remain available for display and operator
+diagnostics.
 
 ## Stream logs (WebSocket)
 WS `/api/v1/sandbox/runs/{id}/stream`

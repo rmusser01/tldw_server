@@ -275,7 +275,7 @@ not generalized until other runtimes have an equally clear ownership model.
 
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
-| Host-local runtimes need clearer docs/API warnings that they are not VM-grade. | `seatbelt`, `worktree` | Phase 2 |
+| Host-local runtime warnings need to be carried into future UI/operator dashboards, not just docs and API metadata. | `seatbelt`, `worktree` | Phase 2 |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
 | Rich structured error metadata beyond the first normalized alias pass remains incomplete. | all | Phase 3 |
 | Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
