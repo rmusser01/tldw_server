@@ -416,6 +416,7 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
         lambda pid, sig: killpg_calls.append((pid, sig)),
     )
 
+    result = None
     try:
         result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
             run_id,
@@ -428,21 +429,22 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
             ),
             session_workspace=str(repo),
         )
+
+        assert result.phase == RunPhase.timed_out
+        assert result.message == "execution_timeout"
+        assert destroy_calls == [(str(created_worktree), str(repo))]
+        assert killpg_calls == [(9876, signal.SIGTERM)]
+        assert not created_worktree.exists()
+        assert not run_dir.exists()
+        with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+            assert run_id not in WorktreeRunner._active_proc  # type: ignore[attr-defined]
+            assert run_id not in WorktreeRunner._active_run_dir  # type: ignore[attr-defined]
+            assert run_id not in WorktreeRunner._cancelled_runs  # type: ignore[attr-defined]
     finally:
         with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
             WorktreeRunner._active_proc.pop(run_id, None)  # type: ignore[attr-defined]
             WorktreeRunner._active_run_dir.pop(run_id, None)  # type: ignore[attr-defined]
             WorktreeRunner._cancelled_runs.discard(run_id)  # type: ignore[attr-defined]
-
-    assert result.phase == RunPhase.timed_out
-    assert result.message == "execution_timeout"
-    assert destroy_calls == [(str(created_worktree), str(repo))]
-    assert killpg_calls == [(9876, signal.SIGTERM)]
-    assert not created_worktree.exists()
-    assert not run_dir.exists()
-    with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
-        assert run_id not in WorktreeRunner._active_proc  # type: ignore[attr-defined]
-        assert run_id not in WorktreeRunner._active_run_dir  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

@@ -50,9 +50,11 @@ Added host-local session contract test asserting seatbelt/worktree remain worksp
 Verification: focused baseline before edits passed 64 tests; focused post-edit test set passed 67 tests; git diff --check passed.
 
 Bandit: skipped because the branch only changes tests, docs, and Backlog.md task metadata; no production Python code changed.
+
+PR #1294 review-fix pass: verified and fixed Qodo/CodeRabbit feedback that the worktree timeout test cleared active-run tracking before asserting cleanup. The test now asserts `_active_proc`, `_active_run_dir`, and `_cancelled_runs` before the test-isolation cleanup block runs.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a local-first sandbox cleanup/recovery contract-test slice. The branch adds design and implementation-plan docs, explicit worktree timeout cleanup coverage, cross-service durable session workspace cleanup coverage, and a host-local session contract assertion that seatbelt/worktree remain workspace-only with no warm runtime reuse or repair/recovery claims. Verification passed with the focused sandbox suite: 67 tests passing; git diff --check clean. Bandit was not run because no production code changed.
+Added a local-first sandbox cleanup/recovery contract-test slice. The branch adds design and implementation-plan docs, explicit worktree timeout cleanup coverage, cross-service durable session workspace cleanup coverage, and a host-local session contract assertion that seatbelt/worktree remain workspace-only with no warm runtime reuse or repair/recovery claims. PR review feedback was addressed by moving worktree active-tracking assertions before test-isolation cleanup. Verification passed with the focused sandbox suite: 67 tests passing; git diff --check clean. Bandit was not run because no production code changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
