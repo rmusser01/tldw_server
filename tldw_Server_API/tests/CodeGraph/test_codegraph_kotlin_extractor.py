@@ -3,7 +3,6 @@ from __future__ import annotations
 from tldw_Server_API.app.core.CodeGraph.extractors.kotlin_extractor import KotlinTreeSitterExtractor
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult
 
-
 KOTLIN_FIXTURE = b"""
 package com.example.app
 

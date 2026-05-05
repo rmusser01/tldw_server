@@ -3,7 +3,6 @@ from __future__ import annotations
 from tldw_Server_API.app.core.CodeGraph.extractors.java_extractor import JavaTreeSitterExtractor
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult
 
-
 JAVA_FIXTURE = b"""
 package com.example.app;
 

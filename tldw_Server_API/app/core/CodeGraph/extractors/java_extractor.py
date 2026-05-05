@@ -23,7 +23,6 @@ from tldw_Server_API.app.core.CodeGraph.models import (
     ExtractionResult,
 )
 
-
 _TYPE_KINDS = {
     "class_declaration": "class",
     "enum_declaration": "enum",
@@ -100,7 +99,7 @@ class _JavaGraphBuilder:
         return ExtractionResult(
             nodes=tuple(self.nodes),
             edges=call_edges,
-            unresolved_refs=tuple([*self.unresolved_refs, *call_unresolved_refs]),
+            unresolved_refs=(*self.unresolved_refs, *call_unresolved_refs),
         )
 
     def _visit_top_level(self, node: Any) -> None:

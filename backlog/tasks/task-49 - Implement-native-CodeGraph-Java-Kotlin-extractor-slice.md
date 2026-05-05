@@ -1,11 +1,11 @@
 ---
 id: TASK-49
 title: Implement native CodeGraph Java/Kotlin extractor slice
-status: In Progress
+status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 00:52'
-updated_date: '2026-05-05 01:10'
+updated_date: '2026-05-05 01:11'
 labels:
   - codegraph
   - mcp
@@ -30,11 +30,11 @@ Add the next Stage 5 native CodeGraph language slice after the merged context/im
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Java files index package, class/interface, method/constructor, and import nodes with deterministic IDs and conservative same-file call or unresolved references.
-- [ ] #2 Kotlin files index package, class/object/interface, function, and import nodes with deterministic IDs and conservative same-file call or unresolved references.
-- [ ] #3 Language registry and indexer expose Java/Kotlin as symbol-extraction capable only when optional Tree-sitter dependencies are available; otherwise they remain visible with dependency_missing metadata and safe skip/failure behavior.
-- [ ] #4 Focused extractor, loader, registry, indexer, and MCP search tests cover Java/Kotlin behavior and dependency-missing paths.
-- [ ] #5 Focused CodeGraph/MCP tests, Ruff, Bandit on touched production scope, and git diff --check pass before PR.
+- [x] #1 Java files index package, class/interface, method/constructor, and import nodes with deterministic IDs and conservative same-file call or unresolved references.
+- [x] #2 Kotlin files index package, class/object/interface, function, and import nodes with deterministic IDs and conservative same-file call or unresolved references.
+- [x] #3 Language registry and indexer expose Java/Kotlin as symbol-extraction capable only when optional Tree-sitter dependencies are available; otherwise they remain visible with dependency_missing metadata and safe skip/failure behavior.
+- [x] #4 Focused extractor, loader, registry, indexer, and MCP search tests cover Java/Kotlin behavior and dependency-missing paths.
+- [x] #5 Focused CodeGraph/MCP tests, Ruff, Bandit on touched production scope, and git diff --check pass before PR.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -61,14 +61,22 @@ Task 4 Kotlin extractor complete: added Kotlin Tree-sitter extraction for packag
 Task 5 registry/indexer wiring complete: promoted Java/Kotlin to foundation metadata with dependency_missing tracking, added dependency probe coverage, exported/register Java/Kotlin extractors when parsers are available, and added indexer coverage for persisted Java/Kotlin graph rows. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_language_registry.py tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py::test_indexer_extracts_java_kotlin_graph_rows_during_index -q (7 passed) and python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py -q (18 passed).
 
 Task 6 MCP regression complete: added codegraph.index plus codegraph.search coverage for Java method and Kotlin function symbols. No MCP implementation changes were needed because the existing module delegates through the registry/indexer/repository path. Verified with python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py::test_codegraph_search_finds_java_kotlin_symbols_after_index -q (1 passed).
+
+Final verification: python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py -q passed with 108 passed and 5 warnings. Ruff passed on touched CodeGraph/MCP scope. Bandit JSON at /tmp/bandit_codegraph_java_kotlin.json reported errors [] and results []. git diff --check exited 0 with no output. Dependency versions verified in the shared venv: tree-sitter-java 0.23.5 and tree-sitter-kotlin 1.1.0. Known limits remain intentional: no classpath, build-system, overload, inheritance, or full type-resolution semantics in this slice.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the native CodeGraph Java/Kotlin extractor slice. Added optional parser dependency pins and loader support, shared JVM Tree-sitter helpers, Java and Kotlin extractors, dependency-aware language registry/indexer wiring, and MCP search regression coverage. The implementation stays conservative: it extracts package/import/type/function or method symbols and same-file simple call edges while leaving imports, receiver calls, constructor calls without modeled targets, and build-system/type-resolution cases unresolved for later slices.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

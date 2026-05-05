@@ -422,7 +422,7 @@ git commit -m "test: cover mcp java kotlin codegraph search"
 **Files:**
 - Modify: `backlog/tasks/task-49 - Implement-native-CodeGraph-Java-Kotlin-extractor-slice.md`
 
-- [ ] **Step 1: Run focused CodeGraph/MCP tests**
+- [x] **Step 1: Run focused CodeGraph/MCP tests**
 
 Run:
 
@@ -436,7 +436,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 2: Run Ruff**
+- [x] **Step 2: Run Ruff**
 
 Run:
 
@@ -451,7 +451,7 @@ Run:
 
 Expected: `All checks passed!`
 
-- [ ] **Step 3: Run Bandit**
+- [x] **Step 3: Run Bandit**
 
 Run:
 
@@ -465,7 +465,7 @@ Run:
 
 Expected: JSON has `errors: []` and `results: []`.
 
-- [ ] **Step 4: Run whitespace check**
+- [x] **Step 4: Run whitespace check**
 
 Run:
 
@@ -475,7 +475,7 @@ git diff --check
 
 Expected: no output and exit 0.
 
-- [ ] **Step 5: Update TASK-49**
+- [x] **Step 5: Update TASK-49**
 
 Record:
 
@@ -484,7 +484,7 @@ Record:
 - verification command results
 - known limits: no classpath/type/build-system resolution
 
-- [ ] **Step 6: Commit task finalization**
+- [x] **Step 6: Commit task finalization**
 
 ```bash
 git add "backlog/tasks/task-49 - Implement-native-CodeGraph-Java-Kotlin-extractor-slice.md"

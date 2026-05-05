@@ -97,7 +97,7 @@ class _KotlinGraphBuilder:
         return ExtractionResult(
             nodes=tuple(self.nodes),
             edges=call_edges,
-            unresolved_refs=tuple([*self.unresolved_refs, *call_unresolved_refs]),
+            unresolved_refs=(*self.unresolved_refs, *call_unresolved_refs),
         )
 
     def _visit_top_level(self, node: Any) -> None:
