@@ -2998,7 +2998,7 @@ def test_iter_content_router_specs_defers_persona_router_attr_lookup(
             "path": "/persona",
             "prefix": "/api/v1/persona",
             "tags": ("persona",),
-            "route_key": "",
+            "route_key": "" if is_explicit_pytest_runtime() else "persona",
             "default_stable": True,
         },
         {
