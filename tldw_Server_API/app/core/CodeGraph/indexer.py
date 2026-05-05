@@ -24,6 +24,7 @@ from .extractors.tree_sitter_loader import load_parser
 from .extractors.typescript_extractor import TypeScriptTreeSitterExtractor
 from .language_registry import CodeGraphLanguageRegistry
 from .models import ExtractionResult
+from .resolver import CodeGraphReferenceResolver
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,25 @@ class CodeGraphIndexer:
             if status == "complete" and not languages:
                 repository.delete_missing_files(discovered_paths or indexed_paths)
 
+            if status == "complete":
+                resolution_limit = _resolution_item_limit(
+                    max_files=limit,
+                    foreground_max_bytes=self._settings.foreground_max_bytes,
+                )
+                resolution = CodeGraphReferenceResolver(repository).resolve(
+                    source_file_paths=indexed_paths,
+                    max_import_nodes=resolution_limit,
+                    max_refs=resolution_limit,
+                    deadline_monotonic=start + self._settings.max_index_seconds,
+                    monotonic=self._monotonic,
+                )
+                counters["cross_file_calls_resolved"] = resolution.resolved_calls
+                counters["cross_file_imports_resolved"] = resolution.resolved_imports
+                counters["stale_reference_resolutions_cleared"] = resolution.stale_resolutions_cleared
+                counters["cross_file_resolution_truncated"] = int(resolution.truncated)
+                counters["cross_file_import_nodes_scanned"] = resolution.import_nodes_scanned
+                counters["cross_file_references_scanned"] = resolution.references_scanned
+
             repository.finish_index_run(
                 run_id,
                 status=status,
@@ -418,3 +438,10 @@ def _empty_counters() -> dict[str, int]:
         "unsupported_language": 0,
         "errors": 0,
     }
+
+
+def _resolution_item_limit(*, max_files: int, foreground_max_bytes: int) -> int:
+    """Derive an explicit foreground cap for resolver import/ref rows."""
+    file_scaled_limit = max(1, int(max_files)) * 1000
+    byte_scaled_limit = max(1, int(foreground_max_bytes) // 16)
+    return max(1, min(file_scaled_limit, byte_scaled_limit))

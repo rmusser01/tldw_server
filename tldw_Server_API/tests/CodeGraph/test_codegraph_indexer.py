@@ -107,6 +107,165 @@ def helper(value):
     ]
 
 
+def test_indexer_resolves_python_cross_file_import_call(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    package = workspace / "pkg"
+    package.mkdir(parents=True)
+    (package / "util.py").write_text(
+        """
+def helper(value):
+    return value.upper()
+""",
+        encoding="utf-8",
+    )
+    (package / "app.py").write_text(
+        """
+from pkg.util import helper
+
+
+def entry(value):
+    return helper(value)
+""",
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+    helper = repo.find_nodes_by_file_and_name(file_path="pkg/util.py", name="helper")[0]
+
+    assert result.status == "complete"
+    assert [relationship["source"]["file_path"] for relationship in repo.list_callers(helper.id, limit=10)] == [
+        "pkg/app.py"
+    ]
+
+
+def test_indexer_removes_stale_cross_file_edges_after_target_rename(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    package = workspace / "pkg"
+    package.mkdir(parents=True)
+    util = package / "util.py"
+    util.write_text("def helper(value):\n    return value\n", encoding="utf-8")
+    (package / "app.py").write_text(
+        "from pkg.util import helper\n\n\ndef entry(value):\n    return helper(value)\n",
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+    indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+    helper = repo.find_nodes_by_file_and_name(file_path="pkg/util.py", name="helper")[0]
+    assert repo.list_callers(helper.id, limit=10)
+
+    util.write_text("def renamed(value):\n    return value\n", encoding="utf-8")
+    result = indexer.sync_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "complete"
+    assert repo.list_callers(helper.id, limit=10) == []
+    assert repo.counts()["unresolved_refs"] == 1
+
+
+def test_indexer_resolves_typescript_path_alias_import_call(tmp_path: Path) -> None:
+    _require_typescript_parsers()
+    workspace = tmp_path / "workspace"
+    source_dir = workspace / "src"
+    source_dir.mkdir(parents=True)
+    (workspace / "tsconfig.json").write_text(
+        '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}',
+        encoding="utf-8",
+    )
+    (source_dir / "util.ts").write_text("export function helper(value: string) { return value; }\n", encoding="utf-8")
+    (source_dir / "app.ts").write_text(
+        'import { helper } from "@/util";\nexport function main(value: string) { return helper(value); }\n',
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+    helper = repo.find_nodes_by_file_and_name(file_path="src/util.ts", name="helper")[0]
+
+    assert result.status == "complete"
+    assert [relationship["source"]["file_path"] for relationship in repo.list_callers(helper.id, limit=10)] == [
+        "src/app.ts"
+    ]
+
+
+def test_indexer_passes_foreground_bounds_to_resolver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    class _FakeResolver:
+        def __init__(self, _repository: CodeGraphRepository) -> None:
+            pass
+
+        def resolve(self, **kwargs: Any) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                resolved_calls=0,
+                resolved_imports=0,
+                stale_resolutions_cleared=0,
+                truncated=False,
+                import_nodes_scanned=0,
+                references_scanned=0,
+            )
+
+    monkeypatch.setattr(indexer_module, "CodeGraphReferenceResolver", _FakeResolver)
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"max_index_seconds": 20}),
+        registry=CodeGraphLanguageRegistry(),
+        monotonic=lambda: 5.0,
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "complete"
+    assert captured["source_file_paths"] == {"app.py"}
+    assert captured["max_import_nodes"] > 0
+    assert captured["max_refs"] > 0
+    assert captured["deadline_monotonic"] == 25.0
+    assert captured["monotonic"]() == 5.0
+
+
 def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path: Path) -> None:
     _require_typescript_parsers()
     workspace = tmp_path / "workspace"

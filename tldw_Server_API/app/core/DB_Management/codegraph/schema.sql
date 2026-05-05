@@ -64,7 +64,11 @@ CREATE TABLE IF NOT EXISTS unresolved_refs (
     line INTEGER,
     column INTEGER,
     candidates TEXT NOT NULL DEFAULT '[]',
-    language TEXT
+    language TEXT,
+    resolved_target TEXT,
+    resolved_edge TEXT,
+    resolution_kind TEXT,
+    resolved_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_unresolved_refs_file_path ON unresolved_refs(file_path);

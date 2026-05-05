@@ -172,6 +172,25 @@ class CodeGraphUnresolvedRef:
 
 
 @dataclass(frozen=True)
+class StoredCodeGraphReference:
+    """Persisted reference row with optional resolved-edge state."""
+
+    id: int
+    from_node_id: str
+    reference_name: str
+    reference_kind: str
+    file_path: str
+    line: int | None = None
+    column: int | None = None
+    candidates: tuple[str, ...] = ()
+    language: str | None = None
+    resolved_target: str | None = None
+    resolved_edge: str | None = None
+    resolution_kind: str | None = None
+    resolved_at: str | None = None
+
+
+@dataclass(frozen=True)
 class ExtractionResult:
     """Extractor output for one file, including graph rows and parse errors."""
 

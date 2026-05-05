@@ -371,6 +371,69 @@ def helper(value):
 
 
 @pytest.mark.asyncio
+async def test_codegraph_read_tools_return_cross_file_relationships(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    package = workspace_root / "pkg"
+    package.mkdir(parents=True)
+    (package / "util.py").write_text(
+        "def helper(value):\n    return value.upper()\n",
+        encoding="utf-8",
+    )
+    (package / "app.py").write_text(
+        "from pkg.util import helper\n\n\ndef entry(value):\n    return helper(value)\n",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    index_result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    helper_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "function", "limit": 10},
+        context=_context(),
+    )
+    entry_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "entry", "kind": "function", "limit": 10},
+        context=_context(),
+    )
+    helper_id = helper_search["results"][0]["id"]
+    entry_id = entry_search["results"][0]["id"]
+
+    callers = await module.execute_tool(
+        "codegraph.callers",
+        {"node_id": helper_id, "limit": 10},
+        context=_context(),
+    )
+    callees = await module.execute_tool(
+        "codegraph.callees",
+        {"node_id": entry_id, "limit": 10},
+        context=_context(),
+    )
+    impact = await module.execute_tool(
+        "codegraph.impact",
+        {"node_id": helper_id, "direction": "incoming", "depth": 1, "limit": 10},
+        context=_context(),
+    )
+    context_result = await module.execute_tool(
+        "codegraph.context",
+        {"task": "helper", "max_nodes": 5, "max_files": 2},
+        context=_context(),
+    )
+
+    assert index_result["status"] == "complete"  # nosec B101
+    assert [item["source"]["file_path"] for item in callers["relationships"]] == ["pkg/app.py"]  # nosec B101
+    assert [item["target"]["file_path"] for item in callees["relationships"]] == ["pkg/util.py"]  # nosec B101
+    assert "pkg/app.py" in {item["source"]["file_path"] for item in impact["relationships"]}  # nosec B101
+    assert any(
+        item["target"]["file_path"] == "pkg/util.py" for item in context_result["relationships"]
+    )  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_codegraph_search_finds_typescript_component_after_index(tmp_path: Path) -> None:
     _require_typescript_parsers()
     workspace_root = tmp_path / "workspace"
