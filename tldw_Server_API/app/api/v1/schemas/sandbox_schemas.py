@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeBoundaryClass,
     RuntimeImplementationState,
+    RuntimeIsolationWarningCode,
     RuntimeNetworkPolicyReadinessSource,
     RuntimeNetworkPolicySupportState,
     RuntimeReasonCode,
@@ -120,6 +121,13 @@ class SandboxRuntimeInfo(BaseModel):
         description=(
             "Whether policy may admit this runtime for untrusted workloads when "
             "preflight and host readiness also pass"
+        ),
+    )
+    isolation_warnings: list[RuntimeIsolationWarningCode] = Field(
+        default_factory=list,
+        description=(
+            "Advisory static isolation warning codes for client UX; these do "
+            "not replace policy admission, runtime preflight, or diagnostics"
         ),
     )
     network_policy_contract: SandboxRuntimeNetworkPolicyContract = Field(

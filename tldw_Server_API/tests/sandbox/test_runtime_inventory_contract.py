@@ -77,6 +77,36 @@ def test_feature_discovery_reports_structured_isolation_metadata(
         assert discovery[host_local_runtime]["untrusted_eligible"] is False
 
 
+def test_feature_discovery_reports_host_local_isolation_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+
+    expected_host_local_warnings = [
+        "host_local_boundary",
+        "not_vm_grade_isolation",
+        "not_untrusted_eligible",
+    ]
+    for host_local_runtime in ("seatbelt", "worktree"):
+        assert (
+            discovery[host_local_runtime]["isolation_warnings"]
+            == expected_host_local_warnings
+        )
+
+    for runtime_name, runtime_info in discovery.items():
+        if runtime_name in {"seatbelt", "worktree"}:
+            continue
+        assert (
+            "host_local_boundary"
+            not in runtime_info["isolation_warnings"]
+        )
+
+
 def test_runtime_isolation_metadata_contract_covers_runtime_enum() -> None:
     assert set(RUNTIME_ISOLATION_METADATA) == set(RuntimeType)
 

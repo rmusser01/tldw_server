@@ -44,6 +44,9 @@ concepts:
   claims, independent of current host availability.
 - `untrusted_eligible`: whether policy may admit this runtime for `untrusted`
   workloads when preflight and host readiness also pass.
+- `isolation_warnings`: additive advisory warning codes derived from static
+  isolation metadata. These are for client UX and do not replace admission,
+  preflight, or diagnostics.
 - `network_policy_contract`: static posture for `deny_all` and `allowlist`
   support, strict enforcement, and current-readiness source.
 
@@ -77,6 +80,16 @@ healthy on the current host.
 | `vz_macos` | `vm_grade_scaffold` | `false` | `false` | Runtime identity exists, but real execution is scaffolded. |
 | `seatbelt` | `host_local` | `false` | `false` | Host-local macOS process isolation only. |
 | `worktree` | `host_local` | `false` | `false` | Host-local VCS/workspace isolation only. |
+
+Host-local runtimes also expose `isolation_warnings`:
+
+- `host_local_boundary`
+- `not_vm_grade_isolation`
+- `not_untrusted_eligible`
+
+These warnings are advisory discovery metadata. Policy admission remains the
+source of truth for whether a request is accepted, and runtime preflight/admin
+diagnostics remain the source of truth for current host readiness.
 
 ## Normalized Reason Codes
 

@@ -29,8 +29,7 @@ def test_runtimes_discovery_shape(monkeypatch) -> None:
         data = r.json()
         assert "runtimes" in data and isinstance(data["runtimes"], list)
         assert len(data["runtimes"]) >= 1
-        first = data["runtimes"][0]
-        for key in [
+        required_keys = [
             "name",
             "available",
             "default_images",
@@ -43,8 +42,12 @@ def test_runtimes_discovery_shape(monkeypatch) -> None:
             "workspace_cap_mb",
             "artifact_ttl_hours",
             "supported_spec_versions",
-        ]:
-            assert key in first
+            "isolation_warnings",
+        ]
+        for runtime in data["runtimes"]:
+            for key in required_keys:
+                assert key in runtime
+            assert isinstance(runtime["isolation_warnings"], list)
 
 
 def test_create_session_scaffold(monkeypatch) -> None:
