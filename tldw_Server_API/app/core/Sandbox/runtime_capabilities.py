@@ -137,7 +137,10 @@ RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
 }
 
 
-RUNTIME_NETWORK_POLICY_METADATA: Mapping[RuntimeType, RuntimeNetworkPolicyMetadata] = {
+RUNTIME_NETWORK_POLICY_METADATA: Mapping[
+    RuntimeType,
+    RuntimeNetworkPolicyMetadata,
+] = {
     RuntimeType.docker: RuntimeNetworkPolicyMetadata(
         deny_all=RuntimeNetworkPolicyModeMetadata(
             support_state="supported",
@@ -311,12 +314,16 @@ def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata
     return metadata
 
 
-def runtime_network_policy_metadata(runtime: RuntimeType) -> RuntimeNetworkPolicyMetadata:
+def runtime_network_policy_metadata(
+    runtime: RuntimeType | str,
+) -> RuntimeNetworkPolicyMetadata:
     """Return stable network policy posture metadata, independent of host availability."""
     try:
         runtime_key = runtime if isinstance(runtime, RuntimeType) else RuntimeType(runtime)
     except ValueError as exc:
-        raise ValueError(f"No network policy metadata configured for runtime {runtime!r}") from exc
+        raise ValueError(
+            f"No network policy metadata configured for runtime {runtime!r}"
+        ) from exc
 
     metadata = RUNTIME_NETWORK_POLICY_METADATA.get(runtime_key)
     if metadata is None:

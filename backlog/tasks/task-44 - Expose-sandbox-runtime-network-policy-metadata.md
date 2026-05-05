@@ -4,7 +4,7 @@ title: Expose sandbox runtime network policy metadata
 status: Done
 assignee: []
 created_date: '2026-05-04 14:58'
-updated_date: '2026-05-04 15:06'
+updated_date: '2026-05-05 00:16'
 labels:
   - sandbox
   - runtime-discovery
@@ -48,6 +48,10 @@ Add a structured, machine-readable network policy contract to sandbox runtime di
 Approved design reviewed for risk before implementation. Main adjustments: use network_policy_contract with support_state, strict_enforcement, and readiness_source; keep existing readiness booleans for compatibility; avoid implying availability is a security guarantee.
 
 Verification: focused runtime inventory/docs tests passed: 19 passed, 2 warnings. Bandit on touched Python sandbox/schema files reported 0 findings. git diff --check passed.
+
+PR review pass: Qodo opened four active threads on PR #1269. Verified against current branch: missing class docstrings, two PEP8 wrapping issues, and runtime_network_policy_metadata signature mismatch all apply and will be fixed in this branch.
+
+PR review fixes applied: added class docstrings for the new Pydantic models, wrapped the long metadata declaration and ValueError line, changed runtime_network_policy_metadata to accept RuntimeType | str, and removed the now-unneeded test type ignore. Verification after fixes: focused tests 19 passed, 2 warnings; Bandit 0 findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

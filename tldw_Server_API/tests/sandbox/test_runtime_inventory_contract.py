@@ -141,7 +141,7 @@ def test_runtime_network_policy_metadata_contract_covers_runtime_enum() -> None:
 def test_runtime_network_policy_metadata_rejects_unknown_runtime() -> None:
     assert hasattr(runtime_caps, "runtime_network_policy_metadata")
     with pytest.raises(ValueError, match="No network policy metadata configured"):
-        runtime_caps.runtime_network_policy_metadata("future_runtime")  # type: ignore[attr-defined]
+        runtime_caps.runtime_network_policy_metadata("future_runtime")
 
 
 def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:

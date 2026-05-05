@@ -33,6 +33,8 @@ TrustLevelType = Literal["trusted", "standard", "untrusted"]
 
 
 class SandboxRuntimeNetworkPolicyModeInfo(BaseModel):
+    """Static network policy posture for one runtime policy mode."""
+
     support_state: RuntimeNetworkPolicySupportState = Field(
         ...,
         description=(
@@ -57,6 +59,8 @@ class SandboxRuntimeNetworkPolicyModeInfo(BaseModel):
 
 
 class SandboxRuntimeNetworkPolicyContract(BaseModel):
+    """Static deny-all and allowlist network policy posture for a runtime."""
+
     deny_all: SandboxRuntimeNetworkPolicyModeInfo
     allowlist: SandboxRuntimeNetworkPolicyModeInfo
 
