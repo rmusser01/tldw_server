@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from loguru import logger
-
 from tldw_Server_API.app.api.v1.router_groups.conditional import (
     ImportedRouterSpec,
     append_imported_router_spec,
@@ -81,97 +79,60 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, infrastructure_spec)
 
-    # Authentication endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.auth import router as auth_router
-
-        specs.append(RouterSpec(
-            router=auth_router,
+    # Identity, config, and sync endpoints
+    for identity_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.auth",
+            log_name="auth",
             prefix=f"{API_V1_PREFIX}",
             tags=("authentication",),
             route_key="auth",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping auth router: {e}")
-
-    # AuthNZ debug endpoints are enabled by default only in explicit pytest runtime.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.authnz_debug import router as authnz_debug_router
-
-        specs.append(RouterSpec(
-            router=authnz_debug_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.authnz_debug",
+            log_name="authnz_debug",
             prefix=f"{API_V1_PREFIX}",
             tags=("authnz-debug",),
             route_key="authnz-debug",
             default_stable=_is_explicit_pytest_runtime(),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping authnz_debug router: {e}")
-
-    # User management endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.users import router as users_router
-
-        specs.append(RouterSpec(
-            router=users_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.users",
+            log_name="users",
             prefix=f"{API_V1_PREFIX}",
             tags=("users",),
             route_key="users",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping users router: {e}")
-
-    # User key management endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.user_keys import router as user_keys_router
-
-        specs.append(RouterSpec(
-            router=user_keys_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.user_keys",
+            log_name="user_keys",
             prefix=f"{API_V1_PREFIX}",
             tags=("users",),
             route_key="users",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping user_keys router: {e}")
-
-    # Feedback endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.feedback import router as feedback_router
-
-        specs.append(RouterSpec(
-            router=feedback_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.feedback",
+            log_name="feedback",
             prefix=f"{API_V1_PREFIX}/feedback",
             tags=("feedback",),
             route_key="feedback",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping feedback router: {e}")
-
-    # Config info endpoint
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router
-
-        specs.append(RouterSpec(
-            router=config_info_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.config_info",
+            log_name="config_info",
             prefix=f"{API_V1_PREFIX}",
             tags=("config",),
             route_key="config",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping config_info router: {e}")
-
-    # Sync endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.sync import router as sync_router
-
-        specs.append(RouterSpec(
-            router=sync_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.sync",
+            log_name="sync",
             prefix=f"{API_V1_PREFIX}/sync",
             tags=("sync",),
             route_key="sync",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping sync router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, identity_spec)
 
     # Chat endpoints
     for chat_spec in (

@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router
 from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
+from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 
 pytestmark = pytest.mark.unit
 
@@ -618,6 +619,118 @@ def test_iter_core_router_specs_defers_infrastructure_router_attr_lookup(
             "tags": ("tools",),
             "route_key": "tools",
             "default_stable": False,
+        },
+    )
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_core_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    selected_route_keys = {
+        str(definition["route_key"])
+        for definition in router_definitions
+    }
+    selected_specs = [
+        spec for spec in specs if spec.route_key in selected_route_keys
+    ]
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.default_stable is definition.get("default_stable", True)
+
+    assert access_count == {
+        str(definition["module_name"]): 1
+        for definition in router_definitions
+    }
+
+
+def test_iter_core_router_specs_defers_identity_config_sync_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered identity/config/sync specs keep router attr lookup lazy."""
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.auth",
+            "path": "/auth/login",
+            "prefix": "/api/v1",
+            "tags": ("authentication",),
+            "route_key": "auth",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.authnz_debug",
+            "path": "/authnz/debug",
+            "prefix": "/api/v1",
+            "tags": ("authnz-debug",),
+            "route_key": "authnz-debug",
+            "default_stable": is_explicit_pytest_runtime(),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.users",
+            "path": "/users",
+            "prefix": "/api/v1",
+            "tags": ("users",),
+            "route_key": "users",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.user_keys",
+            "path": "/users/keys",
+            "prefix": "/api/v1",
+            "tags": ("users",),
+            "route_key": "users",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.feedback",
+            "path": "/feedback/submit",
+            "prefix": "/api/v1/feedback",
+            "tags": ("feedback",),
+            "route_key": "feedback",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.config_info",
+            "path": "/config",
+            "prefix": "/api/v1",
+            "tags": ("config",),
+            "route_key": "config",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.sync",
+            "path": "/sync/status",
+            "prefix": "/api/v1/sync",
+            "tags": ("sync",),
+            "route_key": "sync",
         },
     )
     access_count = {
