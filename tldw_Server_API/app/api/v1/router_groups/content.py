@@ -547,97 +547,58 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping web_clipper router: {e}")
 
-    # Translation
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.translate import router as translate_router
-
-        specs.append(RouterSpec(
-            router=translate_router,
+    for learning_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.translate",
+            log_name="translate",
             prefix=f"{API_V1_PREFIX}",
             tags=("translation",),
             route_key="translation",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping translate router: {e}")
-
-    # Slides
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
-
-        specs.append(RouterSpec(
-            router=slides_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.slides",
+            log_name="slides",
             prefix=f"{API_V1_PREFIX}",
             tags=("slides",),
             route_key="slides",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping slides router: {e}")
-
-    # Study content endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
-
-        specs.append(RouterSpec(
-            router=flashcards_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.flashcards",
+            log_name="flashcards",
             prefix=f"{API_V1_PREFIX}",
             tags=("flashcards",),
             route_key="flashcards",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping flashcards router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.quizzes import router as quizzes_router
-
-        specs.append(RouterSpec(
-            router=quizzes_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.quizzes",
+            log_name="quizzes",
             prefix=f"{API_V1_PREFIX}",
             tags=("quizzes",),
             route_key="quizzes",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping quizzes router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.study_suggestions import (
-            router as study_suggestions_router,
-        )
-
-        specs.append(RouterSpec(
-            router=study_suggestions_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.study_suggestions",
+            log_name="study_suggestions",
             prefix=f"{API_V1_PREFIX}",
             tags=("study-suggestions",),
             route_key="study-suggestions",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping study_suggestions router: {e}")
-
-    # Writing playground endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.writing import router as writing_router
-
-        specs.append(RouterSpec(
-            router=writing_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.writing",
+            log_name="writing",
             prefix=f"{API_V1_PREFIX}/writing",
             tags=("writing",),
             route_key="writing",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping writing router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.writing_manuscripts import (
-            router as manuscripts_router,
-        )
-
-        specs.append(RouterSpec(
-            router=manuscripts_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.writing_manuscripts",
+            log_name="writing_manuscripts",
             prefix=f"{API_V1_PREFIX}/writing/manuscripts",
             tags=("manuscripts",),
             route_key="manuscripts",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping writing_manuscripts router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, learning_spec)
 
     # Chatbooks and sharing endpoints
     try:
