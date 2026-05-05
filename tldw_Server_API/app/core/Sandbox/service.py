@@ -60,6 +60,7 @@ from .runtime_capabilities import (
     collect_runtime_preflights,
     normalize_runtime_reasons,
     runtime_isolation_metadata,
+    runtime_isolation_warnings,
     runtime_implementation_state,
     runtime_network_policy_metadata,
 )
@@ -890,6 +891,7 @@ class SandboxService:
                 "boundary_class": isolation.boundary_class,
                 "vm_grade_isolation": isolation.vm_grade_isolation,
                 "untrusted_eligible": isolation.untrusted_eligible,
+                "isolation_warnings": runtime_isolation_warnings(runtime),
                 "network_policy_contract": network_contract.as_dict(),
             }
 

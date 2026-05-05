@@ -32,10 +32,16 @@ specific runtime today.
 | `scaffold` | Shape exists, but the guarantee is not ready for normal operator use. |
 
 Public runtime discovery exposes isolation concepts through `boundary_class`,
-`vm_grade_isolation`, and `untrusted_eligible`. It exposes network posture
-through `network_policy_contract`. These fields describe static policy posture;
-they do not replace current-host `available`, `reasons`, `enforcement_ready`,
-or runtime preflight checks.
+`vm_grade_isolation`, `untrusted_eligible`, and advisory
+`isolation_warnings`. It exposes network posture through
+`network_policy_contract`. These fields describe static policy posture; they do
+not replace current-host `available`, `reasons`, `enforcement_ready`, or
+runtime preflight checks.
+
+`isolation_warnings` are client-facing warning codes, not rejection reasons.
+Today they flag host-local runtimes with `host_local_boundary`,
+`not_vm_grade_isolation`, and `not_untrusted_eligible` so clients can present
+the weaker boundary clearly without parsing human-readable notes.
 
 ## Trust-Level Eligibility
 

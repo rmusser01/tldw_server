@@ -18,6 +18,11 @@ RuntimeBoundaryClass = Literal[
     "vm_grade",
     "vm_grade_scaffold",
 ]
+RuntimeIsolationWarningCode = Literal[
+    "host_local_boundary",
+    "not_vm_grade_isolation",
+    "not_untrusted_eligible",
+]
 RuntimeNetworkPolicySupportState = Literal[
     "supported",
     "unsupported",
@@ -301,7 +306,7 @@ def runtime_implementation_state(runtime: RuntimeType) -> RuntimeImplementationS
     return RUNTIME_IMPLEMENTATION_STATES.get(runtime, "unsupported")
 
 
-def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata:
+def runtime_isolation_metadata(runtime: RuntimeType | str) -> RuntimeIsolationMetadata:
     """Return stable isolation posture metadata, independent of host availability."""
     try:
         runtime_key = runtime if isinstance(runtime, RuntimeType) else RuntimeType(runtime)
@@ -312,6 +317,22 @@ def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata
     if metadata is None:
         raise ValueError(f"No isolation metadata configured for runtime {runtime!r}")
     return metadata
+
+
+def runtime_isolation_warnings(
+    runtime: RuntimeType | str,
+) -> list[RuntimeIsolationWarningCode]:
+    """Return advisory discovery warnings derived from static isolation posture."""
+    metadata = runtime_isolation_metadata(runtime)
+    if metadata.boundary_class != "host_local":
+        return []
+
+    warnings: list[RuntimeIsolationWarningCode] = ["host_local_boundary"]
+    if not metadata.vm_grade_isolation:
+        warnings.append("not_vm_grade_isolation")
+    if not metadata.untrusted_eligible:
+        warnings.append("not_untrusted_eligible")
+    return warnings
 
 
 def runtime_network_policy_metadata(

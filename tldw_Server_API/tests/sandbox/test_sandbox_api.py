@@ -43,8 +43,10 @@ def test_runtimes_discovery_shape(monkeypatch) -> None:
             "workspace_cap_mb",
             "artifact_ttl_hours",
             "supported_spec_versions",
+            "isolation_warnings",
         ]:
             assert key in first
+        assert isinstance(first["isolation_warnings"], list)
 
 
 def test_create_session_scaffold(monkeypatch) -> None:
