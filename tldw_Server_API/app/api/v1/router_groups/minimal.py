@@ -499,35 +499,33 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, experience_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router
-        from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router
-
-        specs.extend([
-            RouterSpec(
-                router=guardian_controls_router,
-                prefix=f"{API_V1_PREFIX}/guardian",
-                tags=("guardian",),
-            ),
-            RouterSpec(
-                router=family_wizard_router,
-                prefix=f"{API_V1_PREFIX}/guardian",
-                tags=("guardian",),
-            ),
-        ])
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping guardian controls router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router
-
-        specs.append(RouterSpec(
-            router=self_monitoring_router,
+    for guardian_safety_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.guardian_controls",
+            log_name="guardian_controls",
+            prefix=f"{API_V1_PREFIX}/guardian",
+            tags=("guardian",),
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.family_wizard",
+            log_name="family_wizard",
+            prefix=f"{API_V1_PREFIX}/guardian",
+            tags=("guardian",),
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.self_monitoring",
+            log_name="self_monitoring",
             prefix=f"{API_V1_PREFIX}/self-monitoring",
             tags=("self-monitoring",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping self-monitoring router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+    ):
+        append_imported_router_spec(specs, guardian_safety_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router
