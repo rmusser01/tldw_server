@@ -77,6 +77,11 @@ def _require_c_family_parsers() -> None:
         pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
+def _require_jvm_parsers() -> None:
+    if not (load_parser("java").available and load_parser("kotlin").available):
+        pytest.skip("tree-sitter-java/kotlin parsers are not available")
+
+
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
     """Create a CodeGraph module with default test settings."""
     return _module_with_settings(tmp_path, workspace_root, {})
@@ -276,6 +281,7 @@ async def test_codegraph_search_finds_typescript_component_after_index(tmp_path:
 
 @pytest.mark.asyncio
 async def test_codegraph_search_finds_java_kotlin_symbols_after_index(tmp_path: Path) -> None:
+    _require_jvm_parsers()
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "Service.java").write_text(

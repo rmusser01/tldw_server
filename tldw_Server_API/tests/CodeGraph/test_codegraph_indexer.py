@@ -21,6 +21,11 @@ def _require_c_family_parsers() -> None:
         pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
+def _require_jvm_parsers() -> None:
+    if not (load_parser("java").available and load_parser("kotlin").available):
+        pytest.skip("tree-sitter-java/kotlin parsers are not available")
+
+
 def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -120,6 +125,7 @@ def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path
 
 
 def test_indexer_extracts_java_kotlin_graph_rows_during_index(tmp_path: Path) -> None:
+    _require_jvm_parsers()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "Service.java").write_text(
