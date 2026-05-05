@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
+from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, codegraph_node_to_dict
 
 _SNIPPET_CONTEXT_LINES = 3
 
@@ -99,7 +99,7 @@ class CodeGraphContextBuilder:
 
         return {
             "task": task,
-            "nodes": [_node_to_dict(node) for node in nodes],
+            "nodes": [codegraph_node_to_dict(node) for node in nodes],
             "relationships": list(relationships),
             "files": files,
             "truncation": {
@@ -163,24 +163,4 @@ def _make_snippet(node: CodeGraphNode, lines: list[str]) -> dict[str, Any]:
         "end_line": end_line,
         "text": text,
         "truncated": False,
-    }
-
-
-def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
-    return {
-        "id": node.id,
-        "kind": node.kind,
-        "name": node.name,
-        "qualified_name": node.qualified_name,
-        "file_path": node.file_path,
-        "language": node.language,
-        "start_line": node.start_line,
-        "end_line": node.end_line,
-        "start_column": node.start_column,
-        "end_column": node.end_column,
-        "signature": node.signature,
-        "docstring": node.docstring,
-        "visibility": node.visibility,
-        "flags": list(node.flags),
-        "metadata": dict(node.metadata),
     }

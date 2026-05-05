@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.CodeGraph.models import (
     CodeGraphUnresolvedRef,
     IndexedFile,
     IndexRunSummary,
+    codegraph_node_to_dict,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
@@ -437,19 +438,36 @@ class CodeGraphRepository:
         limit: int = 10,
     ) -> ImpactTraversal:
         """Traverse a bounded incoming/outgoing relationship neighborhood."""
+        return self.traverse_impact_many((node_id,), depth=depth, direction=direction, limit=limit)
+
+    def traverse_impact_many(
+        self,
+        node_ids: tuple[str, ...],
+        *,
+        depth: int = 2,
+        direction: str = "both",
+        limit: int = 10,
+    ) -> ImpactTraversal:
+        """Traverse a bounded relationship neighborhood from multiple root nodes."""
         if direction not in {"incoming", "outgoing", "both"}:
             raise ValueError("direction must be incoming, outgoing, or both")
+
+        root_ids = tuple(dict.fromkeys(str(node_id) for node_id in node_ids if str(node_id)))
+        if not root_ids:
+            return ImpactTraversal(nodes=(), relationships=(), truncated=False)
 
         effective_depth = max(1, int(depth))
         effective_limit = max(1, int(limit))
         with self._connection() as conn:
-            root = conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
-            if root is None:
+            root_rows = _select_nodes_by_ids_without_anchor(conn, set(root_ids))
+            if not root_rows:
                 return ImpactTraversal(nodes=(), relationships=(), truncated=False)
-            anchor_file_path = str(root["file_path"])
+            roots_by_id = {str(row["id"]): row for row in root_rows}
+            first_root = next((roots_by_id[root_id] for root_id in root_ids if root_id in roots_by_id), root_rows[0])
+            anchor_file_path = str(first_root["file_path"])
 
-            seen_node_ids = {node_id}
-            frontier = {node_id}
+            seen_node_ids = set(roots_by_id)
+            frontier = set(roots_by_id)
             relationships: list[dict[str, Any]] = []
             seen_relationship_ids: set[str] = set()
             truncated = False
@@ -663,6 +681,22 @@ def _select_nodes_by_ids(
             id
         """,
         (json.dumps(sorted(node_ids)), anchor_file_path),
+    ).fetchall()
+
+
+def _select_nodes_by_ids_without_anchor(
+    conn: sqlite3.Connection,
+    node_ids: set[str],
+) -> list[sqlite3.Row]:
+    """Select nodes by id before an anchor file is known."""
+    return conn.execute(
+        """
+        SELECT *
+        FROM nodes
+        WHERE id IN (SELECT value FROM json_each(?))
+        ORDER BY file_path, COALESCE(start_line, 0), qualified_name, id
+        """,
+        (json.dumps(sorted(node_ids)),),
     ).fetchall()
 
 
@@ -883,27 +917,6 @@ def _node_from_row(row: sqlite3.Row) -> CodeGraphNode:
     )
 
 
-def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
-    """Serialize a CodeGraphNode for relationship payloads."""
-    return {
-        "id": node.id,
-        "kind": node.kind,
-        "name": node.name,
-        "qualified_name": node.qualified_name,
-        "file_path": node.file_path,
-        "language": node.language,
-        "start_line": node.start_line,
-        "end_line": node.end_line,
-        "start_column": node.start_column,
-        "end_column": node.end_column,
-        "signature": node.signature,
-        "docstring": node.docstring,
-        "visibility": node.visibility,
-        "flags": list(node.flags),
-        "metadata": dict(node.metadata),
-    }
-
-
 def _target_node_from_joined_row(row: sqlite3.Row) -> CodeGraphNode:
     """Convert target-node aliases from a relationship join row."""
     return CodeGraphNode(
@@ -938,8 +951,8 @@ def _relationship_from_joined_row(row: sqlite3.Row) -> dict[str, Any]:
         "column": int(row["edge_column"]) if row["edge_column"] is not None else None,
         "metadata": dict(json.loads(row["edge_metadata"] or "{}")),
         "provenance": str(row["edge_provenance"]) if row["edge_provenance"] else None,
-        "source": _node_to_dict(source),
-        "target": _node_to_dict(target),
+        "source": codegraph_node_to_dict(source),
+        "target": codegraph_node_to_dict(target),
     }
 
 

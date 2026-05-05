@@ -379,6 +379,27 @@ def test_repository_impact_traversal_reports_truncation(tmp_path: Path) -> None:
     assert impact.truncated is True
 
 
+def test_repository_batch_impact_traversal_uses_one_neighborhood(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+
+    impact = repo.traverse_impact_many(("node_entry", "node_helper"), depth=1, direction="both", limit=10)
+
+    assert [node.id for node in impact.nodes] == [
+        "node_entry",
+        "node_helper",
+        "node_leaf",
+        "node_other",
+    ]
+    assert [relationship["id"] for relationship in impact.relationships] == [
+        "edge_entry_helper",
+        "edge_helper_leaf",
+        "edge_other_helper",
+    ]
+    assert impact.truncated is False
+
+
 def _seed_impact_graph(repo: CodeGraphRepository) -> None:
     repo.seed_graph_rows_for_test(
         nodes=[

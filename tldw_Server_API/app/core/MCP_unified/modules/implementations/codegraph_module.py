@@ -19,7 +19,13 @@ from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder
 from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_dependencies
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
-from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, IndexedFile, IndexRunSummary, WorkspaceResolution
+from tldw_Server_API.app.core.CodeGraph.models import (
+    CodeGraphNode,
+    IndexedFile,
+    IndexRunSummary,
+    WorkspaceResolution,
+    codegraph_node_to_dict,
+)
 from tldw_Server_API.app.core.CodeGraph.workspace import CodeGraphWorkspaceResolver, WorkspaceRootResolver
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
@@ -610,7 +616,7 @@ class CodeGraphModule(BaseModule):
             "workspace_key": resolution.workspace_key,
             "index_present": True,
             "query": query,
-            "results": [_node_to_dict(row) for row in rows[:effective_limit]],
+            "results": [codegraph_node_to_dict(row) for row in rows[:effective_limit]],
             "truncated": truncated,
         }
 
@@ -626,7 +632,7 @@ class CodeGraphModule(BaseModule):
             return {"workspace_key": resolution.workspace_key, "index_present": False, "node": None}
         repository = CodeGraphRepository(resolution.index_db_path)
         node = repository.get_node(node_id) if node_id else repository.find_node_by_symbol(str(symbol))
-        node_dict = _node_to_dict(node) if node is not None else None
+        node_dict = codegraph_node_to_dict(node) if node is not None else None
         if node_dict is not None and include_code:
             node_dict["code_available"] = False
         return {
@@ -671,7 +677,7 @@ class CodeGraphModule(BaseModule):
         return {
             "workspace_key": resolution.workspace_key,
             "index_present": True,
-            "node": _node_to_dict(node),
+            "node": codegraph_node_to_dict(node),
             "relationships": rows[:effective_limit],
             "truncated": truncated,
         }
@@ -723,8 +729,8 @@ class CodeGraphModule(BaseModule):
         return {
             "workspace_key": resolution.workspace_key,
             "index_present": True,
-            "root": _node_to_dict(node),
-            "nodes": [_node_to_dict(item) for item in impact.nodes],
+            "root": codegraph_node_to_dict(node),
+            "nodes": [codegraph_node_to_dict(item) for item in impact.nodes],
             "relationships": list(impact.relationships),
             "depth": effective_depth,
             "direction": direction,
@@ -867,18 +873,22 @@ def _relationship_neighborhood(
     limit: int,
 ) -> list[dict[str, Any]]:
     """Collect a deduplicated one-hop relationship neighborhood for selected nodes."""
+    impact = repository.traverse_impact_many(
+        tuple(node.id for node in nodes),
+        depth=1,
+        direction="both",
+        limit=limit,
+    )
     relationships: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for node in nodes:
-        impact = repository.traverse_impact(node.id, depth=1, direction="both", limit=limit)
-        for relationship in impact.relationships:
-            relationship_id = str(relationship["id"])
-            if relationship_id in seen:
-                continue
-            relationships.append(relationship)
-            seen.add(relationship_id)
-            if len(relationships) >= limit:
-                return relationships
+    for relationship in impact.relationships:
+        relationship_id = str(relationship["id"])
+        if relationship_id in seen:
+            continue
+        relationships.append(relationship)
+        seen.add(relationship_id)
+        if len(relationships) >= limit:
+            return relationships
     return relationships
 
 
@@ -901,27 +911,6 @@ def _indexed_file_to_dict(file: IndexedFile, *, include_metadata: bool) -> dict[
             }
         )
     return result
-
-
-def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
-    """Serialize a graph node for MCP responses."""
-    return {
-        "id": node.id,
-        "kind": node.kind,
-        "name": node.name,
-        "qualified_name": node.qualified_name,
-        "file_path": node.file_path,
-        "language": node.language,
-        "start_line": node.start_line,
-        "end_line": node.end_line,
-        "start_column": node.start_column,
-        "end_column": node.end_column,
-        "signature": node.signature,
-        "docstring": node.docstring,
-        "visibility": node.visibility,
-        "flags": list(node.flags),
-        "metadata": dict(node.metadata),
-    }
 
 
 def _index_run_to_dict(run: IndexRunSummary | None) -> dict[str, Any] | None:

@@ -6,9 +6,11 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module import (
     CodeGraphModule,
+    _relationship_neighborhood,
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException, MCPProtocol, RequestContext
 
@@ -352,6 +354,48 @@ def test_codegraph_context_rejects_invalid_arguments(tmp_path: Path) -> None:
         module.validate_tool_arguments("codegraph.context", {"task": "helper", "max_files": 0})
     with pytest.raises(ValueError, match="include_code"):
         module.validate_tool_arguments("codegraph.context", {"task": "helper", "include_code": "yes"})
+
+
+def test_relationship_neighborhood_uses_repository_batch_traversal() -> None:
+    node = CodeGraphNode(
+        id="node_helper",
+        identity_key="helper",
+        kind="function",
+        name="helper",
+        qualified_name="helper",
+        file_path="app.py",
+        language="python",
+    )
+    relationship = {
+        "id": "edge_call",
+        "source": {"id": "node_caller", "qualified_name": "caller"},
+        "target": {"id": "node_helper", "qualified_name": "helper"},
+    }
+
+    class _FakeRepository:
+        def __init__(self) -> None:
+            self.calls: list[tuple[tuple[str, ...], int, str, int]] = []
+
+        def traverse_impact_many(
+            self,
+            node_ids: tuple[str, ...],
+            *,
+            depth: int,
+            direction: str,
+            limit: int,
+        ):  # noqa: ANN202
+            self.calls.append((node_ids, depth, direction, limit))
+            return type("Impact", (), {"relationships": (relationship,)})()
+
+        def traverse_impact(self, *_args, **_kwargs):  # noqa: ANN202
+            raise AssertionError("relationship neighborhood should use batch traversal")
+
+    repository = _FakeRepository()
+
+    result = _relationship_neighborhood(repository, (node,), limit=10)  # type: ignore[arg-type]
+
+    assert result == [relationship]  # nosec B101
+    assert repository.calls == [(("node_helper",), 1, "both", 10)]  # nosec B101
 
 
 @pytest.mark.asyncio

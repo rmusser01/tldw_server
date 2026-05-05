@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-04 19:17'
-updated_date: '2026-05-05 00:04'
+updated_date: '2026-05-05 00:19'
 labels:
   - codegraph
   - mcp
@@ -58,12 +58,18 @@ Exposed codegraph.impact and codegraph.context through the Unified MCP CodeGraph
 Verification on 2026-05-04 after rebasing onto origin/dev: pytest focused CodeGraph/MCP suite -> 92 passed, 5 warnings; Ruff touched scopes -> All checks passed; Bandit report /tmp/bandit_codegraph_context_impact.json -> zero findings; git diff --check -> clean.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1270
+
+PR #1270 review follow-up started: address Gemini comments about duplicated CodeGraph node serialization and relationship-neighborhood connection cycles.
+
+PR #1270 review fixes completed: centralized CodeGraphNode serialization in codegraph_node_to_dict and replaced per-node context relationship traversal with repository.traverse_impact_many batch traversal.
+
+Review-fix verification on 2026-05-05: focused CodeGraph/MCP pytest suite -> 95 passed, 5 warnings; Ruff touched scopes -> All checks passed; Bandit /tmp/bandit_codegraph_context_impact.json -> zero findings; git diff --check -> clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Stage 4 native CodeGraph context and impact slice. The branch adds deterministic repository graph traversal, a workspace-safe bounded context builder for source snippets, and read-only Unified MCP tools codegraph.impact and codegraph.context with validation, configured bounds, missing-index behavior, and async offload for blocking repository/source IO. Focused CodeGraph/MCP tests, Ruff, Bandit, and whitespace checks passed after rebasing onto origin/dev.
+Implemented the Stage 4 native CodeGraph context and impact slice. The branch adds deterministic repository graph traversal, a workspace-safe bounded context builder for source snippets, and read-only Unified MCP tools codegraph.impact and codegraph.context with validation, configured bounds, missing-index behavior, and async offload for blocking repository/source IO. Focused CodeGraph/MCP tests, Ruff, Bandit, and whitespace checks passed after rebasing onto origin/dev. PR review follow-up centralized CodeGraph node serialization in models.py and added batch impact traversal for context relationship collection, addressing Gemini review comments without changing MCP response shapes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
