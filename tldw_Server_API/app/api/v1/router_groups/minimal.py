@@ -427,30 +427,30 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, control_support_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat_workflows import router as chat_workflows_router
-        from tldw_Server_API.app.api.v1.endpoints.scheduler_workflows import router as scheduler_workflows_router
-        from tldw_Server_API.app.api.v1.endpoints.workflows import router as workflows_router
-
-        specs.extend([
-            RouterSpec(
-                router=workflows_router,
-                prefix="",
-                tags=("workflows",),
-            ),
-            RouterSpec(
-                router=chat_workflows_router,
-                prefix="",
-                tags=("chat-workflows",),
-            ),
-            RouterSpec(
-                router=scheduler_workflows_router,
-                prefix="",
-                tags=("scheduler",),
-            ),
-        ])
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping workflow routers in minimal test app: {e}")
+    for workflow_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workflows",
+            log_name="workflows",
+            tags=("workflows",),
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat_workflows",
+            log_name="chat_workflows",
+            tags=("chat-workflows",),
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.scheduler_workflows",
+            log_name="scheduler_workflows",
+            tags=("scheduler",),
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+    ):
+        append_imported_router_spec(specs, workflow_spec)
 
     specs.append(RouterSpec(
         router=evaluations_router_factory,
