@@ -18,6 +18,19 @@ from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 
 pytestmark = pytest.mark.unit
 
+KANBAN_ROUTER_MODULE_PREFIX = "tldw_Server_API.app.api.v1.endpoints.kanban."
+KANBAN_ROUTER_DEFINITION_DATA = (
+    ("kanban_boards", "/boards"),
+    ("kanban_lists", "/lists"),
+    ("kanban_cards", "/cards"),
+    ("kanban_labels", "/labels"),
+    ("kanban_checklists", "/checklists"),
+    ("kanban_comments", "/comments"),
+    ("kanban_search", "/search"),
+    ("kanban_links", "/links"),
+    ("kanban_workflow", "/workflow"),
+)
+
 
 def _main_source_text() -> str:
     main_path = Path(__file__).resolve().parents[2] / "app" / "main.py"
@@ -5209,52 +5222,13 @@ def test_iter_minimal_optional_router_specs_defers_kanban_attr_lookup(
         iter_minimal_optional_router_specs,
     )
 
-    router_definitions = (
+    router_definitions = tuple(
         {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards",
-            "expected_name": "kanban_boards",
-            "path": "/boards",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists",
-            "expected_name": "kanban_lists",
-            "path": "/lists",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards",
-            "expected_name": "kanban_cards",
-            "path": "/cards",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels",
-            "expected_name": "kanban_labels",
-            "path": "/labels",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists",
-            "expected_name": "kanban_checklists",
-            "path": "/checklists",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments",
-            "expected_name": "kanban_comments",
-            "path": "/comments",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search",
-            "expected_name": "kanban_search",
-            "path": "/search",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links",
-            "expected_name": "kanban_links",
-            "path": "/links",
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow",
-            "expected_name": "kanban_workflow",
-            "path": "/workflow",
-        },
+            "module_name": f"{KANBAN_ROUTER_MODULE_PREFIX}{module_suffix}",
+            "expected_name": module_suffix,
+            "path": path,
+        }
+        for module_suffix, path in KANBAN_ROUTER_DEFINITION_DATA
     )
     definitions_by_module = {
         str(definition["module_name"]): definition
@@ -5392,28 +5366,15 @@ def test_iter_minimal_optional_router_specs_skips_kanban_runtime_import_failures
         iter_minimal_optional_router_specs,
     )
 
+    kanban_module_suffixes = tuple(
+        module_suffix
+        for module_suffix, _path in KANBAN_ROUTER_DEFINITION_DATA
+    )
     kanban_modules = {
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links",
-        "tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow",
+        f"{KANBAN_ROUTER_MODULE_PREFIX}{module_suffix}"
+        for module_suffix in kanban_module_suffixes
     }
-    expected_names = {
-        "kanban_boards",
-        "kanban_lists",
-        "kanban_cards",
-        "kanban_labels",
-        "kanban_checklists",
-        "kanban_comments",
-        "kanban_search",
-        "kanban_links",
-        "kanban_workflow",
-    }
+    expected_names = set(kanban_module_suffixes)
 
     specs = list(iter_minimal_optional_router_specs())
     selected_specs = {
@@ -5443,17 +5404,7 @@ def test_iter_minimal_optional_router_specs_skips_kanban_runtime_import_failures
     assert debug_messages == [
         f"Skipping {name} router in minimal test app: "
         f"tldw_Server_API.app.api.v1.endpoints.kanban.{name} exploded during import"
-        for name in (
-            "kanban_boards",
-            "kanban_lists",
-            "kanban_cards",
-            "kanban_labels",
-            "kanban_checklists",
-            "kanban_comments",
-            "kanban_search",
-            "kanban_links",
-            "kanban_workflow",
-        )
+        for name in kanban_module_suffixes
     ]
 
 

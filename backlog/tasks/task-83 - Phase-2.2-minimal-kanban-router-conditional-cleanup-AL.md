@@ -4,7 +4,7 @@ title: Phase 2.2 minimal kanban router conditional cleanup AL
 status: Done
 assignee: []
 created_date: '2026-05-05 18:55'
-updated_date: '2026-05-05 18:59'
+updated_date: '2026-05-05 19:30'
 labels:
   - phase2.2
   - router-cleanup
@@ -42,12 +42,16 @@ Red-green Kanban tranche: add focused router-group tests for lazy minimal Kanban
 Red verification: focused minimal Kanban router tests failed before production changes because Kanban endpoint modules were imported during spec construction and named lazy specs were absent.
 
 Green verification: focused Kanban tests, full router group contract tests, main router contract tests, touched-source Bandit, and git diff --check all passed.
+
+Reopened for PR #1324 review feedback. Gemini requested deduplicating Kanban router test data. Qodo flagged broad skip_exceptions=(Exception,); verified against origin/dev that the old minimal-test Kanban block already used one broad except Exception and this task intentionally preserved that compatibility boundary. Address Gemini with a test-only dedupe and respond to Qodo with the compatibility rationale unless the local tests expose a safer narrow behavior.
+
+Review follow-up result: deduplicated Kanban test data through shared module suffix/path data, preserving the intentional minimal-test broad skip behavior. Qodo broad-skip thread will be answered with the base-code/task-contract rationale instead of changing PR semantics in this tranche.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Converted the minimal-test Kanban optional router family to ImportedRouterSpec-backed lazy specs. The new entries preserve /api/v1/kanban prefix, kanban tags, route_key=kanban, default_stable behavior, and broad minimal-test skip semantics with skip_exceptions=(Exception,) while deferring module import and router attribute lookup until registration. Added regression coverage for lazy Kanban resolution and RuntimeError skip behavior. Verification: focused red/green Kanban tests, full test_router_groups_contract.py, test_main_router_contract.py, Bandit on minimal.py with 0 results/0 errors, and git diff --check.
+Addressed PR #1324 review follow-up by deduplicating the Kanban router contract test data from one shared module/path table and deriving module names, expected names, selected modules, and debug expectations from it. Preserved skip_exceptions=(Exception,) because origin/dev used a broad except Exception for the minimal-test Kanban block and TASK-83 explicitly scoped this tranche to preserve that compatibility behavior; the broad-skip cleanup should be handled as a separate behavior-changing tranche if desired. Verification: focused Kanban router contract tests passed, full test_router_groups_contract.py passed, test_main_router_contract.py passed, Bandit on minimal.py reported 0 results/0 errors, and git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
