@@ -30,6 +30,12 @@ export interface AlertProps {
   dismissible?: boolean
   /** Callback when dismissed */
   onDismiss?: () => void
+  /** Accessible label for the dismiss button */
+  dismissLabel?: string
+  /** ARIA role for alert urgency */
+  role?: "alert" | "status"
+  /** Live-region politeness for status-style alerts */
+  "aria-live"?: "off" | "polite" | "assertive"
   /** Additional CSS classes */
   className?: string
   /** Test ID for testing */
@@ -91,6 +97,9 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
       secondaryAction,
       dismissible = false,
       onDismiss,
+      dismissLabel = "Dismiss",
+      role = "alert",
+      "aria-live": ariaLive,
       className,
       "data-testid": dataTestId,
     },
@@ -107,8 +116,10 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
           config.container,
           className
         )}
-        role="alert"
+        role={role}
+        aria-live={ariaLive}
         data-testid={dataTestId}
+        data-ds-component="Alert"
       >
         <span
           className={cn("mt-0.5 flex-shrink-0", config.text)}
@@ -162,7 +173,7 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
               "flex-shrink-0 rounded p-1 transition-colors duration-150 hover:bg-surface2",
               config.text
             )}
-            aria-label="Dismiss"
+            aria-label={dismissLabel}
           >
             <X className="size-4" />
           </button>

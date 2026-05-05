@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react"
+import { act, render, renderHook, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 
 import {
   getChatErrorBannerScanSignature,
   getLatestChatErrorBannerEntry,
+  PlaygroundChatErrorBanner,
   usePlaygroundChatErrorBanner
 } from "../PlaygroundChatErrorBanner"
 
@@ -21,6 +23,40 @@ const encodeError = (
   })
 
 describe("PlaygroundChatErrorBanner", () => {
+  it("renders chat errors through the shared alert primitive", () => {
+    const error = {
+      ...JSON.parse(
+        JSON.stringify({
+          summary: "Generation failed",
+          hint: "Open diagnostics for details",
+          detail: "server detail"
+        })
+      ),
+      key: "assistant-error-1:abc"
+    }
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChatErrorBanner
+          error={error}
+          diagnosticsLabel="Health & diagnostics"
+          dismissLabel="Dismiss error"
+          onDismiss={() => undefined}
+        />
+      </MemoryRouter>
+    )
+
+    const banner = screen.getByTestId("playground-chat-error-banner")
+
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
+    expect(banner).toHaveAttribute("role", "alert")
+    expect(screen.getByRole("link", { name: "Health & diagnostics" })).toHaveAttribute(
+      "href",
+      "/settings/health"
+    )
+    expect(screen.getByRole("button", { name: "Dismiss error" })).toBeInTheDocument()
+  })
+
   it("resolves the newest encoded assistant error", () => {
     const latest = getLatestChatErrorBannerEntry([
       {
