@@ -67,6 +67,30 @@ def _runtime_name_is_documented(text: str, runtime: RuntimeType) -> bool:
     return re.search(pattern, text) is not None
 
 
+def _markdown_section(text: str, heading: str) -> str:
+    match = re.search(
+        rf"^## {re.escape(heading)}\n(?P<body>.*?)(?=^## |\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    return match.group("body") if match else ""
+
+
+def _portable_gate_scope_is_documented(text: str) -> bool:
+    section = _markdown_section(text, "Portable Runtime Capability Gate")
+    has_host_gated_real_execution = re.search(
+        r"\bhost[- ]gated\b.*\breal\s+runtime\s+execution\b",
+        section,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    has_portable_capability_contract = re.search(
+        r"\bportable\b.*\bcapability\s+contract",
+        section,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return bool(has_host_gated_real_execution and has_portable_capability_contract)
+
+
 def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,4 +181,4 @@ def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_miss
     text = inventory.read_text(encoding="utf-8")
 
     assert "CI has no single cross-runtime capability gate" not in text
-    assert "Host-gated smoke tests still own real runtime execution" in text
+    assert _portable_gate_scope_is_documented(text)

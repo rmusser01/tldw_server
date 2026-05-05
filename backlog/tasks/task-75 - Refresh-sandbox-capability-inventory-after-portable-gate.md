@@ -44,7 +44,7 @@ Update the sandbox runtime capability inventory after the portable runtime capab
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-- Worktree: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/sandbox-capability-inventory-refresh`.
+- Worktree: `<local-worktree-path>`.
 - Scope is intentionally docs/test-maintenance only. Do not change runtime behavior.
 - RED: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py::test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_missing -q` failed because the inventory still contained `CI has no single cross-runtime capability gate`.
 - Updated the current gaps table to replace the stale capability-gate gap with a narrower real-execution CI gap: the portable gate covers capability contracts only.
@@ -53,7 +53,10 @@ Update the sandbox runtime capability inventory after the portable runtime capab
 - Verification: `python -m py_compile tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed.
 - Verification: `python -m ruff check tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed.
 - Verification: `git diff --check` passed.
-- Bandit skipped: this slice changed only tests, documentation, and Backlog task metadata; no production Python changed.
+- Review fix: replaced the exact positive documentation phrase assertion with a regex-backed section check that tolerates harmless wording and line wrapping while preserving the host-gated real-execution versus portable capability-contract distinction.
+- Review fix: removed the committed local absolute worktree path from the task notes.
+- Review verification: `python -m bandit -r tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -f json -o /tmp/bandit_sandbox_capability_inventory_refresh_tests.json` ran on the touched test file and reported only pytest assert-use findings (`B101`).
+- Review verification: `python -m bandit -r tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -s B101 -f json -o /tmp/bandit_sandbox_capability_inventory_refresh_tests_no_b101.json` reported 0 findings after excluding pytest assert-use noise.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
