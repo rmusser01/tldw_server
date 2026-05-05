@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 03:25'
-updated_date: '2026-05-05 03:35'
+updated_date: '2026-05-05 03:38'
 labels:
   - codegraph
   - mcp
@@ -14,6 +14,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/1277'
   - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
+  - 'https://github.com/rmusser01/tldw_server/pull/1288'
 documentation:
   - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
 priority: medium
@@ -48,6 +49,8 @@ Verification: focused RED tests failed for unsupported csharp or missing extract
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the native CodeGraph C# extractor slice. C# is now a dependency-aware foundation language backed by optional tree-sitter-c-sharp, with conservative extraction for using directives, namespaces, classes, interfaces, structs, records, enums, constructors, methods, properties, same-file simple calls, and unresolved external/receiver references. Known limits remain intentional: no Roslyn project model, project/solution analysis, partial type merging, overload/type inference, inheritance, extension-method, or cross-file semantic resolution.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1288
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
