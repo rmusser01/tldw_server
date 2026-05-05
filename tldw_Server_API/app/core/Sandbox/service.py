@@ -62,6 +62,7 @@ from .runtime_capabilities import (
     runtime_isolation_metadata,
     runtime_isolation_warnings,
     runtime_implementation_state,
+    runtime_network_policy_effective_support,
     runtime_network_policy_metadata,
 )
 from .snapshots import SnapshotManager
@@ -869,7 +870,18 @@ class SandboxService:
         lima_enforcement_ready = dict((lima_preflight.enforcement_ready if lima_preflight else {}) or {})
         # Allowlist enforcement is not implemented for Lima runtime execution.
         lima_enforcement_ready["allowlist"] = False
-        lima_host = dict((lima_preflight.host if lima_preflight else {}) or {})
+        if lima_preflight is not None:
+            lima_preflight = RuntimePreflightResult(
+                runtime=lima_preflight.runtime,
+                available=lima_preflight.available,
+                reasons=list(lima_preflight.reasons or []),
+                execution_mode=lima_preflight.execution_mode,
+                supported_trust_levels=list(
+                    lima_preflight.supported_trust_levels or []
+                ),
+                host=dict(lima_preflight.host or {}),
+                enforcement_ready=lima_enforcement_ready,
+            )
 
         def _preflight_fields(
             runtime: RuntimeType,
@@ -879,13 +891,17 @@ class SandboxService:
             reasons = list((preflight.reasons if preflight else []) or [])
             isolation = runtime_isolation_metadata(runtime)
             network_contract = runtime_network_policy_metadata(runtime)
+            effective_network_support = runtime_network_policy_effective_support(
+                runtime,
+                enforcement_ready,
+            )
             return {
                 "available": bool(preflight.available) if preflight is not None else False,
                 "reasons": reasons,
                 "normalized_reasons": normalize_runtime_reasons(reasons),
                 "supported_trust_levels": list((preflight.supported_trust_levels if preflight else []) or []),
-                "strict_deny_all_supported": bool(enforcement_ready.get("deny_all")),
-                "strict_allowlist_supported": bool(enforcement_ready.get("allowlist")),
+                "strict_deny_all_supported": effective_network_support["deny_all"],
+                "strict_allowlist_supported": effective_network_support["allowlist"],
                 "enforcement_ready": enforcement_ready,
                 "host": dict((preflight.host if preflight else {}) or {}),
                 "boundary_class": isolation.boundary_class,
@@ -895,11 +911,18 @@ class SandboxService:
                 "network_policy_contract": network_contract.as_dict(),
             }
 
+        docker_fields = _preflight_fields(RuntimeType.docker, docker_preflight)
+        firecracker_fields = _preflight_fields(
+            RuntimeType.firecracker,
+            firecracker_preflight,
+        )
+        lima_fields = _preflight_fields(RuntimeType.lima, lima_preflight)
+
         return [
             {
                 "name": "docker",
                 "implementation_state": runtime_implementation_state(RuntimeType.docker),
-                **_preflight_fields(RuntimeType.docker, docker_preflight),
+                **docker_fields,
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
@@ -922,18 +945,23 @@ class SandboxService:
                         else bool(docker_available())
                     )
                 ),
-                "egress_allowlist_supported": bool(egress_supported),
+                "egress_allowlist_supported": bool(docker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": (
                     "Granular egress allowlist (CIDR, hostname) enforced via host iptables (DOCKER-USER) with DNS pinning"
-                    if bool(egress_supported and granular)
-                    else ("Egress allowlist enforced as deny-all (network=none)" if bool(egress_supported) else None)
+                    if bool(docker_fields["strict_allowlist_supported"] and granular)
+                    else (
+                        "Docker allowlist enforcement is configured without granular enforcement; "
+                        "allowlist is not advertised because execution would fall back to deny-all"
+                        if bool(egress_supported)
+                        else None
+                    )
                 ),
             },
             {
                 "name": "firecracker",
                 "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
-                **_preflight_fields(RuntimeType.firecracker, firecracker_preflight),
+                **firecracker_fields,
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
@@ -948,33 +976,14 @@ class SandboxService:
                 "artifact_ttl_hours": artifact_ttl_hours,
                 "supported_spec_versions": supported_spec_versions,
                 "interactive_supported": False,
-                # Only advertise allowlist support when explicit Firecracker enforcement is enabled
-                "egress_allowlist_supported": bool(
-                    is_truthy(
-                        str(
-                            os.getenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT")
-                            or getattr(app_settings, "SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "")
-                        ).strip().lower()
-                    )
-                ),
+                "egress_allowlist_supported": bool(firecracker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
-                "notes": (
-                    "Granular egress allowlist enforced via VM tap/bridge + host firewall (planned)"
-                    if bool(
-                        is_truthy(
-                            str(
-                                os.getenv("SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT")
-                                or getattr(app_settings, "SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT", "")
-                            ).strip().lower()
-                        )
-                    )
-                    else "Allowlist enforcement uses deny-all fallback currently; granular Firecracker egress isolation planned"
-                ),
+                "notes": "Allowlist enforcement is scaffold/planned and is not advertised as effective support",
             },
             {
                 "name": "lima",
                 "implementation_state": runtime_implementation_state(RuntimeType.lima),
-                **_preflight_fields(RuntimeType.lima, lima_preflight),
+                **lima_fields,
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
@@ -989,11 +998,7 @@ class SandboxService:
                 "artifact_ttl_hours": artifact_ttl_hours,
                 "supported_spec_versions": supported_spec_versions,
                 "interactive_supported": False,  # Not implemented for Lima yet
-                "egress_allowlist_supported": bool(lima_enforcement_ready.get("allowlist")),
-                "strict_deny_all_supported": bool(lima_enforcement_ready.get("deny_all")),
-                "strict_allowlist_supported": bool(lima_enforcement_ready.get("allowlist")),
-                "enforcement_ready": lima_enforcement_ready,
-                "host": lima_host,
+                "egress_allowlist_supported": bool(lima_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": "Full VM isolation via Lima; recommended for macOS",
             },

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
+from loguru import logger
+
+from tldw_Server_API.app.core.config import settings as app_settings
+from tldw_Server_API.app.core.testing import is_truthy
+
+from .exceptions import SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS
 from .models import RuntimeType
 
 RuntimeImplementationState = Literal[
@@ -352,6 +359,56 @@ def runtime_network_policy_metadata(
     return metadata
 
 
+def _settings_flag(name: str) -> bool:
+    """Read a boolean readiness flag, failing closed with operator-visible logs."""
+
+    try:
+        raw = os.getenv(name)
+        if raw is None:
+            raw = getattr(app_settings, name, "")
+        return is_truthy(str(raw).strip().lower())
+    except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Failed to read sandbox readiness flag {}: {}",
+            name,
+            exc,
+        )
+        return False
+
+
+def docker_network_policy_readiness(docker_available: bool) -> dict[str, bool]:
+    """Return Docker network readiness facts used by discovery and admission."""
+
+    egress_enforced = _settings_flag("SANDBOX_EGRESS_ENFORCEMENT")
+    granular_enforced = _settings_flag("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT")
+    return {
+        "deny_all": bool(docker_available),
+        "allowlist": bool(docker_available and egress_enforced and granular_enforced),
+    }
+
+
+def runtime_network_policy_effective_support(
+    runtime: RuntimeType | str,
+    enforcement_ready: Mapping[str, bool] | None = None,
+) -> dict[str, bool]:
+    """Return currently usable strict network policy support for a runtime."""
+
+    contract = runtime_network_policy_metadata(runtime)
+    ready = dict(enforcement_ready or {})
+
+    def _supported(mode: RuntimeNetworkPolicyModeMetadata, key: str) -> bool:
+        if mode.support_state not in {"supported", "host_gated"}:
+            return False
+        if not mode.strict_enforcement:
+            return False
+        return bool(ready.get(key))
+
+    return {
+        "deny_all": _supported(contract.deny_all, "deny_all"),
+        "allowlist": _supported(contract.allowlist, "allowlist"),
+    }
+
+
 def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:
     """Return a stable client-facing code for a raw runtime preflight reason."""
 
@@ -441,11 +498,13 @@ def collect_runtime_preflights(
             runtime=RuntimeType.docker,
             available=docker_ok,
             reasons=[] if docker_ok else ["docker_unavailable"],
+            enforcement_ready=docker_network_policy_readiness(docker_ok),
         ),
         RuntimeType.firecracker: RuntimePreflightResult(
             runtime=RuntimeType.firecracker,
             available=firecracker_ok,
             reasons=[] if firecracker_ok else ["firecracker_unavailable"],
+            enforcement_ready={"deny_all": firecracker_ok, "allowlist": False},
         ),
         RuntimeType.lima: LimaRunner().preflight(network_policy=requested_policy),
         RuntimeType.seatbelt: SeatbeltRunner().preflight(network_policy=requested_policy),
