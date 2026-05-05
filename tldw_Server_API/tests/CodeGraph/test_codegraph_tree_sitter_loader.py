@@ -124,15 +124,30 @@ def test_kotlin_parser_can_parse_class() -> None:
     assert not tree.root_node.has_error
 
 
-def test_load_parser_reports_missing_java_kotlin_optional_dependencies(monkeypatch) -> None:
-    """Report missing JVM parser packages without raising import errors."""
+def test_csharp_parser_can_parse_class() -> None:
+    """Load the optional C# parser and parse a compact class fixture."""
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+
+    result = loader.load_parser("csharp")
+    tree = result.parser.parse(b"class Greeter { string Greet() { return Helper(); } }")
+
+    assert result.missing == ()
+    assert result.error is None
+    assert tree.root_node.type == "compilation_unit"
+    assert not tree.root_node.has_error
+
+
+def test_load_parser_reports_missing_java_kotlin_csharp_optional_dependencies(monkeypatch) -> None:
+    """Report missing JVM/.NET parser packages without raising import errors."""
     loader = importlib.import_module(
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
     real_import_module = loader.importlib.import_module
 
     def fake_import_module(name: str) -> ModuleType:
-        if name in {"tree_sitter_java", "tree_sitter_kotlin"}:
+        if name in {"tree_sitter_java", "tree_sitter_kotlin", "tree_sitter_c_sharp"}:
             raise ModuleNotFoundError(f"No module named '{name}'")
         return real_import_module(name)
 
@@ -140,6 +155,7 @@ def test_load_parser_reports_missing_java_kotlin_optional_dependencies(monkeypat
 
     java = loader.load_parser("java")
     kotlin = loader.load_parser("kotlin")
+    csharp = loader.load_parser("csharp")
 
     assert java.parser is None
     assert java.missing == ("tree_sitter_java",)
@@ -147,3 +163,6 @@ def test_load_parser_reports_missing_java_kotlin_optional_dependencies(monkeypat
     assert kotlin.parser is None
     assert kotlin.missing == ("tree_sitter_kotlin",)
     assert kotlin.error is None
+    assert csharp.parser is None
+    assert csharp.missing == ("tree_sitter_c_sharp",)
+    assert csharp.error is None

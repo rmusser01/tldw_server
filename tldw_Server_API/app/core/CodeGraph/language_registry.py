@@ -18,12 +18,6 @@ _PLANNED_LANGUAGES = (
         extensions=(".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx"),
         stage="planned",
     ),
-    LanguageInfo(
-        language_id="csharp",
-        display_name="C#",
-        extensions=(".cs",),
-        stage="planned",
-    ),
 )
 
 
@@ -63,6 +57,7 @@ def _foundation_languages(dependency_health: DependencyHealth) -> tuple[Language
     typescript_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_typescript"))
     java_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_java"))
     kotlin_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_kotlin"))
+    csharp_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_c_sharp"))
     return (
         LanguageInfo(
             language_id="python",
@@ -102,6 +97,14 @@ def _foundation_languages(dependency_health: DependencyHealth) -> tuple[Language
             stage="foundation",
             dependency_missing=kotlin_missing,
             symbol_extraction=not kotlin_missing,
+        ),
+        LanguageInfo(
+            language_id="csharp",
+            display_name="C#",
+            extensions=(".cs",),
+            stage="foundation",
+            dependency_missing=csharp_missing,
+            symbol_extraction=not csharp_missing,
         ),
     )
 

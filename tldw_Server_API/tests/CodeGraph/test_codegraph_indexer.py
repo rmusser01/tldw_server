@@ -167,6 +167,47 @@ class Greeter {
     assert helper_paths == ["Greeter.kt", "Service.java"]
 
 
+def test_indexer_extracts_csharp_graph_rows_during_index(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "Greeter.cs").write_text(
+        """
+using System;
+
+namespace Example.App;
+
+public class Greeter {
+    public string Greet(string name) {
+        return Helper(name);
+    }
+
+    private string Helper(string value) {
+        return value.Trim();
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    files = {item.path: item for item in repo.list_files(limit=10)}
+    helper_paths = sorted(node.file_path for node in repo.search_nodes("Helper", limit=10))
+
+    assert result.status == "complete"
+    assert files["Greeter.cs"].node_count > 0
+    assert helper_paths == ["Greeter.cs"]
+
+
 def test_indexer_does_not_count_non_extractable_jvm_files_against_foreground_limits(
     tmp_path: Path,
     monkeypatch,
@@ -186,6 +227,49 @@ def test_indexer_does_not_count_non_extractable_jvm_files_against_foreground_lim
             available=True,
             missing=("tree_sitter_java", "tree_sitter_kotlin"),
             present=("tree_sitter", "tree_sitter_javascript", "tree_sitter_typescript"),
+        )
+    )
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=registry)
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=1,
+    )
+
+    assert result.status == "complete"
+    assert result.counters["dependency_missing_language_skipped"] == 2
+    assert [item.path for item in repo.list_files(limit=10)] == ["app.py"]
+
+
+def test_indexer_does_not_count_non_extractable_csharp_files_against_foreground_limits(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_load_parser(language_id: str) -> SimpleNamespace:
+        return SimpleNamespace(available=language_id != "csharp")
+
+    monkeypatch.setattr(indexer_module, "load_parser", fake_load_parser)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "A.cs").write_text("class A {}\n", encoding="utf-8")
+    (workspace / "B.cs").write_text("class B {}\n", encoding="utf-8")
+    (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    registry = CodeGraphLanguageRegistry(
+        dependency_health=DependencyHealth(
+            available=True,
+            missing=("tree_sitter_c_sharp",),
+            present=(
+                "tree_sitter",
+                "tree_sitter_javascript",
+                "tree_sitter_typescript",
+                "tree_sitter_java",
+                "tree_sitter_kotlin",
+            ),
         )
     )
     indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=registry)
