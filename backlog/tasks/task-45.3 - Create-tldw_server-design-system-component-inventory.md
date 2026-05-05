@@ -11,6 +11,8 @@ labels:
   - frontend
   - docs
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/1286'
 documentation:
   - Docs/Design/tldw_web_design_system_contract.md
   - Docs/Design/tldw_web_design_system_inventory.md
@@ -51,6 +53,8 @@ Started after PR #1272 merged into dev at merge commit 5aa53a31d277a0b4126161aa8
 Created Docs/Design/tldw_web_design_system_inventory.md. The inventory records canonical owners, near-duplicates, proof-surface consumers, migration targets, non-goals, and the first Chat/Playground migration queue. Updated Docs/Design/tldw_web_design_system_contract.md to link the inventory from Stage 2.
 
 Verification: rg checks confirmed all required inventory categories and the contract link. awk line-length scan reported no lines over 120 characters in the inventory. git diff --check passed. Bandit skipped because this task touched documentation and Backlog metadata only; no Python code was touched.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1286
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
