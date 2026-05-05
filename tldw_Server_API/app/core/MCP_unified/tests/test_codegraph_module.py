@@ -73,13 +73,27 @@ def _context() -> RequestContext:
 
 
 def _require_c_family_parsers() -> None:
+    """Skip C/C++ MCP coverage unless both C-family parsers load."""
     if not (load_parser("c").available and load_parser("cpp").available):
         pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
 def _require_jvm_parsers() -> None:
+    """Skip JVM MCP coverage unless both Java and Kotlin parsers load."""
     if not (load_parser("java").available and load_parser("kotlin").available):
         pytest.skip("tree-sitter-java/kotlin parsers are not available")
+
+
+def _require_typescript_parsers() -> None:
+    """Skip TypeScript MCP coverage unless TS and TSX parsers load."""
+    if not (load_parser("typescript").available and load_parser("tsx").available):
+        pytest.skip("tree-sitter-typescript parser is not available")
+
+
+def _require_csharp_parser() -> None:
+    """Skip C# MCP coverage unless the C# parser loads."""
+    if not load_parser("csharp").available:
+        pytest.skip("tree-sitter-c-sharp parser is not available")
 
 
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
@@ -255,6 +269,7 @@ def helper(value):
 
 @pytest.mark.asyncio
 async def test_codegraph_search_finds_typescript_component_after_index(tmp_path: Path) -> None:
+    _require_typescript_parsers()
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "Card.tsx").write_text(
@@ -346,6 +361,7 @@ class Greeter {
 
 @pytest.mark.asyncio
 async def test_codegraph_search_finds_csharp_symbols_after_index(tmp_path: Path) -> None:
+    _require_csharp_parser()
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "Greeter.cs").write_text(

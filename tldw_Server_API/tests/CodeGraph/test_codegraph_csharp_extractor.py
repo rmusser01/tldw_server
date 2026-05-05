@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.CodeGraph.extractors.csharp_extractor import CSharpTreeSitterExtractor
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult
+
+pytestmark = pytest.mark.skipif(
+    not load_parser("csharp").available,
+    reason="tree-sitter-c-sharp parser is not available",
+)
 
 CSHARP_FIXTURE = b"""
 using System;

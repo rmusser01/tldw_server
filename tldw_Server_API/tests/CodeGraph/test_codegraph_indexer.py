@@ -17,13 +17,27 @@ from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGrap
 
 
 def _require_c_family_parsers() -> None:
+    """Skip C/C++ indexer coverage unless both C-family parsers load."""
     if not (load_parser("c").available and load_parser("cpp").available):
         pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
 def _require_jvm_parsers() -> None:
+    """Skip JVM indexer coverage unless both Java and Kotlin parsers load."""
     if not (load_parser("java").available and load_parser("kotlin").available):
         pytest.skip("tree-sitter-java/kotlin parsers are not available")
+
+
+def _require_typescript_parsers() -> None:
+    """Skip TypeScript indexer coverage unless TS and TSX parsers load."""
+    if not (load_parser("typescript").available and load_parser("tsx").available):
+        pytest.skip("tree-sitter-typescript parser is not available")
+
+
+def _require_csharp_parser() -> None:
+    """Skip C# indexer coverage unless the C# parser loads."""
+    if not load_parser("csharp").available:
+        pytest.skip("tree-sitter-c-sharp parser is not available")
 
 
 def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:
@@ -94,6 +108,7 @@ def helper(value):
 
 
 def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path: Path) -> None:
+    _require_typescript_parsers()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
@@ -182,6 +197,7 @@ class Greeter {
 
 
 def test_indexer_extracts_csharp_graph_rows_during_index(tmp_path: Path) -> None:
+    _require_csharp_parser()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "Greeter.cs").write_text(
