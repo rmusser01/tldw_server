@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import closing, contextmanager
 import json
 import sqlite3
 import uuid
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,18 @@ from tldw_Server_API.app.core.CodeGraph.models import (
     CodeGraphUnresolvedRef,
     IndexedFile,
     IndexRunSummary,
+    codegraph_node_to_dict,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+
+
+@dataclass(frozen=True)
+class ImpactTraversal:
+    """Bounded graph traversal result for CodeGraph impact queries."""
+
+    nodes: tuple[CodeGraphNode, ...]
+    relationships: tuple[dict[str, Any], ...]
+    truncated: bool
 
 
 class CodeGraphRepository:
@@ -418,6 +429,89 @@ class CodeGraphRepository:
             ).fetchall()
         return [_relationship_from_joined_row(row) for row in rows]
 
+    def traverse_impact(
+        self,
+        node_id: str,
+        *,
+        depth: int = 2,
+        direction: str = "both",
+        limit: int = 10,
+    ) -> ImpactTraversal:
+        """Traverse a bounded incoming/outgoing relationship neighborhood."""
+        return self.traverse_impact_many((node_id,), depth=depth, direction=direction, limit=limit)
+
+    def traverse_impact_many(
+        self,
+        node_ids: tuple[str, ...],
+        *,
+        depth: int = 2,
+        direction: str = "both",
+        limit: int = 10,
+    ) -> ImpactTraversal:
+        """Traverse a bounded relationship neighborhood from multiple root nodes."""
+        if direction not in {"incoming", "outgoing", "both"}:
+            raise ValueError("direction must be incoming, outgoing, or both")
+
+        root_ids = tuple(dict.fromkeys(str(node_id) for node_id in node_ids if str(node_id)))
+        if not root_ids:
+            return ImpactTraversal(nodes=(), relationships=(), truncated=False)
+
+        effective_depth = max(1, int(depth))
+        effective_limit = max(1, int(limit))
+        with self._connection() as conn:
+            root_rows = _select_nodes_by_ids_without_anchor(conn, set(root_ids))
+            if not root_rows:
+                return ImpactTraversal(nodes=(), relationships=(), truncated=False)
+            roots_by_id = {str(row["id"]): row for row in root_rows}
+            first_root = next((roots_by_id[root_id] for root_id in root_ids if root_id in roots_by_id), root_rows[0])
+            anchor_file_path = str(first_root["file_path"])
+
+            seen_node_ids = set(roots_by_id)
+            frontier = set(roots_by_id)
+            relationships: list[dict[str, Any]] = []
+            seen_relationship_ids: set[str] = set()
+            truncated = False
+
+            for _level in range(effective_depth):
+                if not frontier or truncated:
+                    break
+                remaining_rows = (effective_limit - len(relationships)) + 1
+                if remaining_rows <= 0:
+                    truncated = True
+                    break
+                rows = _select_relationships_for_nodes(
+                    conn,
+                    frontier,
+                    direction,
+                    anchor_file_path=anchor_file_path,
+                    max_rows=remaining_rows,
+                )
+                next_frontier: set[str] = set()
+                for row in rows:
+                    edge_id = str(row["edge_id"])
+                    if edge_id in seen_relationship_ids:
+                        continue
+                    if len(relationships) >= effective_limit:
+                        truncated = True
+                        break
+                    relationship = _relationship_from_joined_row(row)
+                    relationships.append(relationship)
+                    seen_relationship_ids.add(edge_id)
+                    for endpoint in (relationship["source"], relationship["target"]):
+                        endpoint_id = str(endpoint["id"])
+                        if endpoint_id not in seen_node_ids:
+                            seen_node_ids.add(endpoint_id)
+                            next_frontier.add(endpoint_id)
+                frontier = next_frontier
+
+            node_rows = _select_nodes_by_ids(conn, seen_node_ids, anchor_file_path=anchor_file_path)
+
+        return ImpactTraversal(
+            nodes=tuple(_node_from_row(row) for row in node_rows),
+            relationships=tuple(relationships),
+            truncated=truncated,
+        )
+
     def seed_graph_rows_for_test(
         self,
         *,
@@ -520,6 +614,102 @@ def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
     conn.executemany("DELETE FROM nodes WHERE file_path = ?", params)
     conn.executemany("DELETE FROM files WHERE path = ?", params)
     _delete_dangling_edges(conn)
+
+
+def _select_relationships_for_nodes(
+    conn: sqlite3.Connection,
+    node_ids: set[str],
+    direction: str,
+    *,
+    anchor_file_path: str,
+    max_rows: int,
+) -> list[sqlite3.Row]:
+    """Select joined relationships touching a set of node ids in deterministic order."""
+    ids_json = json.dumps(sorted(node_ids))
+
+    return conn.execute(
+        """
+        SELECT
+            e.id AS edge_id,
+            e.kind AS edge_kind,
+            e.file_path AS edge_file_path,
+            e.line AS edge_line,
+            e.column AS edge_column,
+            e.metadata AS edge_metadata,
+            e.provenance AS edge_provenance,
+            source_node.*,
+            target_node.id AS target_id,
+            target_node.identity_key AS target_identity_key,
+            target_node.kind AS target_kind,
+            target_node.name AS target_name,
+            target_node.qualified_name AS target_qualified_name,
+            target_node.file_path AS target_file_path,
+            target_node.language AS target_language,
+            target_node.start_line AS target_start_line,
+            target_node.end_line AS target_end_line,
+            target_node.start_column AS target_start_column,
+            target_node.end_column AS target_end_column,
+            target_node.signature AS target_signature,
+            target_node.docstring AS target_docstring,
+            target_node.visibility AS target_visibility,
+            target_node.flags AS target_flags,
+            target_node.metadata AS target_metadata
+        FROM edges e
+        JOIN nodes source_node ON source_node.id = e.source
+        JOIN nodes target_node ON target_node.id = e.target
+        WHERE
+            (? IN ('incoming', 'both') AND e.target IN (SELECT value FROM json_each(?)))
+            OR (? IN ('outgoing', 'both') AND e.source IN (SELECT value FROM json_each(?)))
+        ORDER BY
+            CASE WHEN e.file_path = ? THEN 0 ELSE 1 END,
+            e.file_path,
+            COALESCE(e.line, 0),
+            source_node.qualified_name,
+            target_node.qualified_name,
+            e.id
+        LIMIT ?
+        """,
+        (direction, ids_json, direction, ids_json, anchor_file_path, max(1, int(max_rows))),
+    ).fetchall()
+
+
+def _select_nodes_by_ids(
+    conn: sqlite3.Connection,
+    node_ids: set[str],
+    *,
+    anchor_file_path: str,
+) -> list[sqlite3.Row]:
+    """Select nodes by id in stable source-location order."""
+    return conn.execute(
+        """
+        SELECT *
+        FROM nodes
+        WHERE id IN (SELECT value FROM json_each(?))
+        ORDER BY
+            CASE WHEN file_path = ? THEN 0 ELSE 1 END,
+            file_path,
+            COALESCE(start_line, 0),
+            qualified_name,
+            id
+        """,
+        (json.dumps(sorted(node_ids)), anchor_file_path),
+    ).fetchall()
+
+
+def _select_nodes_by_ids_without_anchor(
+    conn: sqlite3.Connection,
+    node_ids: set[str],
+) -> list[sqlite3.Row]:
+    """Select nodes by id before an anchor file is known."""
+    return conn.execute(
+        """
+        SELECT *
+        FROM nodes
+        WHERE id IN (SELECT value FROM json_each(?))
+        ORDER BY file_path, COALESCE(start_line, 0), qualified_name, id
+        """,
+        (json.dumps(sorted(node_ids)),),
+    ).fetchall()
 
 
 def _upsert_file(
@@ -739,27 +929,6 @@ def _node_from_row(row: sqlite3.Row) -> CodeGraphNode:
     )
 
 
-def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
-    """Serialize a CodeGraphNode for relationship payloads."""
-    return {
-        "id": node.id,
-        "kind": node.kind,
-        "name": node.name,
-        "qualified_name": node.qualified_name,
-        "file_path": node.file_path,
-        "language": node.language,
-        "start_line": node.start_line,
-        "end_line": node.end_line,
-        "start_column": node.start_column,
-        "end_column": node.end_column,
-        "signature": node.signature,
-        "docstring": node.docstring,
-        "visibility": node.visibility,
-        "flags": list(node.flags),
-        "metadata": dict(node.metadata),
-    }
-
-
 def _target_node_from_joined_row(row: sqlite3.Row) -> CodeGraphNode:
     """Convert target-node aliases from a relationship join row."""
     return CodeGraphNode(
@@ -794,8 +963,8 @@ def _relationship_from_joined_row(row: sqlite3.Row) -> dict[str, Any]:
         "column": int(row["edge_column"]) if row["edge_column"] is not None else None,
         "metadata": dict(json.loads(row["edge_metadata"] or "{}")),
         "provenance": str(row["edge_provenance"]) if row["edge_provenance"] else None,
-        "source": _node_to_dict(source),
-        "target": _node_to_dict(target),
+        "source": codegraph_node_to_dict(source),
+        "target": codegraph_node_to_dict(target),
     }
 
 

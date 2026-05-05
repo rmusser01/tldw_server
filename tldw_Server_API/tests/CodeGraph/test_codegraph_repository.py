@@ -1,11 +1,15 @@
+"""Tests for the native CodeGraph SQLite repository."""
+
 from __future__ import annotations
 
+import inspect
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphEdge, CodeGraphNode, CodeGraphUnresolvedRef
+from tldw_Server_API.app.core.DB_Management.codegraph import repository as repository_module
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository, _create_optional_fts
 
 
@@ -345,3 +349,154 @@ def test_repository_atomic_file_and_graph_replacement_rolls_back_on_graph_error(
     assert file_row.content_hash == "old_hash"
     assert repo.get_node("node_old") is not None
     assert repo.search_nodes("new_helper", limit=10) == []
+
+
+def test_repository_traverses_bounded_impact_graph(tmp_path: Path) -> None:
+    """Return a deterministic bounded impact neighborhood around a node."""
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+
+    impact = repo.traverse_impact("node_helper", depth=1, direction="both", limit=10)
+
+    assert [node.id for node in impact.nodes] == [
+        "node_entry",
+        "node_helper",
+        "node_leaf",
+        "node_other",
+    ]
+    assert [relationship["id"] for relationship in impact.relationships] == [
+        "edge_entry_helper",
+        "edge_helper_leaf",
+        "edge_other_helper",
+    ]
+    assert impact.truncated is False
+
+
+def test_repository_impact_traversal_reports_truncation(tmp_path: Path) -> None:
+    """Report truncation when relationship traversal reaches the result cap."""
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+
+    impact = repo.traverse_impact("node_helper", depth=2, direction="both", limit=1)
+
+    assert [relationship["id"] for relationship in impact.relationships] == ["edge_entry_helper"]
+    assert impact.truncated is True
+
+
+def test_repository_batch_impact_traversal_uses_one_neighborhood(tmp_path: Path) -> None:
+    """Traverse one shared impact neighborhood for multiple starting nodes."""
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+
+    impact = repo.traverse_impact_many(("node_entry", "node_helper"), depth=1, direction="both", limit=10)
+
+    assert [node.id for node in impact.nodes] == [
+        "node_entry",
+        "node_helper",
+        "node_leaf",
+        "node_other",
+    ]
+    assert [relationship["id"] for relationship in impact.relationships] == [
+        "edge_entry_helper",
+        "edge_helper_leaf",
+        "edge_other_helper",
+    ]
+    assert impact.truncated is False
+
+
+def test_repository_impact_traversal_passes_remaining_row_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bound each relationship query to the remaining result budget plus one row."""
+    assert "max_rows" in inspect.signature(repository_module._select_relationships_for_nodes).parameters
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+    requested_row_limits: list[int | None] = []
+    original_select = repository_module._select_relationships_for_nodes
+
+    def _spy_select_relationships_for_nodes(
+        conn: sqlite3.Connection,
+        node_ids: set[str],
+        direction: str,
+        *,
+        anchor_file_path: str,
+        max_rows: int | None = None,
+    ) -> list[sqlite3.Row]:
+        requested_row_limits.append(max_rows)
+        return original_select(conn, node_ids, direction, anchor_file_path=anchor_file_path, max_rows=max_rows)
+
+    monkeypatch.setattr(repository_module, "_select_relationships_for_nodes", _spy_select_relationships_for_nodes)
+
+    impact = repo.traverse_impact("node_helper", depth=2, direction="both", limit=1)
+
+    assert requested_row_limits == [2]
+    assert [relationship["id"] for relationship in impact.relationships] == ["edge_entry_helper"]
+    assert impact.truncated is True
+
+
+def _seed_impact_graph(repo: CodeGraphRepository) -> None:
+    """Seed a compact graph for impact traversal tests."""
+    repo.seed_graph_rows_for_test(
+        nodes=[
+            {
+                "id": "node_entry",
+                "identity_key": "entry",
+                "kind": "function",
+                "name": "entry",
+                "file_path": "pkg/sample.py",
+            },
+            {
+                "id": "node_helper",
+                "identity_key": "helper",
+                "kind": "function",
+                "name": "helper",
+                "file_path": "pkg/sample.py",
+            },
+            {
+                "id": "node_leaf",
+                "identity_key": "leaf",
+                "kind": "function",
+                "name": "leaf",
+                "file_path": "pkg/sample.py",
+            },
+            {
+                "id": "node_other",
+                "identity_key": "other",
+                "kind": "function",
+                "name": "other",
+                "file_path": "pkg/other.py",
+            },
+        ],
+        edges=[
+            {
+                "id": "edge_entry_helper",
+                "source": "node_entry",
+                "target": "node_helper",
+                "kind": "calls",
+                "file_path": "pkg/sample.py",
+                "line": 2,
+            },
+            {
+                "id": "edge_helper_leaf",
+                "source": "node_helper",
+                "target": "node_leaf",
+                "kind": "calls",
+                "file_path": "pkg/sample.py",
+                "line": 6,
+            },
+            {
+                "id": "edge_other_helper",
+                "source": "node_other",
+                "target": "node_helper",
+                "kind": "calls",
+                "file_path": "pkg/other.py",
+                "line": 3,
+            },
+        ],
+        unresolved_refs=[],
+    )

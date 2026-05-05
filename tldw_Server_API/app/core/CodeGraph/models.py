@@ -121,6 +121,27 @@ class CodeGraphNode:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def codegraph_node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
+    """Serialize a CodeGraphNode for API and repository relationship payloads."""
+    return {
+        "id": node.id,
+        "kind": node.kind,
+        "name": node.name,
+        "qualified_name": node.qualified_name,
+        "file_path": node.file_path,
+        "language": node.language,
+        "start_line": node.start_line,
+        "end_line": node.end_line,
+        "start_column": node.start_column,
+        "end_column": node.end_column,
+        "signature": node.signature,
+        "docstring": node.docstring,
+        "visibility": node.visibility,
+        "flags": list(node.flags),
+        "metadata": dict(node.metadata),
+    }
+
+
 @dataclass(frozen=True)
 class CodeGraphEdge:
     """Directed graph relationship between two indexed CodeGraph nodes."""

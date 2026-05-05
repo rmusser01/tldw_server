@@ -15,10 +15,17 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
+from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder
 from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_dependencies
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
-from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, IndexedFile, IndexRunSummary, WorkspaceResolution
+from tldw_Server_API.app.core.CodeGraph.models import (
+    CodeGraphNode,
+    IndexedFile,
+    IndexRunSummary,
+    WorkspaceResolution,
+    codegraph_node_to_dict,
+)
 from tldw_Server_API.app.core.CodeGraph.workspace import CodeGraphWorkspaceResolver, WorkspaceRootResolver
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
@@ -223,7 +230,60 @@ class CodeGraphModule(BaseModule):
         )
         callees_tool["inputSchema"]["additionalProperties"] = False
 
-        return [status_tool, index_tool, sync_tool, files_tool, search_tool, node_tool, callers_tool, callees_tool]
+        impact_tool = create_tool_definition(
+            name="codegraph.impact",
+            description="Traverse a bounded incoming or outgoing CodeGraph relationship neighborhood.",
+            parameters={
+                "properties": {
+                    "node_id": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "depth": {"type": "integer"},
+                    "direction": {"type": "string", "description": "incoming, outgoing, or both"},
+                    "limit": {"type": "integer"},
+                },
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        impact_tool["inputSchema"]["additionalProperties"] = False
+
+        context_tool = create_tool_definition(
+            name="codegraph.context",
+            description="Build bounded task-oriented CodeGraph context with related source snippets.",
+            parameters={
+                "properties": {
+                    "task": {"type": "string"},
+                    "max_nodes": {"type": "integer"},
+                    "include_code": {"type": "boolean"},
+                    "max_files": {"type": "integer"},
+                },
+                "required": ["task"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        context_tool["inputSchema"]["additionalProperties"] = False
+
+        return [
+            status_tool,
+            index_tool,
+            sync_tool,
+            files_tool,
+            search_tool,
+            node_tool,
+            callers_tool,
+            callees_tool,
+            impact_tool,
+            context_tool,
+        ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         """Validate and dispatch one CodeGraph MCP tool invocation."""
@@ -302,6 +362,27 @@ class CodeGraphModule(BaseModule):
                 args.get("limit"),
             )
 
+        if tool_name == "codegraph.impact":
+            return await asyncio.to_thread(
+                self._impact,
+                resolution,
+                args.get("node_id"),
+                args.get("symbol"),
+                str(args.get("direction") or "both"),
+                args.get("depth"),
+                args.get("limit"),
+            )
+
+        if tool_name == "codegraph.context":
+            return await asyncio.to_thread(
+                self._build_context,
+                resolution,
+                str(args["task"]),
+                args.get("max_nodes"),
+                args.get("include_code", True),
+                args.get("max_files"),
+            )
+
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -374,6 +455,32 @@ class CodeGraphModule(BaseModule):
             self._reject_unknown(arguments, allowed={"node_id", "symbol", "limit"})
             self._validate_node_selector(arguments)
             self._validate_positive_int(arguments.get("limit"), "limit")
+            return
+
+        if tool_name == "codegraph.impact":
+            self._reject_unknown(arguments, allowed={"node_id", "symbol", "depth", "direction", "limit"})
+            self._validate_node_selector(arguments)
+            direction = arguments.get("direction")
+            if direction is not None and direction not in {"incoming", "outgoing", "both"}:
+                raise ValueError("direction must be incoming, outgoing, or both")
+            self._validate_positive_int(arguments.get("depth"), "depth")
+            if arguments.get("depth") is not None and int(arguments["depth"]) > 4:
+                raise ValueError("depth must be between 1 and 4")
+            self._validate_positive_int(arguments.get("limit"), "limit")
+            return
+
+        if tool_name == "codegraph.context":
+            self._reject_unknown(arguments, allowed={"task", "max_nodes", "include_code", "max_files"})
+            task = arguments.get("task")
+            if not isinstance(task, str) or not task.strip():
+                raise ValueError("task must be a non-empty string")
+            arguments["task"] = task.strip()
+            self._validate_positive_int(arguments.get("max_nodes"), "max_nodes")
+            self._validate_positive_int(arguments.get("max_files"), "max_files")
+            include_code = arguments.get("include_code")
+            if include_code is not None and not isinstance(include_code, bool):
+                raise ValueError("include_code must be a boolean")
+            arguments["include_code"] = True if include_code is None else include_code
             return
 
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -510,7 +617,7 @@ class CodeGraphModule(BaseModule):
             "workspace_key": resolution.workspace_key,
             "index_present": True,
             "query": query,
-            "results": [_node_to_dict(row) for row in rows[:effective_limit]],
+            "results": [codegraph_node_to_dict(row) for row in rows[:effective_limit]],
             "truncated": truncated,
         }
 
@@ -526,7 +633,7 @@ class CodeGraphModule(BaseModule):
             return {"workspace_key": resolution.workspace_key, "index_present": False, "node": None}
         repository = CodeGraphRepository(resolution.index_db_path)
         node = repository.get_node(node_id) if node_id else repository.find_node_by_symbol(str(symbol))
-        node_dict = _node_to_dict(node) if node is not None else None
+        node_dict = codegraph_node_to_dict(node) if node is not None else None
         if node_dict is not None and include_code:
             node_dict["code_available"] = False
         return {
@@ -571,9 +678,110 @@ class CodeGraphModule(BaseModule):
         return {
             "workspace_key": resolution.workspace_key,
             "index_present": True,
-            "node": _node_to_dict(node),
+            "node": codegraph_node_to_dict(node),
             "relationships": rows[:effective_limit],
             "truncated": truncated,
+        }
+
+    def _impact(
+        self,
+        resolution: WorkspaceResolution,
+        node_id: str | None,
+        symbol: str | None,
+        direction: str,
+        depth: int | None,
+        limit: int | None,
+    ) -> dict[str, Any]:
+        """Traverse an indexed graph neighborhood for a node selector."""
+        effective_depth = min(max(1, int(depth or 2)), 4)
+        effective_limit = self._bounded_limit(limit)
+        if not resolution.index_db_path.exists():
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": False,
+                "root": None,
+                "nodes": [],
+                "relationships": [],
+                "depth": effective_depth,
+                "direction": direction,
+                "truncated": False,
+            }
+
+        repository = CodeGraphRepository(resolution.index_db_path)
+        node = repository.get_node(node_id) if node_id else repository.find_node_by_symbol(str(symbol))
+        if node is None:
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": True,
+                "root": None,
+                "nodes": [],
+                "relationships": [],
+                "depth": effective_depth,
+                "direction": direction,
+                "truncated": False,
+            }
+
+        impact = repository.traverse_impact(
+            node.id,
+            depth=effective_depth,
+            direction=direction,
+            limit=effective_limit,
+        )
+        return {
+            "workspace_key": resolution.workspace_key,
+            "index_present": True,
+            "root": codegraph_node_to_dict(node),
+            "nodes": [codegraph_node_to_dict(item) for item in impact.nodes],
+            "relationships": list(impact.relationships),
+            "depth": effective_depth,
+            "direction": direction,
+            "truncated": impact.truncated,
+        }
+
+    def _build_context(
+        self,
+        resolution: WorkspaceResolution,
+        task: str,
+        max_nodes: int | None,
+        include_code: bool,
+        max_files: int | None,
+    ) -> dict[str, Any]:
+        """Build bounded source context for a task string."""
+        query = _context_query(task)
+        effective_max_nodes = self._bounded_limit(max_nodes, default=8)
+        effective_max_files = self._bounded_limit(max_files, default=5)
+        if not resolution.index_db_path.exists():
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": False,
+                "task": task,
+                "query": query,
+                "nodes": [],
+                "files": [],
+                "relationships": [],
+                "truncation": _empty_truncation(self._settings.max_context_chars),
+            }
+
+        repository = CodeGraphRepository(resolution.index_db_path)
+        nodes = tuple(repository.search_nodes(query, limit=effective_max_nodes + 1)[:effective_max_nodes])
+        relationships = tuple(_relationship_neighborhood(repository, nodes, limit=self._settings.max_search_results))
+        builder = CodeGraphContextBuilder(
+            workspace_root=resolution.workspace_root,
+            max_context_chars=self._settings.max_context_chars,
+            max_file_size_bytes=self._settings.max_file_size_bytes,
+        )
+        result = builder.build(
+            task=task,
+            nodes=nodes,
+            relationships=relationships,
+            max_files=effective_max_files,
+            include_code=include_code,
+        )
+        return {
+            "workspace_key": resolution.workspace_key,
+            "index_present": True,
+            "query": query,
+            **result,
         }
 
     def _new_indexer(self) -> CodeGraphIndexer:
@@ -644,6 +852,47 @@ def _normalize_path_prefix(path: str | None) -> str | None:
     return raw.as_posix().strip("/") or None
 
 
+def _context_query(task: str) -> str:
+    """Derive the first-pass symbol search query from a task description."""
+    return task.strip()
+
+
+def _empty_truncation(max_context_chars: int) -> dict[str, Any]:
+    """Build empty source-context truncation metadata."""
+    return {
+        "max_context_chars": max_context_chars,
+        "used_chars": 0,
+        "truncated": False,
+        "skipped_files": 0,
+    }
+
+
+def _relationship_neighborhood(
+    repository: CodeGraphRepository,
+    nodes: tuple[CodeGraphNode, ...],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Collect a deduplicated one-hop relationship neighborhood for selected nodes."""
+    impact = repository.traverse_impact_many(
+        tuple(node.id for node in nodes),
+        depth=1,
+        direction="both",
+        limit=limit,
+    )
+    relationships: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for relationship in impact.relationships:
+        relationship_id = str(relationship["id"])
+        if relationship_id in seen:
+            continue
+        relationships.append(relationship)
+        seen.add(relationship_id)
+        if len(relationships) >= limit:
+            return relationships
+    return relationships
+
+
 def _indexed_file_to_dict(file: IndexedFile, *, include_metadata: bool) -> dict[str, Any]:
     """Serialize an indexed file row for MCP responses."""
     result: dict[str, Any] = {
@@ -663,27 +912,6 @@ def _indexed_file_to_dict(file: IndexedFile, *, include_metadata: bool) -> dict[
             }
         )
     return result
-
-
-def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
-    """Serialize a graph node for MCP responses."""
-    return {
-        "id": node.id,
-        "kind": node.kind,
-        "name": node.name,
-        "qualified_name": node.qualified_name,
-        "file_path": node.file_path,
-        "language": node.language,
-        "start_line": node.start_line,
-        "end_line": node.end_line,
-        "start_column": node.start_column,
-        "end_column": node.end_column,
-        "signature": node.signature,
-        "docstring": node.docstring,
-        "visibility": node.visibility,
-        "flags": list(node.flags),
-        "metadata": dict(node.metadata),
-    }
 
 
 def _index_run_to_dict(run: IndexRunSummary | None) -> dict[str, Any] | None:

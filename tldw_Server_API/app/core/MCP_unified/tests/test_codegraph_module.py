@@ -1,3 +1,5 @@
+"""Tests for the Unified MCP CodeGraph module."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,24 +8,31 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module import (
     CodeGraphModule,
+    _relationship_neighborhood,
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException, MCPProtocol, RequestContext
 
 
 class _FakeWorkspaceRootResolver:
+    """Capture workspace resolution requests and return a fixed workspace."""
+
     def __init__(self, result: dict[str, Any]) -> None:
         self.result = dict(result)
         self.calls: list[dict[str, Any]] = []
 
     async def resolve_for_context(self, **kwargs: Any) -> dict[str, Any]:
+        """Return the configured fake workspace resolution payload."""
         self.calls.append(dict(kwargs))
         return dict(self.result)
 
 
 class _CodeGraphRegistry:
+    """Minimal registry wrapper exposing one CodeGraph module to protocol tests."""
+
     def __init__(self, module: CodeGraphModule) -> None:
         self.module = module
         self._tool_names = {
@@ -35,20 +44,25 @@ class _CodeGraphRegistry:
             "codegraph.node",
             "codegraph.callers",
             "codegraph.callees",
+            "codegraph.impact",
+            "codegraph.context",
         }
 
     async def find_module_for_tool(self, tool_name: str):  # noqa: ANN001
+        """Return the CodeGraph module when the tool name belongs to it."""
         if tool_name in self._tool_names:
             return self.module
         return None
 
     def get_module_id_for_tool(self, tool_name: str) -> str | None:
+        """Return the CodeGraph module id for known CodeGraph tools."""
         if tool_name in self._tool_names:
             return self.module.name
         return None
 
 
 def _context() -> RequestContext:
+    """Build a request context with a workspace id for CodeGraph tests."""
     return RequestContext(
         request_id="req-codegraph",
         user_id="7",
@@ -58,6 +72,7 @@ def _context() -> RequestContext:
 
 
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
+    """Create a CodeGraph module with default test settings."""
     return _module_with_settings(tmp_path, workspace_root, {})
 
 
@@ -66,6 +81,7 @@ def _module_with_settings(
     workspace_root: Path,
     settings: dict[str, Any],
 ) -> CodeGraphModule:
+    """Create a CodeGraph module with overridden test settings."""
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -99,6 +115,8 @@ async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
         "codegraph.node",
         "codegraph.callers",
         "codegraph.callees",
+        "codegraph.impact",
+        "codegraph.context",
     }
     assert by_name["codegraph.status"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.files"]["metadata"]["readOnlyHint"] is True  # nosec B101
@@ -106,6 +124,8 @@ async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
     assert by_name["codegraph.node"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.callers"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.callees"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.impact"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.context"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.index"]["metadata"]["category"] == "management"  # nosec B101
     assert by_name["codegraph.sync"]["metadata"]["category"] == "management"  # nosec B101
 
@@ -119,6 +139,8 @@ async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
     assert by_name["codegraph.sync"]["metadata"]["path_argument_hints"] == []  # nosec B101
     assert by_name["codegraph.files"]["metadata"]["path_argument_hints"] == ["path"]  # nosec B101
     assert by_name["codegraph.search"]["metadata"]["path_argument_hints"] == []  # nosec B101
+    assert by_name["codegraph.impact"]["metadata"]["path_argument_hints"] == []  # nosec B101
+    assert by_name["codegraph.context"]["metadata"]["path_argument_hints"] == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -258,6 +280,250 @@ def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
         )
 
 
+def test_codegraph_impact_rejects_invalid_arguments(tmp_path: Path) -> None:
+    """Reject invalid selectors, directions, depth, and limit arguments."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    with pytest.raises(ValueError, match="unknown arguments"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "unknown": True})
+    with pytest.raises(ValueError, match="direction"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "direction": "sideways"})
+    with pytest.raises(ValueError, match="depth"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "depth": 5})
+    with pytest.raises(ValueError, match="limit"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "limit": 0})
+
+
+@pytest.mark.asyncio
+async def test_codegraph_impact_missing_index_is_read_only(tmp_path: Path) -> None:
+    """Return an empty read-only impact response when no index database exists."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    index_base = tmp_path / "indexes"
+    module = _module(tmp_path, workspace_root)
+
+    result = await module.execute_tool("codegraph.impact", {"symbol": "helper"}, context=_context())
+
+    assert result["index_present"] is False  # nosec B101
+    assert result["root"] is None  # nosec B101
+    assert result["nodes"] == []  # nosec B101
+    assert result["relationships"] == []  # nosec B101
+    assert not index_base.exists()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_impact_returns_bounded_relationship_neighborhood(tmp_path: Path) -> None:
+    """Return a bounded incoming impact neighborhood for an indexed symbol."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text(
+        """
+class Greeter:
+    def greet(self, name):
+        return helper(name)
+
+
+def helper(value):
+    return value.upper()
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    result = await module.execute_tool(
+        "codegraph.impact",
+        {"symbol": " helper ", "direction": "incoming", "depth": 1, "limit": 10},
+        context=_context(),
+    )
+
+    assert result["index_present"] is True  # nosec B101
+    assert result["root"]["qualified_name"] == "helper"  # nosec B101
+    assert result["depth"] == 1  # nosec B101
+    assert result["direction"] == "incoming"  # nosec B101
+    assert [node["qualified_name"] for node in result["nodes"]] == ["Greeter.greet", "helper"]  # nosec B101
+    assert [relationship["source"]["qualified_name"] for relationship in result["relationships"]] == [
+        "Greeter.greet"
+    ]  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+
+
+def test_codegraph_context_rejects_invalid_arguments(tmp_path: Path) -> None:
+    """Reject invalid task, bounds, include_code, and unknown context arguments."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    with pytest.raises(ValueError, match="unknown arguments"):
+        module.validate_tool_arguments("codegraph.context", {"task": "helper", "unknown": True})
+    with pytest.raises(ValueError, match="task"):
+        module.validate_tool_arguments("codegraph.context", {"task": " "})
+    with pytest.raises(ValueError, match="max_nodes"):
+        module.validate_tool_arguments("codegraph.context", {"task": "helper", "max_nodes": 0})
+    with pytest.raises(ValueError, match="max_files"):
+        module.validate_tool_arguments("codegraph.context", {"task": "helper", "max_files": 0})
+    with pytest.raises(ValueError, match="include_code"):
+        module.validate_tool_arguments("codegraph.context", {"task": "helper", "include_code": "yes"})
+
+
+def test_relationship_neighborhood_uses_repository_batch_traversal() -> None:
+    """Collect context relationships with one repository batch traversal call."""
+    node = CodeGraphNode(
+        id="node_helper",
+        identity_key="helper",
+        kind="function",
+        name="helper",
+        qualified_name="helper",
+        file_path="app.py",
+        language="python",
+    )
+    relationship = {
+        "id": "edge_call",
+        "source": {"id": "node_caller", "qualified_name": "caller"},
+        "target": {"id": "node_helper", "qualified_name": "helper"},
+    }
+
+    class _FakeRepository:
+        """Record impact traversal calls made by relationship-neighborhood helper."""
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[tuple[str, ...], int, str, int]] = []
+
+        def traverse_impact_many(
+            self,
+            node_ids: tuple[str, ...],
+            *,
+            depth: int,
+            direction: str,
+            limit: int,
+        ):  # noqa: ANN202
+            """Return one fake impact relationship and record traversal arguments."""
+            self.calls.append((node_ids, depth, direction, limit))
+            return type("Impact", (), {"relationships": (relationship,)})()
+
+        def traverse_impact(self, *_args, **_kwargs):  # noqa: ANN202
+            """Fail if legacy single-node traversal is used by context assembly."""
+            raise AssertionError("relationship neighborhood should use batch traversal")
+
+    repository = _FakeRepository()
+
+    result = _relationship_neighborhood(repository, (node,), limit=10)  # type: ignore[arg-type]
+
+    assert result == [relationship]  # nosec B101
+    assert repository.calls == [(("node_helper",), 1, "both", 10)]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_context_missing_index_is_read_only(tmp_path: Path) -> None:
+    """Return an empty read-only context response when no index database exists."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    index_base = tmp_path / "indexes"
+    module = _module(tmp_path, workspace_root)
+
+    result = await module.execute_tool("codegraph.context", {"task": "helper"}, context=_context())
+
+    assert result["index_present"] is False  # nosec B101
+    assert result["nodes"] == []  # nosec B101
+    assert result["files"] == []  # nosec B101
+    assert result["relationships"] == []  # nosec B101
+    assert not index_base.exists()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_context_returns_bounded_source_context(tmp_path: Path) -> None:
+    """Build bounded context with related nodes, relationships, and source snippets."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text(
+        """
+class Greeter:
+    def greet(self, name):
+        return helper(name)
+
+
+def helper(value):
+    return value.upper()
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    result = await module.execute_tool(
+        "codegraph.context",
+        {"task": " helper ", "max_nodes": 5, "max_files": 2, "include_code": True},
+        context=_context(),
+    )
+
+    assert result["index_present"] is True  # nosec B101
+    assert result["task"] == "helper"  # nosec B101
+    assert result["query"] == "helper"  # nosec B101
+    assert [node["qualified_name"] for node in result["nodes"]] == ["helper"]  # nosec B101
+    assert [relationship["source"]["qualified_name"] for relationship in result["relationships"]] == [
+        "Greeter.greet"
+    ]  # nosec B101
+    assert [file_context["path"] for file_context in result["files"]] == ["app.py"]  # nosec B101
+    assert "def helper" in result["files"][0]["snippets"][0]["text"]  # nosec B101
+    assert result["truncation"]["truncated"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_context_treats_null_include_code_as_default_true(tmp_path: Path) -> None:
+    """Treat JSON null include_code as the default source-including context mode."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    result = await module.execute_tool(
+        "codegraph.context",
+        {"task": "helper", "include_code": None},
+        context=_context(),
+    )
+
+    assert "def helper" in result["files"][0]["snippets"][0]["text"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_context_can_return_metadata_without_source_text(tmp_path: Path) -> None:
+    """Return file metadata without source snippets when include_code is false."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    result = await module.execute_tool(
+        "codegraph.context",
+        {"task": "helper", "include_code": False},
+        context=_context(),
+    )
+
+    assert result["files"][0]["path"] == "app.py"  # nosec B101
+    assert result["files"][0]["snippets"] == []  # nosec B101
+    assert result["truncation"]["used_chars"] == 0  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_codegraph_offloads_blocking_repository_work(
     tmp_path: Path,
@@ -279,8 +545,11 @@ async def test_codegraph_offloads_blocking_repository_work(
     await module.execute_tool("codegraph.files", {}, context=_context())
     await module.execute_tool("codegraph.search", {"query": "app"}, context=_context())
     await module.execute_tool("codegraph.sync", {"mode": "foreground"}, context=_context())
+    await module.execute_tool("codegraph.impact", {"symbol": "app"}, context=_context())
+    await module.execute_tool("codegraph.context", {"task": "app"}, context=_context())
 
-    assert len(offloaded) >= 4  # nosec B101
+    assert "_impact" in offloaded  # nosec B101
+    assert "_build_context" in offloaded  # nosec B101
 
 
 @pytest.mark.asyncio
