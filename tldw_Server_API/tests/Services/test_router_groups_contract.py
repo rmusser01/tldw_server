@@ -5343,7 +5343,7 @@ def test_iter_minimal_optional_router_specs_defers_kanban_attr_lookup(
         assert spec.route_key == "kanban"
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (Exception,)
+        assert spec.skip_exceptions == (ImportError, AttributeError)
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -5356,10 +5356,10 @@ def test_iter_minimal_optional_router_specs_defers_kanban_attr_lookup(
     }
 
 
-def test_iter_minimal_optional_router_specs_skips_kanban_runtime_import_failures(
+def test_iter_minimal_optional_router_specs_skips_kanban_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal Kanban specs preserve broad import failure skipping."""
+    """Verify minimal Kanban specs skip missing optional router imports."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -5389,7 +5389,7 @@ def test_iter_minimal_optional_router_specs_skips_kanban_runtime_import_failures
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
         """Crash only the selected Kanban router imports at registration."""
         if module_name in kanban_modules:
-            raise RuntimeError(f"{module_name} exploded during import")
+            raise ImportError(f"{module_name} missing during import")
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -5403,9 +5403,40 @@ def test_iter_minimal_optional_router_specs_skips_kanban_runtime_import_failures
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
         f"Skipping {name} router in minimal test app: "
-        f"tldw_Server_API.app.api.v1.endpoints.kanban.{name} exploded during import"
+        f"tldw_Server_API.app.api.v1.endpoints.kanban.{name} missing during import"
         for name in kanban_module_suffixes
     ]
+
+
+def test_iter_minimal_optional_router_specs_propagates_kanban_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal Kanban runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    module_name = f"{KANBAN_ROUTER_MODULE_PREFIX}kanban_boards"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "kanban_boards")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected Kanban router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="kanban_boards exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_experience_attr_lookup(

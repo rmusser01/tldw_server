@@ -611,7 +611,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
                 tags=("kanban",),
                 route_key="kanban",
                 skip_context=minimal_skip_context,
-                skip_exceptions=(Exception,),
+                skip_exceptions=(ImportError, AttributeError),
             ),
         )
 
