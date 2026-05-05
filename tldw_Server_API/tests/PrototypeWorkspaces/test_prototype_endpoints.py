@@ -28,7 +28,12 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _seed_workspace(services: SimpleNamespace, *, title: str = "Sales dashboard") -> tuple[dict, dict]:
+def _seed_workspace(
+    services: SimpleNamespace,
+    *,
+    title: str = "Sales dashboard",
+    designated_promoter_ids: list[int] | None = None,
+) -> tuple[dict, dict]:
     workspace = _run(
         services.repo.create_workspace(
             owner_user_id=1,
@@ -39,6 +44,7 @@ def _seed_workspace(services: SimpleNamespace, *, title: str = "Sales dashboard"
                 "owner_profile": "owner_collab",
                 "external_collaborator_profile": "locked_collab",
             },
+            designated_promoter_ids=designated_promoter_ids,
         )
     )
     seed_snapshot = _run(
@@ -397,6 +403,78 @@ class TestPrototypeWorkspaceEndpoints:
         body = review.json()
         assert body["status"] == "promoted"
         assert body["preview_handle"]
+        assert body["canonical_snapshot_id"] == candidate_snapshot["snapshot_id"]
+
+    def test_designated_promoter_can_review_promotion_request(
+        self,
+        test_app: FastAPI,
+        test_services: SimpleNamespace,
+    ) -> None:
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+
+        async def _fake_promoter() -> User:
+            return User(
+                id=2,
+                username="promoter",
+                email="promoter@test.com",
+                roles=[],
+                permissions=["prototype.promote"],
+            )
+
+        test_app.dependency_overrides[get_request_user] = _fake_promoter
+        client = TestClient(test_app)
+
+        workspace, _ = _seed_workspace(
+            test_services,
+            title="Designated promotion review prototype",
+            designated_promoter_ids=[2],
+        )
+        access_context = _seed_external_access(
+            test_services,
+            prototype_workspace_id=workspace["id"],
+            share_link_id=62,
+        )
+        session_result = _run(
+            test_services.service.create_or_reuse_branch_session(
+                prototype_workspace_id=workspace["id"],
+                actor_type="external_collaborator",
+                actor_shared_actor_id=access_context.shared_actor_id,
+                request_nonce="req_designated_review",
+                share_link_id=62,
+            )
+        )
+        session = session_result["session"]
+        candidate_snapshot = _run(
+            test_services.repo.create_snapshot(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id="psnap_designated_review_candidate",
+                created_by_shared_actor_id=access_context.shared_actor_id,
+                parent_snapshot_id=session["base_snapshot_id"],
+                created_from_session_id=session["id"],
+                storage_ref="prototype://designated-review-candidate",
+                prompt_summary="Looks good to designated promoter",
+            )
+        )
+        promotion_request = _run(
+            test_services.repo.create_promotion_request(
+                prototype_workspace_id=workspace["id"],
+                prototype_session_id=session["id"],
+                candidate_snapshot_id=candidate_snapshot["snapshot_id"],
+                requested_by_shared_actor_id=access_context.shared_actor_id,
+            )
+        )
+
+        review = client.post(
+            f"/api/v1/prototype-promotions/{promotion_request['id']}/review",
+            json={
+                "decision": "approve",
+                "review_notes": "Looks good from designated promoter",
+            },
+        )
+
+        assert review.status_code == 200
+        body = review.json()
+        assert body["status"] == "promoted"
         assert body["canonical_snapshot_id"] == candidate_snapshot["snapshot_id"]
 
     def test_preview_grant_renewal_returns_updated_expiry(

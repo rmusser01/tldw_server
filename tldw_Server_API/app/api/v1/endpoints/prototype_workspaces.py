@@ -358,8 +358,12 @@ async def review_promotion_request(
     if not workspace:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
     reviewer_user_id = _coerce_user_id(user)
-    if reviewer_user_id != int(workspace["owner_user_id"]):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can review promotion requests")
+    service = await _maybe_await(_get_service())
+    if not service._is_promoter(workspace, reviewer_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Reviewer does not have promotion permissions",
+        )
 
     if body.decision == "reject":
         updated = await repo.update_promotion_request(
@@ -378,7 +382,6 @@ async def review_promotion_request(
             details={"review_notes": updated.get("review_notes")},
         )
 
-    service = await _maybe_await(_get_service())
     result = await service.promote_candidate(
         prototype_workspace_id=str(promotion_request["prototype_workspace_id"]),
         candidate_snapshot_id=str(promotion_request["candidate_snapshot_id"]),
