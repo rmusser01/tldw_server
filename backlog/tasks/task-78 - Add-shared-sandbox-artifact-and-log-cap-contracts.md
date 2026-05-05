@@ -38,6 +38,8 @@ Verification: focused sandbox suite passed with 60 tests: test_sandbox_limits.py
 Opened PR #1319: https://github.com/rmusser01/tldw_server/pull/1319
 
 PR review fix pass: added docstrings/type annotations requested by Qodo; applied exclusions before artifact quota accounting; preserved artifact counter schema on collection errors; moved stream truncation publish/metrics outside the hub lock; used one Lima log cap for replay and accounting; cleared artifact counters for canceled seatbelt/worktree runs. Left the VZ Linux helper-unavailable/protocol-mismatch fallback suggestion unchanged because existing tests intentionally preserve session control rows when host truth is unavailable or untrusted. Verification: targeted red tests failed before fixes and passed after fixes; affected sandbox suite passed 88 tests; py_compile passed; Ruff passed; Bandit JSON at /tmp/bandit_sandbox_artifact_log_cap_review_fixes.json reported existing low-severity findings only with 0 findings on added lines; git diff --check passed.
+
+Additional VZ review follow-up: accepted the session-reuse fallback finding after explicit re-review. VZ Linux now treats helper status-probe unavailable/protocol failures and absent status replies as unhealthy candidate VMs, clears stale session control, and attempts fresh VM provisioning. Regression tests were updated from the older fail/preserve-control expectation and now cover unavailable, protocol mismatch, absent status, and unhealthy status fallback paths.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

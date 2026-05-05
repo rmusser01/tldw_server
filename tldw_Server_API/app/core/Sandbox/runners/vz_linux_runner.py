@@ -407,9 +407,11 @@ class VZLinuxRunner(VZBaseRunner):
                 and str(session_control.get("vm_id") or "").strip()
             ):
                 candidate_vm_id = str(session_control.get("vm_id") or "").strip()
-                # Host truth errors are allowed to bubble up; explicit admin repair owns row cleanup.
-                status = helper.get_vm_status(candidate_vm_id)
-                if bool(status.healthy):
+                try:
+                    status = helper.get_vm_status(candidate_vm_id)
+                except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError):
+                    status = None
+                if bool(getattr(status, "healthy", False)):
                     vm_id = candidate_vm_id
                     template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
                     should_terminate_vm = False
