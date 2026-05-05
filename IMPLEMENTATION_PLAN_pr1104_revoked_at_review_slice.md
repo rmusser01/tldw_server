@@ -14,7 +14,7 @@
 **Goal**: Run focused backend tests, Bandit on touched backend code, diff checks, then push/reply to the relevant PR threads.
 **Success Criteria**: Local verification passes and the addressed PR #1104 review threads have replies.
 **Tests**: Focused pytest, Ruff PLE1205, Bandit, `git diff --check`.
-**Status**: In Progress
+**Status**: Complete
 
 ### Verification
 - Red: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_service_authorization.py -q` failed with all three `revoked_at`-only cases not raising.
@@ -23,3 +23,4 @@
 - Ruff: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check --select PLE1205 tldw_Server_API/app/main.py` dropped from 27 to 26 existing findings after removing the reviewed prototype-workspaces warning; remaining findings are unrelated pre-existing logger calls.
 - Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Prototype_Workspaces/service.py tldw_Server_API/app/main.py -f json -o /tmp/bandit_pr1104_revoked_at_slice.json` reported no results and no errors.
 - Diff: `git diff --check` passed.
+- Published: committed as `5355b4857`, pushed to PR #1104, replied to and resolved review threads `PRRT_kwDOL1aGf859uo71` and `PRRT_kwDOL1aGf859uo8D`.

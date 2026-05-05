@@ -9,6 +9,7 @@ creating share links (tokens), and admin management.
 """
 from __future__ import annotations
 
+import inspect
 import threading
 import time
 from collections import defaultdict
@@ -57,13 +58,20 @@ def _get_repo():
     """Lazily construct the SharedWorkspaceRepo from the AuthNZ DB pool."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.shared_workspace_repo import SharedWorkspaceRepo
-    pool = get_db_pool()
-    return SharedWorkspaceRepo(db_pool=pool)
+
+    async def _build():
+        return SharedWorkspaceRepo(db_pool=await get_db_pool())
+
+    return _build()
 
 
 def _get_token_service():
     from tldw_Server_API.app.core.Sharing.share_token_service import ShareTokenService
-    return ShareTokenService(_get_repo())
+
+    async def _build():
+        return ShareTokenService(await _maybe_await(_get_repo()))
+
+    return _build()
 
 
 def _get_prototype_repo():
@@ -72,13 +80,25 @@ def _get_prototype_repo():
         PrototypeWorkspacesRepo,
     )
 
-    return PrototypeWorkspacesRepo(db_pool=get_db_pool())
+    async def _build():
+        return PrototypeWorkspacesRepo(db_pool=await get_db_pool())
+
+    return _build()
 
 
 def _get_prototype_access_service():
     from tldw_Server_API.app.core.Prototype_Workspaces.access import PrototypeAccessService
 
-    return PrototypeAccessService(_get_prototype_repo())
+    async def _build():
+        return PrototypeAccessService(await _maybe_await(_get_prototype_repo()))
+
+    return _build()
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 _cached_audit_service: "ShareAuditService | None" = None  # noqa: F821
@@ -261,7 +281,7 @@ async def share_workspace(
     # [CRITICAL FIX #3] Verify the user owns this workspace
     await _verify_workspace_ownership(workspace_id, user)
 
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
     try:
         share = await repo.create_share(
@@ -309,7 +329,7 @@ async def list_workspace_shares(
     include_revoked: bool = Query(False),
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     shares = await repo.list_shares_for_workspace(
         workspace_id, user.id, include_revoked=include_revoked
     )
@@ -328,7 +348,7 @@ async def update_share(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     existing = await repo.get_share(share_id)
@@ -367,7 +387,7 @@ async def revoke_share(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     existing = await repo.get_share(share_id)
@@ -404,7 +424,7 @@ async def revoke_share(
 async def shared_with_me(
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
 
     # Gather shares from all teams/orgs the user belongs to
     items: list[SharedWithMeItem] = []
@@ -475,7 +495,7 @@ async def get_shared_workspace(
     share_id: int,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     share = await repo.get_share(share_id)
     if not share or share.get("is_revoked"):
         raise HTTPException(status_code=404, detail="Share not found or revoked")
@@ -499,7 +519,7 @@ async def clone_shared_workspace(
     background_tasks: BackgroundTasks,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     share = await repo.get_share(share_id)
@@ -599,7 +619,7 @@ async def list_shared_workspace_sources(
     share_id: int,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     share = await repo.get_share(share_id)
     if not share or share.get("is_revoked"):
         raise HTTPException(status_code=404, detail="Share not found or revoked")
@@ -635,7 +655,7 @@ async def get_shared_workspace_media(
     media_id: int,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     share = await repo.get_share(share_id)
     if not share or share.get("is_revoked"):
         raise HTTPException(status_code=404, detail="Share not found or revoked")
@@ -683,7 +703,7 @@ async def chat_with_shared_workspace(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     share = await repo.get_share(share_id)
@@ -752,7 +772,7 @@ async def create_token(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
 
     result = await svc.generate_token(
@@ -787,7 +807,7 @@ async def create_token(
 async def list_tokens(
     user: User = Depends(get_request_user),
 ):
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     tokens = await svc.list_tokens(user.id)
     return TokenListResponse(tokens=[TokenResponse(**t) for t in tokens], total=len(tokens))
 
@@ -802,7 +822,7 @@ async def revoke_token(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     token = await repo.get_token(token_id)
@@ -811,7 +831,7 @@ async def revoke_token(
     if token["owner_user_id"] != user.id:
         raise HTTPException(status_code=403, detail="Not the token owner")
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     await svc.revoke_token(token_id)
 
     await audit.log(
@@ -843,7 +863,7 @@ async def public_preview(
     # [CRITICAL FIX #1] Rate limit public endpoints (10 req/min per IP)
     _check_public_rate_limit(request)
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     validated = await svc.validate_token(token)
     # Return identical 404 for not-found / expired / revoked to prevent enumeration
     if not validated:
@@ -869,7 +889,7 @@ async def public_verify_password(
     # [CRITICAL FIX #1] Rate limit public endpoints (10 req/min per IP)
     _check_public_rate_limit(request)
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
 
     validated = await svc.validate_token(token)
@@ -912,7 +932,7 @@ async def public_prototype_session_exchange(
         PrototypeAccessError,
     )
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
     validated = await svc.validate_token(token, allow_exhausted=True)
     if not validated:
@@ -927,7 +947,7 @@ async def public_prototype_session_exchange(
         )
 
     resume_cookie_value = request.cookies.get(PROTOTYPE_SHARED_ACTOR_COOKIE)
-    access_service = _get_prototype_access_service()
+    access_service = await _maybe_await(_get_prototype_access_service())
     can_resume_without_password = await access_service.can_resume_external_collaborator(
         prototype_workspace_id=prototype_workspace_id,
         share_link_id=int(validated["id"]),
@@ -1040,7 +1060,7 @@ async def public_import(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
 
     validated = await svc.validate_token(token)
@@ -1099,7 +1119,7 @@ async def admin_list_shares(
     include_revoked: bool = Query(False),
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     shares = await repo.list_all_shares(limit=limit, offset=offset, include_revoked=include_revoked)
     total = await repo.count_all_shares(include_revoked=include_revoked)
     pagination = build_offset_pagination_meta(
@@ -1126,7 +1146,7 @@ async def admin_update_config(
     body: UpdateConfigRequest,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     for key, value in body.config.items():
         await repo.set_config(
             key, value,

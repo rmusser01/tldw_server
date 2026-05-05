@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import builtins
 import asyncio
+import inspect
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -12,10 +13,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import Field
 
+from tldw_Server_API.app.api.v1.endpoints import sharing as sharing_endpoints
 from tldw_Server_API.app.api.v1.endpoints.sharing import router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 pytestmark = pytest.mark.integration
+
+
+async def _resolve_factory(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 class _TestUser(User):
@@ -317,6 +325,44 @@ async def test_admin_audit_log_includes_canonical_offset_pagination(monkeypatch)
     assert response.pagination.total == 3
     assert response.pagination.has_more is True
     assert response.pagination.next_offset == 2
+
+
+@pytest.mark.asyncio
+async def test_lazy_shared_repo_awaits_db_pool(monkeypatch):
+    fake_pool = object()
+
+    async def fake_get_db_pool():
+        return fake_pool
+
+    from tldw_Server_API.app.core.AuthNZ import database
+
+    monkeypatch.setattr(database, "get_db_pool", fake_get_db_pool)
+
+    repo = await _resolve_factory(sharing_endpoints._get_repo())
+    db_pool = repo.db_pool
+    if inspect.isawaitable(db_pool):
+        await db_pool
+
+    assert db_pool is fake_pool
+
+
+@pytest.mark.asyncio
+async def test_lazy_prototype_repo_awaits_db_pool(monkeypatch):
+    fake_pool = object()
+
+    async def fake_get_db_pool():
+        return fake_pool
+
+    from tldw_Server_API.app.core.AuthNZ import database
+
+    monkeypatch.setattr(database, "get_db_pool", fake_get_db_pool)
+
+    repo = await _resolve_factory(sharing_endpoints._get_prototype_repo())
+    db_pool = repo.db_pool
+    if inspect.isawaitable(db_pool):
+        await db_pool
+
+    assert db_pool is fake_pool
 
 
 @pytest.fixture
