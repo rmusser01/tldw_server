@@ -126,38 +126,30 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, llm_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.vector_stores_openai import router as vector_stores_router
-
-        specs.append(RouterSpec(
-            router=vector_stores_router,
+    for embedding_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vector_stores_openai",
+            log_name="vector-stores",
             prefix=f"{API_V1_PREFIX}",
             tags=("vector-stores",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping vector-stores router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import router as embeddings_router
-
-        specs.append(RouterSpec(
-            router=embeddings_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced",
+            log_name="embeddings",
             prefix=f"{API_V1_PREFIX}",
             tags=("embeddings",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping embeddings router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import router as media_embeddings_router
-
-        specs.append(RouterSpec(
-            router=media_embeddings_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media_embeddings",
+            log_name="media_embeddings",
             prefix=f"{API_V1_PREFIX}",
             tags=("media-embeddings",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping media_embeddings router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, embedding_spec)
 
     if audio_imports_enabled_for_runtime():
         def _audio_router_factory():

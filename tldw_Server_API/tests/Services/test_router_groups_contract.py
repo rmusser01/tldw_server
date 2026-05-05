@@ -3688,7 +3688,7 @@ def test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup
         "tldw_Server_API.app.api.v1.endpoints.vector_stores_openai",
         "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced",
         "tldw_Server_API.app.api.v1.endpoints.media_embeddings",
-    }.issubset(set(fake_unrelated_eager_imports))
+    }.isdisjoint(fake_unrelated_eager_imports)
 
     selected_specs = {
         spec.name: spec
@@ -3814,6 +3814,157 @@ def test_iter_minimal_optional_router_specs_defers_rag_attr_lookup(
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
         """Track lazy module imports for selected minimal RAG routers."""
+        if module_name in definitions_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+    fake_main = ModuleType("tldw_Server_API.app.main")
+    fake_main.app = FastAPI()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.main", fake_main)
+
+    specs = list(iter_minimal_optional_router_specs())
+    assert access_count == {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {
+            str(definition["expected_name"])
+            for definition in router_definitions
+        }
+    }
+    assert set(selected_specs) == {
+        str(definition["expected_name"])
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        spec = selected_specs[str(definition["expected_name"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == ""
+        assert spec.skip_context == "in minimal test app"
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
+    assert access_count == {
+        f"{definition['module_name']}.router": 1
+        for definition in router_definitions
+    }
+
+
+def test_iter_minimal_optional_router_specs_defers_embedding_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal vector and embedding specs keep router attr lookup lazy."""
+    import builtins
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.vector_stores_openai",
+            "expected_name": "vector-stores",
+            "path": "/vector_stores",
+            "prefix": "/api/v1",
+            "tags": ("vector-stores",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced",
+            "expected_name": "embeddings",
+            "path": "/embeddings",
+            "prefix": "/api/v1",
+            "tags": ("embeddings",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.media_embeddings",
+            "expected_name": "media_embeddings",
+            "path": "/media_embeddings",
+            "prefix": "/api/v1",
+            "tags": ("media-embeddings",),
+        },
+    )
+    definitions_by_module = {
+        str(definition["module_name"]): definition
+        for definition in router_definitions
+    }
+    access_count = {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for module_name, definition in definitions_by_module.items():
+        fake_module = ModuleType(module_name)
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake minimal embedding router."""
+            return {"status": "ok"}
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[f"{module_name}.router"] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    endpoints_package = "tldw_Server_API.app.api.v1.endpoints."
+    real_import = builtins.__import__
+
+    def _fake_endpoint_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        """Return fake routers for unrelated eager minimal optional imports."""
+        if (
+            level == 0
+            and name.startswith(endpoints_package)
+            and name not in definitions_by_module
+        ):
+            attrs = tuple(attr for attr in fromlist if attr != "*") or ("router",)
+            for attr_name in attrs:
+                _install_fake_router_module(
+                    monkeypatch,
+                    name,
+                    path="/minimal-unrelated-embedding-fake",
+                    attr_name=attr_name,
+                )
+            return sys.modules[name]
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_endpoint_import)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected minimal embedding routers."""
         if module_name in definitions_by_module:
             import_calls.append(module_name)
         return real_import_module(module_name, package)
