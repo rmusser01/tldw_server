@@ -4,7 +4,7 @@ title: Phase 2.2 minimal persona/notes router skip exception cleanup AO
 status: Done
 assignee: []
 created_date: '2026-05-05 23:10'
-updated_date: '2026-05-05 23:13'
+updated_date: '2026-05-05 23:15'
 labels:
   - phase2.2
   - router-cleanup
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1116'
   - 'https://github.com/rmusser01/tldw_server/pull/1329'
+  - 'https://github.com/rmusser01/tldw_server/pull/1331'
 priority: medium
 ---
 
@@ -42,6 +43,8 @@ Verification: full test_router_groups_contract.py passed with 95 passed; test_ma
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Narrowed minimal-test persona, archetype, and notes ImportedRouterSpec skip_exceptions from broad Exception to ImportError and AttributeError. Added focused contract coverage for lazy attr lookup metadata, missing optional import skipping, and runtime import error propagation while preserving prefixes, tags, route keys, and default stability.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1331
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
