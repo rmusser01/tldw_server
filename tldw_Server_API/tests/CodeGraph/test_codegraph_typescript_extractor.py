@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.extractors.typescript_extractor import (
     TypeScriptTreeSitterExtractor,
+)
+
+pytestmark = pytest.mark.skipif(
+    not (load_parser("typescript").available and load_parser("tsx").available),
+    reason="tree-sitter-typescript parser is not available",
 )
 
 

@@ -82,6 +82,16 @@ def _require_jvm_parsers() -> None:
         pytest.skip("tree-sitter-java/kotlin parsers are not available")
 
 
+def _require_typescript_parsers() -> None:
+    if not (load_parser("typescript").available and load_parser("tsx").available):
+        pytest.skip("tree-sitter-typescript parser is not available")
+
+
+def _require_csharp_parser() -> None:
+    if not load_parser("csharp").available:
+        pytest.skip("tree-sitter-c-sharp parser is not available")
+
+
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
     """Create a CodeGraph module with default test settings."""
     return _module_with_settings(tmp_path, workspace_root, {})
@@ -255,6 +265,7 @@ def helper(value):
 
 @pytest.mark.asyncio
 async def test_codegraph_search_finds_typescript_component_after_index(tmp_path: Path) -> None:
+    _require_typescript_parsers()
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "Card.tsx").write_text(
@@ -346,6 +357,7 @@ class Greeter {
 
 @pytest.mark.asyncio
 async def test_codegraph_search_finds_csharp_symbols_after_index(tmp_path: Path) -> None:
+    _require_csharp_parser()
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "Greeter.cs").write_text(

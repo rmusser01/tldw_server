@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.CodeGraph.extractors import js_ts_imports
 from tldw_Server_API.app.core.CodeGraph.extractors.javascript_extractor import (
     JavaScriptTreeSitterExtractor,
 )
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult
+
+pytestmark = pytest.mark.skipif(
+    not load_parser("javascript").available,
+    reason="tree-sitter-javascript parser is not available",
+)
 
 
 def test_javascript_extractor_records_module_symbols_imports_and_calls(tmp_path: Path) -> None:

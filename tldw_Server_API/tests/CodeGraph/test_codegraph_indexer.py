@@ -26,6 +26,20 @@ def _require_jvm_parsers() -> None:
         pytest.skip("tree-sitter-java/kotlin parsers are not available")
 
 
+def _require_js_ts_parsers() -> None:
+    if not (
+        load_parser("javascript").available
+        and load_parser("typescript").available
+        and load_parser("tsx").available
+    ):
+        pytest.skip("tree-sitter-javascript/typescript parsers are not available")
+
+
+def _require_csharp_parser() -> None:
+    if not load_parser("csharp").available:
+        pytest.skip("tree-sitter-c-sharp parser is not available")
+
+
 def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -94,6 +108,7 @@ def helper(value):
 
 
 def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path: Path) -> None:
+    _require_js_ts_parsers()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
@@ -182,6 +197,7 @@ class Greeter {
 
 
 def test_indexer_extracts_csharp_graph_rows_during_index(tmp_path: Path) -> None:
+    _require_csharp_parser()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "Greeter.cs").write_text(
