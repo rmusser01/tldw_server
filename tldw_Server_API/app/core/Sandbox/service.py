@@ -64,6 +64,7 @@ from .runtime_capabilities import (
     runtime_implementation_state,
     runtime_network_policy_effective_support,
     runtime_network_policy_metadata,
+    runtime_session_contract_metadata,
 )
 from .snapshots import SnapshotManager
 from .store import get_store_mode
@@ -891,6 +892,7 @@ class SandboxService:
             reasons = list((preflight.reasons if preflight else []) or [])
             isolation = runtime_isolation_metadata(runtime)
             network_contract = runtime_network_policy_metadata(runtime)
+            session_contract = runtime_session_contract_metadata(runtime)
             effective_network_support = runtime_network_policy_effective_support(
                 runtime,
                 enforcement_ready,
@@ -909,6 +911,7 @@ class SandboxService:
                 "untrusted_eligible": isolation.untrusted_eligible,
                 "isolation_warnings": runtime_isolation_warnings(runtime),
                 "network_policy_contract": network_contract.as_dict(),
+                "session_contract": session_contract.as_dict(),
             }
 
         docker_fields = _preflight_fields(RuntimeType.docker, docker_preflight)

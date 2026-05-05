@@ -42,6 +42,12 @@ RuntimeNetworkPolicyReadinessSource = Literal[
     "config",
     "not_applicable",
 ]
+RuntimeSessionReuseModel = Literal[
+    "none",
+    "workspace_only",
+    "warm_vm",
+    "scaffold",
+]
 RuntimeReasonCode = Literal[
     "runtime_unavailable",
     "unsupported_os",
@@ -110,6 +116,26 @@ class RuntimeNetworkPolicyMetadata:
         }
 
 
+@dataclass(frozen=True)
+class RuntimeSessionContractMetadata:
+    """Machine-readable session semantics for runtime discovery."""
+
+    support_state: RuntimeImplementationState
+    reuse_model: RuntimeSessionReuseModel
+    requires_live_health_check: bool
+    recovery_state: RuntimeImplementationState
+    repair_state: RuntimeImplementationState
+
+    def as_dict(self) -> dict[str, str | bool]:
+        return {
+            "support_state": self.support_state,
+            "reuse_model": self.reuse_model,
+            "requires_live_health_check": self.requires_live_health_check,
+            "recovery_state": self.recovery_state,
+            "repair_state": self.repair_state,
+        }
+
+
 RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
     RuntimeType.docker: RuntimeIsolationMetadata(
         boundary_class="container",
@@ -145,6 +171,62 @@ RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
         boundary_class="host_local",
         vm_grade_isolation=False,
         untrusted_eligible=False,
+    ),
+}
+
+
+RUNTIME_SESSION_CONTRACT_METADATA: Mapping[
+    RuntimeType,
+    RuntimeSessionContractMetadata,
+] = {
+    RuntimeType.docker: RuntimeSessionContractMetadata(
+        support_state="supported",
+        reuse_model="workspace_only",
+        requires_live_health_check=False,
+        recovery_state="unsupported",
+        repair_state="unsupported",
+    ),
+    RuntimeType.firecracker: RuntimeSessionContractMetadata(
+        support_state="scaffold",
+        reuse_model="scaffold",
+        requires_live_health_check=False,
+        recovery_state="unsupported",
+        repair_state="unsupported",
+    ),
+    RuntimeType.lima: RuntimeSessionContractMetadata(
+        support_state="scaffold",
+        reuse_model="scaffold",
+        requires_live_health_check=False,
+        recovery_state="unsupported",
+        repair_state="unsupported",
+    ),
+    RuntimeType.vz_linux: RuntimeSessionContractMetadata(
+        support_state="host_gated",
+        reuse_model="warm_vm",
+        requires_live_health_check=True,
+        recovery_state="host_gated",
+        repair_state="host_gated",
+    ),
+    RuntimeType.vz_macos: RuntimeSessionContractMetadata(
+        support_state="scaffold",
+        reuse_model="scaffold",
+        requires_live_health_check=False,
+        recovery_state="scaffold",
+        repair_state="scaffold",
+    ),
+    RuntimeType.seatbelt: RuntimeSessionContractMetadata(
+        support_state="scaffold",
+        reuse_model="workspace_only",
+        requires_live_health_check=False,
+        recovery_state="unsupported",
+        repair_state="unsupported",
+    ),
+    RuntimeType.worktree: RuntimeSessionContractMetadata(
+        support_state="scaffold",
+        reuse_model="workspace_only",
+        requires_live_health_check=False,
+        recovery_state="unsupported",
+        repair_state="unsupported",
     ),
 }
 
@@ -264,7 +346,20 @@ def _validate_runtime_network_policy_metadata_map() -> None:
         )
 
 
+def _validate_runtime_session_contract_metadata_map() -> None:
+    expected = set(RuntimeType)
+    actual = set(RUNTIME_SESSION_CONTRACT_METADATA)
+    missing = sorted(runtime.value for runtime in expected - actual)
+    extra = sorted(str(runtime) for runtime in actual - expected)
+    if missing or extra:
+        raise RuntimeError(
+            "Runtime session contract metadata map is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+
+
 _validate_runtime_isolation_metadata_map()
+_validate_runtime_session_contract_metadata_map()
 _validate_runtime_network_policy_metadata_map()
 
 
@@ -356,6 +451,25 @@ def runtime_network_policy_metadata(
     metadata = RUNTIME_NETWORK_POLICY_METADATA.get(runtime_key)
     if metadata is None:
         raise ValueError(f"No network policy metadata configured for runtime {runtime!r}")
+    return metadata
+
+
+def runtime_session_contract_metadata(
+    runtime: RuntimeType | str,
+) -> RuntimeSessionContractMetadata:
+    """Return stable session semantics metadata, independent of host availability."""
+    try:
+        runtime_key = runtime if isinstance(runtime, RuntimeType) else RuntimeType(runtime)
+    except ValueError as exc:
+        raise ValueError(
+            f"No session contract metadata configured for runtime {runtime!r}"
+        ) from exc
+
+    metadata = RUNTIME_SESSION_CONTRACT_METADATA.get(runtime_key)
+    if metadata is None:
+        raise ValueError(
+            f"No session contract metadata configured for runtime {runtime!r}"
+        )
     return metadata
 
 

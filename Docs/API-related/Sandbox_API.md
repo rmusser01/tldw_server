@@ -21,8 +21,8 @@ Current runtime identities are `docker`, `firecracker`, `lima`, `vz_linux`,
 guarantee:
 - Runtime discovery includes machine-readable `boundary_class`,
   `vm_grade_isolation`, `untrusted_eligible`, `isolation_warnings`, and
-  `network_policy_contract` fields. Use those fields for client decisions
-  instead of parsing prose notes.
+  `network_policy_contract` fields, plus a `session_contract` object. Use
+  those fields for client decisions instead of parsing prose notes.
 - `isolation_warnings` are advisory metadata for client UX and operator
   context. They are not admission rejection reasons by themselves.
 - `seatbelt` is host-local. `seatbelt` is not `untrusted`-eligible.
@@ -152,6 +152,13 @@ Response (example):
           "readiness_source": "config"
         }
       },
+      "session_contract": {
+        "support_state": "supported",
+        "reuse_model": "workspace_only",
+        "requires_live_health_check": false,
+        "recovery_state": "unsupported",
+        "repair_state": "unsupported"
+      },
       "supported_spec_versions": ["1.0", "1.1"],
       "interactive_supported": false,
       "egress_allowlist_supported": false,
@@ -174,6 +181,9 @@ Runtime isolation fields mean:
   `allowlist`. It describes whether each policy is supported, unsupported,
   scaffold-only, or host-gated, whether strict enforcement is possible, and
   where current readiness should be read from.
+- `session_contract`: static runtime posture for session participation, reuse
+  model, live health check expectation, and recovery/repair maturity. It does
+  not replace `available`, runtime preflight, or admin diagnostics.
 
 Current posture mapping:
 
@@ -206,6 +216,23 @@ still reported through:
 - `strict_allowlist_supported`
 - `enforcement_ready` (object with `deny_all`/`allowlist`)
 - `host` (host capability facts for troubleshooting)
+
+Session contract mapping:
+
+| Runtime | `support_state` | `reuse_model` | Live health check | `recovery_state` | `repair_state` |
+| --- | --- | --- | --- | --- | --- |
+| `docker` | `supported` | `workspace_only` | `false` | `unsupported` | `unsupported` |
+| `firecracker` | `scaffold` | `scaffold` | `false` | `unsupported` | `unsupported` |
+| `lima` | `scaffold` | `scaffold` | `false` | `unsupported` | `unsupported` |
+| `vz_linux` | `host_gated` | `warm_vm` | `true` | `host_gated` | `host_gated` |
+| `vz_macos` | `scaffold` | `scaffold` | `false` | `scaffold` | `scaffold` |
+| `seatbelt` | `scaffold` | `workspace_only` | `false` | `unsupported` | `unsupported` |
+| `worktree` | `scaffold` | `workspace_only` | `false` | `unsupported` | `unsupported` |
+
+`session_contract` is static posture metadata. Same-session warm runtime reuse
+is currently limited to the host-gated `vz_linux` path; host-local runtimes only
+participate through workspace-oriented session inputs and do not provide warm
+runtime reuse.
 
 ## Create a session
 POST `/api/v1/sandbox/sessions`
