@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import RunStatusReasonCode
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeBoundaryClass,
     RuntimeImplementationState,
@@ -20,7 +21,6 @@ from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeReasonCode,
     RuntimeSessionReuseModel,
 )
-from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import RunStatusReasonCode
 
 RuntimeType = Literal[
     "docker",
@@ -396,7 +396,7 @@ class SandboxAdminRunListResponse(BaseModel):
     items: list[SandboxAdminRunSummary]
 
     @model_validator(mode="after")
-    def default_pagination_aliases(self) -> "SandboxAdminRunListResponse":
+    def default_pagination_aliases(self) -> SandboxAdminRunListResponse:
         return _default_offset_pagination_aliases(self)
 
 
@@ -424,7 +424,7 @@ class SandboxAdminIdempotencyListResponse(BaseModel):
     items: list[SandboxAdminIdempotencyItem]
 
     @model_validator(mode="after")
-    def default_pagination_aliases(self) -> "SandboxAdminIdempotencyListResponse":
+    def default_pagination_aliases(self) -> SandboxAdminIdempotencyListResponse:
         return _default_offset_pagination_aliases(self)
 
 
@@ -446,7 +446,7 @@ class SandboxAdminUsageResponse(BaseModel):
     items: list[SandboxAdminUsageItem]
 
     @model_validator(mode="after")
-    def default_pagination_aliases(self) -> "SandboxAdminUsageResponse":
+    def default_pagination_aliases(self) -> SandboxAdminUsageResponse:
         return _default_offset_pagination_aliases(self)
 
 
@@ -631,6 +631,19 @@ class SandboxAdminStartupWarningSummary(BaseModel):
     codes: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSRecoverySummary(BaseModel):
+    """Operator-facing recovery posture derived from macOS diagnostics blocks."""
+
+    status: Literal["healthy", "action_recommended", "unavailable"]
+    severity: Literal["ok", "warning", "error"]
+    codes: list[str] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    recommended_action: str | None = None
+    repair_endpoint: str | None = None
+    cleanup_plan_endpoint: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     """Structured admin response for macOS sandbox diagnostics."""
 
@@ -641,6 +654,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
     image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
     observability: SandboxAdminMacOSObservabilityDiagnostics | None = None
+    recovery_summary: SandboxAdminMacOSRecoverySummary | None = None
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 
