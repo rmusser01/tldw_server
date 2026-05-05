@@ -555,49 +555,41 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, persona_notes_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.web_clipper import router as web_clipper_router
-
-        specs.append(RouterSpec(
-            router=web_clipper_router,
+    for utility_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.web_clipper",
+            log_name="web clipper",
             prefix=f"{API_V1_PREFIX}/web-clipper",
             tags=("web-clipper",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping web clipper router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.skills import router as skills_router
-
-        specs.append(RouterSpec(
-            router=skills_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.skills",
+            log_name="skills",
             prefix=f"{API_V1_PREFIX}/skills",
             tags=("skills",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping skills router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.translate import router as translate_router
-
-        specs.append(RouterSpec(
-            router=translate_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.translate",
+            log_name="translate",
             prefix=f"{API_V1_PREFIX}",
             tags=("translation",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping translate router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
-
-        specs.append(RouterSpec(
-            router=slides_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.slides",
+            log_name="slides",
             prefix=f"{API_V1_PREFIX}",
             tags=("slides",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping slides router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+    ):
+        append_imported_router_spec(specs, utility_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards import router as kanban_boards_router
