@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module import (
@@ -69,6 +70,11 @@ def _context() -> RequestContext:
         session_id="sess-1",
         metadata={"workspace_id": "workspace-1"},
     )
+
+
+def _require_c_family_parsers() -> None:
+    if not (load_parser("c").available and load_parser("cpp").available):
+        pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
@@ -376,6 +382,7 @@ public class Greeter {
 
 @pytest.mark.asyncio
 async def test_codegraph_search_finds_c_cpp_symbols_after_index(tmp_path: Path) -> None:
+    _require_c_family_parsers()
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "greeter.c").write_text(

@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.CodeGraph.extractors.c_family_extractor import CppTreeSitterExtractor
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult
+
+pytestmark = pytest.mark.skipif(
+    not load_parser("cpp").available,
+    reason="tree-sitter-cpp parser is not available",
+)
 
 CPP_FIXTURE = b"""
 #include <string>

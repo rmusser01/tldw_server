@@ -9,10 +9,16 @@ import pytest
 import tldw_Server_API.app.core.CodeGraph.indexer as indexer_module
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.dependencies import DependencyHealth
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer, _Candidate, _DiscoveryResult
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult, LanguageInfo
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
+
+
+def _require_c_family_parsers() -> None:
+    if not (load_parser("c").available and load_parser("cpp").available):
+        pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
 def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:
@@ -211,6 +217,7 @@ public class Greeter {
 
 
 def test_indexer_extracts_c_cpp_graph_rows_during_index(tmp_path: Path) -> None:
+    _require_c_family_parsers()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "greeter.c").write_text(
@@ -762,6 +769,7 @@ def test_indexer_stops_when_foreground_time_budget_expires(tmp_path: Path) -> No
 
 
 def test_indexer_extracts_former_planned_cpp_extension_when_parser_exists(tmp_path: Path) -> None:
+    _require_c_family_parsers()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "main.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
