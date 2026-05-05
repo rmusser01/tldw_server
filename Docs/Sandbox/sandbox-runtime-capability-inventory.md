@@ -271,7 +271,7 @@ not generalized until other runtimes have an equally clear ownership model.
 | Rich structured error metadata beyond the first normalized alias pass remains incomplete. | all | Phase 3 |
 | Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
-| CI has no single cross-runtime capability gate. | all | Phase 5 |
+| No single CI job proves real execution for every runtime; the portable capability gate covers capability contracts only. | all | Phase 5 |
 
 ## Maintenance Rules
 

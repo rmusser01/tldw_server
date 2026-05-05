@@ -147,3 +147,14 @@ def test_portable_runtime_capability_gate_is_documented_for_every_runtime(
         assert _runtime_name_is_documented(text, runtime), (
             f"{runtime.value} missing from inventory"
         )
+
+
+def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_missing(
+    pytestconfig: pytest.Config,
+) -> None:
+    repo_root = Path(pytestconfig.rootpath)
+    inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
+    text = inventory.read_text(encoding="utf-8")
+
+    assert "CI has no single cross-runtime capability gate" not in text
+    assert "Host-gated smoke tests still own real runtime execution" in text
