@@ -479,6 +479,36 @@ def test_recovery_summary_reports_healthy_when_no_issues() -> None:
     assert summary["cleanup_plan_endpoint"] is None
 
 
+def test_recovery_summary_keeps_observability_only_failure_healthy() -> None:
+    summary = diagnostics_module.summarize_recovery(
+        reconciliation={
+            "computed": True,
+            "persisted_sessions": 1,
+            "live_vms": 1,
+            "healthy_session_ids": ["sess-live"],
+            "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": [],
+            "reasons": [],
+        },
+        image_store={"gc_candidates": 0, "reasons": []},
+        observability={"live_vms": 1, "reasons": ["serial_log_dir_not_configured"]},
+    )
+
+    assert summary["status"] == "healthy"
+    assert summary["severity"] == "ok"
+    assert summary["codes"] == []
+    assert summary["recommended_action"] == "No recovery action needed."
+    assert summary["repair_endpoint"] is None
+    assert summary["cleanup_plan_endpoint"] is None
+    assert summary["notes"] == ["Observability reasons: serial_log_dir_not_configured."]
+
+
 def test_recovery_summary_reports_unavailable_when_reconciliation_uncomputed() -> None:
     summary = diagnostics_module.summarize_recovery(
         reconciliation={

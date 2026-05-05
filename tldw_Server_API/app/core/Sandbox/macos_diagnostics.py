@@ -292,7 +292,6 @@ def summarize_recovery(
         if str(reason).strip()
     ]
     if observability_reasons:
-        codes.append("vz_observability_unavailable")
         notes.append(f"Observability reasons: {', '.join(observability_reasons[:3])}.")
 
     repair_needed = any(
@@ -312,8 +311,9 @@ def summarize_recovery(
             "skipped_active_session_controls",
         )
     )
+    actionable_recovery_issue = repair_needed or cleanup_needed or inspect_needed
 
-    if not codes:
+    if not actionable_recovery_issue:
         recommended_action = "No recovery action needed."
     elif repair_needed and cleanup_needed:
         recommended_action = "Run macOS reconciliation repair in dry-run mode, then inspect the image-store cleanup plan."
@@ -324,11 +324,11 @@ def summarize_recovery(
     elif inspect_needed:
         recommended_action = "Inspect orphan VM ownership before taking manual action."
     else:
-        recommended_action = "Review VZ Linux diagnostics before taking recovery action."
+        recommended_action = "Review macOS sandbox diagnostics before taking recovery action."
 
     return {
-        "status": "action_recommended" if codes else "healthy",
-        "severity": "warning" if codes else "ok",
+        "status": "action_recommended" if actionable_recovery_issue else "healthy",
+        "severity": "warning" if actionable_recovery_issue else "ok",
         "codes": codes,
         "counts": counts,
         "recommended_action": recommended_action,
