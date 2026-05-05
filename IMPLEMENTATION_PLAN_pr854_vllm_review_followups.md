@@ -21,3 +21,13 @@
 **Success Criteria**: Non-admin/non-single-user callers cannot select arbitrary managed instances; existing default managed routing still works.
 **Tests**: `test_vllm_instance_routing.py` coverage for chat and embeddings explicit-selection authorization paths.
 **Status**: Complete
+
+## Stage 5: DB Ownership Boundary
+**Goal**: Address the remaining PR #854 review thread that flagged SQLite driver ownership under `core/VLLM_Management`.
+**Success Criteria**: Raw `sqlite3` usage for managed vLLM persistence lives under `core/DB_Management`; `core/VLLM_Management/sqlite_repo.py` is only a compatibility import; a regression test guards against reintroducing SQLite driver imports under `core/VLLM_Management`.
+**Tests**: Red/green static boundary test in `test_repository.py`; focused vLLM backend suite covering repository, resolver, API, jobs, worker, provider listing, and routing.
+**Status**: Complete
+
+Verification notes:
+- Red check: `test_vllm_management_core_does_not_own_sqlite_driver_imports` failed with `sqlite_repo.py` as the offender before the move.
+- Green checks: `test_repository.py` passed 5 tests; focused vLLM backend slice passed 62 tests after the move.

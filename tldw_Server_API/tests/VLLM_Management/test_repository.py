@@ -1,3 +1,6 @@
+import ast
+from pathlib import Path
+
 from tldw_Server_API.app.core.VLLM_Management.models import VLLMInstanceCreate
 from tldw_Server_API.app.core.VLLM_Management.sqlite_repo import SqliteVLLMInstanceRepository
 
@@ -21,6 +24,21 @@ def _instance_payload(name: str, *, execution_mode: str = "local") -> VLLMInstan
         routing_policy={"is_default": False},
         declared_capabilities={"chat": True, "embeddings": False, "vision": True},
     )
+
+
+def test_vllm_management_core_does_not_own_sqlite_driver_imports():
+    vllm_core_path = Path(__file__).resolve().parents[2] / "app/core/VLLM_Management"
+    offenders: list[str] = []
+
+    for module_path in sorted(vllm_core_path.rglob("*.py")):
+        tree = ast.parse(module_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import) and any(alias.name == "sqlite3" for alias in node.names):
+                offenders.append(str(module_path.relative_to(vllm_core_path)))
+            if isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
+                offenders.append(str(module_path.relative_to(vllm_core_path)))
+
+    assert offenders == []
 
 
 def test_repository_round_trips_instance_and_default_route(tmp_path):

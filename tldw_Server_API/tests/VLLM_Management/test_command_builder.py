@@ -31,4 +31,3 @@ def test_command_builder_rejects_dangerous_or_conflicting_flags():
                 "extra_args": ["; rm", "-rf", "/"],
             }
         )
-

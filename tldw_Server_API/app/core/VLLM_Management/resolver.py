@@ -10,9 +10,12 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.core.DB_Management.VLLM_Management_DB import (
+    SqliteVLLMInstanceRepository,
+)
+
 from .capabilities import derive_effective_capabilities
 from .repository import VLLMInstanceRepository
-from .sqlite_repo import SqliteVLLMInstanceRepository
 
 
 class ResolvedVLLMRoute(BaseModel):
