@@ -382,8 +382,8 @@ bounded slice:
 
 Recommended first PR boundary:
 
-- Use `EmptyState`, `RecoveryCallout` and `Badge` where the user-facing state is
-  empty, unavailable, degraded, retrying, blocked, ready or error.
+- Use EmptyState, LoadingState, RecoveryCallout and Badge where the user-facing state is
+  empty, loading, unavailable, degraded, retrying, blocked, ready or error.
 - Keep composer-specific visual controls such as `IconButton`, `SendButton`,
   `TokenMeter`, `Pill`, `SourceChip` and `FacetRow` local until a dedicated
   composer-component migration exists.
