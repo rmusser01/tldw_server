@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { JobsTab } from "../JobsTab"
 
 const mocks = vi.hoisted(() => ({
+  fetchJobRunsMock: vi.fn(),
   fetchWatchlistJobsMock: vi.fn(),
   fetchWatchlistSourcesMock: vi.fn(),
   fetchWatchlistGroupsMock: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   restoreWatchlistJobMock: vi.fn(),
   updateWatchlistJobMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
+  modalConfirmMock: vi.fn(),
   messageErrorMock: vi.fn(),
   messageSuccessMock: vi.fn(),
   showUndoNotificationMock: vi.fn(),
@@ -66,6 +68,15 @@ vi.mock("antd", () => {
     Button,
     Popconfirm,
     Space: ({ children }: any) => <>{children}</>,
+    Modal: {
+      confirm: vi.fn((config: any) => {
+        mocks.modalConfirmMock(config)
+        return {
+          destroy: vi.fn(),
+          update: vi.fn()
+        }
+      })
+    },
     Switch: () => null,
     Table,
     Tag: ({ children }: any) => <span>{children}</span>,
@@ -86,6 +97,7 @@ vi.mock("@/hooks/useUndoNotification", () => ({
 
 vi.mock("@/services/watchlists", () => ({
   deleteWatchlistJob: (...args: any[]) => mocks.deleteWatchlistJobMock(...args),
+  fetchJobRuns: (...args: any[]) => mocks.fetchJobRunsMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
   fetchWatchlistSources: (...args: any[]) => mocks.fetchWatchlistSourcesMock(...args),
   fetchWatchlistGroups: (...args: any[]) => mocks.fetchWatchlistGroupsMock(...args),
@@ -137,6 +149,15 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const getPendingDeleteConfirmation = async () => {
+  await waitFor(() => {
+    expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)
+  })
+  const config = mocks.modalConfirmMock.mock.calls[0][0]
+  expect(typeof config.onOk).toBe("function")
+  return config
+}
+
 describe("JobsTab undo delete flow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -173,6 +194,13 @@ describe("JobsTab undo delete flow", () => {
     })
     mocks.fetchWatchlistSourcesMock.mockResolvedValue([])
     mocks.fetchWatchlistGroupsMock.mockResolvedValue([])
+    mocks.fetchJobRunsMock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      size: 10,
+      has_more: false
+    })
     mocks.deleteWatchlistJobMock.mockResolvedValue({
       success: true,
       job_id: 41,
@@ -199,6 +227,10 @@ describe("JobsTab undo delete flow", () => {
     })
 
     fireEvent.click(screen.getByTestId("danger-button"))
+    const confirmConfig = await getPendingDeleteConfirmation()
+    expect(mocks.deleteWatchlistJobMock).not.toHaveBeenCalled()
+
+    await confirmConfig.onOk()
 
     await waitFor(() => {
       expect(mocks.deleteWatchlistJobMock).toHaveBeenCalledWith(41)
@@ -227,11 +259,13 @@ describe("JobsTab undo delete flow", () => {
     })
 
     fireEvent.click(screen.getByTestId("danger-button"))
+    const confirmConfig = await getPendingDeleteConfirmation()
+
+    await confirmConfig.onOk()
 
     await waitFor(() => {
       expect(mocks.showUndoNotificationMock).toHaveBeenCalledTimes(1)
     })
-
     const undoOptions = mocks.showUndoNotificationMock.mock.calls[0][0]
     expect(typeof undoOptions.onDismiss).toBe("function")
 
@@ -258,11 +292,13 @@ describe("JobsTab undo delete flow", () => {
     })
 
     fireEvent.click(screen.getByTestId("danger-button"))
+    const confirmConfig = await getPendingDeleteConfirmation()
+
+    await confirmConfig.onOk()
 
     await waitFor(() => {
       expect(mocks.showUndoNotificationMock).toHaveBeenCalledTimes(1)
     })
-
     const undoOptions = mocks.showUndoNotificationMock.mock.calls[0][0]
     expect(undoOptions.duration).toBe(10)
     expect(undoOptions.description).toBe(
