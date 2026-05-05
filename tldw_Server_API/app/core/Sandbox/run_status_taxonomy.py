@@ -47,6 +47,7 @@ _RUNTIME_UNAVAILABLE_MESSAGES = frozenset({
     "runtime unavailable",
     "docker_unavailable",
     "firecracker_unavailable",
+    "limactl_missing",
     "vz_linux_unavailable",
     "vz_macos_unavailable",
     "seatbelt_unavailable",
