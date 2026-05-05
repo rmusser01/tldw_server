@@ -19,6 +19,7 @@ class ImportedRouterSpec:
     default_stable: bool = True
     attr_name: str = "router"
     skip_context: str = ""
+    skip_exceptions: tuple[type[Exception], ...] = (ImportError, AttributeError)
 
 
 def append_imported_router_spec(
@@ -42,5 +43,6 @@ def append_imported_router_spec(
             default_stable=definition.default_stable,
             name=definition.log_name,
             skip_context=definition.skip_context,
+            skip_exceptions=definition.skip_exceptions,
         )
     )

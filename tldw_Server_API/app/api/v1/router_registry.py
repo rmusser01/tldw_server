@@ -54,6 +54,8 @@ def register_router_specs(app: FastAPI, specs: Iterable[RouterSpec]) -> int:
         try:
             router = spec.resolve_router()
         except Exception as e:  # noqa: BLE001
+            if not isinstance(e, spec.skip_exceptions):
+                raise
             spec_name = spec.name or spec.route_key or "unnamed"
             context = f" {spec.skip_context}" if spec.skip_context else ""
             logger.debug(f"Skipping {spec_name} router{context}: {e}")

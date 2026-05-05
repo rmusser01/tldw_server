@@ -112,6 +112,7 @@ def test_append_imported_router_spec_preserves_metadata(
     assert specs[0].tags == ("acp-schedules",)
     assert specs[0].route_key == "acp"
     assert specs[0].default_stable is False
+    assert specs[0].skip_exceptions == (ImportError, AttributeError)
 
 
 def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
@@ -266,10 +267,10 @@ def test_append_imported_router_spec_skips_optional_import_error_at_registration
     ]
 
 
-def test_append_imported_router_spec_logs_unexpected_import_error_at_registration(
+def test_append_imported_router_spec_raises_unexpected_import_error_at_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify unexpected import-time failures are logged by registration."""
+    """Verify unexpected import-time failures are not silently skipped."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -296,8 +297,9 @@ def test_append_imported_router_spec_logs_unexpected_import_error_at_registratio
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert len(specs) == 1
-    assert register_router_specs(FastAPI(), specs) == 0
-    assert debug_messages == ["Skipping crashing-router router: router module crashed during import"]
+    with pytest.raises(RuntimeError, match="router module crashed during import"):
+        register_router_specs(FastAPI(), specs)
+    assert debug_messages == []
 
 
 def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
@@ -855,10 +857,10 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
     assert access_count == {module_name: 1 for module_name in router_definitions}
 
 
-def test_iter_core_router_specs_skips_crashing_chat_import(
+def test_iter_core_router_specs_raises_crashing_chat_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify chat import crashes skip only the affected router at registration."""
+    """Verify unexpected chat import crashes are not silently skipped."""
     import importlib
 
     app = FastAPI()
@@ -907,14 +909,15 @@ def test_iter_core_router_specs_skips_crashing_chat_import(
         for spec in specs
         if spec.route_key == "chat"
     ]
-    count = register_router_specs(app, chat_specs)
+    with pytest.raises(RuntimeError, match="chat loop crashed during import"):
+        register_router_specs(app, chat_specs)
+
     chat_paths = {route.path for route in app.routes}
 
-    assert count == 2
     assert "/api/v1/chat/chat/completions" in chat_paths
-    assert "/api/v1/chats/conversations" in chat_paths
+    assert "/api/v1/chats/conversations" not in chat_paths
     assert "/api/v1/chat/loop/start" not in chat_paths
-    assert "Skipping chat_loop router: chat loop crashed during import" in debug_messages
+    assert debug_messages == []
 
 
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -981,14 +984,48 @@ def test_register_router_specs_resolves_lazy_router_after_route_policy(
     assert "/api/v1/lazy" in {route.path for route in app.routes}
 
 
-def test_register_router_specs_logs_spec_name_for_resolution_failures(
+def test_register_router_specs_raises_unexpected_resolution_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify unexpected lazy router failures fail closed."""
     app = FastAPI()
     debug_messages: list[str] = []
 
     def router_factory() -> APIRouter:
         raise RuntimeError("lazy router failed")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.route_enabled",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    with pytest.raises(RuntimeError, match="lazy router failed"):
+        register_router_specs(
+            app,
+            [
+                RouterSpec(
+                    router=router_factory,
+                    prefix="/api/v1",
+                    tags=("lazy",),
+                    route_key="chat",
+                    name="chat_loop",
+                ),
+            ],
+        )
+
+    assert debug_messages == []
+
+
+def test_register_router_specs_skips_configured_resolution_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify router specs can explicitly opt into skippable failures."""
+    app = FastAPI()
+    debug_messages: list[str] = []
+
+    def router_factory() -> APIRouter:
+        raise RuntimeError("lazy optional router failed")
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.config.route_enabled",
@@ -1005,12 +1042,13 @@ def test_register_router_specs_logs_spec_name_for_resolution_failures(
                 tags=("lazy",),
                 route_key="chat",
                 name="chat_loop",
+                skip_exceptions=(RuntimeError,),
             ),
         ],
     )
 
     assert count == 0
-    assert debug_messages == ["Skipping chat_loop router: lazy router failed"]
+    assert debug_messages == ["Skipping chat_loop router: lazy optional router failed"]
 
 
 def test_register_router_specs_fails_closed_when_route_policy_errors(
