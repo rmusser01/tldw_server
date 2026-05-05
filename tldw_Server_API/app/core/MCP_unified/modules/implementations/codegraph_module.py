@@ -8,6 +8,7 @@ search, and same-file call relationship queries for trusted workspace roots.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder
 from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_dependencies
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
+from tldw_Server_API.app.core.CodeGraph.jobs import enqueue_codegraph_index_job
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
 from tldw_Server_API.app.core.CodeGraph.models import (
     CodeGraphNode,
@@ -33,6 +35,7 @@ from ..base import BaseModule, ModuleConfig, create_tool_definition
 
 _EMPTY_COUNTS = {"files": 0, "nodes": 0, "edges": 0, "unresolved_refs": 0}
 _FOREGROUND_MODE = "foreground"
+_JOB_MODES = {"job", "background"}
 
 
 class CodeGraphModule(BaseModule):
@@ -42,6 +45,7 @@ class CodeGraphModule(BaseModule):
         self,
         config: ModuleConfig,
         workspace_root_resolver: WorkspaceRootResolver | None = None,
+        job_manager_factory: Callable[[], Any] | None = None,
     ) -> None:
         """Create module-scoped settings, dependency probes, and workspace resolver."""
         super().__init__(config)
@@ -49,6 +53,7 @@ class CodeGraphModule(BaseModule):
         self._dependency_health = probe_codegraph_dependencies()
         self._language_registry = CodeGraphLanguageRegistry(self._dependency_health)
         self._workspace = CodeGraphWorkspaceResolver(workspace_root_resolver, self._settings)
+        self._job_manager_factory = job_manager_factory
 
     async def on_initialize(self) -> None:
         """Log CodeGraph module initialization."""
@@ -97,10 +102,10 @@ class CodeGraphModule(BaseModule):
 
         index_tool = create_tool_definition(
             name="codegraph.index",
-            description="Run bounded foreground CodeGraph file indexing for the active workspace.",
+            description="Run bounded CodeGraph file indexing for the active workspace.",
             parameters={
                 "properties": {
-                    "mode": {"type": "string", "description": "Only foreground is supported in Stage 1"},
+                    "mode": {"type": "string", "description": "foreground, job, or background"},
                     "force": {"type": "boolean"},
                     "languages": {"type": "array"},
                     "max_files": {"type": "integer"},
@@ -116,10 +121,10 @@ class CodeGraphModule(BaseModule):
 
         sync_tool = create_tool_definition(
             name="codegraph.sync",
-            description="Run bounded foreground CodeGraph file sync for the active workspace.",
+            description="Run bounded CodeGraph file sync for the active workspace.",
             parameters={
                 "properties": {
-                    "mode": {"type": "string", "description": "Only foreground is supported in Stage 1"},
+                    "mode": {"type": "string", "description": "foreground, job, or background"},
                     "languages": {"type": "array"},
                     "max_files": {"type": "integer"},
                 },
@@ -297,20 +302,19 @@ class CodeGraphModule(BaseModule):
             return await self._status(resolution)
 
         if tool_name == "codegraph.index":
-            return await asyncio.to_thread(
-                self._run_index,
+            return await self._execute_write_tool(
                 resolution,
-                bool(args.get("force", False)),
-                args.get("languages"),
-                args.get("max_files"),
+                args,
+                context,
+                operation="index",
             )
 
         if tool_name == "codegraph.sync":
-            return await asyncio.to_thread(
-                self._run_sync,
+            return await self._execute_write_tool(
                 resolution,
-                args.get("languages"),
-                args.get("max_files"),
+                args,
+                context,
+                operation="sync",
             )
 
         if tool_name == "codegraph.files":
@@ -394,7 +398,7 @@ class CodeGraphModule(BaseModule):
 
         if tool_name == "codegraph.index":
             self._reject_unknown(arguments, allowed={"mode", "force", "languages", "max_files"})
-            self._validate_foreground_mode(arguments.get("mode"))
+            self._validate_execution_mode(arguments.get("mode"))
             force = arguments.get("force")
             if force is not None and not isinstance(force, bool):
                 raise ValueError("force must be a boolean")
@@ -404,7 +408,7 @@ class CodeGraphModule(BaseModule):
 
         if tool_name == "codegraph.sync":
             self._reject_unknown(arguments, allowed={"mode", "languages", "max_files"})
-            self._validate_foreground_mode(arguments.get("mode"))
+            self._validate_execution_mode(arguments.get("mode"))
             self._validate_languages(arguments.get("languages"))
             self._validate_positive_int(arguments.get("max_files"), "max_files")
             return
@@ -557,6 +561,80 @@ class CodeGraphModule(BaseModule):
             max_files=max_files,
         )
         return _index_result_to_dict(result, resolution)
+
+    async def _execute_write_tool(
+        self,
+        resolution: WorkspaceResolution,
+        args: dict[str, Any],
+        context: Any | None,
+        *,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Execute or enqueue a CodeGraph index/sync write operation."""
+        mode = str(args.get("mode") or _FOREGROUND_MODE)
+        languages = args.get("languages")
+        max_files = args.get("max_files")
+        force = bool(args.get("force", False)) if operation == "index" else False
+        if mode in _JOB_MODES:
+            return await asyncio.to_thread(
+                self._enqueue_index_job,
+                resolution,
+                operation,
+                mode,
+                force,
+                languages,
+                max_files,
+                self._owner_user_id(context),
+            )
+        if operation == "index":
+            return await asyncio.to_thread(
+                self._run_index,
+                resolution,
+                force,
+                languages,
+                max_files,
+            )
+        return await asyncio.to_thread(
+            self._run_sync,
+            resolution,
+            languages,
+            max_files,
+        )
+
+    def _enqueue_index_job(
+        self,
+        resolution: WorkspaceResolution,
+        operation: str,
+        mode: str,
+        force: bool,
+        languages: list[str] | None,
+        max_files: int | None,
+        owner_user_id: str | None,
+    ) -> dict[str, Any]:
+        """Enqueue an index or sync job and serialize the queued Jobs row."""
+        manager = self._job_manager_factory() if self._job_manager_factory is not None else None
+        job = enqueue_codegraph_index_job(
+            resolution=resolution,
+            settings=self._settings,
+            operation=operation,
+            force=force,
+            languages=languages,
+            max_files=max_files,
+            owner_user_id=owner_user_id,
+            jm=manager,
+        )
+        return {
+            "status": "queued",
+            "mode": mode,
+            "operation": operation,
+            "workspace_key": resolution.workspace_key,
+            "workspace_id": resolution.workspace_id,
+            "index_db_path": str(resolution.index_db_path),
+            "job_id": job.get("id"),
+            "job_uuid": job.get("uuid"),
+            "job_status": job.get("status"),
+            "queue": job.get("queue"),
+        }
 
     def _list_files(
         self,
@@ -809,10 +887,12 @@ class CodeGraphModule(BaseModule):
             raise ValueError(f"unknown languages: {', '.join(unknown)}")
 
     @staticmethod
-    def _validate_foreground_mode(mode: Any) -> None:
-        """Ensure Stage 1 callers only request foreground execution."""
-        if mode is not None and mode != _FOREGROUND_MODE:
-            raise ValueError("only foreground mode is supported")
+    def _validate_execution_mode(mode: Any) -> None:
+        """Validate the optional index/sync execution mode."""
+        if mode is None:
+            return
+        if not isinstance(mode, str) or mode not in {_FOREGROUND_MODE, *_JOB_MODES}:
+            raise ValueError("mode must be foreground, job, or background")
 
     @staticmethod
     def _validate_positive_int(value: Any, field_name: str) -> None:
@@ -843,6 +923,21 @@ class CodeGraphModule(BaseModule):
     def _bounded_limit(self, limit: int | None, *, default: int = 10) -> int:
         """Clamp user-provided result limits to configured maximums."""
         return min(max(1, int(limit or default)), self._settings.max_search_results)
+
+    @staticmethod
+    def _owner_user_id(context: Any | None) -> str | None:
+        """Extract a stable Jobs owner id from an MCP request context."""
+        if context is None:
+            return None
+        user_id = getattr(context, "user_id", None)
+        if user_id is None:
+            metadata = getattr(context, "metadata", None)
+            if isinstance(metadata, dict):
+                user_id = metadata.get("user_id")
+        if user_id is None:
+            return None
+        text = str(user_id).strip()
+        return text or None
 
 
 def _normalize_path_prefix(path: str | None) -> str | None:

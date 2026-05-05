@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,25 @@ class _CodeGraphRegistry:
         return None
 
 
+class _FakeJobManager:
+    """Capture CodeGraph Jobs rows created by MCP job-mode tests."""
+
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        """Record a fake Jobs create call."""
+        self.created.append(dict(kwargs))
+        return {"id": len(self.created), "uuid": f"job-{len(self.created)}", "status": "queued", **kwargs}
+
+    def get_job(self, job_id: int) -> dict[str, Any] | None:
+        """Return the recorded fake Jobs row by id."""
+        if job_id < 1 or job_id > len(self.created):
+            return None
+        created = self.created[job_id - 1]
+        return {"id": job_id, "uuid": f"job-{job_id}", "status": "queued", **created}
+
+
 def _context() -> RequestContext:
     """Build a request context with a workspace id for CodeGraph tests."""
     return RequestContext(
@@ -105,6 +125,8 @@ def _module_with_settings(
     tmp_path: Path,
     workspace_root: Path,
     settings: dict[str, Any],
+    *,
+    job_manager_factory: Callable[[], Any] | None = None,
 ) -> CodeGraphModule:
     """Create a CodeGraph module with overridden test settings."""
     resolver = _FakeWorkspaceRootResolver(
@@ -119,6 +141,7 @@ def _module_with_settings(
     return CodeGraphModule(
         ModuleConfig(name="CodeGraph", settings=module_settings),
         workspace_root_resolver=resolver,
+        job_manager_factory=job_manager_factory,
     )
 
 
@@ -208,6 +231,86 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
     assert index_result["counters"]["files_indexed"] == 2  # nosec B101
     assert [item["path"] for item in files_result["files"]] == ["app.py", "ui.ts"]  # nosec B101
     assert [item["path"] for item in filtered_result["files"]] == ["app.py"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_index_job_mode_enqueues_without_creating_index(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    jobs = _FakeJobManager()
+    module = _module_with_settings(
+        tmp_path,
+        workspace_root,
+        {},
+        job_manager_factory=lambda: jobs,
+    )
+
+    result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "job", "force": True, "languages": ["python"], "max_files": 10},
+        context=_context(),
+    )
+
+    assert result["status"] == "queued"  # nosec B101
+    assert result["mode"] == "job"  # nosec B101
+    assert result["operation"] == "index"  # nosec B101
+    assert result["job_id"] == 1  # nosec B101
+    assert result["job_uuid"] == "job-1"  # nosec B101
+    assert result["job_status"] == "queued"  # nosec B101
+    assert result["workspace_id"] == "workspace-1"  # nosec B101
+    assert result["workspace_key"].startswith("ws_")  # nosec B101
+    assert not result["index_db_path"].endswith("app.py")  # nosec B101
+    assert not Path(result["index_db_path"]).exists()  # nosec B101
+
+    created = jobs.created[0]
+    assert created["domain"] == "codegraph"  # nosec B101
+    assert created["queue"] == "default"  # nosec B101
+    assert created["job_type"] == "codegraph_index"  # nosec B101
+    assert created["owner_user_id"] == "7"  # nosec B101
+    assert created["max_retries"] == 0  # nosec B101
+    assert created["payload"]["operation"] == "index"  # nosec B101
+    assert created["payload"]["force"] is True  # nosec B101
+    assert created["payload"]["languages"] == ["python"]  # nosec B101
+    assert created["payload"]["max_files"] == 10  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_sync_background_mode_enqueues_sync(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    jobs = _FakeJobManager()
+    module = _module_with_settings(
+        tmp_path,
+        workspace_root,
+        {},
+        job_manager_factory=lambda: jobs,
+    )
+
+    result = await module.execute_tool(
+        "codegraph.sync",
+        {"mode": "background", "languages": ["python"], "max_files": 5},
+        context=_context(),
+    )
+
+    assert result["status"] == "queued"  # nosec B101
+    assert result["mode"] == "background"  # nosec B101
+    assert result["operation"] == "sync"  # nosec B101
+    assert result["job_id"] == 1  # nosec B101
+    assert result["queue"] == "default"  # nosec B101
+    assert jobs.created[0]["payload"]["operation"] == "sync"  # nosec B101
+    assert jobs.created[0]["payload"]["force"] is False  # nosec B101
+    assert jobs.created[0]["payload"]["languages"] == ["python"]  # nosec B101
+    assert jobs.created[0]["payload"]["max_files"] == 5  # nosec B101
+
+
+def test_codegraph_rejects_unknown_execution_mode(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    with pytest.raises(ValueError, match="mode must be foreground, job, or background"):
+        module.validate_tool_arguments("codegraph.index", {"mode": "later"})
 
 
 @pytest.mark.asyncio
@@ -729,7 +832,8 @@ async def test_codegraph_offloads_blocking_repository_work(
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "app.py").write_text("x = 1\n", encoding="utf-8")
-    module = _module(tmp_path, workspace_root)
+    jobs = _FakeJobManager()
+    module = _module_with_settings(tmp_path, workspace_root, {}, job_manager_factory=lambda: jobs)
     offloaded: list[str] = []
 
     async def _fake_to_thread(func, /, *args, **kwargs):  # noqa: ANN001
@@ -742,9 +846,13 @@ async def test_codegraph_offloads_blocking_repository_work(
     await module.execute_tool("codegraph.files", {}, context=_context())
     await module.execute_tool("codegraph.search", {"query": "app"}, context=_context())
     await module.execute_tool("codegraph.sync", {"mode": "foreground"}, context=_context())
+    await module.execute_tool("codegraph.index", {"mode": "job"}, context=_context())
     await module.execute_tool("codegraph.impact", {"symbol": "app"}, context=_context())
     await module.execute_tool("codegraph.context", {"task": "app"}, context=_context())
 
+    assert "_run_index" in offloaded  # nosec B101
+    assert "_run_sync" in offloaded  # nosec B101
+    assert "_enqueue_index_job" in offloaded  # nosec B101
     assert "_impact" in offloaded  # nosec B101
     assert "_build_context" in offloaded  # nosec B101
 
