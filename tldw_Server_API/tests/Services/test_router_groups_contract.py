@@ -5255,12 +5255,14 @@ def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
         fromlist: tuple[str, ...] = (),
         level: int = 0,
     ) -> ModuleType:
-        """Return fake routers for unrelated eager minimal optional imports."""
+        """Track selected imports and fake unrelated eager optional routers."""
         if (
             level == 0
             and name.startswith(endpoints_package)
-            and name not in definitions_by_module
         ):
+            if name in definitions_by_module:
+                import_calls.append(name)
+                return real_import(name, globals, locals, fromlist, level)
             attrs = tuple(attr for attr in fromlist if attr != "*") or ("router",)
             for attr_name in attrs:
                 _install_fake_router_module(
@@ -5291,6 +5293,11 @@ def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
     monkeypatch.setitem(sys.modules, "tldw_Server_API.app.main", fake_main)
 
     specs = list(iter_minimal_optional_router_specs())
+    assert [
+        module_name
+        for module_name in definitions_by_module
+        if module_name in import_calls
+    ] == []
     assert access_count == {
         f"{definition['module_name']}.router": 0
         for definition in router_definitions
