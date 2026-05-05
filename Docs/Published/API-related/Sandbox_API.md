@@ -20,9 +20,11 @@ Current runtime identities are `docker`, `firecracker`, `lima`, `vz_linux`,
 `vz_macos`, `seatbelt`, and `worktree`. Availability does not imply a security
 guarantee:
 - Runtime discovery includes machine-readable `boundary_class`,
-  `vm_grade_isolation`, `untrusted_eligible`, and
+  `vm_grade_isolation`, `untrusted_eligible`, `isolation_warnings`, and
   `network_policy_contract` fields. Use those fields for client decisions
   instead of parsing prose notes.
+- `isolation_warnings` are advisory metadata for client UX and operator
+  context. They are not admission rejection reasons by themselves.
 - `seatbelt` is host-local. `seatbelt` is not `untrusted`-eligible.
 - `worktree` is host-local. `worktree` is not `untrusted`-eligible.
 - `vz_macos` real execution is not implemented; it is a scaffold/preflight
@@ -137,6 +139,7 @@ Response (example):
       "boundary_class": "container",
       "vm_grade_isolation": false,
       "untrusted_eligible": true,
+      "isolation_warnings": [],
       "network_policy_contract": {
         "deny_all": {
           "support_state": "supported",
@@ -164,6 +167,9 @@ Runtime isolation fields mean:
   claims, independent of current host availability.
 - `untrusted_eligible`: whether policy may admit this runtime for `untrusted`
   workloads when preflight and host readiness also pass.
+- `isolation_warnings`: advisory warning codes for client UX and operator
+  context. These are not rejection reasons by themselves; admission remains
+  governed by runtime preflight, policy, and request validation.
 - `network_policy_contract`: static runtime posture for `deny_all` and
   `allowlist`. It describes whether each policy is supported, unsupported,
   scaffold-only, or host-gated, whether strict enforcement is possible, and
@@ -171,15 +177,15 @@ Runtime isolation fields mean:
 
 Current posture mapping:
 
-| Runtime | `boundary_class` | `vm_grade_isolation` | `untrusted_eligible` |
-| --- | --- | --- | --- |
-| `docker` | `container` | `false` | `true` |
-| `firecracker` | `vm_grade` | `true` | `true` |
-| `lima` | `vm_grade` | `true` | `true` |
-| `vz_linux` | `vm_grade` | `true` | `true` |
-| `vz_macos` | `vm_grade_scaffold` | `false` | `false` |
-| `seatbelt` | `host_local` | `false` | `false` |
-| `worktree` | `host_local` | `false` | `false` |
+| Runtime | `boundary_class` | `vm_grade_isolation` | `untrusted_eligible` | `isolation_warnings` |
+| --- | --- | --- | --- | --- |
+| `docker` | `container` | `false` | `true` | `[]` |
+| `firecracker` | `vm_grade` | `true` | `true` | `[]` |
+| `lima` | `vm_grade` | `true` | `true` | `[]` |
+| `vz_linux` | `vm_grade` | `true` | `true` | `[]` |
+| `vz_macos` | `vm_grade_scaffold` | `false` | `false` | `[]` |
+| `seatbelt` | `host_local` | `false` | `false` | `host_local_boundary`, `not_vm_grade_isolation`, `not_untrusted_eligible` |
+| `worktree` | `host_local` | `false` | `false` | `host_local_boundary`, `not_vm_grade_isolation`, `not_untrusted_eligible` |
 
 Network policy contract mapping:
 

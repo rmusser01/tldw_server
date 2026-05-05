@@ -45,7 +45,7 @@ present and is a list.
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py \
   tldw_Server_API/tests/sandbox/test_sandbox_api.py::test_runtimes_discovery_shape \
   -q --timeout=60
@@ -101,16 +101,16 @@ admission decision.
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py \
   tldw_Server_API/tests/sandbox/test_feature_discovery_flags.py \
   tldw_Server_API/tests/sandbox/test_sandbox_api.py::test_runtimes_discovery_shape \
   -q --timeout=60
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile \
+python -m py_compile \
   tldw_Server_API/app/core/Sandbox/runtime_capabilities.py \
   tldw_Server_API/app/core/Sandbox/service.py \
   tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r \
+python -m bandit -r \
   tldw_Server_API/app/core/Sandbox/runtime_capabilities.py \
   tldw_Server_API/app/core/Sandbox/service.py \
   tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py \
