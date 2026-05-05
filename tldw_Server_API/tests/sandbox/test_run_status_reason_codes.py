@@ -107,6 +107,19 @@ def test_run_status_reason_taxonomy_maps_known_policy_failures() -> None:
         ) == "policy_failed"
 
 
+def test_run_status_reason_taxonomy_prefers_policy_failed_over_runtime_unavailable() -> None:
+    for message in (
+        "lima_policy_failed runtime_unavailable",
+        "Runtime unavailable after VZ_MACOS_POLICY_FAILED",
+    ):
+        assert normalize_run_status_reason(
+            phase=RunPhase.failed,
+            message=message,
+            exit_code=None,
+            resource_usage=None,
+        ) == "policy_failed"
+
+
 def test_run_status_reason_taxonomy_distinguishes_runtime_unavailable() -> None:
     for message in (
         "runtime_unavailable",
