@@ -60,4 +60,3 @@ Expected focused verification:
 - `python -m ruff check` for touched Python files
 - Bandit on touched production Python only, or document skip for test/docs-only changes
 - `git diff --check`
-
