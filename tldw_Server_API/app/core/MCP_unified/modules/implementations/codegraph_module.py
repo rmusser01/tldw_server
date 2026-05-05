@@ -40,6 +40,7 @@ from ..base import BaseModule, ModuleConfig, create_tool_definition
 _EMPTY_COUNTS = {"files": 0, "nodes": 0, "edges": 0, "unresolved_refs": 0}
 _FOREGROUND_MODE = "foreground"
 _JOB_MODES = {"job", "background"}
+_MAX_CONTEXT_CANDIDATE_SEARCH_TERMS = 16
 
 
 class CodeGraphModule(BaseModule):
@@ -864,7 +865,8 @@ class CodeGraphModule(BaseModule):
                 limit=self._settings.max_search_results,
             )
         )
-        nodes = rank_context_nodes(task, candidate_nodes, relationships=candidate_relationships)[:effective_max_nodes]
+        ranking_relationships = _relationships_between_nodes(candidate_relationships, candidate_nodes)
+        nodes = rank_context_nodes(task, candidate_nodes, relationships=ranking_relationships)[:effective_max_nodes]
         relationships = tuple(_relationship_neighborhood(repository, nodes, limit=self._settings.max_search_results))
         builder = CodeGraphContextBuilder(
             workspace_root=resolution.workspace_root,
@@ -983,7 +985,7 @@ def _context_candidate_nodes(
 ) -> tuple[CodeGraphNode, ...]:
     """Collect deduplicated context candidates from whole-task and token searches."""
     normalized_limit = max(1, int(limit))
-    terms = context_search_terms(query)[:normalized_limit]
+    terms = _context_candidate_search_terms(query)
     if not terms:
         return ()
 
@@ -993,6 +995,44 @@ def _context_candidate_nodes(
         for node in repository.search_nodes(term, limit=per_term_limit):
             by_id.setdefault(node.id, node)
     return tuple(by_id.values())
+
+
+def _context_candidate_search_terms(query: str) -> tuple[str, ...]:
+    """Return bounded search terms while preserving later specific task tokens."""
+    terms = context_search_terms(query)
+    if len(terms) <= _MAX_CONTEXT_CANDIDATE_SEARCH_TERMS:
+        return terms
+
+    full_query, *tokens = terms
+    selected_tokens = sorted(
+        enumerate(tokens),
+        key=lambda item: (-len(item[1]), item[0]),
+    )[: _MAX_CONTEXT_CANDIDATE_SEARCH_TERMS - 1]
+    return (full_query, *(token for _index, token in sorted(selected_tokens)))
+
+
+def _relationships_between_nodes(
+    relationships: tuple[dict[str, Any], ...],
+    nodes: tuple[CodeGraphNode, ...],
+) -> tuple[dict[str, Any], ...]:
+    """Filter relationship dictionaries to edges whose endpoints are both candidate nodes."""
+    node_ids = {node.id for node in nodes}
+    return tuple(
+        relationship
+        for relationship in relationships
+        if _relationship_endpoint_id(relationship, "source") in node_ids
+        and _relationship_endpoint_id(relationship, "target") in node_ids
+    )
+
+
+def _relationship_endpoint_id(relationship: dict[str, Any], endpoint_name: str) -> str | None:
+    endpoint = relationship.get(endpoint_name)
+    if not isinstance(endpoint, dict):
+        return None
+    node_id = endpoint.get("id")
+    if not isinstance(node_id, str) or not node_id:
+        return None
+    return node_id
 
 
 def _empty_truncation(max_context_chars: int) -> dict[str, Any]:

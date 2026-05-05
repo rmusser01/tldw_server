@@ -87,6 +87,37 @@ def test_rank_context_nodes_boosts_related_nodes_on_ties() -> None:
     assert [node.id for node in ranked[:2]] == ["node_related", "node_unrelated"]
 
 
+def test_rank_context_nodes_ignores_relationships_to_non_candidate_nodes() -> None:
+    """Avoid ranking high-degree external hubs above local candidate relationships."""
+    hub = _node("node_hub", "pkg/helper_hub.py", name="helper_hub", qualified_name="helpers.helper_hub")
+    related = _node(
+        "node_related",
+        "pkg/helper_related.py",
+        name="helper_related",
+        qualified_name="helpers.helper_related",
+    )
+    peer = _node("node_peer", "pkg/helper_peer.py", name="helper_peer", qualified_name="helpers.helper_peer")
+    relationships = (
+        {"id": "edge_hub_external_a", "source": {"id": "node_hub"}, "target": {"id": "node_external_a"}},
+        {"id": "edge_hub_external_b", "source": {"id": "node_external_b"}, "target": {"id": "node_hub"}},
+        {"id": "edge_peer_related", "source": {"id": "node_peer"}, "target": {"id": "node_related"}},
+    )
+
+    ranked = rank_context_nodes("helper", (hub, related, peer), relationships=relationships)
+
+    assert [node.id for node in ranked[:2]] == ["node_related", "node_peer"]
+
+
+def test_rank_context_nodes_boosts_filename_stem_matches() -> None:
+    """Rank filename stem matches above weaker path substring matches."""
+    weak = _node("node_weak", "pkg/app_config.py", name="handler", qualified_name="handler")
+    strong = _node("node_strong", "pkg/app.py", name="handler", qualified_name="handler")
+
+    ranked = rank_context_nodes("update app", (weak, strong), relationships=())
+
+    assert [node.id for node in ranked] == ["node_strong", "node_weak"]
+
+
 def test_context_builder_groups_duplicate_file_snippets(tmp_path: Path) -> None:
     """Group multiple node snippets from the same file under one file entry."""
     source = tmp_path / "pkg" / "sample.py"

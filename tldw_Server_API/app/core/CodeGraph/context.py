@@ -145,7 +145,8 @@ def rank_context_nodes(
 ) -> tuple[CodeGraphNode, ...]:
     """Return context nodes ordered by task-token relevance and graph proximity."""
     tokens = _task_tokens(task)
-    relationship_counts = _relationship_endpoint_counts(relationships)
+    candidate_ids = {node.id for node in nodes}
+    relationship_counts = _relationship_endpoint_counts(relationships, candidate_ids=candidate_ids)
     indexed_nodes = tuple(enumerate(nodes))
 
     return tuple(
@@ -185,18 +186,31 @@ def _task_tokens(task: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def _relationship_endpoint_counts(relationships: tuple[dict[str, Any], ...]) -> dict[str, int]:
-    """Count how often each node id appears in the selected relationship set."""
+def _relationship_endpoint_counts(
+    relationships: tuple[dict[str, Any], ...],
+    *,
+    candidate_ids: set[str],
+) -> dict[str, int]:
+    """Count candidate ids that participate in candidate-to-candidate relationships."""
     counts: dict[str, int] = {}
     for relationship in relationships:
-        for endpoint_name in ("source", "target"):
-            endpoint = relationship.get(endpoint_name)
-            if not isinstance(endpoint, dict):
-                continue
-            node_id = endpoint.get("id")
-            if isinstance(node_id, str) and node_id:
-                counts[node_id] = counts.get(node_id, 0) + 1
+        source_id = _relationship_endpoint_id(relationship, "source")
+        target_id = _relationship_endpoint_id(relationship, "target")
+        if source_id not in candidate_ids or target_id not in candidate_ids:
+            continue
+        counts[source_id] = counts.get(source_id, 0) + 1
+        counts[target_id] = counts.get(target_id, 0) + 1
     return counts
+
+
+def _relationship_endpoint_id(relationship: dict[str, Any], endpoint_name: str) -> str | None:
+    endpoint = relationship.get(endpoint_name)
+    if not isinstance(endpoint, dict):
+        return None
+    node_id = endpoint.get("id")
+    if not isinstance(node_id, str) or not node_id:
+        return None
+    return node_id
 
 
 def _ranking_key(
@@ -204,7 +218,7 @@ def _ranking_key(
     node: CodeGraphNode,
     tokens: tuple[str, ...],
     relationship_counts: dict[str, int],
-) -> tuple[int, int, int, str, int, str]:
+) -> tuple[int, int, int]:
     """Build a stable sort key where lower values represent more relevant context."""
     relevance_score = _node_relevance_score(node, tokens)
     relationship_score = relationship_counts.get(node.id, 0)
@@ -212,9 +226,6 @@ def _ranking_key(
         -relevance_score,
         -relationship_score,
         original_index,
-        node.file_path,
-        int(node.start_line or 0),
-        node.qualified_name,
     )
 
 
@@ -232,7 +243,7 @@ def _node_relevance_score(node: CodeGraphNode, tokens: tuple[str, ...]) -> int:
         for field in fields:
             if field == token:
                 score += 8
-            elif field.endswith(f".{token}") or field.endswith(f"/{token}"):
+            elif field.endswith(f".{token}") or field.endswith(f"/{token}") or f"/{token}." in field:
                 score += 5
             elif token in field:
                 score += 2

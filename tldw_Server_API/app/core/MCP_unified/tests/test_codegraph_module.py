@@ -865,7 +865,7 @@ async def test_codegraph_context_ranks_task_and_relationship_relevance(tmp_path:
             f"def update_noise_{index}(value):\n    return value - {index}\n",
             encoding="utf-8",
         )
-    module = _module(tmp_path, workspace_root)
+    module = _module_with_settings(tmp_path, workspace_root, {"max_search_results": 3})
 
     await module.execute_tool(
         "codegraph.index",
