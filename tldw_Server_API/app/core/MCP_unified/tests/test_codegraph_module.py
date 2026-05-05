@@ -842,6 +842,52 @@ def helper(value):
 
 
 @pytest.mark.asyncio
+async def test_codegraph_context_ranks_task_and_relationship_relevance(tmp_path: Path) -> None:
+    """Select related task-token matches for multi-word context requests."""
+    workspace_root = tmp_path / "workspace"
+    package = workspace_root / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "util.py").write_text(
+        "def helper(value):\n    return value + 1\n",
+        encoding="utf-8",
+    )
+    (package / "app.py").write_text(
+        "from pkg.util import helper\n\n\ndef entry(value):\n    return helper(value)\n",
+        encoding="utf-8",
+    )
+    (package / "noise.py").write_text(
+        "def helper_noise(value):\n    return value - 1\n",
+        encoding="utf-8",
+    )
+    for index in range(12):
+        (package / f"noise_{index:02}.py").write_text(
+            f"def update_noise_{index}(value):\n    return value - {index}\n",
+            encoding="utf-8",
+        )
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 25},
+        context=_context(),
+    )
+    result = await module.execute_tool(
+        "codegraph.context",
+        {"task": "update entry helper flow", "max_nodes": 2, "max_files": 2, "include_code": False},
+        context=_context(),
+    )
+
+    assert {node["name"] for node in result["nodes"]} == {"entry", "helper"}  # nosec B101
+    assert "helper_noise" not in {node["name"] for node in result["nodes"]}  # nosec B101
+    assert {file_context["path"] for file_context in result["files"]} == {"pkg/app.py", "pkg/util.py"}  # nosec B101
+    assert any(  # nosec B101
+        relationship["source"]["name"] == "entry" and relationship["target"]["name"] == "helper"
+        for relationship in result["relationships"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_codegraph_context_treats_null_include_code_as_default_true(tmp_path: Path) -> None:
     """Treat JSON null include_code as the default source-including context mode."""
     workspace_root = tmp_path / "workspace"

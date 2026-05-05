@@ -16,7 +16,11 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
-from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder
+from tldw_Server_API.app.core.CodeGraph.context import (
+    CodeGraphContextBuilder,
+    context_search_terms,
+    rank_context_nodes,
+)
 from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_dependencies
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.jobs import enqueue_codegraph_index_job
@@ -844,7 +848,23 @@ class CodeGraphModule(BaseModule):
             }
 
         repository = CodeGraphRepository(resolution.index_db_path)
-        nodes = tuple(repository.search_nodes(query, limit=effective_max_nodes + 1)[:effective_max_nodes])
+        candidate_limit = min(
+            self._settings.max_search_results,
+            max(effective_max_nodes * 4, effective_max_nodes + 8),
+        )
+        candidate_nodes = _context_candidate_nodes(
+            repository,
+            query,
+            limit=candidate_limit,
+        )
+        candidate_relationships = tuple(
+            _relationship_neighborhood(
+                repository,
+                candidate_nodes,
+                limit=self._settings.max_search_results,
+            )
+        )
+        nodes = rank_context_nodes(task, candidate_nodes, relationships=candidate_relationships)[:effective_max_nodes]
         relationships = tuple(_relationship_neighborhood(repository, nodes, limit=self._settings.max_search_results))
         builder = CodeGraphContextBuilder(
             workspace_root=resolution.workspace_root,
@@ -953,6 +973,26 @@ def _normalize_path_prefix(path: str | None) -> str | None:
 def _context_query(task: str) -> str:
     """Derive the first-pass symbol search query from a task description."""
     return task.strip()
+
+
+def _context_candidate_nodes(
+    repository: CodeGraphRepository,
+    query: str,
+    *,
+    limit: int,
+) -> tuple[CodeGraphNode, ...]:
+    """Collect deduplicated context candidates from whole-task and token searches."""
+    normalized_limit = max(1, int(limit))
+    terms = context_search_terms(query)[:normalized_limit]
+    if not terms:
+        return ()
+
+    per_term_limit = max(1, (normalized_limit + len(terms) - 1) // len(terms))
+    by_id: dict[str, CodeGraphNode] = {}
+    for term in terms:
+        for node in repository.search_nodes(term, limit=per_term_limit):
+            by_id.setdefault(node.id, node)
+    return tuple(by_id.values())
 
 
 def _empty_truncation(max_context_chars: int) -> dict[str, Any]:

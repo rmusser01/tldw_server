@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder
+from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder, rank_context_nodes
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
 
 
@@ -49,6 +49,42 @@ def test_context_builder_reads_bounded_source_snippet(tmp_path: Path) -> None:
     assert snippet["end_line"] == 10
     assert "def helper" in snippet["text"]
     assert result["truncation"]["truncated"] is False
+
+
+def test_rank_context_nodes_prefers_task_token_matches() -> None:
+    """Rank direct task-token matches ahead of weaker search-order candidates."""
+    weak = _node("node_weak", "pkg/config.py", name="parse_config", qualified_name="parse_config")
+    strong = _node("node_strong", "pkg/helper.py", name="helper", qualified_name="services.helper")
+
+    ranked = rank_context_nodes("fix helper behavior", (weak, strong), relationships=())
+
+    assert [node.id for node in ranked] == ["node_strong", "node_weak"]
+
+
+def test_rank_context_nodes_boosts_related_nodes_on_ties() -> None:
+    """Prefer task-matching nodes connected to the selected relationship neighborhood."""
+    unrelated = _node(
+        "node_unrelated",
+        "pkg/helpers_misc.py",
+        name="helper_misc",
+        qualified_name="helpers.helper_misc",
+    )
+    related = _node(
+        "node_related",
+        "pkg/helpers_related.py",
+        name="helper_related",
+        qualified_name="helpers.helper_related",
+    )
+    entry = _node("node_entry", "pkg/entry.py", name="entry", qualified_name="entry")
+    relationship = {
+        "id": "edge_entry_related",
+        "source": {"id": "node_entry"},
+        "target": {"id": "node_related"},
+    }
+
+    ranked = rank_context_nodes("helper", (unrelated, related, entry), relationships=(relationship,))
+
+    assert [node.id for node in ranked[:2]] == ["node_related", "node_unrelated"]
 
 
 def test_context_builder_groups_duplicate_file_snippets(tmp_path: Path) -> None:
@@ -216,16 +252,19 @@ def _node(
     node_id: str,
     file_path: str,
     *,
+    name: str | None = None,
+    qualified_name: str | None = None,
     start_line: int | None = 1,
     end_line: int | None = 1,
 ) -> CodeGraphNode:
     """Build a minimal CodeGraph node for context builder tests."""
+    node_name = name or node_id.removeprefix("node_")
     return CodeGraphNode(
         id=node_id,
         identity_key=node_id,
         kind="function",
-        name=node_id.removeprefix("node_"),
-        qualified_name=node_id.removeprefix("node_"),
+        name=node_name,
+        qualified_name=qualified_name or node_name,
         file_path=file_path,
         language="python",
         start_line=start_line,
