@@ -494,6 +494,7 @@ There is no built-in autonomous multi-stage agent loop. The safe pattern is expl
 - Architecture and internals: `Docs/MCP/Unified/Developer_Guide.md`
 - Deployment and hardening: `Docs/MCP/Unified/System_Admin_Guide.md`
 - Module authoring: `Docs/MCP/Unified/Modules.md`
+- Native CodeGraph module: `Docs/MCP/Unified/CodeGraph.md`
 - YAML module config details: `Docs/MCP/Unified/Using_Modules_YAML.md`
 - External federation module: `Docs/MCP/Unified/External_Federation.md`
 - Client snippets: `Docs/MCP/Unified/Client_Snippets.md`
