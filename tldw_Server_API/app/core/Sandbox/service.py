@@ -1099,9 +1099,13 @@ class SandboxService:
         """Return a read-only operator summary derived from runtime discovery."""
         runtime_rows = [self._runtime_diagnostics_item(row) for row in self.feature_discovery()]
         ready = [row for row in runtime_rows if row["readiness"] == "ready"]
-        unavailable = [row for row in runtime_rows if row["readiness"] != "ready"]
         host_gated = [row for row in runtime_rows if row["readiness"] == "host_gated"]
         scaffold = [row for row in runtime_rows if row["readiness"] == "scaffold"]
+        unavailable = [
+            row
+            for row in runtime_rows
+            if row["readiness"] in {"unavailable", "unsupported", "not_applicable"}
+        ]
         host_local_warning_runtimes = [
             str(row["name"])
             for row in runtime_rows

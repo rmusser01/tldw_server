@@ -462,7 +462,7 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
     assert summary["summary"] == {
         "total": 4,
         "ready": 2,
-        "unavailable": 2,
+        "unavailable": 1,
         "host_gated": 1,
         "scaffold": 0,
         "host_local_warning_runtimes": ["worktree"],
