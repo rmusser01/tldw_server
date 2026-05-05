@@ -2846,6 +2846,7 @@ def test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify minimal Llama.cpp/messages specs keep router attr lookup lazy."""
+    import builtins
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -2927,6 +2928,37 @@ def test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup
         fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
+    endpoints_package = "tldw_Server_API.app.api.v1.endpoints."
+    fake_unrelated_eager_imports: list[str] = []
+    real_import = builtins.__import__
+
+    def _fake_endpoint_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        """Return fake routers for unrelated eager minimal optional imports."""
+        if (
+            level == 0
+            and name.startswith(endpoints_package)
+            and name not in definitions_by_module
+        ):
+            attrs = tuple(attr for attr in fromlist if attr != "*") or ("router",)
+            fake_unrelated_eager_imports.append(name)
+            for attr_name in attrs:
+                _install_fake_router_module(
+                    monkeypatch,
+                    name,
+                    path=f"/minimal-unrelated-fake/{len(fake_unrelated_eager_imports)}",
+                    attr_name=attr_name,
+                )
+            return sys.modules[name]
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_endpoint_import)
+
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
@@ -2949,6 +2981,11 @@ def test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup
         for definition in router_definitions
     }
     assert import_calls == []
+    assert {
+        "tldw_Server_API.app.api.v1.endpoints.vector_stores_openai",
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced",
+        "tldw_Server_API.app.api.v1.endpoints.media_embeddings",
+    }.issubset(set(fake_unrelated_eager_imports))
 
     selected_specs = {
         spec.name: spec
