@@ -529,6 +529,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
       {capabilities && !capabilities.hasChatDocuments && (
         <Alert
           variant="warning"
+          role="status"
+          aria-live="polite"
           data-testid="document-generator-capability-alert"
           className="mb-4"
         >
@@ -541,6 +543,8 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
       {!conversationId && (
         <Alert
           variant="info"
+          role="status"
+          aria-live="polite"
           data-testid="document-generator-conversation-alert"
           className="mb-4"
         >

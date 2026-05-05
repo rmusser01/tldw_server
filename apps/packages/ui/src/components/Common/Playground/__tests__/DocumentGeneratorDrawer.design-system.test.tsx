@@ -128,12 +128,28 @@ describe("DocumentGeneratorDrawer design-system recovery alerts", () => {
       "data-ds-component",
       "Alert"
     )
+    expect(screen.getByTestId("document-generator-capability-alert")).toHaveAttribute(
+      "role",
+      "status"
+    )
+    expect(screen.getByTestId("document-generator-capability-alert")).toHaveAttribute(
+      "aria-live",
+      "polite"
+    )
     expect(
       screen.getByText("Document generation is not available on this server.")
     ).toBeInTheDocument()
     expect(screen.getByTestId("document-generator-conversation-alert")).toHaveAttribute(
       "data-ds-component",
       "Alert"
+    )
+    expect(screen.getByTestId("document-generator-conversation-alert")).toHaveAttribute(
+      "role",
+      "status"
+    )
+    expect(screen.getByTestId("document-generator-conversation-alert")).toHaveAttribute(
+      "aria-live",
+      "polite"
     )
     expect(
       screen.getByText("Start a server-backed chat to generate documents.")

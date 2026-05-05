@@ -55,6 +55,7 @@ Verification:
 - `bunx tsc --noEmit --pretty false -p tsconfig.json` still exits 2 on the broader frontend baseline; filtering the compiler log for the touched files produced no matches.
 - `git diff --check` passed.
 - Bandit skipped: this is a frontend-only TypeScript/React migration with no Python touched scope.
+- PR review pass: CodeRabbit and Qodo both flagged the same accessibility issue in DocumentGeneratorDrawer. Added `role="status"` and `aria-live="polite"` to the non-urgent capability and missing-conversation Alert instances, plus regression assertions for both attributes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
