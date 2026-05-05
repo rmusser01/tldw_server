@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+import tldw_Server_API.app.core.Sandbox.runners.worktree_runner as worktree_module
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.worktree_runner import (
     WorktreeRunner,
@@ -335,6 +336,115 @@ def test_start_run_failure_after_worktree_create_destroys_worktree(
         pytest.fail(f"unexpected destroy calls: {destroy_calls}")
     if created_worktree.exists():
         pytest.fail("created worktree should have been removed")
+
+
+def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Timeout cleanup must remove runtime state before returning."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run-dir"
+    created_worktree = tmp_path / "created-worktree"
+    run_id = "run-worktree-timeout-cleanup"
+    destroy_calls: list[tuple[str, str]] = []
+    killpg_calls: list[tuple[int, int]] = []
+
+    def _mkdtemp(prefix: str) -> str:
+        if prefix != "tldw_wt_run_":
+            pytest.fail(f"unexpected temp prefix: {prefix}")
+        run_dir.mkdir()
+        return str(run_dir)
+
+    def _create_worktree(repo_path: str, branch: str = "HEAD") -> str:
+        if repo_path != str(repo):
+            pytest.fail(f"unexpected repo path: {repo_path}")
+        if branch != "HEAD":
+            pytest.fail(f"unexpected branch: {branch}")
+        created_worktree.mkdir()
+        return str(created_worktree)
+
+    def _destroy_worktree(worktree_path: str, repo_path: str) -> None:
+        destroy_calls.append((worktree_path, repo_path))
+        shutil.rmtree(worktree_path)
+
+    class _TimeoutProc:
+        pid = 9876
+        returncode = None
+
+        def __init__(self) -> None:
+            self.wait_calls = 0
+
+        def wait(self, timeout: int | None = None) -> int:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired(cmd=["sleep"], timeout=timeout)
+            self.returncode = -signal.SIGTERM
+            return self.returncode
+
+    monkeypatch.setattr(worktree_module.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(worktree_module.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "_is_git_repo",
+        staticmethod(lambda path: path == str(repo)),
+    )
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "create_worktree",
+        staticmethod(_create_worktree),
+    )
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "destroy_worktree",
+        staticmethod(_destroy_worktree),
+    )
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "_cancel_grace_seconds",
+        classmethod(lambda cls: 0),
+    )
+    monkeypatch.setattr(
+        worktree_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _TimeoutProc(),
+    )
+    monkeypatch.setattr(
+        worktree_module.os,
+        "killpg",
+        lambda pid, sig: killpg_calls.append((pid, sig)),
+    )
+
+    result = None
+    try:
+        result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
+            run_id,
+            RunSpec(
+                session_id=None,
+                runtime=RuntimeType.worktree,
+                base_image=None,
+                command=["/bin/sleep", "60"],
+                timeout_sec=1,
+            ),
+            session_workspace=str(repo),
+        )
+
+        assert result.phase == RunPhase.timed_out
+        assert result.message == "execution_timeout"
+        assert destroy_calls == [(str(created_worktree), str(repo))]
+        assert killpg_calls == [(9876, signal.SIGTERM)]
+        assert not created_worktree.exists()
+        assert not run_dir.exists()
+        with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+            assert run_id not in WorktreeRunner._active_proc  # type: ignore[attr-defined]
+            assert run_id not in WorktreeRunner._active_run_dir  # type: ignore[attr-defined]
+            assert run_id not in WorktreeRunner._cancelled_runs  # type: ignore[attr-defined]
+    finally:
+        with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+            WorktreeRunner._active_proc.pop(run_id, None)  # type: ignore[attr-defined]
+            WorktreeRunner._active_run_dir.pop(run_id, None)  # type: ignore[attr-defined]
+            WorktreeRunner._cancelled_runs.discard(run_id)  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
