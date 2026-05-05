@@ -2635,6 +2635,142 @@ def test_iter_content_router_specs_defers_kanban_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_learning_writing_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify learning/writing specs keep import and attr lookup lazy."""
+    import importlib
+
+    router_definitions = [
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.translate",
+            "path": "/translate",
+            "prefix": "/api/v1",
+            "tags": ("translation",),
+            "route_key": "translation",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.slides",
+            "path": "/slides",
+            "prefix": "/api/v1",
+            "tags": ("slides",),
+            "route_key": "slides",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.flashcards",
+            "path": "/flashcards",
+            "prefix": "/api/v1",
+            "tags": ("flashcards",),
+            "route_key": "flashcards",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.quizzes",
+            "path": "/quizzes",
+            "prefix": "/api/v1",
+            "tags": ("quizzes",),
+            "route_key": "quizzes",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.study_suggestions",
+            "path": "/study/suggestions",
+            "prefix": "/api/v1",
+            "tags": ("study-suggestions",),
+            "route_key": "study-suggestions",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.writing",
+            "path": "/writing",
+            "prefix": "/api/v1/writing",
+            "tags": ("writing",),
+            "route_key": "writing",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.writing_manuscripts",
+            "path": "/writing/manuscripts",
+            "prefix": "/api/v1/writing/manuscripts",
+            "tags": ("manuscripts",),
+            "route_key": "manuscripts",
+        },
+    ]
+    routers_by_module: dict[str, APIRouter] = {}
+    access_count = {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake learning router."""
+            return {"status": "ok"}
+
+        routers_by_module[module_name] = router
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected learning/writing routers."""
+        if module_name in routers_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = {
+        spec.route_key: spec
+        for spec in specs
+        if spec.route_key in {
+            str(definition["route_key"])
+            for definition in router_definitions
+        }
+    }
+    assert set(selected_specs) == {
+        str(definition["route_key"]) for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        spec = selected_specs[str(definition["route_key"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.default_stable is True
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(definition["module_name"]) for definition in router_definitions
+    ]
+    assert access_count == {
+        str(definition["module_name"]): 1 for definition in router_definitions
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
