@@ -339,6 +339,7 @@ class LimaRunner:
         """Execute a real run in a Lima VM."""
         started = datetime.utcnow()
         hub = get_hub()
+        max_log_bytes = self._max_log_bytes()
 
         with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
             hub.publish_event(run_id, "start", {
@@ -486,7 +487,7 @@ class LimaRunner:
                     with open(log_path, "rb") as f:
                         log_data = f.read()
                     if log_data:
-                        hub.publish_stdout(run_id, log_data, 10 * 1024 * 1024)
+                        hub.publish_stdout(run_id, log_data, max_log_bytes)
                 except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -560,11 +561,6 @@ class LimaRunner:
             log_bytes_total = int(hub.get_log_bytes(run_id))
         except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
             log_bytes_total = 0
-        try:
-            max_log_bytes = int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
-        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-            max_log_bytes = 10 * 1024 * 1024
-
         art_bytes = sum(len(v) for v in artifacts_map.values()) if artifacts_map else 0
 
         usage: dict[str, int] = {
@@ -656,11 +652,7 @@ exit $exit_code
     def _tail_log(run_id: str, log_path: str, stop_flag: dict[str, bool]) -> None:
         """Tail the log file and stream to hub."""
         hub = get_hub()
-        max_log = None
-        try:
-            max_log = int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
-        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-            max_log = 10 * 1024 * 1024
+        max_log = LimaRunner._max_log_bytes()
 
         # Wait for log file to appear
         deadline = time.time() + 10
@@ -682,6 +674,14 @@ exit $exit_code
                     hub.publish_stdout(run_id, line, max_log)
         except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
             return
+
+    @staticmethod
+    def _max_log_bytes() -> int:
+        """Return the configured Lima stream log cap in bytes."""
+        try:
+            return int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
+        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return 10 * 1024 * 1024
 
     @staticmethod
     def _collect_artifacts(

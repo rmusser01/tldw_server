@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,6 +49,7 @@ _ARTIFACT_LIMIT_COUNTER_KEYS = (
     "artifact_limit_total_bytes",
     "artifact_files_collected",
     "artifact_files_skipped",
+    "artifact_files_excluded",
     "artifact_bytes_collected",
     "artifact_skip_file_limit",
     "artifact_skip_total_limit",
@@ -147,23 +148,15 @@ def collect_limited_artifacts(
     *,
     max_file_bytes: int | None,
     max_total_bytes: int | None,
+    exclude_names: Iterable[str] = (),
+    exclude_hidden: bool = False,
 ) -> ArtifactLimitResult:
     """Collect matching artifacts without reading files that exceed byte caps."""
-    counters = {
-        "artifact_limit_file_bytes": int(max_file_bytes or 0),
-        "artifact_limit_total_bytes": int(max_total_bytes or 0),
-        "artifact_files_collected": 0,
-        "artifact_files_skipped": 0,
-        "artifact_bytes_collected": 0,
-        "artifact_skip_file_limit": 0,
-        "artifact_skip_total_limit": 0,
-        "artifact_skip_symlink": 0,
-        "artifact_skip_invalid": 0,
-        "artifact_skip_read_error": 0,
-    }
+    counters = artifact_limit_counter_defaults(max_file_bytes, max_total_bytes)
     patterns = [str(pattern) for pattern in (capture_patterns or []) if str(pattern or "").strip()]
     if not patterns:
         return ArtifactLimitResult(artifacts={}, counters=counters)
+    excludes = {str(name).strip() for name in exclude_names if str(name).strip()}
 
     workspace_path = Path(workspace)
     if workspace_path.is_symlink():
@@ -187,6 +180,9 @@ def collect_limited_artifacts(
                 full_path = root_path / file_name
                 rel_posix = full_path.relative_to(workspace_root).as_posix()
                 if not any(fnmatch.fnmatchcase(rel_posix, pattern) for pattern in patterns):
+                    continue
+                if not _artifact_allowed(rel_posix, exclude_names=excludes, exclude_hidden=exclude_hidden):
+                    counters["artifact_files_excluded"] += 1
                     continue
                 if full_path.is_symlink():
                     _increment_artifact_skip(counters, "artifact_skip_symlink")
@@ -279,6 +275,26 @@ def limit_event_actions(resource_usage: Mapping[str, object] | None) -> list[str
     return actions
 
 
+def artifact_limit_counter_defaults(
+    max_file_bytes: int | None,
+    max_total_bytes: int | None,
+) -> dict[str, int]:
+    """Return the shared artifact counter schema with limit values and zero counts."""
+    return {
+        "artifact_limit_file_bytes": int(max_file_bytes or 0),
+        "artifact_limit_total_bytes": int(max_total_bytes or 0),
+        "artifact_files_collected": 0,
+        "artifact_files_skipped": 0,
+        "artifact_files_excluded": 0,
+        "artifact_bytes_collected": 0,
+        "artifact_skip_file_limit": 0,
+        "artifact_skip_total_limit": 0,
+        "artifact_skip_symlink": 0,
+        "artifact_skip_invalid": 0,
+        "artifact_skip_read_error": 0,
+    }
+
+
 def _increment_artifact_skip(counters: dict[str, int], reason_key: str) -> None:
     counters["artifact_files_skipped"] += 1
     counters[reason_key] += 1
@@ -332,3 +348,10 @@ def _path_within_root(root: Path, path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _artifact_allowed(path: str, *, exclude_names: set[str], exclude_hidden: bool) -> bool:
+    rel = Path(path)
+    if exclude_hidden and any(part.startswith(".") for part in rel.parts):
+        return False
+    return rel.as_posix() not in exclude_names

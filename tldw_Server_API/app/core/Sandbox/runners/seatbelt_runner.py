@@ -391,12 +391,14 @@ class SeatbeltRunner:
                 phase = RunPhase.killed
                 exit_code = None
                 artifacts_map = {}
+                artifact_counters = {}
                 message = "canceled_by_user"
         except _SEATBELT_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("Seatbelt execution error for run {}: {}", run_id, exc)
             message = f"seatbelt execution error: {exc}"
             if self._consume_cancelled(run_id):
                 phase = RunPhase.killed
+                artifact_counters = {}
                 message = "canceled_by_user"
         finally:
             finished = datetime.utcnow()

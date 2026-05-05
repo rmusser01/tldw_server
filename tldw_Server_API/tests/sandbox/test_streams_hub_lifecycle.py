@@ -151,3 +151,23 @@ def test_hub_marks_single_oversized_chunk_as_log_truncated() -> None:
         frame.get("type") == "truncated" and frame.get("reason") == "log_cap"
         for frame in frames
     )
+
+
+@pytest.mark.unit
+def test_hub_log_truncation_publishes_after_releasing_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    run_id = "run-hub-6"
+    published: list[dict[str, object]] = []
+
+    def _publish_without_lock(_run_id: str, frame: dict[str, object]) -> None:
+        assert not hub._lock._is_owned()  # type: ignore[attr-defined]
+        published.append(dict(frame))
+
+    monkeypatch.setattr(hub, "_publish", _publish_without_lock)
+
+    hub.mark_log_truncated(run_id)
+
+    assert hub.is_log_truncated(run_id)
+    assert published == [{"type": "truncated", "reason": "log_cap"}]

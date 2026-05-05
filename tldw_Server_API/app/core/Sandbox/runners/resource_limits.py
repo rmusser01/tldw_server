@@ -1,10 +1,17 @@
+"""Runner-facing artifact and log limit helpers.
+
+This module keeps runtime implementations on one shared reporting contract while
+letting each runner keep its own execution lifecycle. Helpers intentionally
+return aggregate counters only; they do not expose artifact paths in limit/audit
+metadata.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
-from ..limits import ArtifactLimitResult, collect_limited_artifacts
+from ..limits import ArtifactLimitResult, artifact_limit_counter_defaults, collect_limited_artifacts
 from ..policy import SandboxPolicyConfig
 
 _RESOURCE_LIMIT_EXCEPTIONS = (
@@ -18,6 +25,7 @@ _RESOURCE_LIMIT_EXCEPTIONS = (
 
 
 def sandbox_policy_config() -> SandboxPolicyConfig:
+    """Load sandbox policy settings with safe defaults for runner cleanup paths."""
     try:
         return SandboxPolicyConfig.from_settings()
     except _RESOURCE_LIMIT_EXCEPTIONS:
@@ -25,6 +33,7 @@ def sandbox_policy_config() -> SandboxPolicyConfig:
 
 
 def artifact_limit_values() -> tuple[int, int]:
+    """Return positive per-file and total artifact byte caps for runner collection."""
     cfg = sandbox_policy_config()
     return (
         _positive_int(getattr(cfg, "max_artifact_file_bytes", None), 64 * 1024 * 1024),
@@ -39,6 +48,7 @@ def collect_runner_artifacts(
     exclude_names: Iterable[str] = (),
     exclude_hidden: bool = False,
 ) -> ArtifactLimitResult:
+    """Collect runner artifacts with shared caps and optional internal exclusions."""
     max_file_bytes, max_total_bytes = artifact_limit_values()
     try:
         result = collect_limited_artifacts(
@@ -46,28 +56,19 @@ def collect_runner_artifacts(
             capture_patterns,
             max_file_bytes=max_file_bytes,
             max_total_bytes=max_total_bytes,
+            exclude_names=exclude_names,
+            exclude_hidden=exclude_hidden,
         )
     except _RESOURCE_LIMIT_EXCEPTIONS:
-        return ArtifactLimitResult(artifacts={}, counters={})
-
-    excludes = {str(name).strip() for name in exclude_names if str(name).strip()}
-    if not excludes and not exclude_hidden:
-        return result
-
-    artifacts = {
-        path: data
-        for path, data in result.artifacts.items()
-        if _artifact_allowed(path, exclude_names=excludes, exclude_hidden=exclude_hidden)
-    }
-    if len(artifacts) == len(result.artifacts):
-        return result
-    counters = dict(result.counters)
-    counters["artifact_files_collected"] = len(artifacts)
-    counters["artifact_bytes_collected"] = sum(len(value) for value in artifacts.values())
-    return ArtifactLimitResult(artifacts=artifacts, counters=counters)
+        counters = artifact_limit_counter_defaults(max_file_bytes, max_total_bytes)
+        counters["artifact_files_skipped"] = 1
+        counters["artifact_skip_read_error"] = 1
+        return ArtifactLimitResult(artifacts={}, counters=counters)
+    return result
 
 
 def log_limit_counters(hub: Any, run_id: str, max_log_bytes: int) -> dict[str, int]:
+    """Return resource_usage counters when the stream hub observed log truncation."""
     try:
         is_truncated = bool(hub.is_log_truncated(run_id))
     except _RESOURCE_LIMIT_EXCEPTIONS:
@@ -86,10 +87,3 @@ def _positive_int(value: Any, default: int) -> int:
     except _RESOURCE_LIMIT_EXCEPTIONS:
         return default
     return parsed if parsed > 0 else default
-
-
-def _artifact_allowed(path: str, *, exclude_names: set[str], exclude_hidden: bool) -> bool:
-    rel = Path(path)
-    if exclude_hidden and any(part.startswith(".") for part in rel.parts):
-        return False
-    return rel.as_posix() not in exclude_names

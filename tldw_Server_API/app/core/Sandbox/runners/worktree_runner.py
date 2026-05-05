@@ -621,6 +621,7 @@ class WorktreeRunner:
                 phase = RunPhase.killed
                 exit_code = None
                 artifacts_map = {}
+                artifact_counters = {}
                 message = "canceled_by_user"
 
         except _WORKTREE_NONCRITICAL_EXCEPTIONS as exc:
@@ -628,6 +629,7 @@ class WorktreeRunner:
             message = f"worktree execution error: {exc}"
             if self._consume_cancelled(run_id):
                 phase = RunPhase.killed
+                artifact_counters = {}
                 message = "canceled_by_user"
         finally:
             finished = datetime.now(timezone.utc)

@@ -545,6 +545,80 @@ def test_start_run_applies_artifact_and_log_caps(
     assert destroy_calls == [(str(created_worktree), str(repo))]
 
 
+def test_cancelled_run_drops_artifact_counters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Canceled worktree runs should not report counters for discarded artifacts."""
+    monkeypatch.setattr(
+        SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_artifact_file_bytes=100, max_artifact_total_bytes=100)),
+    )
+    monkeypatch.setattr(worktree_module.sys, "platform", "darwin")
+    monkeypatch.setattr(WorktreeRunner, "_consume_cancelled", classmethod(lambda cls, run_id: True))
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run-dir"
+    created_worktree = tmp_path / "created-worktree"
+
+    def _mkdtemp(prefix: str) -> str:
+        assert prefix == "tldw_wt_run_"
+        run_dir.mkdir()
+        return str(run_dir)
+
+    def _create_worktree(repo_path: str, branch: str = "HEAD") -> str:
+        del branch
+        assert repo_path == str(repo)
+        created_worktree.mkdir()
+        return str(created_worktree)
+
+    def _destroy_worktree(worktree_path: str, repo_path: str) -> None:
+        assert worktree_path == str(created_worktree)
+        assert repo_path == str(repo)
+        shutil.rmtree(worktree_path)
+
+    class _CancelProc:
+        pid = 6161
+        returncode = 0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args
+            stdout = kwargs.get("stdout")
+            assert stdout is not None
+            (created_worktree / "artifact.txt").write_bytes(b"artifact")
+            stdout.write(b"ok")
+            stdout.flush()
+
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    monkeypatch.setattr(worktree_module.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(WorktreeRunner, "_is_git_repo", staticmethod(lambda path: path == str(repo)))
+    monkeypatch.setattr(WorktreeRunner, "create_worktree", staticmethod(_create_worktree))
+    monkeypatch.setattr(WorktreeRunner, "destroy_worktree", staticmethod(_destroy_worktree))
+    monkeypatch.setattr(worktree_module.subprocess, "Popen", _CancelProc)
+
+    result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
+        "run-worktree-cancel-counters",
+        RunSpec(
+            session_id=None,
+            runtime=RuntimeType.worktree,
+            base_image=None,
+            command=["/bin/echo", "ok"],
+            timeout_sec=10,
+            capture_patterns=["*.txt"],
+        ),
+        session_workspace=str(repo),
+    )
+
+    assert result.phase == RunPhase.killed
+    assert result.artifacts is None
+    assert "artifact_files_collected" not in result.resource_usage
+
+
 # ---------------------------------------------------------------------------
 # Linux unshare refusal
 # ---------------------------------------------------------------------------

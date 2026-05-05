@@ -313,7 +313,9 @@ class RunStreamHub:
     def mark_log_truncated(self, run_id: str) -> None:
         """Mark a run as log-truncated when a runner caps file-backed output."""
         with self._lock:
-            self._mark_log_truncated_locked(run_id)
+            should_emit = self._mark_log_truncated_locked(run_id)
+        if should_emit:
+            self._emit_log_truncated(run_id)
 
     def publish_stdout(self, run_id: str, chunk: bytes, max_log_bytes: int | None = None) -> None:
         self._publish_stream(run_id, "stdout", chunk, max_log_bytes=max_log_bytes)
@@ -326,9 +328,15 @@ class RunStreamHub:
         with self._lock:
             used = self._log_bytes.get(run_id, 0)
             if used >= cap:
-                self._mark_log_truncated_locked(run_id)
-                return
-            remaining = cap - used
+                should_emit = self._mark_log_truncated_locked(run_id)
+                remaining = 0
+            else:
+                should_emit = False
+                remaining = cap - used
+        if used >= cap:
+            if should_emit:
+                self._emit_log_truncated(run_id)
+            return
         data = chunk[:remaining]
         truncated_chunk = len(chunk) > len(data)
         try:
@@ -342,12 +350,17 @@ class RunStreamHub:
         self._publish(run_id, frame)
         if truncated_chunk:
             with self._lock:
-                self._mark_log_truncated_locked(run_id)
+                should_emit = self._mark_log_truncated_locked(run_id)
+            if should_emit:
+                self._emit_log_truncated(run_id)
 
-    def _mark_log_truncated_locked(self, run_id: str) -> None:
+    def _mark_log_truncated_locked(self, run_id: str) -> bool:
         if run_id in self._truncated:
-            return
+            return False
         self._truncated.add(run_id)
+        return True
+
+    def _emit_log_truncated(self, run_id: str) -> None:
         self._publish(run_id, {"type": "truncated", "reason": "log_cap"})
         try:
             from tldw_Server_API.app.core.Metrics import increment_counter

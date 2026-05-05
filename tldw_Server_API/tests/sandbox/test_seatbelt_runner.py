@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import BinaryIO
 from unittest.mock import MagicMock
 
 import pytest
@@ -158,7 +159,11 @@ def test_seatbelt_start_run_executes_real_subprocess_and_collects_artifacts(monk
     assert not run_root.exists()
 
 
-def test_seatbelt_start_run_applies_artifact_and_log_caps(monkeypatch, tmp_path: Path) -> None:
+def test_seatbelt_start_run_applies_artifact_and_log_caps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Seatbelt runs should share artifact and log-cap resource counters."""
     monkeypatch.delenv("TLDW_SANDBOX_SEATBELT_FAKE_EXEC", raising=False)
     monkeypatch.setattr(
         SandboxPolicyConfig,
@@ -175,7 +180,16 @@ def test_seatbelt_start_run_applies_artifact_and_log_caps(monkeypatch, tmp_path:
     monkeypatch.setattr(seatbelt_module.tempfile, "mkdtemp", lambda prefix: str(run_root))
 
     class _CapPopen:
-        def __init__(self, argv, cwd=None, env=None, stdout=None, stderr=None, stdin=None, start_new_session=None):
+        def __init__(
+            self,
+            argv: object,
+            cwd: str | None = None,
+            env: dict[str, str] | None = None,
+            stdout: BinaryIO | None = None,
+            stderr: BinaryIO | None = None,
+            stdin: object | None = None,
+            start_new_session: bool | None = None,
+        ) -> None:
             assert stdout is not None
             assert stderr is not None
             del argv, env, stdin, start_new_session
@@ -188,7 +202,8 @@ def test_seatbelt_start_run_applies_artifact_and_log_caps(monkeypatch, tmp_path:
             self.pid = 5151
             self.returncode = 0
 
-        def wait(self, timeout=None):
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
             return 0
 
     monkeypatch.setattr(seatbelt_module.subprocess, "Popen", _CapPopen)
@@ -224,6 +239,64 @@ def test_seatbelt_start_run_applies_artifact_and_log_caps(monkeypatch, tmp_path:
     assert status.resource_usage["artifact_bytes"] == 4
     assert status.resource_usage["log_limit_bytes"] == 5
     assert status.resource_usage["log_truncated"] == 1
+
+
+def test_seatbelt_cancelled_run_drops_artifact_counters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Canceled seatbelt runs should not report artifact counters for discarded artifacts."""
+    monkeypatch.delenv("TLDW_SANDBOX_SEATBELT_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_artifact_file_bytes=100, max_artifact_total_bytes=100)),
+    )
+    monkeypatch.setattr(seatbelt_module, "_sandbox_exec_exists", lambda: True)
+
+    run_root = tmp_path / "seatbelt-cancel-run"
+    run_root.mkdir()
+    workspace_root = run_root / "workspace"
+
+    monkeypatch.setattr(seatbelt_module.tempfile, "mkdtemp", lambda prefix: str(run_root))
+    monkeypatch.setattr(SeatbeltRunner, "_consume_cancelled", classmethod(lambda cls, run_id: True))
+
+    class _CancelPopen:
+        pid = 5252
+        returncode = 0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args
+            stdout = kwargs.get("stdout")
+            assert stdout is not None
+            (workspace_root / "artifact.txt").write_bytes(b"artifact")
+            stdout.write(b"ok")
+            stdout.flush()
+
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    monkeypatch.setattr(seatbelt_module.subprocess, "Popen", _CancelPopen)
+
+    status = SeatbeltRunner().start_run(
+        run_id="run-seatbelt-cancel-counters",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.seatbelt,
+            base_image="host-local",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+            trust_level=TrustLevel.trusted,
+            timeout_sec=7,
+            capture_patterns=["*.txt"],
+        ),
+        session_workspace=None,
+    )
+
+    assert status.phase == RunPhase.killed
+    assert status.artifacts is None
+    assert "artifact_files_collected" not in status.resource_usage
 
 
 def test_seatbelt_start_run_times_out_and_cleans_up(monkeypatch, tmp_path: Path) -> None:
