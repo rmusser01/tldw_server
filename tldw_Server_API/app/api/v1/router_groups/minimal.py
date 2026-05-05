@@ -527,38 +527,33 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, guardian_safety_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router
-
-        specs.append(RouterSpec(
-            router=persona_router,
+    for persona_notes_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.persona",
+            log_name="persona",
             prefix=f"{API_V1_PREFIX}/persona",
             tags=("persona",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping persona router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router
-
-        specs.append(RouterSpec(
-            router=archetype_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
+            log_name="archetype",
             prefix=f"{API_V1_PREFIX}/persona/archetypes",
             tags=("persona-archetypes",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping archetype router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
-
-        specs.append(RouterSpec(
-            router=notes_router,
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes",
+            log_name="notes",
             prefix=f"{API_V1_PREFIX}/notes",
             tags=("notes",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping notes router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+            skip_exceptions=(Exception,),
+        ),
+    ):
+        append_imported_router_spec(specs, persona_notes_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.web_clipper import router as web_clipper_router
