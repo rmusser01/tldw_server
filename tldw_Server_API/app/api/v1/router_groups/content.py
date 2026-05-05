@@ -26,18 +26,15 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     specs: list[RouterSpec] = []
 
     # RAG unified endpoints (router has its own /api/v1/rag prefix)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.rag_unified import (
-            router as rag_unified_router,
-        )
-
-        specs.append(RouterSpec(
-            router=rag_unified_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.rag_unified",
+            log_name="rag_unified",
             tags=("rag-unified",),
             route_key="rag-unified",
-        ))
-    except ImportError as e:
-        logger.debug(f"Skipping rag_unified router: {e}")
+        ),
+    )
 
     # RAG health and research discovery endpoints
     for discovery_spec in (

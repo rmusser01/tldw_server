@@ -1340,6 +1340,66 @@ def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scrapin
     assert web_scraping_specs[0].prefix == "/api/v1"
 
 
+def test_iter_content_router_specs_defers_rag_unified_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify rag_unified keeps import and router attr lookup lazy."""
+    import importlib
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.rag_unified"
+    access_count = 0
+    import_calls: list[str] = []
+    router = APIRouter()
+
+    @router.get("/api/v1/rag/search")
+    def _endpoint() -> dict[str, str]:
+        """Return a deterministic response for the fake rag router."""
+        return {"status": "ok"}
+
+    fake_module = ModuleType(module_name)
+
+    def _module_getattr(name: str) -> APIRouter:
+        """Track lazy router attribute resolution for the fake module."""
+        nonlocal access_count
+        if name != "router":
+            raise AttributeError(name)
+        access_count += 1
+        return router
+
+    fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_path: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for the selected RAG router."""
+        if import_path == module_name:
+            import_calls.append(import_path)
+        return real_import_module(import_path, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == 0
+    assert import_calls == []
+
+    selected_specs = [spec for spec in specs if spec.name == "rag_unified"]
+    assert len(selected_specs) == 1
+
+    spec = selected_specs[0]
+    assert spec.prefix == ""
+    assert spec.tags == ("rag-unified",)
+    assert spec.route_key == "rag-unified"
+    assert spec.default_stable is True
+    assert _first_router_path(spec.router) == "/api/v1/rag/search"
+
+    assert import_calls == [module_name]
+    assert access_count == 1
+
+
 def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
