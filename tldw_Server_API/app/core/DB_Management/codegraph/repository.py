@@ -475,7 +475,17 @@ class CodeGraphRepository:
             for _level in range(effective_depth):
                 if not frontier or truncated:
                     break
-                rows = _select_relationships_for_nodes(conn, frontier, direction, anchor_file_path=anchor_file_path)
+                remaining_rows = (effective_limit - len(relationships)) + 1
+                if remaining_rows <= 0:
+                    truncated = True
+                    break
+                rows = _select_relationships_for_nodes(
+                    conn,
+                    frontier,
+                    direction,
+                    anchor_file_path=anchor_file_path,
+                    max_rows=remaining_rows,
+                )
                 next_frontier: set[str] = set()
                 for row in rows:
                     edge_id = str(row["edge_id"])
@@ -612,6 +622,7 @@ def _select_relationships_for_nodes(
     direction: str,
     *,
     anchor_file_path: str,
+    max_rows: int,
 ) -> list[sqlite3.Row]:
     """Select joined relationships touching a set of node ids in deterministic order."""
     ids_json = json.dumps(sorted(node_ids))
@@ -656,8 +667,9 @@ def _select_relationships_for_nodes(
             source_node.qualified_name,
             target_node.qualified_name,
             e.id
+        LIMIT ?
         """,
-        (direction, ids_json, direction, ids_json, anchor_file_path),
+        (direction, ids_json, direction, ids_json, anchor_file_path, max(1, int(max_rows))),
     ).fetchall()
 
 

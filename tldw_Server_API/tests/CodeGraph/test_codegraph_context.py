@@ -1,3 +1,5 @@
+"""Tests for bounded workspace-safe CodeGraph context assembly."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +9,7 @@ from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
 
 
 def test_context_builder_reads_bounded_source_snippet(tmp_path: Path) -> None:
+    """Read a source snippet around the indexed node with surrounding context."""
     source = tmp_path / "pkg" / "sample.py"
     source.parent.mkdir()
     source.write_text(
@@ -49,6 +52,7 @@ def test_context_builder_reads_bounded_source_snippet(tmp_path: Path) -> None:
 
 
 def test_context_builder_groups_duplicate_file_snippets(tmp_path: Path) -> None:
+    """Group multiple node snippets from the same file under one file entry."""
     source = tmp_path / "pkg" / "sample.py"
     source.parent.mkdir()
     source.write_text(
@@ -88,6 +92,7 @@ def test_context_builder_groups_duplicate_file_snippets(tmp_path: Path) -> None:
 
 
 def test_context_builder_respects_context_character_budget(tmp_path: Path) -> None:
+    """Truncate snippet text when the context character budget is exhausted."""
     source = tmp_path / "pkg" / "large.py"
     source.parent.mkdir()
     source.write_text(
@@ -127,6 +132,7 @@ def test_context_builder_respects_context_character_budget(tmp_path: Path) -> No
 
 
 def test_context_builder_skips_unsafe_paths(tmp_path: Path) -> None:
+    """Skip absolute and parent-traversal file paths instead of reading them."""
     builder = CodeGraphContextBuilder(
         workspace_root=tmp_path,
         max_context_chars=500,
@@ -149,6 +155,7 @@ def test_context_builder_skips_unsafe_paths(tmp_path: Path) -> None:
 
 
 def test_context_builder_reports_missing_files_without_raising(tmp_path: Path) -> None:
+    """Represent missing source files as file-context errors without raising."""
     builder = CodeGraphContextBuilder(
         workspace_root=tmp_path,
         max_context_chars=500,
@@ -175,6 +182,7 @@ def test_context_builder_reports_missing_files_without_raising(tmp_path: Path) -
 
 
 def test_context_builder_can_exclude_source_text(tmp_path: Path) -> None:
+    """Return metadata-only file context when source snippets are disabled."""
     source = tmp_path / "pkg" / "sample.py"
     source.parent.mkdir()
     source.write_text("def helper():\n    return 1\n", encoding="utf-8")
@@ -211,6 +219,7 @@ def _node(
     start_line: int | None = 1,
     end_line: int | None = 1,
 ) -> CodeGraphNode:
+    """Build a minimal CodeGraph node for context builder tests."""
     return CodeGraphNode(
         id=node_id,
         identity_key=node_id,

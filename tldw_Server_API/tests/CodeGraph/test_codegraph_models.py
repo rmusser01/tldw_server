@@ -1,9 +1,12 @@
+"""Tests for shared CodeGraph model serialization helpers."""
+
 from __future__ import annotations
 
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, codegraph_node_to_dict
 
 
 def test_codegraph_node_to_dict_serializes_public_fields() -> None:
+    """Serialize CodeGraph nodes into stable public MCP payload fields."""
     node = CodeGraphNode(
         id="node_helper",
         identity_key="helper-key",

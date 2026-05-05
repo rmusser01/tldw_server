@@ -379,7 +379,7 @@ class CodeGraphModule(BaseModule):
                 resolution,
                 str(args["task"]),
                 args.get("max_nodes"),
-                bool(args.get("include_code", True)),
+                args.get("include_code", True),
                 args.get("max_files"),
             )
 
@@ -480,6 +480,7 @@ class CodeGraphModule(BaseModule):
             include_code = arguments.get("include_code")
             if include_code is not None and not isinstance(include_code, bool):
                 raise ValueError("include_code must be a boolean")
+            arguments["include_code"] = True if include_code is None else include_code
             return
 
         raise ValueError(f"Unknown tool: {tool_name}")
