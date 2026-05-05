@@ -227,6 +227,34 @@ def test_firecracker_discovery_does_not_advertise_scaffold_allowlist(
     assert "scaffold/planned" in str(firecracker["notes"])
 
 
+def test_settings_flag_logs_read_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenSettings:
+        @property
+        def SANDBOX_EGRESS_ENFORCEMENT(self) -> str:
+            raise RuntimeError("settings unavailable")
+
+    class CapturingLogger:
+        def __init__(self) -> None:
+            self.warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        def warning(self, *args: object, **kwargs: object) -> None:
+            self.warnings.append((args, kwargs))
+
+    logger = CapturingLogger()
+    monkeypatch.delenv("SANDBOX_EGRESS_ENFORCEMENT", raising=False)
+    monkeypatch.setattr(runtime_caps, "app_settings", BrokenSettings())
+    monkeypatch.setattr(runtime_caps, "logger", logger, raising=False)
+
+    assert runtime_caps._settings_flag(  # noqa: SLF001
+        "SANDBOX_EGRESS_ENFORCEMENT",
+        "SANDBOX_EGRESS_ENFORCEMENT",
+    ) is False
+    assert logger.warnings
+    assert "Failed to read sandbox readiness flag" in str(logger.warnings[0][0][0])
+
+
 def test_runtime_network_policy_metadata_contract_covers_runtime_enum() -> None:
     assert hasattr(runtime_caps, "RUNTIME_NETWORK_POLICY_METADATA")
     assert set(runtime_caps.RUNTIME_NETWORK_POLICY_METADATA) == set(RuntimeType)

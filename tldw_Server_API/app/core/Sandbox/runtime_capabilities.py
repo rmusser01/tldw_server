@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
+from loguru import logger
+
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -365,12 +367,20 @@ def runtime_network_policy_metadata(
 
 
 def _settings_flag(env_name: str, setting_name: str) -> bool:
+    """Read a boolean readiness flag, failing closed with operator-visible logs."""
+
     try:
         raw = os.getenv(env_name)
         if raw is None:
             raw = getattr(app_settings, setting_name, "")
         return is_truthy(str(raw).strip().lower())
-    except _RUNTIME_CAPABILITIES_NONCRITICAL_EXCEPTIONS:
+    except _RUNTIME_CAPABILITIES_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Failed to read sandbox readiness flag env={} setting={}: {}",
+            env_name,
+            setting_name,
+            exc,
+        )
         return False
 
 

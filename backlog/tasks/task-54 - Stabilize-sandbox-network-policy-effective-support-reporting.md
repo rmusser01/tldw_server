@@ -4,7 +4,7 @@ title: Stabilize sandbox network policy effective support reporting
 status: Done
 assignee: []
 created_date: '2026-05-05 02:11'
-updated_date: '2026-05-05 02:15'
+updated_date: '2026-05-05 02:30'
 labels:
   - sandbox
   - network-policy
@@ -45,12 +45,18 @@ Make sandbox runtime discovery and admission report effective network policy sup
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented network policy effective support gating. RED: Docker allowlist admission with allowlist readiness false did not raise, and discovery tests failed because runtime_network_policy_effective_support() did not exist. GREEN: added the helper, Docker/Firecracker readiness facts, policy admission wiring, and discovery wiring. Docker allowlist is now effectively supported only with Docker available plus egress enforcement plus granular enforcement; Docker network=none fallback is treated as deny_all, not allowlist. Firecracker allowlist remains scaffold and is never advertised as effective support. Verification: focused sandbox admission/discovery/Lima tests passed (33 tests), py_compile passed for touched production modules, Bandit reported 0 findings for touched production modules, and git diff --check passed.
+
+PR review follow-up: verifying and fixing Qodo findings for _settings_flag() observability and missing-preflight SandboxPolicy admission compatibility.
+
+PR review fixes completed. Added regression coverage for missing-preflight Docker deny_all admission and _settings_flag() observability. Implemented static supported-only fallback for direct SandboxPolicy callers without preflights and warning logging for readiness flag read failures. Verification: 44 sandbox policy/discovery tests passed, py_compile passed, Bandit reported 0 findings for touched Sandbox modules, and git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Centralized sandbox network-policy effective support so discovery and admission use the same static contract plus current readiness calculation. Docker allowlist now requires granular egress enforcement readiness; scaffold/unsupported allowlist paths remain fail-closed and cannot be over-advertised through legacy discovery booleans. Updated network-policy docs and focused tests.
+
+PR review follow-up: fixed Qodo findings by adding operator-visible logging for readiness flag read failures and preserving no-preflight direct SandboxPolicy callers for statically supported Docker deny_all while keeping host-gated/scaffold policies fail-closed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

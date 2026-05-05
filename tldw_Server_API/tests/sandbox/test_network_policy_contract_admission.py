@@ -170,6 +170,16 @@ def test_apply_to_session_canonicalizes_admitted_network_policy() -> None:
     assert result.network_policy == "allowlist"
 
 
+def test_apply_to_run_allows_default_docker_deny_all_without_preflights() -> None:
+    policy = SandboxPolicy()
+    spec = _run_spec(None)
+
+    result = policy.apply_to_run(spec, firecracker_available=False)
+
+    assert result.runtime == RuntimeType.docker
+    assert result.network_policy == "deny_all"
+
+
 def test_apply_to_run_rejects_docker_allowlist_when_not_effectively_ready() -> None:
     policy = SandboxPolicy()
     spec = _run_spec(RuntimeType.docker, network_policy="allowlist")

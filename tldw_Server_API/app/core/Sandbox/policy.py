@@ -12,6 +12,7 @@ from .models import RunSpec, RuntimeType, SessionSpec, TrustLevel
 from .runtime_capabilities import (
     RuntimePreflightResult,
     runtime_network_policy_effective_support,
+    runtime_network_policy_metadata,
 )
 
 _POLICY_NONCRITICAL_EXCEPTIONS = (
@@ -246,6 +247,19 @@ class SandboxPolicy:
         return "strict_deny_all_not_supported"
 
     @staticmethod
+    def _network_policy_static_support(
+        runtime: RuntimeType,
+        network_policy: str,
+    ) -> bool:
+        contract = runtime_network_policy_metadata(runtime)
+        mode = (
+            contract.deny_all
+            if network_policy == "deny_all"
+            else contract.allowlist
+        )
+        return mode.support_state == "supported" and mode.strict_enforcement
+
+    @staticmethod
     def _require_network_policy_supported(
         runtime: RuntimeType,
         network_policy: str | None,
@@ -261,11 +275,19 @@ class SandboxPolicy:
                 reasons=["unsupported_network_policy"],
             )
 
-        effective_support = runtime_network_policy_effective_support(
-            runtime,
-            runtime_preflight.enforcement_ready if runtime_preflight else None,
-        )
-        if not effective_support.get(requested_policy, False):
+        if runtime_preflight is None:
+            supported = SandboxPolicy._network_policy_static_support(
+                runtime,
+                requested_policy,
+            )
+        else:
+            effective_support = runtime_network_policy_effective_support(
+                runtime,
+                runtime_preflight.enforcement_ready,
+            )
+            supported = effective_support.get(requested_policy, False)
+
+        if not supported:
             raise SandboxPolicy.PolicyUnsupported(
                 runtime,
                 requirement=requested_policy,
