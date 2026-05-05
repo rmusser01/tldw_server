@@ -85,6 +85,7 @@ modules:
       max_file_size_bytes: 1048576
       foreground_max_files: 500
       foreground_max_bytes: 50000000
+      max_index_seconds: 20
       max_context_chars: 35000
       max_search_results: 100
 
