@@ -72,6 +72,7 @@ def _audio_jobs_imports_enabled_for_runtime() -> bool:
 def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     """Yield optional minimal-test router specs, skipping unavailable imports."""
     specs: list[RouterSpec] = []
+    minimal_skip_context = "in minimal test app"
 
     append_imported_router_spec(
         specs,
@@ -348,82 +349,80 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, collections_social_spec)
 
-    data_resource_skip_context = "in minimal test app"
     for data_resource_spec in (
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.files",
             log_name="files",
             prefix=f"{API_V1_PREFIX}",
             tags=("files",),
-            skip_context=data_resource_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.storage",
             log_name="storage",
             prefix=f"{API_V1_PREFIX}",
             tags=("storage",),
-            skip_context=data_resource_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.data_tables",
             log_name="data_tables",
             prefix=f"{API_V1_PREFIX}",
             tags=("data-tables",),
-            skip_context=data_resource_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.reading_highlights",
             log_name="reading_highlights",
             prefix=f"{API_V1_PREFIX}",
             tags=("reading-highlights",),
-            skip_context=data_resource_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.items",
             log_name="items",
             prefix=f"{API_V1_PREFIX}",
             tags=("items",),
-            skip_context=data_resource_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.reminders",
             log_name="reminders",
             prefix=f"{API_V1_PREFIX}",
             tags=("tasks",),
-            skip_context=data_resource_skip_context,
+            skip_context=minimal_skip_context,
         ),
     ):
         append_imported_router_spec(specs, data_resource_spec)
 
-    control_support_skip_context = "in minimal test app"
     for control_support_spec in (
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.integrations_control_plane",
             log_name="integrations_control_plane",
             prefix=f"{API_V1_PREFIX}",
             tags=("integrations",),
-            skip_context=control_support_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane",
             log_name="scheduled_tasks_control_plane",
             prefix=f"{API_V1_PREFIX}",
             tags=("scheduled-tasks",),
-            skip_context=control_support_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notifications",
             log_name="notifications",
             prefix=f"{API_V1_PREFIX}",
             tags=("notifications",),
-            skip_context=control_support_skip_context,
+            skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.chatbooks",
             log_name="chatbooks",
             prefix=f"{API_V1_PREFIX}",
             tags=("chatbooks",),
-            skip_context=control_support_skip_context,
+            skip_context=minimal_skip_context,
         ),
     ):
         append_imported_router_spec(specs, control_support_spec)

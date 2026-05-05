@@ -4621,6 +4621,7 @@ def test_iter_minimal_optional_router_specs_defers_control_support_attr_lookup(
             "path": "/integrations",
             "prefix": "/api/v1",
             "tags": ("integrations",),
+            "default_stable": True,
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.scheduled_tasks_control_plane",
@@ -4628,6 +4629,7 @@ def test_iter_minimal_optional_router_specs_defers_control_support_attr_lookup(
             "path": "/scheduled-tasks",
             "prefix": "/api/v1",
             "tags": ("scheduled-tasks",),
+            "default_stable": True,
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.notifications",
@@ -4635,6 +4637,7 @@ def test_iter_minimal_optional_router_specs_defers_control_support_attr_lookup(
             "path": "/notifications",
             "prefix": "/api/v1",
             "tags": ("notifications",),
+            "default_stable": True,
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.chatbooks",
@@ -4642,6 +4645,7 @@ def test_iter_minimal_optional_router_specs_defers_control_support_attr_lookup(
             "path": "/chatbooks",
             "prefix": "/api/v1",
             "tags": ("chatbooks",),
+            "default_stable": True,
         },
     )
     definitions_by_module = {
@@ -4749,6 +4753,7 @@ def test_iter_minimal_optional_router_specs_defers_control_support_attr_lookup(
         assert spec.tags == definition["tags"]
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
+        assert spec.default_stable is definition["default_stable"]
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
