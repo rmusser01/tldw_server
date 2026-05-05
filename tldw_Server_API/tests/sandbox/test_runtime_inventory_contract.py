@@ -98,10 +98,12 @@ def test_feature_discovery_reports_host_local_isolation_warnings(
             == expected_host_local_warnings
         )
 
-    for vm_runtime in ("firecracker", "lima", "vz_linux"):
+    for runtime_name, runtime_info in discovery.items():
+        if runtime_name in {"seatbelt", "worktree"}:
+            continue
         assert (
             "host_local_boundary"
-            not in discovery[vm_runtime]["isolation_warnings"]
+            not in runtime_info["isolation_warnings"]
         )
 
 
