@@ -4,7 +4,7 @@ title: Add shared sandbox artifact and log cap contracts
 status: Done
 assignee: []
 created_date: '2026-05-05 17:12'
-updated_date: '2026-05-05 17:38'
+updated_date: '2026-05-05 17:46'
 labels:
   - sandbox
 dependencies: []
@@ -34,12 +34,16 @@ Phase 4 reliability slice: enforce shared artifact quota and log-cap reporting c
 
 <!-- SECTION:NOTES:BEGIN -->
 Verification: focused sandbox suite passed with 60 tests: test_sandbox_limits.py, test_streams_hub_lifecycle.py, test_seatbelt_runner.py, test_worktree_runner.py, test_run_status_reason_codes.py, and test_sandbox_run_limit_audit.py. py_compile passed for touched Sandbox app files. Ruff passed for touched app/test files. Bandit JSON at /tmp/bandit_sandbox_artifact_log_cap_contracts.json reported 105 existing low-severity subprocess findings in runner files; diff-line check found 0 findings on added lines. git diff --check passed. Known blocker: test_docker_runner_fake.py -q still stalls after the first TestClient case and was terminated; this matches the existing app-lifespan/TestClient hang pattern rather than the runner-only artifact/log cap changes.
+
+Opened PR #1319: https://github.com/rmusser01/tldw_server/pull/1319
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added shared sandbox artifact/log cap contract plumbing. Seatbelt and worktree now use shared artifact byte caps and report aggregate counters; Docker, Firecracker, Lima, and VZ Linux paths reuse the shared helpers where applicable. Stream log truncation is tracked as resource_usage and included in audit/status limit signals. Added focused regression coverage for artifact caps, log truncation, and limit taxonomy/audit metadata.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1319
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
