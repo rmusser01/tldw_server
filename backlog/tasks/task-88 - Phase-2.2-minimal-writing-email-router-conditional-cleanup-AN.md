@@ -4,7 +4,7 @@ title: Phase 2.2 minimal writing/email router conditional cleanup AN
 status: Done
 assignee: []
 created_date: '2026-05-05 21:58'
-updated_date: '2026-05-05 22:02'
+updated_date: '2026-05-05 22:11'
 labels:
   - phase2.2
   - router-cleanup
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1116'
   - 'https://github.com/rmusser01/tldw_server/pull/1327'
+  - 'https://github.com/rmusser01/tldw_server/pull/1329'
 priority: medium
 ---
 
@@ -52,6 +53,8 @@ GREEN verification: converted writing, writing_manuscripts, and email to Importe
 Converted the minimal-test writing/email router family, limited to writing, writing_manuscripts, and email, from eager try/import RouterSpec blocks to ImportedRouterSpec-backed lazy specs. The change preserves prefixes, tags, default route_key/default_stable behavior, and minimal skip context while using narrow missing-optional skip semantics: ImportError and AttributeError are skipped, but runtime import defects propagate through register_router_specs.
 
 Added focused contract coverage for lazy module import/router attribute lookup, missing optional import skipping, and RuntimeError propagation. Verification: focused writing/email tests passed with 3 passed after a failing RED run; full router group contract tests passed with 94 passed; main router contract tests passed with 6 passed; OpenAPI contract tests passed with 69 passed; Bandit on minimal.py reported 0 results and 0 errors; git diff --check passed.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1329
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
