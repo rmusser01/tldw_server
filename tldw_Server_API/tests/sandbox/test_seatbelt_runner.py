@@ -7,7 +7,7 @@ import pytest
 
 import tldw_Server_API.app.core.Sandbox.runners.seatbelt_runner as seatbelt_module
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType, TrustLevel
-from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy
+from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy, SandboxPolicyConfig
 from tldw_Server_API.app.core.Sandbox.runners.seatbelt_runner import SeatbeltRunner
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 
@@ -156,6 +156,74 @@ def test_seatbelt_start_run_executes_real_subprocess_and_collects_artifacts(monk
     assert any(frame.get("type") == "stdout" and "stdout-line" in frame.get("data", "") for frame in frames)
     assert any(frame.get("type") == "stderr" and "stderr-line" in frame.get("data", "") for frame in frames)
     assert not run_root.exists()
+
+
+def test_seatbelt_start_run_applies_artifact_and_log_caps(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_SEATBELT_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_artifact_file_bytes=5, max_artifact_total_bytes=8)),
+    )
+    monkeypatch.setattr(seatbelt_module, "_sandbox_exec_exists", lambda: True)
+    monkeypatch.setattr(SeatbeltRunner, "_max_log_bytes", staticmethod(lambda: 5))
+
+    run_root = tmp_path / "seatbelt-cap-run"
+    run_root.mkdir()
+    workspace_root = run_root / "workspace"
+
+    monkeypatch.setattr(seatbelt_module.tempfile, "mkdtemp", lambda prefix: str(run_root))
+
+    class _CapPopen:
+        def __init__(self, argv, cwd=None, env=None, stdout=None, stderr=None, stdin=None, start_new_session=None):
+            assert stdout is not None
+            assert stderr is not None
+            del argv, env, stdin, start_new_session
+            assert cwd == str(workspace_root)
+            (workspace_root / "small.txt").write_bytes(b"1234")
+            (workspace_root / "too-large.txt").write_bytes(b"123456")
+            (workspace_root / "would-exceed-total.txt").write_bytes(b"56789")
+            stdout.write(b"abcdef")
+            stdout.flush()
+            self.pid = 5151
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(seatbelt_module.subprocess, "Popen", _CapPopen)
+
+    run_id = "run-seatbelt-cap-contract"
+    hub = get_hub()
+    hub.cleanup_run(run_id)
+
+    status = SeatbeltRunner().start_run(
+        run_id=run_id,
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.seatbelt,
+            base_image="host-local",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+            trust_level=TrustLevel.trusted,
+            timeout_sec=7,
+            capture_patterns=["*.txt"],
+        ),
+        session_workspace=None,
+    )
+
+    assert status.phase == RunPhase.completed
+    assert status.artifacts == {"small.txt": b"1234"}
+    assert status.resource_usage["artifact_limit_file_bytes"] == 5
+    assert status.resource_usage["artifact_limit_total_bytes"] == 8
+    assert status.resource_usage["artifact_files_collected"] == 1
+    assert status.resource_usage["artifact_files_skipped"] == 2
+    assert status.resource_usage["artifact_skip_file_limit"] == 1
+    assert status.resource_usage["artifact_skip_total_limit"] == 1
+    assert status.resource_usage["artifact_bytes_collected"] == 4
+    assert status.resource_usage["artifact_bytes"] == 4
+    assert status.resource_usage["log_limit_bytes"] == 5
+    assert status.resource_usage["log_truncated"] == 1
 
 
 def test_seatbelt_start_run_times_out_and_cleans_up(monkeypatch, tmp_path: Path) -> None:

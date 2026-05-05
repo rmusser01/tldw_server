@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import hashlib
 import json
 import os
@@ -17,10 +16,12 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy
+
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
 from .lima_enforcer import build_lima_enforcer
+from .resource_limits import collect_runner_artifacts, log_limit_counters
 
 _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -415,6 +416,7 @@ class LimaRunner:
         exit_code: int | None = None
         image_digest: str | None = None
         artifacts_map: dict[str, bytes] = {}
+        artifact_counters: dict[str, int] = {}
         message = "Lima execution"
 
         try:
@@ -489,7 +491,14 @@ class LimaRunner:
                     pass
 
             # Collect artifacts
-            artifacts_map = self._collect_artifacts(workspace, spec.capture_patterns)
+            artifact_result = collect_runner_artifacts(
+                workspace,
+                spec.capture_patterns,
+                exclude_names={"entry.sh", "run.log", ".env"},
+                exclude_hidden=True,
+            )
+            artifacts_map = artifact_result.artifacts
+            artifact_counters = artifact_result.counters
 
             # Compute image digest based on Lima config hash
             try:
@@ -551,6 +560,10 @@ class LimaRunner:
             log_bytes_total = int(hub.get_log_bytes(run_id))
         except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
             log_bytes_total = 0
+        try:
+            max_log_bytes = int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
+        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
+            max_log_bytes = 10 * 1024 * 1024
 
         art_bytes = sum(len(v) for v in artifacts_map.values()) if artifacts_map else 0
 
@@ -561,6 +574,8 @@ class LimaRunner:
             "log_bytes": int(log_bytes_total),
             "artifact_bytes": int(art_bytes),
         }
+        usage.update(log_limit_counters(hub, run_id, max_log_bytes))
+        usage.update(artifact_counters)
 
         return RunStatus(
             id="",
@@ -673,34 +688,9 @@ exit $exit_code
         workspace: str, capture_patterns: list[str] | None
     ) -> dict[str, bytes]:
         """Collect artifacts matching the capture patterns."""
-        if not capture_patterns:
-            return {}
-
-        artifacts_map: dict[str, bytes] = {}
-
-        try:
-            for root, _dirs, files in os.walk(workspace):
-                for fn in files:
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, workspace)
-                    rel_posix = rel.replace(os.sep, "/")
-
-                    # Skip internal files
-                    if rel_posix.startswith("."):
-                        continue
-                    if rel_posix in ("entry.sh", "run.log", ".env"):
-                        continue
-
-                    if any(
-                        fnmatch.fnmatchcase(rel_posix, pat)
-                        for pat in capture_patterns
-                    ):
-                        try:
-                            with open(full, "rb") as rf:
-                                artifacts_map[rel_posix] = rf.read()
-                        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-                            pass
-        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-            pass
-
-        return artifacts_map
+        return collect_runner_artifacts(
+            workspace,
+            capture_patterns,
+            exclude_names={"entry.sh", "run.log", ".env"},
+            exclude_hidden=True,
+        ).artifacts

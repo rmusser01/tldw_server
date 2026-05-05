@@ -33,6 +33,7 @@ RunStatusReasonCode = Literal[
 _LIMIT_COUNTER_KEYS = (
     "stdout_truncated",
     "stderr_truncated",
+    "log_truncated",
     "guest_output_limit_exceeded",
     "artifact_files_skipped",
     "artifact_skip_file_limit",

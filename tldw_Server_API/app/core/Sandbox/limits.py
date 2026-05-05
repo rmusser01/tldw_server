@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import fnmatch
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,10 @@ _OUTPUT_LIMIT_COUNTER_KEYS = (
     "stderr_bytes_returned",
     "stdout_truncated",
     "stderr_truncated",
+)
+_LOG_LIMIT_COUNTER_KEYS = (
+    "log_limit_bytes",
+    "log_truncated",
 )
 _ARTIFACT_LIMIT_COUNTER_KEYS = (
     "artifact_limit_file_bytes",
@@ -236,7 +241,7 @@ def build_limit_audit_metadata(resource_usage: Mapping[str, object] | None) -> d
         return {}
 
     metadata: dict[str, object] = {}
-    for key in _OUTPUT_LIMIT_COUNTER_KEYS + _ARTIFACT_LIMIT_COUNTER_KEYS:
+    for key in _OUTPUT_LIMIT_COUNTER_KEYS + _LOG_LIMIT_COUNTER_KEYS + _ARTIFACT_LIMIT_COUNTER_KEYS:
         value = _counter_value(resource_usage.get(key))
         if value is not None:
             metadata[key] = value
@@ -267,6 +272,8 @@ def limit_event_actions(resource_usage: Mapping[str, object] | None) -> list[str
     actions: list[str] = []
     if bool(metadata.get("output_truncated")):
         actions.append("output_truncated")
+    if int(metadata.get("log_truncated", 0) or 0) > 0:
+        actions.append("log_truncated")
     if bool(metadata.get("artifacts_limited")):
         actions.append("artifacts_limited")
     return actions

@@ -25,6 +25,8 @@ def test_build_limit_audit_metadata_is_aggregate_and_path_minimized() -> None:
             "artifact_files_skipped": 2,
             "artifact_skip_file_limit": 1,
             "artifact_skip_total_limit": 1,
+            "log_limit_bytes": 5,
+            "log_truncated": 1,
             "artifact_paths": ["secret.txt"],
         }
     )
@@ -33,11 +35,14 @@ def test_build_limit_audit_metadata_is_aggregate_and_path_minimized() -> None:
     assert metadata["output_limit_bytes"] == 5
     assert metadata["artifact_files_skipped"] == 2
     assert metadata["artifact_skip_reasons"] == ["file_limit", "total_limit"]
+    assert metadata["log_limit_bytes"] == 5
+    assert metadata["log_truncated"] == 1
     assert "artifact_paths" not in metadata
 
 
 def test_limit_event_actions_reports_only_affected_limits() -> None:
     assert limit_event_actions({"stdout_truncated": 1}) == ["output_truncated"]
+    assert limit_event_actions({"log_truncated": 1}) == ["log_truncated"]
     assert limit_event_actions({"artifact_files_skipped": 1}) == ["artifacts_limited"]
     assert limit_event_actions({"stdout_truncated": 0, "artifact_files_skipped": 0}) == []
 
