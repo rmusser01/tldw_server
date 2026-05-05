@@ -249,7 +249,7 @@ class SandboxPolicy:
     def _require_network_policy_supported(
         runtime: RuntimeType,
         network_policy: str | None,
-    ) -> None:
+    ) -> str:
         requested_policy = (
             str(network_policy or "deny_all").strip().lower() or "deny_all"
         )
@@ -266,8 +266,9 @@ class SandboxPolicy:
             if requested_policy == "deny_all"
             else contract.allowlist
         )
-        if mode.support_state not in {"supported", "host_gated"} or (
-            not mode.strict_enforcement
+        if (
+            mode.support_state not in {"supported", "host_gated"}
+            or not mode.strict_enforcement
         ):
             raise SandboxPolicy.PolicyUnsupported(
                 runtime,
@@ -278,6 +279,7 @@ class SandboxPolicy:
                     )
                 ],
             )
+        return requested_policy
 
     def select_runtime(
         self,
@@ -326,9 +328,15 @@ class SandboxPolicy:
         )
         profile = TRUST_PROFILES.get(trust, TRUST_PROFILES[TrustLevel.standard])
 
-        if not spec.network_policy:
-            spec.network_policy = profile.get("network_policy", self.cfg.network_default)
-        self._require_network_policy_supported(spec.runtime, spec.network_policy)
+        if not str(spec.network_policy or "").strip():
+            spec.network_policy = profile.get(
+                "network_policy",
+                self.cfg.network_default,
+            )
+        spec.network_policy = self._require_network_policy_supported(
+            spec.runtime,
+            spec.network_policy,
+        )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
         profile_max_cpu = float(profile.get("max_cpu", self.cfg.max_cpu))
@@ -386,9 +394,15 @@ class SandboxPolicy:
         )
         profile = TRUST_PROFILES.get(trust, TRUST_PROFILES[TrustLevel.standard])
 
-        if not spec.network_policy:
-            spec.network_policy = profile.get("network_policy", self.cfg.network_default)
-        self._require_network_policy_supported(spec.runtime, spec.network_policy)
+        if not str(spec.network_policy or "").strip():
+            spec.network_policy = profile.get(
+                "network_policy",
+                self.cfg.network_default,
+            )
+        spec.network_policy = self._require_network_policy_supported(
+            spec.runtime,
+            spec.network_policy,
+        )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
         profile_max_cpu = float(profile.get("max_cpu", self.cfg.max_cpu))

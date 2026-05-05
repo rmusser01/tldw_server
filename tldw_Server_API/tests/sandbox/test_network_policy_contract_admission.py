@@ -134,6 +134,55 @@ def test_apply_to_run_rejects_invalid_network_policy() -> None:
     assert exc.value.reasons == ["unsupported_network_policy"]
 
 
+def test_apply_to_run_canonicalizes_admitted_network_policy() -> None:
+    policy = SandboxPolicy()
+    spec = _run_spec(RuntimeType.docker, network_policy=" DeNy_AlL ")
+
+    result = policy.apply_to_run(
+        spec,
+        firecracker_available=False,
+        runtime_preflights={
+            RuntimeType.docker: _available_preflight(RuntimeType.docker)
+        },
+    )
+
+    assert result.network_policy == "deny_all"
+
+
+def test_apply_to_session_canonicalizes_admitted_network_policy() -> None:
+    policy = SandboxPolicy()
+    spec = SessionSpec(
+        runtime=RuntimeType.docker,
+        trust_level=TrustLevel.standard,
+        network_policy=" ALLOWLIST ",
+    )
+
+    result = policy.apply_to_session(
+        spec,
+        firecracker_available=False,
+        runtime_preflights={
+            RuntimeType.docker: _available_preflight(RuntimeType.docker)
+        },
+    )
+
+    assert result.network_policy == "allowlist"
+
+
+def test_apply_to_run_treats_whitespace_only_policy_as_missing() -> None:
+    policy = SandboxPolicy()
+    spec = _run_spec(RuntimeType.docker, network_policy="   ")
+
+    result = policy.apply_to_run(
+        spec,
+        firecracker_available=False,
+        runtime_preflights={
+            RuntimeType.docker: _available_preflight(RuntimeType.docker)
+        },
+    )
+
+    assert result.network_policy == "deny_all"
+
+
 def test_apply_to_run_allows_vz_linux_deny_all_static_contract() -> None:
     policy = SandboxPolicy()
     spec = _run_spec(RuntimeType.vz_linux, network_policy="deny_all")
