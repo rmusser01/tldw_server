@@ -607,57 +607,38 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, collaboration_spec)
 
     # Persona endpoints are force-included in explicit pytest runtime for WS/unit coverage.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.persona import router as persona_router
-
-        specs.append(RouterSpec(
-            router=persona_router,
+    for persona_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.persona",
+            log_name="persona",
             prefix=f"{API_V1_PREFIX}/persona",
             tags=("persona",),
             route_key="" if _is_explicit_pytest_runtime() else "persona",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping persona router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.personalization import (
-            router as personalization_router,
-        )
-
-        specs.append(RouterSpec(
-            router=personalization_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.personalization",
+            log_name="personalization",
             prefix=f"{API_V1_PREFIX}/personalization",
             tags=("personalization",),
             route_key="personalization",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping personalization router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.companion import router as companion_router
-
-        specs.append(RouterSpec(
-            router=companion_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.companion",
+            log_name="companion",
             prefix=f"{API_V1_PREFIX}/companion",
             tags=("companion",),
             route_key="companion",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping companion router: {e}")
-
-    # Archetype template endpoints are always available read-only catalog data.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router
-
-        specs.append(RouterSpec(
-            router=archetype_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
+            log_name="archetype_endpoints",
             prefix=f"{API_V1_PREFIX}/persona/archetypes",
             tags=("persona-archetypes",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping archetype router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, persona_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.files import router as files_router
