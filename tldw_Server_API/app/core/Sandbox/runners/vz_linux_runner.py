@@ -22,6 +22,7 @@ from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..policy import SandboxPolicyConfig
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
+from .resource_limits import log_limit_counters
 from .vz_common import _VZ_NONCRITICAL_EXCEPTIONS, VZBaseRunner, vz_host_facts
 
 _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS = (
@@ -409,9 +410,8 @@ class VZLinuxRunner(VZBaseRunner):
                 try:
                     status = helper.get_vm_status(candidate_vm_id)
                 except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError):
-                    # Host truth is unavailable or untrusted; explicit admin repair owns row cleanup.
-                    raise
-                if bool(status.healthy):
+                    status = None
+                if bool(getattr(status, "healthy", False)):
                     vm_id = candidate_vm_id
                     template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
                     should_terminate_vm = False
@@ -547,6 +547,7 @@ class VZLinuxRunner(VZBaseRunner):
             "log_bytes": int(total_log_bytes),
             "artifact_bytes": int(artifact_bytes),
         }
+        usage.update(log_limit_counters(hub, run_id, max_log_bytes))
         usage.update(output_counters)
         usage.update(artifact_counters)
 

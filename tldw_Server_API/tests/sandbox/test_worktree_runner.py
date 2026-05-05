@@ -1,4 +1,5 @@
 """Tests for the git worktree sandbox runner."""
+
 from __future__ import annotations
 
 import os
@@ -13,14 +14,8 @@ import pytest
 
 import tldw_Server_API.app.core.Sandbox.runners.worktree_runner as worktree_module
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
-from tldw_Server_API.app.core.Sandbox.runners.worktree_runner import (
-    WorktreeRunner,
-    _SENSITIVE_ENV_VARS,
-    _check_git_version,
-    _check_unshare_available,
-    worktree_available,
-)
-
+from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicyConfig
+from tldw_Server_API.app.core.Sandbox.runners.worktree_runner import WorktreeRunner
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -445,6 +440,183 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
             WorktreeRunner._active_proc.pop(run_id, None)  # type: ignore[attr-defined]
             WorktreeRunner._active_run_dir.pop(run_id, None)  # type: ignore[attr-defined]
             WorktreeRunner._cancelled_runs.discard(run_id)  # type: ignore[attr-defined]
+
+
+def test_start_run_applies_artifact_and_log_caps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Worktree runs should share artifact and log-cap resource counters."""
+    monkeypatch.setattr(
+        SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_artifact_file_bytes=5, max_artifact_total_bytes=8)),
+    )
+    monkeypatch.setattr(WorktreeRunner, "_max_log_bytes", staticmethod(lambda: 5))
+    monkeypatch.setattr(worktree_module.sys, "platform", "darwin")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run-dir"
+    created_worktree = tmp_path / "created-worktree"
+    destroy_calls: list[tuple[str, str]] = []
+
+    def _mkdtemp(prefix: str) -> str:
+        if prefix != "tldw_wt_run_":
+            pytest.fail(f"unexpected temp prefix: {prefix}")
+        run_dir.mkdir()
+        return str(run_dir)
+
+    def _create_worktree(repo_path: str, branch: str = "HEAD") -> str:
+        if repo_path != str(repo):
+            pytest.fail(f"unexpected repo path: {repo_path}")
+        if branch != "HEAD":
+            pytest.fail(f"unexpected branch: {branch}")
+        created_worktree.mkdir()
+        return str(created_worktree)
+
+    def _destroy_worktree(worktree_path: str, repo_path: str) -> None:
+        destroy_calls.append((worktree_path, repo_path))
+        shutil.rmtree(worktree_path)
+
+    class _CapProc:
+        pid = 6060
+        returncode = 0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            cwd = kwargs.get("cwd")
+            stdout = kwargs.get("stdout")
+            assert cwd == str(created_worktree)
+            assert stdout is not None
+            (created_worktree / "small.txt").write_bytes(b"1234")
+            (created_worktree / "too-large.txt").write_bytes(b"123456")
+            (created_worktree / "would-exceed-total.txt").write_bytes(b"56789")
+            stdout.write(b"abcdef")
+            stdout.flush()
+
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    monkeypatch.setattr(worktree_module.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "_is_git_repo",
+        staticmethod(lambda path: path == str(repo)),
+    )
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "create_worktree",
+        staticmethod(_create_worktree),
+    )
+    monkeypatch.setattr(
+        WorktreeRunner,
+        "destroy_worktree",
+        staticmethod(_destroy_worktree),
+    )
+    monkeypatch.setattr(worktree_module.subprocess, "Popen", _CapProc)
+
+    run_id = "run-worktree-cap-contract"
+    result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
+        run_id,
+        RunSpec(
+            session_id=None,
+            runtime=RuntimeType.worktree,
+            base_image=None,
+            command=["/bin/echo", "ok"],
+            timeout_sec=10,
+            capture_patterns=["*.txt"],
+        ),
+        session_workspace=str(repo),
+    )
+
+    assert result.phase == RunPhase.completed
+    assert result.artifacts == {"small.txt": b"1234"}
+    assert result.resource_usage["artifact_limit_file_bytes"] == 5
+    assert result.resource_usage["artifact_limit_total_bytes"] == 8
+    assert result.resource_usage["artifact_files_collected"] == 1
+    assert result.resource_usage["artifact_files_skipped"] == 2
+    assert result.resource_usage["artifact_skip_file_limit"] == 1
+    assert result.resource_usage["artifact_skip_total_limit"] == 1
+    assert result.resource_usage["artifact_bytes_collected"] == 4
+    assert result.resource_usage["artifact_bytes"] == 4
+    assert result.resource_usage["log_limit_bytes"] == 5
+    assert result.resource_usage["log_truncated"] == 1
+    assert destroy_calls == [(str(created_worktree), str(repo))]
+
+
+def test_cancelled_run_drops_artifact_counters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Canceled worktree runs should not report counters for discarded artifacts."""
+    monkeypatch.setattr(
+        SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_artifact_file_bytes=100, max_artifact_total_bytes=100)),
+    )
+    monkeypatch.setattr(worktree_module.sys, "platform", "darwin")
+    monkeypatch.setattr(WorktreeRunner, "_consume_cancelled", classmethod(lambda cls, run_id: True))
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run-dir"
+    created_worktree = tmp_path / "created-worktree"
+
+    def _mkdtemp(prefix: str) -> str:
+        assert prefix == "tldw_wt_run_"
+        run_dir.mkdir()
+        return str(run_dir)
+
+    def _create_worktree(repo_path: str, branch: str = "HEAD") -> str:
+        del branch
+        assert repo_path == str(repo)
+        created_worktree.mkdir()
+        return str(created_worktree)
+
+    def _destroy_worktree(worktree_path: str, repo_path: str) -> None:
+        assert worktree_path == str(created_worktree)
+        assert repo_path == str(repo)
+        shutil.rmtree(worktree_path)
+
+    class _CancelProc:
+        pid = 6161
+        returncode = 0
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args
+            stdout = kwargs.get("stdout")
+            assert stdout is not None
+            (created_worktree / "artifact.txt").write_bytes(b"artifact")
+            stdout.write(b"ok")
+            stdout.flush()
+
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    monkeypatch.setattr(worktree_module.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(WorktreeRunner, "_is_git_repo", staticmethod(lambda path: path == str(repo)))
+    monkeypatch.setattr(WorktreeRunner, "create_worktree", staticmethod(_create_worktree))
+    monkeypatch.setattr(WorktreeRunner, "destroy_worktree", staticmethod(_destroy_worktree))
+    monkeypatch.setattr(worktree_module.subprocess, "Popen", _CancelProc)
+
+    result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
+        "run-worktree-cancel-counters",
+        RunSpec(
+            session_id=None,
+            runtime=RuntimeType.worktree,
+            base_image=None,
+            command=["/bin/echo", "ok"],
+            timeout_sec=10,
+            capture_patterns=["*.txt"],
+        ),
+        session_workspace=str(repo),
+    )
+
+    assert result.phase == RunPhase.killed
+    assert result.artifacts is None
+    assert "artifact_files_collected" not in result.resource_usage
 
 
 # ---------------------------------------------------------------------------

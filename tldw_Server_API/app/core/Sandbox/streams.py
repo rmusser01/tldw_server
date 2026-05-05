@@ -310,6 +310,13 @@ class RunStreamHub:
         """Publish a truncated frame with a reason code."""
         self._publish(run_id, {"type": "truncated", "reason": str(reason)})
 
+    def mark_log_truncated(self, run_id: str) -> None:
+        """Mark a run as log-truncated when a runner caps file-backed output."""
+        with self._lock:
+            should_emit = self._mark_log_truncated_locked(run_id)
+        if should_emit:
+            self._emit_log_truncated(run_id)
+
     def publish_stdout(self, run_id: str, chunk: bytes, max_log_bytes: int | None = None) -> None:
         self._publish_stream(run_id, "stdout", chunk, max_log_bytes=max_log_bytes)
 
@@ -321,21 +328,17 @@ class RunStreamHub:
         with self._lock:
             used = self._log_bytes.get(run_id, 0)
             if used >= cap:
-                if run_id not in self._truncated:
-                    self._truncated.add(run_id)
-                    self._publish(run_id, {"type": "truncated", "reason": "log_cap"})
-                    # Metrics: log truncations
-                    try:
-                        from tldw_Server_API.app.core.Metrics import increment_counter
-                        increment_counter(
-                            "sandbox_log_truncations_total",
-                            labels={"component": "sandbox", "reason": "log_cap"},
-                        )
-                    except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
-                        pass
-                return
-            remaining = cap - used
+                should_emit = self._mark_log_truncated_locked(run_id)
+                remaining = 0
+            else:
+                should_emit = False
+                remaining = cap - used
+        if used >= cap:
+            if should_emit:
+                self._emit_log_truncated(run_id)
+            return
         data = chunk[:remaining]
+        truncated_chunk = len(chunk) > len(data)
         try:
             text = data.decode("utf-8")
             frame = {"type": kind, "encoding": "utf8", "data": text}
@@ -345,6 +348,28 @@ class RunStreamHub:
         with self._lock:
             self._log_bytes[run_id] = self._log_bytes.get(run_id, 0) + len(data)
         self._publish(run_id, frame)
+        if truncated_chunk:
+            with self._lock:
+                should_emit = self._mark_log_truncated_locked(run_id)
+            if should_emit:
+                self._emit_log_truncated(run_id)
+
+    def _mark_log_truncated_locked(self, run_id: str) -> bool:
+        if run_id in self._truncated:
+            return False
+        self._truncated.add(run_id)
+        return True
+
+    def _emit_log_truncated(self, run_id: str) -> None:
+        self._publish(run_id, {"type": "truncated", "reason": "log_cap"})
+        try:
+            from tldw_Server_API.app.core.Metrics import increment_counter
+            increment_counter(
+                "sandbox_log_truncations_total",
+                labels={"component": "sandbox", "reason": "log_cap"},
+            )
+        except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
+            pass
 
     def drain_buffer(self, run_id: str, q: asyncio.Queue) -> None:
         with self._lock:
@@ -539,6 +564,11 @@ class RunStreamHub:
         """Return the total number of bytes published to stdout/stderr for a run."""
         with self._lock:
             return int(self._log_bytes.get(run_id, 0))
+
+    def is_log_truncated(self, run_id: str) -> bool:
+        """Return whether stdout/stderr streaming hit the configured byte cap."""
+        with self._lock:
+            return run_id in self._truncated
 
     def cleanup_run(self, run_id: str) -> None:
         """Remove all references for a run to avoid memory leaks.

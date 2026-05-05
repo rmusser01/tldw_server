@@ -125,3 +125,49 @@ def test_hub_unsubscribe_removes_only_target_queue() -> None:
 
     hub.unsubscribe(run_id, q2)
     assert run_id not in hub._queues
+
+
+@pytest.mark.unit
+def test_hub_marks_single_oversized_chunk_as_log_truncated() -> None:
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    run_id = "run-hub-5"
+    queue = hub.subscribe(run_id)
+
+    hub.publish_stdout(run_id, b"abcdef", max_log_bytes=5)
+    hub.drain_buffer(run_id, queue)
+
+    frames = []
+    while True:
+        try:
+            frames.append(queue.get_nowait())
+        except Exception:
+            break
+
+    assert hub.get_log_bytes(run_id) == 5
+    assert hub.is_log_truncated(run_id)
+    assert any(
+        frame.get("type") == "truncated" and frame.get("reason") == "log_cap"
+        for frame in frames
+    )
+
+
+@pytest.mark.unit
+def test_hub_log_truncation_publishes_after_releasing_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    run_id = "run-hub-6"
+    published: list[dict[str, object]] = []
+
+    def _publish_without_lock(_run_id: str, frame: dict[str, object]) -> None:
+        assert not hub._lock._is_owned()  # type: ignore[attr-defined]
+        published.append(dict(frame))
+
+    monkeypatch.setattr(hub, "_publish", _publish_without_lock)
+
+    hub.mark_log_truncated(run_id)
+
+    assert hub.is_log_truncated(run_id)
+    assert published == [{"type": "truncated", "reason": "log_cap"}]

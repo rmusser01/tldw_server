@@ -22,6 +22,7 @@ from ..network_policy import (
     expand_allowlist_to_targets,
 )
 from ..streams import get_hub
+from .resource_limits import collect_runner_artifacts, log_limit_counters
 
 _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -803,6 +804,7 @@ class DockerRunner:
                 "log_bytes": int(get_hub().get_log_bytes(run_id)),
                 "artifact_bytes": 0,
             }
+            usage.update(log_limit_counters(hub, run_id, int(max_log or 10 * 1024 * 1024)))
             with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.check_call(["docker", "rm", "-f", cid])
             self._cleanup_tracked_egress_resources(run_id)
@@ -836,25 +838,15 @@ class DockerRunner:
             image_digest = None
         # Step 4: Collect artifacts via docker cp of workspace and filter by glob allowlist
         artifacts_map: dict[str, bytes] = {}
+        artifact_counters: dict[str, int] = {}
         try:
             if spec.capture_patterns:
                 host_ws = tempfile.mkdtemp(prefix="tldw_ws_copy_")
                 try:
                     subprocess.check_call(["docker", "cp", f"{cid}:/workspace/.", f"{host_ws}/"])
-                    # Apply glob
-                    import fnmatch
-                    for root, _dirs, files in os.walk(host_ws):
-                        for fname in files:
-                            rel = os.path.relpath(os.path.join(root, fname), host_ws)
-                            # match posix style
-                            rel_posix = rel.replace(os.sep, "/")
-                            if any(fnmatch.fnmatchcase(rel_posix, pat) for pat in (spec.capture_patterns or [])):
-                                try:
-                                    with open(os.path.join(host_ws, rel), "rb") as rf:
-                                        data = rf.read()
-                                    artifacts_map[rel_posix] = data
-                                except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
-                                    logger.debug(f"Skip artifact {rel}: {e}")
+                    artifact_result = collect_runner_artifacts(host_ws, spec.capture_patterns)
+                    artifacts_map = artifact_result.artifacts
+                    artifact_counters = artifact_result.counters
                 finally:
                     with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                         shutil.rmtree(host_ws, ignore_errors=True)
@@ -898,6 +890,8 @@ class DockerRunner:
             "log_bytes": int(total_log),
             "artifact_bytes": int(art_bytes),
         }
+        usage.update(log_limit_counters(hub, run_id, int(max_log or 10 * 1024 * 1024)))
+        usage.update(artifact_counters)
         # Remove container after collecting stats
         with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
             subprocess.check_call(["docker", "rm", "-f", cid])

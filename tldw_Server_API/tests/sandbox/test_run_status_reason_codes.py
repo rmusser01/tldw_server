@@ -89,6 +89,12 @@ def test_run_status_reason_taxonomy_reports_limit_signals() -> None:
         exit_code=None,
         resource_usage={"artifact_skip_total_limit": 1},
     ) == "limits_applied"
+    assert normalize_run_status_reason(
+        phase=RunPhase.completed,
+        message="worktree execution finished",
+        exit_code=0,
+        resource_usage={"log_truncated": 1, "log_limit_bytes": 5},
+    ) == "limits_applied"
 
 
 def test_run_status_reason_taxonomy_maps_known_policy_failures() -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import hashlib
 import json
 import os
@@ -18,8 +17,10 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy
+
 from ..models import RunPhase, RunSpec, RunStatus
 from ..streams import get_hub
+from .resource_limits import collect_runner_artifacts, log_limit_counters
 
 _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -413,20 +414,15 @@ class FirecrackerRunner:
             finished = datetime.utcnow()
             # Collect artifacts
             artifacts_map: dict[str, bytes] = {}
+            artifact_counters: dict[str, int] = {}
             try:
                 if spec.capture_patterns:
-                    for root, _dirs, files in os.walk(workspace):
-                        for fn in files:
-                            rel = os.path.relpath(os.path.join(root, fn), workspace)
-                            rel_posix = rel.replace(os.sep, "/")
-                            if any(fnmatch.fnmatchcase(rel_posix, pat) for pat in (spec.capture_patterns or [])):
-                                try:
-                                    with open(os.path.join(root, fn), "rb") as rf:
-                                        artifacts_map[rel_posix] = rf.read()
-                                except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                                    pass
+                    artifact_result = collect_runner_artifacts(workspace, spec.capture_patterns)
+                    artifacts_map = artifact_result.artifacts
+                    artifact_counters = artifact_result.counters
             except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
                 artifacts_map = {}
+                artifact_counters = {}
 
             # Usage
             try:
@@ -434,6 +430,10 @@ class FirecrackerRunner:
             except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
                 log_bytes_total = 0
             art_bytes = sum(len(v) for v in artifacts_map.values()) if artifacts_map else 0
+            try:
+                max_log_bytes = int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
+            except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
+                max_log_bytes = 10 * 1024 * 1024
             usage: dict[str, int] = {
                 "cpu_time_sec": 0,
                 "wall_time_sec": int(max(0.0, (finished - started).total_seconds())),
@@ -441,6 +441,8 @@ class FirecrackerRunner:
                 "log_bytes": int(log_bytes_total),
                 "artifact_bytes": int(art_bytes),
             }
+            usage.update(log_limit_counters(hub, run_id, max_log_bytes))
+            usage.update(artifact_counters)
 
             return RunStatus(
                 id="",
