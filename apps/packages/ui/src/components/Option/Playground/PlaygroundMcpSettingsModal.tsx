@@ -1,5 +1,6 @@
 import React from "react"
 import { InputNumber, Modal, Select, Switch, Input } from "antd"
+import { ModalFooter } from "@/components/ui/layout"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -79,7 +80,19 @@ export const PlaygroundMcpSettingsModal: React.FC<PlaygroundMcpSettingsModalProp
       <Modal
         open={open}
         onCancel={onClose}
-        footer={null}
+        footer={
+          <ModalFooter
+            hideCancel
+            data-testid="mcp-settings-modal-footer"
+            actions={[
+              {
+                label: t("common:close", "Close"),
+                onClick: onClose,
+                variant: "primary"
+              }
+            ]}
+          />
+        }
         width={560}
         title={t(
           "playground:composer.mcpSettingsTitle",

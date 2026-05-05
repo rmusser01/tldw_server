@@ -8,6 +8,7 @@ import {
   Select
 } from "antd"
 import { WandSparkles } from "lucide-react"
+import { ModalFooter } from "@/components/ui/layout"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import type { ReferenceImageCandidate } from "@/services/tldw/TldwApiClient"
 import {
@@ -226,51 +227,53 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
         width={720}
         destroyOnHidden
         footer={
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                onClick={onCreateDraft}
-                icon={<WandSparkles className="h-4 w-4" />}
-                disabled={busy}
-              >
-                {t(
+          <ModalFooter
+            align="between"
+            data-testid="image-generation-modal-footer"
+            leftActions={[
+              {
+                label: t(
                   "playground:imageGeneration.createPrompt",
                   "Create prompt"
-                )}
-              </Button>
-              <Button
-                onClick={() => {
-                  void onRefine()
-                }}
-                loading={refineSubmitting}
-                disabled={submitting}
-                data-testid="image-refine-with-llm"
-              >
-                {t(
+                ),
+                onClick: onCreateDraft,
+                icon: <WandSparkles className="h-4 w-4" />,
+                disabled: busy
+              },
+              {
+                label: t(
                   "playground:imageGeneration.refineWithLlm",
                   "Refine with LLM"
-                )}
-              </Button>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={onClose} disabled={busy}>
-                {t("common:cancel", "Cancel")}
-              </Button>
-              <Button
-                type="primary"
-                onClick={() => {
-                  void onSubmit()
-                }}
-                loading={submitting}
-                disabled={refineSubmitting}
-              >
-                {t(
-                  "playground:imageGeneration.generateNow",
-                  "Generate image"
-                )}
-              </Button>
-            </div>
-          </div>
+                ),
+                onClick: () => {
+                  void onRefine()
+                },
+                loading: busy || refineSubmitting,
+                disabled: busy || submitting,
+                "data-testid": "image-refine-with-llm"
+              }
+            ]}
+            hideCancel
+            actions={[
+              {
+                label: t("common:cancel", "Cancel"),
+                onClick: onClose,
+                disabled: busy,
+                variant: "ghost"
+              }
+            ]}
+            primaryAction={{
+              label: t(
+                "playground:imageGeneration.generateNow",
+                "Generate image"
+              ),
+              onClick: () => {
+                void onSubmit()
+              },
+              loading: submitting,
+              disabled: busy || refineSubmitting
+            }}
+          />
         }
       >
         <div className="space-y-4">
