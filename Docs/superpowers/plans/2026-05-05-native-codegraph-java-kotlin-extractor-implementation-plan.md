@@ -66,7 +66,7 @@ Excluded:
 - Modify: `tldw_Server_API/app/core/CodeGraph/extractors/tree_sitter_loader.py`
 - Test: `tldw_Server_API/tests/CodeGraph/test_codegraph_tree_sitter_loader.py`
 
-- [ ] **Step 1: Install/verify candidate parser dependencies**
+- [x] **Step 1: Install/verify candidate parser dependencies**
 
 Run:
 
@@ -76,11 +76,11 @@ Run:
 
 Expected: packages install into the shared repo venv. If installation fails due network or wheel availability, stop and report the blocker rather than replacing this slice with regex parsing.
 
-- [ ] **Step 2: Write RED loader tests**
+- [x] **Step 2: Write RED loader tests**
 
 Add tests that call `load_parser("java")` and `load_parser("kotlin")`, parse compact Java/Kotlin snippets, and assert missing-package behavior can report `tree_sitter_java` / `tree_sitter_kotlin` without raising.
 
-- [ ] **Step 3: Run RED tests**
+- [x] **Step 3: Run RED tests**
 
 Run:
 
@@ -90,7 +90,7 @@ Run:
 
 Expected before implementation: fail with unsupported Tree-sitter language for Java/Kotlin.
 
-- [ ] **Step 4: Implement parser mappings**
+- [x] **Step 4: Implement parser mappings**
 
 Add:
 
@@ -103,11 +103,11 @@ to `_LANGUAGE_MODULES`.
 
 Add dependency bounds to `pyproject.toml` only after the smoke test confirms the import/function names.
 
-- [ ] **Step 5: Run GREEN loader tests**
+- [x] **Step 5: Run GREEN loader tests**
 
 Run the same pytest command. Expected: all loader tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml \
@@ -122,7 +122,7 @@ git commit -m "feat: add codegraph jvm parser loading"
 - Create: `tldw_Server_API/app/core/CodeGraph/extractors/jvm_common.py`
 - Test indirectly through Java/Kotlin extractor tests in Tasks 3 and 4.
 
-- [ ] **Step 1: Add a small helper module**
+- [x] **Step 1: Add a small helper module**
 
 Include only helpers shared by both languages:
 
@@ -133,11 +133,11 @@ Include only helpers shared by both languages:
 - helper for creating `CodeGraphNode` with `make_node_id()`
 - helper for resolving call sites by simple local callable name
 
-- [ ] **Step 2: Keep helpers language-neutral**
+- [x] **Step 2: Keep helpers language-neutral**
 
 Do not encode Java/Kotlin grammar node-type decisions in this file unless both languages use the same Tree-sitter node type and semantics.
 
-- [ ] **Step 3: Defer commit**
+- [x] **Step 3: Defer commit**
 
 Commit helpers with the first extractor that uses them so the branch stays buildable.
 
@@ -148,7 +148,7 @@ Commit helpers with the first extractor that uses them so the branch stays build
 - Create: `tldw_Server_API/tests/CodeGraph/test_codegraph_java_extractor.py`
 - Create/modify: `tldw_Server_API/app/core/CodeGraph/extractors/jvm_common.py`
 
-- [ ] **Step 1: Write RED Java extractor test**
+- [x] **Step 1: Write RED Java extractor test**
 
 Test source:
 
@@ -188,7 +188,7 @@ Expected relationships:
 - `greet` has a resolved same-file call edge to `helper`.
 - imports are unresolved refs unless the target file is resolved in a later slice.
 
-- [ ] **Step 2: Run RED Java test**
+- [x] **Step 2: Run RED Java test**
 
 Run:
 
@@ -198,7 +198,7 @@ Run:
 
 Expected: fail because `JavaTreeSitterExtractor` does not exist.
 
-- [ ] **Step 3: Implement minimal Java extractor**
+- [x] **Step 3: Implement minimal Java extractor**
 
 Implement:
 
@@ -213,15 +213,15 @@ Implement:
 
 Do not attempt overload or receiver type resolution. Receiver calls such as `client.fetch()` should become unresolved refs.
 
-- [ ] **Step 4: Run GREEN Java test**
+- [x] **Step 4: Run GREEN Java test**
 
 Run the same pytest command. Expected: pass.
 
-- [ ] **Step 5: Add deterministic ID test**
+- [x] **Step 5: Add deterministic ID test**
 
 Add one test extracting the same Java source twice and assert node IDs are identical.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/CodeGraph/extractors/jvm_common.py \

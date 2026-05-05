@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@Codex'
 created_date: '2026-05-05 00:52'
-updated_date: '2026-05-05 00:59'
+updated_date: '2026-05-05 01:04'
 labels:
   - codegraph
   - mcp
@@ -53,6 +53,8 @@ Add the next Stage 5 native CodeGraph language slice after the merged context/im
 Created focused Stage 5 implementation plan at Docs/superpowers/plans/2026-05-05-native-codegraph-java-kotlin-extractor-implementation-plan.md. Local venv currently has tree_sitter but not tree_sitter_java/tree_sitter_kotlin; dependency install/verification is the first implementation gate.
 
 Task 1 dependency gate complete: installed tree-sitter-java 0.23.5 and tree-sitter-kotlin 1.1.0 into the shared venv, verified both expose language(), added loader mappings and optional dependency bounds, and loader tests pass with 9 passed.
+
+Task 3 Java extractor complete: added shared JVM helpers plus Java Tree-sitter extraction for package/import/type/method/constructor nodes, same-file bare method call resolution, unresolved imports/receiver calls, parse errors, and deterministic node IDs. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_java_extractor.py -q (3 passed).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
