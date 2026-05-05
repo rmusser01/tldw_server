@@ -206,38 +206,30 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     else:
         logger.info("Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chunking_templates import router as chunking_templates_router
-
-        specs.append(RouterSpec(
-            router=chunking_templates_router,
+    for auxiliary_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chunking_templates",
+            log_name="chunking templates",
             prefix=f"{API_V1_PREFIX}",
             tags=("chunking-templates",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chunking templates router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
-
-        specs.append(RouterSpec(
-            router=prompt_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompts",
+            log_name="prompts",
             prefix=f"{API_V1_PREFIX}/prompts",
             tags=("prompts",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping prompts router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.claims import router as claims_router
-
-        specs.append(RouterSpec(
-            router=claims_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.claims",
+            log_name="claims",
             prefix=f"{API_V1_PREFIX}",
             tags=("claims",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping claims router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, auxiliary_spec)
 
     append_imported_router_spec(
         specs,
@@ -249,38 +241,30 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         ),
     )
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.text2sql import router as text2sql_router
-
-        specs.append(RouterSpec(
-            router=text2sql_router,
+    for auxiliary_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.text2sql",
+            log_name="text2sql",
             prefix=f"{API_V1_PREFIX}",
             tags=("text2sql",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping text2sql router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.feedback import router as feedback_router
-
-        specs.append(RouterSpec(
-            router=feedback_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.feedback",
+            log_name="feedback",
             prefix=f"{API_V1_PREFIX}/feedback",
             tags=("feedback",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping feedback router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.vlm import router as vlm_router
-
-        specs.append(RouterSpec(
-            router=vlm_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vlm",
+            log_name="vlm",
             prefix=f"{API_V1_PREFIX}",
             tags=("vlm",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping vlm router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, auxiliary_spec)
 
     append_imported_router_spec(
         specs,
@@ -292,38 +276,30 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         ),
     )
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.consent import router as consent_router
-
-        specs.append(RouterSpec(
-            router=consent_router,
+    for auxiliary_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.consent",
+            log_name="consent",
             prefix=f"{API_V1_PREFIX}",
             tags=("consent",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping consent router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.outputs_templates import router as outputs_templates_router
-
-        specs.append(RouterSpec(
-            router=outputs_templates_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.outputs_templates",
+            log_name="outputs_templates",
             prefix=f"{API_V1_PREFIX}",
             tags=("outputs-templates",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping outputs_templates router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.outputs import router as outputs_router
-
-        specs.append(RouterSpec(
-            router=outputs_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.outputs",
+            log_name="outputs",
             prefix=f"{API_V1_PREFIX}",
             tags=("outputs",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping outputs router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, auxiliary_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.collections_feeds import router as collections_feeds_router

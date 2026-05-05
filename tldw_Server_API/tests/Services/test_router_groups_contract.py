@@ -4015,6 +4015,199 @@ def test_iter_minimal_optional_router_specs_defers_embedding_attr_lookup(
     }
 
 
+def test_iter_minimal_optional_router_specs_defers_auxiliary_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal auxiliary specs keep router attr lookup lazy."""
+    import builtins
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.chunking_templates",
+            "expected_name": "chunking templates",
+            "path": "/chunking-templates",
+            "prefix": "/api/v1",
+            "tags": ("chunking-templates",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompts",
+            "expected_name": "prompts",
+            "path": "/prompts",
+            "prefix": "/api/v1/prompts",
+            "tags": ("prompts",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.claims",
+            "expected_name": "claims",
+            "path": "/claims",
+            "prefix": "/api/v1",
+            "tags": ("claims",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.text2sql",
+            "expected_name": "text2sql",
+            "path": "/text2sql",
+            "prefix": "/api/v1",
+            "tags": ("text2sql",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.feedback",
+            "expected_name": "feedback",
+            "path": "/feedback",
+            "prefix": "/api/v1/feedback",
+            "tags": ("feedback",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.vlm",
+            "expected_name": "vlm",
+            "path": "/vlm",
+            "prefix": "/api/v1",
+            "tags": ("vlm",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.consent",
+            "expected_name": "consent",
+            "path": "/consent",
+            "prefix": "/api/v1",
+            "tags": ("consent",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.outputs_templates",
+            "expected_name": "outputs_templates",
+            "path": "/outputs/templates",
+            "prefix": "/api/v1",
+            "tags": ("outputs-templates",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.outputs",
+            "expected_name": "outputs",
+            "path": "/outputs",
+            "prefix": "/api/v1",
+            "tags": ("outputs",),
+        },
+    )
+    definitions_by_module = {
+        str(definition["module_name"]): definition
+        for definition in router_definitions
+    }
+    access_count = {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for module_name, definition in definitions_by_module.items():
+        fake_module = ModuleType(module_name)
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake minimal auxiliary router."""
+            return {"status": "ok"}
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[f"{module_name}.router"] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    endpoints_package = "tldw_Server_API.app.api.v1.endpoints."
+    real_import = builtins.__import__
+
+    def _fake_endpoint_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        """Return fake routers for unrelated eager minimal optional imports."""
+        if (
+            level == 0
+            and name.startswith(endpoints_package)
+            and name not in definitions_by_module
+        ):
+            attrs = tuple(attr for attr in fromlist if attr != "*") or ("router",)
+            for attr_name in attrs:
+                _install_fake_router_module(
+                    monkeypatch,
+                    name,
+                    path="/minimal-unrelated-auxiliary-fake",
+                    attr_name=attr_name,
+                )
+            return sys.modules[name]
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_endpoint_import)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected minimal auxiliary routers."""
+        if module_name in definitions_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+    fake_main = ModuleType("tldw_Server_API.app.main")
+    fake_main.app = FastAPI()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.main", fake_main)
+
+    specs = list(iter_minimal_optional_router_specs())
+    assert access_count == {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {
+            str(definition["expected_name"])
+            for definition in router_definitions
+        }
+    }
+    assert set(selected_specs) == {
+        str(definition["expected_name"])
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        spec = selected_specs[str(definition["expected_name"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == ""
+        assert spec.skip_context == "in minimal test app"
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
+    assert access_count == {
+        f"{definition['module_name']}.router": 1
+        for definition in router_definitions
+    }
+
+
 def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
 
