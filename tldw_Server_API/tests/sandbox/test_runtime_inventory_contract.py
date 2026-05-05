@@ -163,6 +163,70 @@ def test_feature_discovery_reports_structured_network_policy_contract(
     }
 
 
+def test_feature_discovery_reports_effective_network_policy_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+
+    for runtime in RuntimeType:
+        info = discovery[runtime.value]
+        effective_support = runtime_caps.runtime_network_policy_effective_support(
+            runtime,
+            info["enforcement_ready"],
+        )
+        assert info["strict_deny_all_supported"] is effective_support["deny_all"]
+        assert info["strict_allowlist_supported"] is effective_support["allowlist"]
+        assert info["egress_allowlist_supported"] is effective_support["allowlist"]
+
+
+def test_docker_discovery_does_not_advertise_allowlist_for_coarse_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "1")
+    monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "0")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+    docker = discovery["docker"]
+
+    assert docker["enforcement_ready"] == {"deny_all": True, "allowlist": False}
+    assert docker["strict_allowlist_supported"] is False
+    assert docker["egress_allowlist_supported"] is False
+    assert "fall back to deny-all" in str(docker["notes"])
+
+
+def test_firecracker_discovery_does_not_advertise_scaffold_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setenv("TLDW_SANDBOX_FIRECRACKER_AVAILABLE", "1")
+    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "1")
+    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT", "1")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+    firecracker = discovery["firecracker"]
+
+    assert firecracker["enforcement_ready"] == {
+        "deny_all": True,
+        "allowlist": False,
+    }
+    assert firecracker["strict_allowlist_supported"] is False
+    assert firecracker["egress_allowlist_supported"] is False
+    assert "scaffold/planned" in str(firecracker["notes"])
+
+
 def test_runtime_network_policy_metadata_contract_covers_runtime_enum() -> None:
     assert hasattr(runtime_caps, "RUNTIME_NETWORK_POLICY_METADATA")
     assert set(runtime_caps.RUNTIME_NETWORK_POLICY_METADATA) == set(RuntimeType)

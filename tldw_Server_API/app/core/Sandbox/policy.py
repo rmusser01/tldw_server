@@ -11,7 +11,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 from .models import RunSpec, RuntimeType, SessionSpec, TrustLevel
 from .runtime_capabilities import (
     RuntimePreflightResult,
-    runtime_network_policy_metadata,
+    runtime_network_policy_effective_support,
 )
 
 _POLICY_NONCRITICAL_EXCEPTIONS = (
@@ -249,6 +249,7 @@ class SandboxPolicy:
     def _require_network_policy_supported(
         runtime: RuntimeType,
         network_policy: str | None,
+        runtime_preflight: RuntimePreflightResult | None = None,
     ) -> str:
         requested_policy = (
             str(network_policy or "deny_all").strip().lower() or "deny_all"
@@ -260,16 +261,11 @@ class SandboxPolicy:
                 reasons=["unsupported_network_policy"],
             )
 
-        contract = runtime_network_policy_metadata(runtime)
-        mode = (
-            contract.deny_all
-            if requested_policy == "deny_all"
-            else contract.allowlist
+        effective_support = runtime_network_policy_effective_support(
+            runtime,
+            runtime_preflight.enforcement_ready if runtime_preflight else None,
         )
-        if (
-            mode.support_state not in {"supported", "host_gated"}
-            or not mode.strict_enforcement
-        ):
+        if not effective_support.get(requested_policy, False):
             raise SandboxPolicy.PolicyUnsupported(
                 runtime,
                 requirement=requested_policy,
@@ -336,6 +332,11 @@ class SandboxPolicy:
         spec.network_policy = self._require_network_policy_supported(
             spec.runtime,
             spec.network_policy,
+            runtime_preflight=(
+                runtime_preflights.get(spec.runtime)
+                if runtime_preflights is not None
+                else None
+            ),
         )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
@@ -402,6 +403,11 @@ class SandboxPolicy:
         spec.network_policy = self._require_network_policy_supported(
             spec.runtime,
             spec.network_policy,
+            runtime_preflight=(
+                runtime_preflights.get(spec.runtime)
+                if runtime_preflights is not None
+                else None
+            ),
         )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)

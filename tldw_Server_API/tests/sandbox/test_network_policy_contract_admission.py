@@ -21,6 +21,7 @@ def _available_preflight(
     runtime: RuntimeType,
     *,
     trust_levels: list[str] | None = None,
+    enforcement_ready: dict[str, bool] | None = None,
 ) -> RuntimePreflightResult:
     return RuntimePreflightResult(
         runtime=runtime,
@@ -28,7 +29,8 @@ def _available_preflight(
         reasons=[],
         supported_trust_levels=trust_levels
         or ["trusted", "standard", "untrusted"],
-        enforcement_ready={"deny_all": True, "allowlist": True},
+        enforcement_ready=enforcement_ready
+        or {"deny_all": True, "allowlist": True},
     )
 
 
@@ -166,6 +168,27 @@ def test_apply_to_session_canonicalizes_admitted_network_policy() -> None:
     )
 
     assert result.network_policy == "allowlist"
+
+
+def test_apply_to_run_rejects_docker_allowlist_when_not_effectively_ready() -> None:
+    policy = SandboxPolicy()
+    spec = _run_spec(RuntimeType.docker, network_policy="allowlist")
+
+    with pytest.raises(SandboxPolicy.PolicyUnsupported) as exc:
+        policy.apply_to_run(
+            spec,
+            firecracker_available=False,
+            runtime_preflights={
+                RuntimeType.docker: _available_preflight(
+                    RuntimeType.docker,
+                    enforcement_ready={"deny_all": True, "allowlist": False},
+                )
+            },
+        )
+
+    assert exc.value.runtime == RuntimeType.docker
+    assert exc.value.requirement == "allowlist"
+    assert exc.value.reasons == ["strict_allowlist_not_supported"]
 
 
 def test_apply_to_run_treats_whitespace_only_policy_as_missing() -> None:

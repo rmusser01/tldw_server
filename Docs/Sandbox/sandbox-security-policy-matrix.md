@@ -78,10 +78,15 @@ It records each policy's support state, whether strict enforcement is possible,
 and whether current readiness should be read from runtime preflight, operator
 configuration, or nowhere because the policy is unsupported.
 
+Effective discovery booleans such as `strict_deny_all_supported`,
+`strict_allowlist_supported`, and `egress_allowlist_supported` require both a
+strict static contract and current readiness. Scaffold or unsupported modes must
+stay false even when environment flags or test preflights report readiness.
+
 | Runtime | `deny_all` semantics | `allowlist` semantics | Operator rule |
 | --- | --- | --- | --- |
-| `docker` | Supported through container network isolation where configured. | Supported only when Docker egress enforcement is enabled and healthy. | Do not advertise allowlist unless enforcement is configured. |
-| `firecracker` | Host-gated strict deny-all when VM networking is absent or blocked. | Scaffold. | Fail closed when host enforcement cannot prove the requested policy. |
+| `docker` | Supported through container network isolation where configured. | Supported only when Docker egress enforcement and granular enforcement are enabled. | Do not advertise allowlist when execution would fall back to `network=none`; that fallback is deny-all, not allowlist. |
+| `firecracker` | Host-gated strict deny-all when VM networking is absent or blocked. | Scaffold. | Fail closed when host enforcement cannot prove the requested policy; do not advertise scaffold allowlist as effective support. |
 | `lima` | Host-gated strict deny-all through Lima enforcer readiness. | Unsupported for execution today. | `allowlist` requests must be rejected even if test overrides report readiness. |
 | `vz_linux` | Strict deny-all by Python admission plus helper rejection of non-`deny_all` VM creation; current VM config attaches no network device. | Unsupported. | Helper metadata should echo the accepted policy for diagnostics. |
 | `vz_macos` | Scaffold only. | Unsupported. | Do not claim real network enforcement until real execution exists. |

@@ -160,10 +160,17 @@ It does not replace `available`, raw `reasons`, `normalized_reasons`, or
 uses the same support-state vocabulary as this inventory and records whether a
 policy can ever be strictly enforced by the runtime.
 
+Effective support is stricter than either static metadata or raw readiness by
+itself. A runtime reports `strict_deny_all_supported` or
+`strict_allowlist_supported` only when the static contract is `supported` or
+`host_gated`, `strict_enforcement=true`, and current readiness for that policy
+is true. `scaffold` and `unsupported` modes remain false even if an operator
+sets experimental flags.
+
 | Runtime | `deny_all` | `allowlist` | Notes |
 | --- | --- | --- | --- |
-| `docker` | `supported` | `host_gated` | Deny-all can use container network isolation. Allowlist depends on configured egress enforcement. |
-| `firecracker` | `host_gated` | `scaffold` | Real mode requires a prepared Linux/KVM host. Allowlist is advertised only behind explicit enforcement flags and remains planned. |
+| `docker` | `supported` | `host_gated` | Deny-all can use container network isolation. Allowlist is effective only when egress enforcement and granular enforcement are both configured; the `network=none` fallback is treated as deny-all, not allowlist. |
+| `firecracker` | `host_gated` | `scaffold` | Real mode requires a prepared Linux/KVM host. Allowlist remains planned and is not advertised as effective support. |
 | `lima` | `host_gated` | `unsupported` | Deny-all depends on the Lima enforcer preflight. Service discovery intentionally forces allowlist false for execution. |
 | `vz_linux` | `host_gated` | `unsupported` | Real helper path accepts `deny_all` only and attaches no guest network device. |
 | `vz_macos` | `scaffold` | `unsupported` | No real execution yet. |
@@ -219,7 +226,7 @@ an equally clear ownership model.
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
 | Host-local runtimes need clearer docs/API warnings that they are not VM-grade. | `seatbelt`, `worktree` | Phase 2 |
-| Allowlist support is inconsistent and often scaffold-only. | all except host-local unsupported paths | Phase 2 |
+| Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
 | Detailed runner-internal error strings still vary by runtime behind `runtime_error`. | all | Phase 3 |
 | Session semantics are not normalized across warm VM, container, and host-local reuse. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
