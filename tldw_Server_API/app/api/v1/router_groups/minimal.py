@@ -94,36 +94,37 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         ),
     )
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.llamacpp import public_router as llamacpp_public_router
-        from tldw_Server_API.app.api.v1.endpoints.llamacpp import router as llamacpp_router
-        from tldw_Server_API.app.api.v1.endpoints.messages import public_router as messages_public_router
-        from tldw_Server_API.app.api.v1.endpoints.messages import router as messages_router
-
-        specs.extend([
-            RouterSpec(
-                router=llamacpp_router,
-                prefix=f"{API_V1_PREFIX}",
-                tags=("llamacpp",),
-            ),
-            RouterSpec(
-                router=llamacpp_public_router,
-                prefix="",
-                tags=("llamacpp",),
-            ),
-            RouterSpec(
-                router=messages_router,
-                prefix=f"{API_V1_PREFIX}",
-                tags=("messages",),
-            ),
-            RouterSpec(
-                router=messages_public_router,
-                prefix="",
-                tags=("messages",),
-            ),
-        ])
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping llamacpp/messages routers in minimal test app: {e}")
+    for llm_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llamacpp",
+            log_name="llamacpp",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llamacpp",),
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llamacpp",
+            log_name="llamacpp_public",
+            tags=("llamacpp",),
+            attr_name="public_router",
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.messages",
+            log_name="messages",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("messages",),
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.messages",
+            log_name="messages_public",
+            tags=("messages",),
+            attr_name="public_router",
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, llm_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.vector_stores_openai import router as vector_stores_router
