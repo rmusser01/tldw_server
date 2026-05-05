@@ -439,38 +439,27 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, audio_voice_spec)
 
     # Kanban Board endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_boards import router as kanban_boards_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_cards import router as kanban_cards_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_checklists import router as kanban_checklists_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_comments import router as kanban_comments_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_labels import router as kanban_labels_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_links import router as kanban_links_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_lists import router as kanban_lists_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search import router as kanban_search_router
-        from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow import router as kanban_workflow_router
-
-        specs.extend([
-            RouterSpec(
-                router=kanban_router,
+    for kanban_module in (
+        "kanban_boards",
+        "kanban_lists",
+        "kanban_cards",
+        "kanban_labels",
+        "kanban_checklists",
+        "kanban_comments",
+        "kanban_search",
+        "kanban_links",
+        "kanban_workflow",
+    ):
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path=f"tldw_Server_API.app.api.v1.endpoints.kanban.{kanban_module}",
+                log_name=kanban_module,
                 prefix=f"{API_V1_PREFIX}/kanban",
                 tags=("kanban",),
                 route_key="kanban",
-            )
-            for kanban_router in (
-                kanban_boards_router,
-                kanban_lists_router,
-                kanban_cards_router,
-                kanban_labels_router,
-                kanban_checklists_router,
-                kanban_comments_router,
-                kanban_search_router,
-                kanban_links_router,
-                kanban_workflow_router,
-            )
-        ])
-    except ImportError as e:
-        logger.debug(f"Kanban endpoints unavailable; skipping import: {e}")
+            ),
+        )
 
     # Ingestion and adapter endpoints
     for adapter_spec in (
