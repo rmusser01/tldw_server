@@ -332,6 +332,16 @@ def test_runtime_session_contract_metadata_rejects_unknown_runtime() -> None:
         runtime_caps.runtime_session_contract_metadata("future_runtime")
 
 
+def test_host_local_session_contracts_do_not_claim_warm_reuse_or_repair() -> None:
+    for runtime in (RuntimeType.seatbelt, RuntimeType.worktree):
+        contract = runtime_caps.runtime_session_contract_metadata(runtime)
+
+        assert contract.reuse_model == "workspace_only"
+        assert contract.requires_live_health_check is False
+        assert contract.recovery_state == "unsupported"
+        assert contract.repair_state == "unsupported"
+
+
 def test_runtime_info_schema_exposes_session_contract() -> None:
     schema = SandboxRuntimeInfo.model_json_schema()
 
