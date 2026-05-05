@@ -410,43 +410,33 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, character_spec)
 
-    # Audiobooks endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.audio.audiobooks import router as audiobooks_router
-
-        specs.append(RouterSpec(
-            router=audiobooks_router,
+    # Audiobooks and Voice Assistant endpoints
+    for audio_voice_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.audio.audiobooks",
+            log_name="audiobooks",
             prefix=f"{API_V1_PREFIX}",
             tags=("audiobooks",),
             route_key="audiobooks",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping audiobooks router: {e}")
-
-    # Voice Assistant endpoints (REST + WebSocket)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.voice_assistant import (
-            router as voice_assistant_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.voice_assistant import (
-            ws_router as voice_assistant_ws_router,
-        )
-
-        specs.append(RouterSpec(
-            router=voice_assistant_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.voice_assistant",
+            log_name="voice_assistant",
             prefix=f"{API_V1_PREFIX}/voice",
             tags=("voice-assistant",),
             route_key="voice-assistant",
-        ))
-        specs.append(RouterSpec(
-            router=voice_assistant_ws_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.voice_assistant",
+            log_name="voice_assistant_ws",
             prefix=f"{API_V1_PREFIX}/voice",
             tags=("voice-assistant-ws",),
             route_key="voice-assistant-ws",
-        ))
-    except ImportError as e:
-        logger.debug(f"Voice assistant endpoints not available: {e}")
+            attr_name="ws_router",
+        ),
+    ):
+        append_imported_router_spec(specs, audio_voice_spec)
 
     # Kanban Board endpoints
     try:
