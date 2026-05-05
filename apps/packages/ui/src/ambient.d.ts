@@ -89,7 +89,7 @@ declare module "exceljs" {
   export class Workbook {
     addWorksheet(name: string): any
     xlsx: {
-      writeBuffer(): Promise<ArrayBuffer>
+      writeBuffer(): Promise<import("node:buffer").Buffer>
     }
   }
 }

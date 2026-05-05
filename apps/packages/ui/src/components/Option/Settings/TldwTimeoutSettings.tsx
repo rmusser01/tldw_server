@@ -146,9 +146,10 @@ export const TldwTimeoutSettings = ({
   }
 
   return (
-    <Collapse
-      className="mt-4 scroll-mt-24"
-      items={[
+    <div id="tldw-settings-timeouts" className="scroll-mt-24">
+      <Collapse
+        className="mt-4"
+        items={[
         {
           key: 'adv',
           label: t('settings:tldw.advancedTimeouts'),
@@ -383,7 +384,8 @@ export const TldwTimeoutSettings = ({
             </div>
           )
         }
-      ]}
-    />
+        ]}
+      />
+    </div>
   )
 }

@@ -161,13 +161,18 @@ export function ConnectionWebModal({ open, onClose }: ConnectionWebModalProps) {
       },
     ]
 
-    const layout: LayoutOptions = {
+    const layout: LayoutOptions & {
+      rankDir: "LR"
+      nodeSep: number
+      rankSep: number
+      animate: false
+    } = {
       name: "dagre",
       rankDir: "LR",
       nodeSep: 50,
       rankSep: 100,
       animate: false,
-    } as LayoutOptions
+    }
 
     const cy = cytoscape({
       container: containerRef.current,

@@ -229,7 +229,9 @@ export function ContentViewerDocumentIntelligenceSection({
             <select
               value={modals.annotationDraftColor}
               onChange={(event) =>
-                modals.setAnnotationDraftColor(event.target.value as any)
+                modals.setAnnotationDraftColor(
+                  event.target.value as MediaAnnotationColor
+                )
               }
               className="h-8 rounded border border-border bg-surface px-2 text-xs text-text"
               data-testid="media-annotation-color"

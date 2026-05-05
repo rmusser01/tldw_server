@@ -565,6 +565,10 @@ export function CommandPalette({
     setSelectedIndex(0)
   }, [query])
 
+  useEffect(() => {
+    onQueryChange?.(query)
+  }, [onQueryChange, query])
+
   // Focus input when opened
   useEffect(() => {
     if (open) {
@@ -689,11 +693,7 @@ export function CommandPalette({
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => {
-              const nextQuery = e.target.value
-              setQuery(nextQuery)
-              onQueryChange?.(nextQuery)
-            }}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder={t("common:commandPalette.placeholder", "Type a command or search...")}
             className={cn(
               "flex-1 rounded-md bg-transparent text-base text-text placeholder:text-text-subtle",

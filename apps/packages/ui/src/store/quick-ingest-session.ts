@@ -106,6 +106,11 @@ type QuickIngestSessionPersistedState = {
   session: QuickIngestSessionRecord | null
 }
 
+const isCustomBasePreset = (
+  value: unknown
+): value is Exclude<IngestPreset, "custom"> =>
+  typeof value === "string" && value in DEFAULT_PRESETS
+
 type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   triggerSummary: QuickIngestTriggerSummary
   createDraftSession: (
@@ -433,7 +438,9 @@ const sanitizeSession = (
       ? session.updatedAt
       : createdAt
 
-  const customBasePreset = session.customBasePreset as IngestPreset | undefined
+  const customBasePreset = isCustomBasePreset(session.customBasePreset)
+    ? session.customBasePreset
+    : DEFAULT_PRESET
 
   return {
     id: session.id || generateSessionId(),
@@ -442,10 +449,7 @@ const sanitizeSession = (
     currentStep: session.currentStep || 1,
     queueItems: sanitizeQueueItems(session.queueItems),
     selectedPreset: session.selectedPreset || DEFAULT_PRESET,
-    customBasePreset:
-      customBasePreset && customBasePreset !== "custom"
-        ? customBasePreset
-        : DEFAULT_PRESET,
+    customBasePreset,
     presetConfig: session.presetConfig || DEFAULT_PRESETS[DEFAULT_PRESET],
     customOptions: session.customOptions || {},
     processingState: session.processingState || { ...INITIAL_PROCESSING_STATE },

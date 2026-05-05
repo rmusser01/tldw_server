@@ -4207,6 +4207,30 @@ export class TldwApiClientBase {
         : typeof messageCountRaw === "string" && messageCountRaw.trim().length > 0
           ? Number.parseFloat(messageCountRaw)
           : null
+    const character_id = input?.character_id ?? input?.characterId ?? null
+    const assistant_kind =
+      input?.assistant_kind ??
+      input?.assistantKind ??
+      (character_id != null ? "character" : null)
+    const assistant_id =
+      input?.assistant_id ??
+      input?.assistantId ??
+      (assistant_kind === "character" && character_id != null
+        ? String(character_id)
+        : null)
+    const scope_type =
+      input?.scope_type === "global" || input?.scopeType === "global"
+        ? "global"
+        : input?.scope_type === "workspace" || input?.scopeType === "workspace"
+          ? "workspace"
+          : null
+    const workspace_id =
+      typeof input?.workspace_id === "string" && input.workspace_id.trim().length > 0
+        ? input.workspace_id
+        : typeof input?.workspaceId === "string" &&
+            input.workspaceId.trim().length > 0
+          ? input.workspaceId
+          : null
     return {
       id: String(input?.id ?? ""),
       title: String(input?.title || ""),
@@ -4227,7 +4251,23 @@ export class TldwApiClientBase {
           : typeof input?.relevance === "number"
             ? input?.relevance
             : null,
-      character_id: input?.character_id ?? input?.characterId ?? null,
+      character_id,
+      assistant_kind:
+        assistant_kind === "character" || assistant_kind === "persona"
+          ? assistant_kind
+          : null,
+      assistant_id:
+        assistant_id == null || assistant_id === ""
+          ? null
+          : String(assistant_id),
+      persona_memory_mode:
+        input?.persona_memory_mode === "read_only" ||
+        input?.persona_memory_mode === "read_write"
+          ? input.persona_memory_mode
+          : input?.personaMemoryMode === "read_only" ||
+              input?.personaMemoryMode === "read_write"
+            ? input.personaMemoryMode
+            : null,
       parent_conversation_id:
         input?.parent_conversation_id ?? input?.parentConversationId ?? null,
       root_id: input?.root_id ?? input?.rootId ?? null,
@@ -4238,7 +4278,9 @@ export class TldwApiClientBase {
           ? input.version
           : typeof input?.expected_version === "number"
             ? input.expected_version
-            : null
+            : null,
+      scope_type,
+      workspace_id
     }
   }
 
@@ -4254,7 +4296,7 @@ export class TldwApiClientBase {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatSummary[]> {
-    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...params })
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4285,7 +4327,7 @@ export class TldwApiClientBase {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...params })
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4327,7 +4369,7 @@ export class TldwApiClientBase {
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { ...toChatScopeParams(options?.scope), ...payload }
+      body: { ...payload, ...toChatScopeParams(options?.scope) }
     })
     return this.normalizeChatSummary(res)
   }
@@ -4431,7 +4473,7 @@ export class TldwApiClientBase {
     options?: { scope?: ChatScope }
   ): Promise<LorebookDiagnosticExportResponse> {
     const cid = String(chat_id)
-    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...params })
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     return await bgRequest<LorebookDiagnosticExportResponse>({
       path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
       method: "GET"

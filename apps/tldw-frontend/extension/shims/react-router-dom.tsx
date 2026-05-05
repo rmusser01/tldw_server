@@ -51,6 +51,27 @@ const runNavigationTransition = (update: () => void) => {
   update()
 }
 
+const normalizeDelimitedSegment = (
+  value: string | undefined,
+  delimiter: "?" | "#"
+) => {
+  const trimmed = value?.trim() ?? ""
+  if (!trimmed) return ""
+  return trimmed.startsWith(delimiter) ? trimmed : `${delimiter}${trimmed}`
+}
+
+const formatNavigateHref = (
+  to: Exclude<NavigateTo, number>,
+  fallbackPath: string
+) => {
+  if (typeof to === "string") return to
+  const href = `${to.pathname ?? ""}${normalizeDelimitedSegment(
+    to.search,
+    "?"
+  )}${normalizeDelimitedSegment(to.hash, "#")}`
+  return href || fallbackPath
+}
+
 const noop = () => {}
 
 export const UNSAFE_DataRouterContext = React.createContext<unknown | null>(null)
@@ -98,10 +119,7 @@ export const useNavigate = () => {
       }
       return
     }
-    const href =
-      typeof to === "string"
-        ? to
-        : `${to.pathname ?? ""}${to.search ?? ""}${to.hash ?? ""}` || router.asPath
+    const href = formatNavigateHref(to, router.asPath)
     const doFallback = () => {
       if (typeof window === "undefined") return
       const proto = window.location.protocol
@@ -114,11 +132,13 @@ export const useNavigate = () => {
 
     try {
       runNavigationTransition(() => {
-        if (options?.replace) {
-          void router.replace(href)
-        } else {
-          void router.push(href)
-        }
+        const navigation = options?.replace
+          ? router.replace(href)
+          : router.push(href)
+        void navigation.catch((err) => {
+          console.error("[useNavigate shim] Navigation failed:", err)
+          doFallback()
+        })
       })
     } catch (err) {
       console.error("[useNavigate shim] Navigation failed:", err)
@@ -181,11 +201,12 @@ export const useSearchParams = (): [
         ? `${router.pathname}?${queryString}`
         : router.pathname
       runNavigationTransition(() => {
-        if (options?.replace) {
-          void router.replace(nextPath)
-        } else {
-          void router.push(nextPath)
-        }
+        const navigation = options?.replace
+          ? router.replace(nextPath)
+          : router.push(nextPath)
+        void navigation.catch((error) => {
+          console.error("[useSearchParams shim] Navigation failed:", error)
+        })
       })
     },
     [router]
@@ -235,11 +256,10 @@ export const Navigate: React.FC<NavigateProps> = ({ to, replace }) => {
   const router = useRouter()
   React.useEffect(() => {
     runNavigationTransition(() => {
-      if (replace) {
-        void router.replace(to)
-      } else {
-        void router.push(to)
-      }
+      const navigation = replace ? router.replace(to) : router.push(to)
+      void navigation.catch((error) => {
+        console.error("[Navigate shim] Navigation failed:", error)
+      })
     })
   }, [router, to, replace])
   return null

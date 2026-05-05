@@ -98,7 +98,7 @@ export async function exportToExcel(table: DataTable): Promise<Blob> {
 
   // Write to buffer
   const buffer = await workbook.xlsx.writeBuffer()
-  return new Blob([buffer], {
+  return new Blob([new Uint8Array(buffer)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   })
 }

@@ -64,6 +64,21 @@ const LazyCharacterPreviewPopup = React.lazy(() =>
   })),
 )
 
+const normalizeWorldBookId = (value: string | number | undefined): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value !== "string") {
+    return null
+  }
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) {
+    return null
+  }
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export type CharacterListContentProps = {
   t: TFunction
   // data
@@ -1636,11 +1651,9 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
             attachedWorldBooks={previewCharacterWorldBooks}
             attachedWorldBooksLoading={previewCharacterWorldBooksLoading}
             launchedFromWorldBooks={crossNavigationContext.launchedFromWorldBooks}
-            launchedFromWorldBookId={
-              typeof crossNavigationContext.focusWorldBookId === "number"
-                ? crossNavigationContext.focusWorldBookId
-                : null
-            }
+            launchedFromWorldBookId={normalizeWorldBookId(
+              crossNavigationContext.focusWorldBookId
+            )}
             deleting={deleting}
             exporting={
               !!exporting &&

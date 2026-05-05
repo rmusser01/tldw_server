@@ -100,8 +100,8 @@ export const SidePanelBody = ({
 
   // Stable callbacks for PlaygroundMessage
   const handleEditMessage = React.useCallback(
-    (index: number, value: string, isUser: boolean) =>
-      editMessage(index, value, isUser),
+    (index: number, value: string, isUser: boolean, isSend: boolean) =>
+      editMessage(index, value, isUser, isSend),
     [editMessage]
   )
   const handleDeleteMessage = React.useCallback(
@@ -278,8 +278,8 @@ export const SidePanelBody = ({
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
-                  onEditFormSubmit={(value) => {
-                    void handleEditMessage(index, value, !message.isBot)
+                  onEditFormSubmit={(value, isSend) => {
+                    void handleEditMessage(index, value, !message.isBot, isSend)
                   }}
                   onDeleteMessage={() => {
                     void handleDeleteMessage(index)

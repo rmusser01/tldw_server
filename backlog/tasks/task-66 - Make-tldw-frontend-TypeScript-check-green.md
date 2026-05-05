@@ -4,7 +4,7 @@ title: Make tldw-frontend TypeScript check green
 status: Done
 assignee: []
 created_date: '2026-05-05 05:23'
-updated_date: '2026-05-05 14:19'
+updated_date: '2026-05-05 15:06'
 labels:
   - frontend
   - typescript
@@ -40,6 +40,8 @@ Fixes are intentionally type-surface cleanup and stale-code removal: Playground 
 git diff --check exits 0.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1302. Human requester still needs to add the required human-written Change summary before merge.
+
+Review-fix pass completed for PR #1302. Addressed structured chat version-conflict detection and getChat reuse; scoped chat metadata/scope precedence; command palette query callback consistency; sidepanel edit send flag; prompt ID/content separation; persisted quick-ingest/account-mode validation; navigation shim delimiter and promise handling; test setup shims; and targeted cast/type cleanup. Verification after review fixes: tsc in apps/tldw-frontend exited 0; focused vitest batch with --testTimeout=10000 in apps/packages/ui passed 4 files and 62 tests; git diff --check exited 0. The same focused vitest batch without increased timeout had two FamilyGuardrailsWizard cases exceed the default 5000ms, and those two passed when isolated.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
