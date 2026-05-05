@@ -116,6 +116,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
           outline ? `border ${styles.outline} bg-transparent` : styles.filled,
           className
         )}
+        data-ds-component="Badge"
         data-testid={dataTestId}
       >
         {dot && (
