@@ -91,19 +91,52 @@ def test_run_status_reason_taxonomy_reports_limit_signals() -> None:
     ) == "limits_applied"
 
 
+def test_run_status_reason_taxonomy_maps_known_policy_failures() -> None:
+    for message in (
+        "lima_policy_failed",
+        "vz_linux_policy_failed",
+        "vz_macos_policy_failed",
+        "seatbelt_policy_failed",
+        "worktree_policy_failed",
+    ):
+        assert normalize_run_status_reason(
+            phase=RunPhase.failed,
+            message=message,
+            exit_code=None,
+            resource_usage=None,
+        ) == "policy_failed"
+
+
+def test_run_status_reason_taxonomy_prefers_policy_failed_over_runtime_unavailable() -> None:
+    for message in (
+        "lima_policy_failed runtime_unavailable",
+        "Runtime unavailable after VZ_MACOS_POLICY_FAILED",
+    ):
+        assert normalize_run_status_reason(
+            phase=RunPhase.failed,
+            message=message,
+            exit_code=None,
+            resource_usage=None,
+        ) == "policy_failed"
+
+
 def test_run_status_reason_taxonomy_distinguishes_runtime_unavailable() -> None:
-    assert normalize_run_status_reason(
-        phase=RunPhase.failed,
-        message="vz_linux_policy_failed",
-        exit_code=None,
-        resource_usage=None,
-    ) == "runtime_unavailable"
-    assert normalize_run_status_reason(
-        phase=RunPhase.failed,
-        message="vz_macos_policy_failed",
-        exit_code=None,
-        resource_usage=None,
-    ) == "runtime_unavailable"
+    for message in (
+        "runtime_unavailable",
+        "runtime unavailable",
+        "docker_unavailable",
+        "firecracker_unavailable",
+        "vz_linux_unavailable",
+        "vz_macos_unavailable",
+        "seatbelt_unavailable",
+        "worktree_unavailable",
+    ):
+        assert normalize_run_status_reason(
+            phase=RunPhase.failed,
+            message=message,
+            exit_code=None,
+            resource_usage=None,
+        ) == "runtime_unavailable"
     assert normalize_run_status_reason(
         phase=RunPhase.failed,
         message="runtime provisioning template missing",
