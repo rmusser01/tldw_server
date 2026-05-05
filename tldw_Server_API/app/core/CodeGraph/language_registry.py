@@ -5,28 +5,13 @@ from pathlib import Path
 from .dependencies import DependencyHealth, probe_codegraph_dependencies
 from .models import LanguageInfo
 
-_PLANNED_LANGUAGES = (
-    LanguageInfo(
-        language_id="c",
-        display_name="C",
-        extensions=(".c", ".h"),
-        stage="planned",
-    ),
-    LanguageInfo(
-        language_id="cpp",
-        display_name="C++",
-        extensions=(".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx"),
-        stage="planned",
-    ),
-)
-
 
 class CodeGraphLanguageRegistry:
     """Language metadata and extension lookup for the foundation indexer."""
 
     def __init__(self, dependency_health: DependencyHealth | None = None) -> None:
         self.dependency_health = dependency_health or probe_codegraph_dependencies()
-        self._languages = (*_foundation_languages(self.dependency_health), *_PLANNED_LANGUAGES)
+        self._languages = _foundation_languages(self.dependency_health)
         self._by_extension = {
             extension: language
             for language in self._languages
@@ -58,6 +43,8 @@ def _foundation_languages(dependency_health: DependencyHealth) -> tuple[Language
     java_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_java"))
     kotlin_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_kotlin"))
     csharp_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_c_sharp"))
+    c_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_c"))
+    cpp_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_cpp"))
     return (
         LanguageInfo(
             language_id="python",
@@ -105,6 +92,22 @@ def _foundation_languages(dependency_health: DependencyHealth) -> tuple[Language
             stage="foundation",
             dependency_missing=csharp_missing,
             symbol_extraction=not csharp_missing,
+        ),
+        LanguageInfo(
+            language_id="c",
+            display_name="C",
+            extensions=(".c", ".h"),
+            stage="foundation",
+            dependency_missing=c_missing,
+            symbol_extraction=not c_missing,
+        ),
+        LanguageInfo(
+            language_id="cpp",
+            display_name="C++",
+            extensions=(".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx"),
+            stage="foundation",
+            dependency_missing=cpp_missing,
+            symbol_extraction=not cpp_missing,
         ),
     )
 

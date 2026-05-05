@@ -40,8 +40,8 @@ def test_registry_reports_foundation_languages_and_planned_languages() -> None:
     assert by_id["java"].stage == "foundation"
     assert by_id["kotlin"].stage == "foundation"
     assert by_id["csharp"].stage == "foundation"
-    assert by_id["c"].stage == "planned"
-    assert by_id["cpp"].stage == "planned"
+    assert by_id["c"].stage == "foundation"
+    assert by_id["cpp"].stage == "foundation"
 
 
 def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> None:
@@ -57,6 +57,8 @@ def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> Non
                 "tree_sitter_java",
                 "tree_sitter_kotlin",
                 "tree_sitter_c_sharp",
+                "tree_sitter_c",
+                "tree_sitter_cpp",
             ),
         )
     )
@@ -67,7 +69,9 @@ def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> Non
     assert registry.language_for_path("src/main/java/com/example/App.java").language_id == "java"
     assert registry.language_for_path("src/main/kotlin/com/example/App.kt").language_id == "kotlin"
     assert registry.language_for_path("src/main/csharp/Example/App.cs").language_id == "csharp"
-    assert registry.language_for_path("src/main.cc").stage == "planned"
+    assert registry.language_for_path("src/main.c").language_id == "c"
+    assert registry.language_for_path("src/main.cc").language_id == "cpp"
+    assert registry.language_for_path("include/main.hpp").language_id == "cpp"
     assert registry.language_for_path("README.md") is None
 
     by_id = {language.language_id: language for language in registry.list_languages()}
@@ -78,6 +82,8 @@ def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> Non
     assert by_id["java"].symbol_extraction is True
     assert by_id["kotlin"].symbol_extraction is True
     assert by_id["csharp"].symbol_extraction is True
+    assert by_id["c"].symbol_extraction is True
+    assert by_id["cpp"].symbol_extraction is True
 
 
 def test_registry_reports_missing_parser_dependencies_per_language() -> None:
@@ -89,6 +95,8 @@ def test_registry_reports_missing_parser_dependencies_per_language() -> None:
                 "tree_sitter_java",
                 "tree_sitter_kotlin",
                 "tree_sitter_c_sharp",
+                "tree_sitter_c",
+                "tree_sitter_cpp",
             ),
             present=("tree_sitter", "tree_sitter_typescript"),
         )
@@ -107,3 +115,7 @@ def test_registry_reports_missing_parser_dependencies_per_language() -> None:
     assert by_id["kotlin"].dependency_missing == ("tree_sitter_kotlin",)
     assert by_id["csharp"].symbol_extraction is False
     assert by_id["csharp"].dependency_missing == ("tree_sitter_c_sharp",)
+    assert by_id["c"].symbol_extraction is False
+    assert by_id["c"].dependency_missing == ("tree_sitter_c",)
+    assert by_id["cpp"].symbol_extraction is False
+    assert by_id["cpp"].dependency_missing == ("tree_sitter_cpp",)

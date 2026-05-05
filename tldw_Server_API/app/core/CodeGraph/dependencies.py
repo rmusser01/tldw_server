@@ -13,6 +13,8 @@ _OPTIONAL_LANGUAGE_MODULES = (
     "tree_sitter_java",
     "tree_sitter_kotlin",
     "tree_sitter_c_sharp",
+    "tree_sitter_c",
+    "tree_sitter_cpp",
 )
 _PROBED_MODULES = (*_CORE_MODULES, *_OPTIONAL_LANGUAGE_MODULES)
 

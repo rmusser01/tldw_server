@@ -29,6 +29,8 @@ _LANGUAGE_MODULES: dict[str, tuple[str, str]] = {
     "java": ("tree_sitter_java", "language"),
     "kotlin": ("tree_sitter_kotlin", "language"),
     "csharp": ("tree_sitter_c_sharp", "language"),
+    "c": ("tree_sitter_c", "language"),
+    "cpp": ("tree_sitter_cpp", "language"),
 }
 
 

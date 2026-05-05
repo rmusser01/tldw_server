@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module import (
@@ -69,6 +70,11 @@ def _context() -> RequestContext:
         session_id="sess-1",
         metadata={"workspace_id": "workspace-1"},
     )
+
+
+def _require_c_family_parsers() -> None:
+    if not (load_parser("c").available and load_parser("cpp").available):
+        pytest.skip("tree-sitter-c/cpp parsers are not available")
 
 
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
@@ -372,6 +378,69 @@ public class Greeter {
     assert [item["qualified_name"] for item in search["results"]] == [  # nosec B101
         "Example.App.Greeter.Helper"
     ]
+
+
+@pytest.mark.asyncio
+async def test_codegraph_search_finds_c_cpp_symbols_after_index(tmp_path: Path) -> None:
+    _require_c_family_parsers()
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "greeter.c").write_text(
+        """
+#include <stdio.h>
+
+int helper(int value) {
+    return value + 1;
+}
+
+int greet(int name) {
+    return helper(name);
+}
+""",
+        encoding="utf-8",
+    )
+    (workspace_root / "Greeter.cpp").write_text(
+        """
+#include <string>
+
+namespace demo {
+class Greeter {
+public:
+    std::string greet(std::string name) {
+        return helper(name);
+    }
+
+private:
+    std::string helper(std::string value) {
+        return value;
+    }
+};
+}
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    index_result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    c_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "function", "language": "c", "limit": 10},
+        context=_context(),
+    )
+    cpp_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "method", "language": "cpp", "limit": 10},
+        context=_context(),
+    )
+
+    assert index_result["status"] == "complete"  # nosec B101
+    assert index_result["counters"]["files_indexed"] == 2  # nosec B101
+    assert [item["qualified_name"] for item in c_search["results"]] == ["helper"]  # nosec B101
+    assert [item["qualified_name"] for item in cpp_search["results"]] == ["demo.Greeter.helper"]  # nosec B101
 
 
 def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
