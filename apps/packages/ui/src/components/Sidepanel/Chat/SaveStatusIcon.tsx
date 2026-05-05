@@ -3,6 +3,7 @@ import { Save } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useEffect, useRef } from "react"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 type SaveMode = "ephemeral" | "local" | "server"
 
@@ -59,16 +60,15 @@ export const SaveStatusIcon = ({
     return "local"
   })()
 
-  const iconClassName = (() => {
-    const base = "size-4 transition-colors"
+  const badgeVariant: BadgeVariant = (() => {
     switch (saveMode) {
       case "ephemeral":
-        return `${base} text-primary`
+        return "primary"
       case "server":
-        return `${base} text-success`
+        return "success"
       case "local":
       default:
-        return `${base} text-text-subtle`
+        return "secondary"
     }
   })()
 
@@ -103,7 +103,15 @@ export const SaveStatusIcon = ({
         aria-label={tooltip}
         title={tooltip}
       >
-        <Save className={iconClassName} />
+        <Badge
+          data-testid="chat-save-status-badge"
+          variant={badgeVariant}
+          size="sm"
+          outline
+          className="gap-0 leading-none"
+        >
+          <Save className="size-4 transition-colors" aria-hidden="true" />
+        </Badge>
       </button>
     </Tooltip>
   )

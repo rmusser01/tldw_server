@@ -5,6 +5,7 @@ import {
   useConnectionActions,
   useConnectionUxState
 } from "@/hooks/useConnectionState"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 /**
  * Compact connection status indicator with icon and color for accessibility.
@@ -18,7 +19,7 @@ import {
  */
 export const StatusDot = () => {
   const { t } = useTranslation(["sidepanel"])
-  const { uxState, mode, isConnectedUx, isChecking, isConfigOrError } =
+  const { mode, isConnectedUx, isChecking, isConfigOrError } =
     useConnectionUxState()
   const { checkOnce } = useConnectionActions()
 
@@ -65,18 +66,26 @@ export const StatusDot = () => {
   const renderStatusIcon = () => {
     if (isChecking) {
       return (
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-warn" />
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-current" />
       )
     }
     if (isConnectedUx) {
       return (
-        <Check className="h-3.5 w-3.5 text-success" />
+        <Check className="h-3.5 w-3.5 text-current" />
       )
     }
     return (
-      <AlertCircle className="h-3.5 w-3.5 text-danger" />
+      <AlertCircle className="h-3.5 w-3.5 text-current" />
     )
   }
+
+  const badgeVariant: BadgeVariant = (() => {
+    if (isChecking) return "warning"
+    if (isConnectedUx && mode === "demo") return "demo"
+    if (isConnectedUx) return "success"
+    if (isConfigOrError) return "warning"
+    return "danger"
+  })()
 
   return (
     <Tooltip title={tooltip}>
@@ -89,7 +98,15 @@ export const StatusDot = () => {
         aria-label={tooltip}
         title={tooltip}
       >
-        {renderStatusIcon()}
+        <Badge
+          data-testid="status-dot-badge"
+          variant={badgeVariant}
+          size="sm"
+          outline
+          className="gap-0 leading-none"
+        >
+          {renderStatusIcon()}
+        </Badge>
       </button>
     </Tooltip>
   )

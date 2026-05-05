@@ -2,6 +2,7 @@ import React from "react"
 
 import type { ChatLinkedResearchRun } from "@/services/tldw/TldwApiClient"
 import type { ResearchFollowUpTarget } from "./research-chat-context"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 import {
   CHAT_LINKED_RESEARCH_VISIBLE_TERMINAL_ROWS,
@@ -17,13 +18,13 @@ type ResearchRunStatusStackProps = {
   onFollowUp?: (target: ResearchFollowUpTarget) => void
 }
 
-const STATUS_BADGE_CLASSNAME: Record<string, string> = {
-  Running: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-  "Needs review": "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  Completed: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  Failed: "bg-red-500/10 text-red-700 dark:text-red-300",
-  Cancelled: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
-  Paused: "bg-violet-500/10 text-violet-700 dark:text-violet-300"
+const STATUS_BADGE_VARIANT: Record<string, BadgeVariant> = {
+  Running: "info",
+  "Needs review": "warning",
+  Completed: "success",
+  Failed: "danger",
+  Cancelled: "secondary",
+  Paused: "warning"
 }
 
 export const ResearchRunStatusStack: React.FC<ResearchRunStatusStackProps> = ({
@@ -72,11 +73,13 @@ export const ResearchRunStatusStack: React.FC<ResearchRunStatusStackProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-text">{run.query}</div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-text-subtle">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 font-medium ${STATUS_BADGE_CLASSNAME[statusLabel] ?? "bg-muted text-text-subtle"}`}
+                    <Badge
+                      data-testid={`research-run-status-badge-${run.run_id}`}
+                      variant={STATUS_BADGE_VARIANT[statusLabel] ?? "secondary"}
+                      size="sm"
                     >
                       {statusLabel}
-                    </span>
+                    </Badge>
                     {actionPolicy.reasonLabel ? <span>{actionPolicy.reasonLabel}</span> : null}
                     <span className="truncate">{run.run_id}</span>
                   </div>
