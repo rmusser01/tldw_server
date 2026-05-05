@@ -31,10 +31,11 @@ specific runtime today.
 | `strict allowlist` | Runtime networking permits only explicitly configured destinations and blocks all others. |
 | `scaffold` | Shape exists, but the guarantee is not ready for normal operator use. |
 
-Public runtime discovery exposes these concepts through `boundary_class`,
-`vm_grade_isolation`, and `untrusted_eligible`. Those fields describe policy
-posture and boundary category; they do not replace current-host `available`,
-`reasons`, or runtime preflight checks.
+Public runtime discovery exposes isolation concepts through `boundary_class`,
+`vm_grade_isolation`, and `untrusted_eligible`. It exposes network posture
+through `network_policy_contract`. These fields describe static policy posture;
+they do not replace current-host `available`, `reasons`, `enforcement_ready`,
+or runtime preflight checks.
 
 ## Trust-Level Eligibility
 
@@ -65,6 +66,11 @@ Policy requirements:
 Network policy names are request semantics, not proof that every runtime can
 enforce them. Public discovery and diagnostics must report enforcement
 readiness separately from runtime availability.
+
+`network_policy_contract` is the static machine-readable version of this table.
+It records each policy's support state, whether strict enforcement is possible,
+and whether current readiness should be read from runtime preflight, operator
+configuration, or nowhere because the policy is unsupported.
 
 | Runtime | `deny_all` semantics | `allowlist` semantics | Operator rule |
 | --- | --- | --- | --- |
@@ -156,5 +162,7 @@ diagnostic paths.
 - Keep `sandbox-runtime-capability-inventory.md` as the current support-state
   inventory and this document as the security contract.
 - Add focused tests when a row describes a fail-closed admission rule.
+- Keep `network_policy_contract` aligned with the Network Semantics table, and
+  do not use current `enforcement_ready` values as static security claims.
 - Prefer explicit `unsupported` reasons over ambiguous best-effort language.
 - Do not use `available=true` as proof of a security guarantee.

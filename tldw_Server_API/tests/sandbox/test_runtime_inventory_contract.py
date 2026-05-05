@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.core.Sandbox import runtime_capabilities as runtime_caps
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RUNTIME_ISOLATION_METADATA,
     RuntimePreflightResult,
@@ -83,6 +84,64 @@ def test_runtime_isolation_metadata_contract_covers_runtime_enum() -> None:
 def test_runtime_isolation_metadata_rejects_unknown_runtime() -> None:
     with pytest.raises(ValueError, match="No isolation metadata configured"):
         runtime_isolation_metadata("future_runtime")  # type: ignore[arg-type]
+
+
+def test_feature_discovery_reports_structured_network_policy_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+
+    assert set(discovery) == {runtime.value for runtime in RuntimeType}
+    for runtime in RuntimeType:
+        contract = discovery[runtime.value]["network_policy_contract"]
+        assert set(contract) == {"deny_all", "allowlist"}
+        for mode in ("deny_all", "allowlist"):
+            assert set(contract[mode]) == {
+                "support_state",
+                "strict_enforcement",
+                "readiness_source",
+            }
+
+    for host_local_runtime in ("seatbelt", "worktree"):
+        contract = discovery[host_local_runtime]["network_policy_contract"]
+        assert contract["deny_all"] == {
+            "support_state": "unsupported",
+            "strict_enforcement": False,
+            "readiness_source": "not_applicable",
+        }
+        assert contract["allowlist"] == {
+            "support_state": "unsupported",
+            "strict_enforcement": False,
+            "readiness_source": "not_applicable",
+        }
+
+    vz_linux_contract = discovery["vz_linux"]["network_policy_contract"]
+    assert vz_linux_contract["deny_all"] == {
+        "support_state": "host_gated",
+        "strict_enforcement": True,
+        "readiness_source": "runtime_preflight",
+    }
+    assert vz_linux_contract["allowlist"] == {
+        "support_state": "unsupported",
+        "strict_enforcement": False,
+        "readiness_source": "not_applicable",
+    }
+
+
+def test_runtime_network_policy_metadata_contract_covers_runtime_enum() -> None:
+    assert hasattr(runtime_caps, "RUNTIME_NETWORK_POLICY_METADATA")
+    assert set(runtime_caps.RUNTIME_NETWORK_POLICY_METADATA) == set(RuntimeType)
+
+
+def test_runtime_network_policy_metadata_rejects_unknown_runtime() -> None:
+    assert hasattr(runtime_caps, "runtime_network_policy_metadata")
+    with pytest.raises(ValueError, match="No network policy metadata configured"):
+        runtime_caps.runtime_network_policy_metadata("future_runtime")
 
 
 def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:

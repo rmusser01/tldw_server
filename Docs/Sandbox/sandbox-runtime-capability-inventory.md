@@ -44,6 +44,8 @@ concepts:
   claims, independent of current host availability.
 - `untrusted_eligible`: whether policy may admit this runtime for `untrusted`
   workloads when preflight and host readiness also pass.
+- `network_policy_contract`: static posture for `deny_all` and `allowlist`
+  support, strict enforcement, and current-readiness source.
 
 | Runtime | `implementation_state` | Discovery source |
 | --- | --- | --- |
@@ -139,6 +141,12 @@ separate persisted state machine.
 
 ## Network Policy Support
 
+Runtime discovery exposes `network_policy_contract` as static posture metadata.
+It does not replace `available`, raw `reasons`, `normalized_reasons`, or
+`enforcement_ready`, which remain current host/preflight truth. The contract
+uses the same support-state vocabulary as this inventory and records whether a
+policy can ever be strictly enforced by the runtime.
+
 | Runtime | `deny_all` | `allowlist` | Notes |
 | --- | --- | --- | --- |
 | `docker` | `supported` | `host_gated` | Deny-all can use container network isolation. Allowlist depends on configured egress enforcement. |
@@ -148,6 +156,16 @@ separate persisted state machine.
 | `vz_macos` | `scaffold` | `unsupported` | No real execution yet. |
 | `seatbelt` | `unsupported` | `unsupported` | Deny-all is best effort and must not be reported as strict enforcement. |
 | `worktree` | `unsupported` | `unsupported` | Host-local process execution does not provide strict network isolation. |
+
+| Runtime | `deny_all` strict | `deny_all` readiness source | `allowlist` strict | `allowlist` readiness source |
+| --- | --- | --- | --- | --- |
+| `docker` | `true` | `config` | `true` | `config` |
+| `firecracker` | `true` | `runtime_preflight` | `false` | `runtime_preflight` |
+| `lima` | `true` | `runtime_preflight` | `false` | `not_applicable` |
+| `vz_linux` | `true` | `runtime_preflight` | `false` | `not_applicable` |
+| `vz_macos` | `false` | `runtime_preflight` | `false` | `not_applicable` |
+| `seatbelt` | `false` | `not_applicable` | `false` | `not_applicable` |
+| `worktree` | `false` | `not_applicable` | `false` | `not_applicable` |
 
 ## Execution And Lifecycle Support
 
@@ -200,6 +218,8 @@ an equally clear ownership model.
 - Keep `/api/v1/sandbox/runtimes` aligned with `RuntimeType`.
 - Do not use `available=true` as proof of a security guarantee.
 - Do not classify `seatbelt` or `worktree` as `untrusted`-eligible.
+- Add network policy metadata for every runtime and keep it separate from
+  current `enforcement_ready` host/preflight truth.
 - Prefer `unsupported` over ambiguous wording when a guarantee cannot be
   proven.
 - Update this document before expanding `vz_macos`, Apple `containerization`,
