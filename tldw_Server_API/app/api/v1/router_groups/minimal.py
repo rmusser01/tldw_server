@@ -301,72 +301,52 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, auxiliary_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.collections_feeds import router as collections_feeds_router
-
-        specs.append(RouterSpec(
-            router=collections_feeds_router,
+    for collections_social_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.collections_feeds",
+            log_name="collections_feeds",
             prefix=f"{API_V1_PREFIX}",
             tags=("collections-feeds",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping collections_feeds router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.collections_websub import (
-            callback_router as websub_callback_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.collections_websub import (
-            router as collections_websub_router,
-        )
-
-        specs.extend([
-            RouterSpec(
-                router=collections_websub_router,
-                prefix=f"{API_V1_PREFIX}",
-                tags=("collections-websub",),
-            ),
-            RouterSpec(
-                router=websub_callback_router,
-                prefix=f"{API_V1_PREFIX}",
-                tags=("collections-websub",),
-            ),
-        ])
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping collections_websub router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.slack import router as slack_router
-
-        specs.append(RouterSpec(
-            router=slack_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.collections_websub",
+            log_name="collections_websub",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("collections-websub",),
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.collections_websub",
+            log_name="collections_websub_callback",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("collections-websub",),
+            attr_name="callback_router",
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.slack",
+            log_name="slack",
             prefix=f"{API_V1_PREFIX}",
             tags=("slack",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping slack router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.discord import router as discord_router
-
-        specs.append(RouterSpec(
-            router=discord_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.discord",
+            log_name="discord",
             prefix=f"{API_V1_PREFIX}",
             tags=("discord",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping discord router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.telegram import router as telegram_router
-
-        specs.append(RouterSpec(
-            router=telegram_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.telegram",
+            log_name="telegram",
             prefix=f"{API_V1_PREFIX}",
             tags=("telegram",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping telegram router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, collections_social_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.files import router as files_router
