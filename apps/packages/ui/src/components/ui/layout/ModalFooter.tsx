@@ -30,7 +30,7 @@ export interface ModalFooterAction {
   /** Button type for forms */
   type?: "button" | "submit" | "reset"
   /** Accessible label for icon-heavy actions */
-  ariaLabel?: string
+  "aria-label"?: string
   /** Tooltip/title text */
   title?: string
   /** Additional CSS classes */
@@ -140,7 +140,7 @@ export const ModalFooter = React.forwardRef<HTMLDivElement, ModalFooterProps>(
           loading={action.loading}
           disabled={action.disabled}
           icon={action.icon}
-          ariaLabel={action.ariaLabel}
+          ariaLabel={action["aria-label"]}
           title={action.title}
           className={action.className}
           data-testid={action["data-testid"]}

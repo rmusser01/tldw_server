@@ -248,8 +248,8 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
                 onClick: () => {
                   void onRefine()
                 },
-                loading: refineSubmitting,
-                disabled: submitting,
+                loading: busy || refineSubmitting,
+                disabled: busy || submitting,
                 "data-testid": "image-refine-with-llm"
               }
             ]}
@@ -271,7 +271,7 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
                 void onSubmit()
               },
               loading: submitting,
-              disabled: refineSubmitting
+              disabled: busy || refineSubmitting
             }}
           />
         }

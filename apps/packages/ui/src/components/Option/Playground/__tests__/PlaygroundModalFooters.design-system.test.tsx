@@ -44,6 +44,7 @@ type MockButtonProps = Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
   "type"
 > & {
+  variant?: string
   type?: string
   htmlType?: "button" | "submit" | "reset"
   icon?: React.ReactNode
@@ -158,6 +159,7 @@ vi.mock("antd", () => {
       onClick,
       disabled,
       loading,
+      variant,
       type,
       htmlType,
       icon,
@@ -174,6 +176,7 @@ vi.mock("antd", () => {
         title={title}
         aria-label={ariaLabel}
         data-testid={dataTestId}
+        data-variant={variant}
         data-antd-type={type}
         aria-busy={loading || undefined}
       >
@@ -471,12 +474,17 @@ describe("Playground modal footers design-system migration", () => {
   })
 
   it("preserves image-generation footer disabled and loading states", () => {
+    const onRefine = vi.fn()
+    const onSubmit = vi.fn()
+
     render(
       <PlaygroundImageGenModal
         {...baseImageGenProps}
         busy={true}
-        refineSubmitting={true}
+        refineSubmitting={false}
         submitting={false}
+        onRefine={onRefine}
+        onSubmit={onSubmit}
       />
     )
 
@@ -497,6 +505,15 @@ describe("Playground modal footers design-system migration", () => {
     expect(
       within(footer).getByRole("button", { name: "Generate image" })
     ).toBeDisabled()
+
+    fireEvent.click(
+      within(footer).getByRole("button", { name: "Refine with LLM" })
+    )
+    fireEvent.click(
+      within(footer).getByRole("button", { name: "Generate image" })
+    )
+    expect(onRefine).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it("adds an explicit MCP settings close action through ModalFooter", () => {

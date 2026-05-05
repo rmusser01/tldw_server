@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-05 18:16'
-updated_date: '2026-05-05 18:41'
+updated_date: '2026-05-05 19:52'
 labels:
   - design-system
   - frontend
@@ -51,14 +51,16 @@ Red/green cycle complete: the new focused tests first failed because the scoped 
 Implemented ModalFooter ordered left/right action support plus data-ds-component="ModalFooter" while preserving existing primaryAction, secondaryAction, onCancel and leftContent compatibility.
 
 Verification: bunx vitest run src/components/Option/Playground/__tests__/PlaygroundModalFooters.design-system.test.tsx src/components/Common/Playground/__tests__/DocumentGeneratorDrawer.design-system.test.tsx src/components/Option/Playground/__tests__/PlaygroundForm.reference-image.integration.test.tsx passed with 8 tests. ESLint targeted touched files exited 0 with no errors; remaining warnings are pre-existing no-explicit-any warnings in older Playground component signatures. git diff --check passed. Package tsc is blocked by unrelated existing errors across ui tests/source; filtered tsc output for touched filenames was empty. Bandit skipped because this is frontend-only TypeScript/React code.
+
+Reopened for PR #1323 review feedback. Unresolved threads: standardize ModalFooter action aria label key to aria-label while adapting to the existing Common/Button ariaLabel prop, add variant plumbing to the Playground test Button mock, and make ImageGen submit/refine footer actions respect busy. Keep changes limited to the reviewed files and focused tests.
+
+PR #1323 review feedback addressed: ModalFooterAction now uses the standard aria-label action key while adapting to Common/Button's ariaLabel prop, the Playground footer test Button mock carries variant through data-variant, and ImageGen refine/generate actions respect busy. Verification: focused Playground footer Vitest suite passed 3 files / 8 tests; tsc --noEmit passed; git diff --check passed; targeted ESLint exited 0 with only existing no-explicit-any warnings in PlaygroundImageGenModal.tsx.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the scoped Playground modal/drawer footer action rows to the shared ModalFooter primitive. ModalFooter now exposes a data-ds-component marker and supports ordered left/right action groups while preserving the existing primaryAction, secondaryAction, cancel, and leftContent API. The Startup template, raw request, context window/session insights, image generation, MCP settings, and document generator action rows now render through ModalFooter without changing AntD Modal/Drawer mechanics or non-footer controls.
-
-Focused tests cover representative footer markers, action ordering, destructive/cancel/primary callbacks, and disabled/loading states. Verification passed for the targeted Vitest suite, git diff whitespace, and targeted ESLint with no errors; package-wide tsc remains blocked by unrelated existing errors, with no touched-file matches in filtered output. Bandit is not applicable for this frontend-only slice.
+Migrated the scoped Playground modal/drawer footer action rows to the shared ModalFooter primitive and addressed PR #1323 review feedback. ModalFooter now exposes a standard aria-label action key while adapting to the existing Common/Button ariaLabel prop, the Playground design-system test mock preserves variant/type attributes, and the ImageGen footer submit/refine actions now respect the modal busy lock. Focused tests cover footer markers, action ordering, callbacks, disabled/loading states, and busy-lock click prevention. Verification passed for the focused Vitest suite, frontend tsc --noEmit, git diff --check, and targeted ESLint with no errors; ESLint still reports pre-existing no-explicit-any warnings in PlaygroundImageGenModal.tsx. Bandit is not applicable for this frontend-only TypeScript/React slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
