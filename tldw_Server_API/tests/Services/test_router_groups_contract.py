@@ -76,6 +76,29 @@ WRITING_EMAIL_ROUTER_DEFINITION_DATA = (
         "/email/search",
     ),
 )
+PERSONA_NOTES_ROUTER_DEFINITION_DATA = (
+    (
+        "tldw_Server_API.app.api.v1.endpoints.persona",
+        "persona",
+        "/api/v1/persona",
+        ("persona",),
+        "/persona/status",
+    ),
+    (
+        "tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
+        "archetype",
+        "/api/v1/persona/archetypes",
+        ("persona-archetypes",),
+        "/archetypes",
+    ),
+    (
+        "tldw_Server_API.app.api.v1.endpoints.notes",
+        "notes",
+        "/api/v1/notes",
+        ("notes",),
+        "/notes",
+    ),
+)
 
 
 def _main_source_text() -> str:
@@ -6365,33 +6388,17 @@ def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
         iter_minimal_optional_router_specs,
     )
 
-    router_definitions = (
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.persona",
-            "expected_name": "persona",
-            "path": "/persona/status",
-            "prefix": "/api/v1/persona",
-            "tags": ("persona",),
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
-            "expected_name": "archetype",
-            "path": "/archetypes",
-            "prefix": "/api/v1/persona/archetypes",
-            "tags": ("persona-archetypes",),
-        },
-        {
-            "module_name": "tldw_Server_API.app.api.v1.endpoints.notes",
-            "expected_name": "notes",
-            "path": "/notes",
-            "prefix": "/api/v1/notes",
-            "tags": ("notes",),
-        },
-    )
     definitions_by_module = {
-        str(definition["module_name"]): definition
-        for definition in router_definitions
+        module_name: {
+            "module_name": module_name,
+            "expected_name": expected_name,
+            "prefix": prefix,
+            "tags": tags,
+            "path": path,
+        }
+        for module_name, expected_name, prefix, tags, path in PERSONA_NOTES_ROUTER_DEFINITION_DATA
     }
+    router_definitions = tuple(definitions_by_module.values())
     access_count = {
         f"{definition['module_name']}.router": 0
         for definition in router_definitions
@@ -6501,7 +6508,7 @@ def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (Exception,)
+        assert spec.skip_exceptions == (ImportError, AttributeError)
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -6514,10 +6521,10 @@ def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
     }
 
 
-def test_iter_minimal_optional_router_specs_skips_persona_notes_runtime_import_failures(
+def test_iter_minimal_optional_router_specs_skips_persona_notes_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal persona/notes specs preserve broad import failure skipping."""
+    """Verify minimal persona/notes specs skip missing optional router imports."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -6525,25 +6532,28 @@ def test_iter_minimal_optional_router_specs_skips_persona_notes_runtime_import_f
     )
 
     persona_notes_modules = {
-        "tldw_Server_API.app.api.v1.endpoints.persona",
-        "tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
-        "tldw_Server_API.app.api.v1.endpoints.notes",
+        module_name
+        for module_name, _expected_name, _prefix, _tags, _path in PERSONA_NOTES_ROUTER_DEFINITION_DATA
+    }
+    expected_names = {
+        expected_name
+        for _module_name, expected_name, _prefix, _tags, _path in PERSONA_NOTES_ROUTER_DEFINITION_DATA
     }
 
     specs = list(iter_minimal_optional_router_specs())
     selected_specs = {
         spec.name: spec
         for spec in specs
-        if spec.name in {"persona", "archetype", "notes"}
+        if spec.name in expected_names
     }
-    assert set(selected_specs) == {"persona", "archetype", "notes"}
+    assert set(selected_specs) == expected_names
 
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Crash only the selected persona/notes router imports at registration."""
+        """Fail only the selected persona/notes router imports at registration."""
         if module_name in persona_notes_modules:
-            raise RuntimeError(f"{module_name} exploded during import")
+            raise ImportError(f"{module_name} missing during import")
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -6556,13 +6566,41 @@ def test_iter_minimal_optional_router_specs_skips_persona_notes_runtime_import_f
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
-        "Skipping persona router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.persona exploded during import",
-        "Skipping archetype router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.archetype_endpoints exploded during import",
-        "Skipping notes router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.notes exploded during import",
+        f"Skipping {expected_name} router in minimal test app: "
+        f"{module_name} missing during import"
+        for module_name, expected_name, _prefix, _tags, _path in PERSONA_NOTES_ROUTER_DEFINITION_DATA
     ]
+
+
+def test_iter_minimal_optional_router_specs_propagates_persona_notes_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal persona/notes runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.persona"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "persona")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected persona/notes router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="persona exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pytest.MonkeyPatch) -> None:
