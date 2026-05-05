@@ -1,4 +1,4 @@
-"""Optional Tree-sitter parser loading for CodeGraph JS-family extractors."""
+"""Optional Tree-sitter parser loading for CodeGraph extractors."""
 
 from __future__ import annotations
 
@@ -28,11 +28,12 @@ _LANGUAGE_MODULES: dict[str, tuple[str, str]] = {
     "tsx": ("tree_sitter_typescript", "language_tsx"),
     "java": ("tree_sitter_java", "language"),
     "kotlin": ("tree_sitter_kotlin", "language"),
+    "csharp": ("tree_sitter_c_sharp", "language"),
 }
 
 
 def load_parser(language_id: str) -> ParserLoadResult:
-    """Dynamically load a Tree-sitter parser for a supported JS-family language."""
+    """Dynamically load a Tree-sitter parser for a supported language."""
     parser_package = _LANGUAGE_MODULES.get(language_id)
     if parser_package is None:
         return ParserLoadResult(error=f"Unsupported Tree-sitter language: {language_id}")

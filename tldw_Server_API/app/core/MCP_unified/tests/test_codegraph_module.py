@@ -332,6 +332,48 @@ class Greeter {
     ]
 
 
+@pytest.mark.asyncio
+async def test_codegraph_search_finds_csharp_symbols_after_index(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "Greeter.cs").write_text(
+        """
+using System;
+
+namespace Example.App;
+
+public class Greeter {
+    public string Greet(string name) {
+        return Helper(name);
+    }
+
+    private string Helper(string value) {
+        return value.Trim();
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    index_result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "Helper", "kind": "method", "language": "csharp", "limit": 10},
+        context=_context(),
+    )
+
+    assert index_result["status"] == "complete"  # nosec B101
+    assert index_result["counters"]["files_indexed"] == 1  # nosec B101
+    assert [item["qualified_name"] for item in search["results"]] == [  # nosec B101
+        "Example.App.Greeter.Helper"
+    ]
+
+
 def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()

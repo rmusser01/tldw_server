@@ -39,9 +39,9 @@ def test_registry_reports_foundation_languages_and_planned_languages() -> None:
     assert by_id["typescript"].stage == "foundation"
     assert by_id["java"].stage == "foundation"
     assert by_id["kotlin"].stage == "foundation"
+    assert by_id["csharp"].stage == "foundation"
     assert by_id["c"].stage == "planned"
     assert by_id["cpp"].stage == "planned"
-    assert by_id["csharp"].stage == "planned"
 
 
 def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> None:
@@ -56,6 +56,7 @@ def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> Non
                 "tree_sitter_typescript",
                 "tree_sitter_java",
                 "tree_sitter_kotlin",
+                "tree_sitter_c_sharp",
             ),
         )
     )
@@ -65,6 +66,7 @@ def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> Non
     assert registry.language_for_path("apps/ui/component.jsx").language_id == "javascript"
     assert registry.language_for_path("src/main/java/com/example/App.java").language_id == "java"
     assert registry.language_for_path("src/main/kotlin/com/example/App.kt").language_id == "kotlin"
+    assert registry.language_for_path("src/main/csharp/Example/App.cs").language_id == "csharp"
     assert registry.language_for_path("src/main.cc").stage == "planned"
     assert registry.language_for_path("README.md") is None
 
@@ -75,13 +77,19 @@ def test_registry_maps_extensions_and_reports_symbol_extraction_support() -> Non
     assert by_id["typescript"].symbol_extraction is True
     assert by_id["java"].symbol_extraction is True
     assert by_id["kotlin"].symbol_extraction is True
+    assert by_id["csharp"].symbol_extraction is True
 
 
 def test_registry_reports_missing_parser_dependencies_per_language() -> None:
     registry = CodeGraphLanguageRegistry(
         dependency_health=DependencyHealth(
             available=False,
-            missing=("tree_sitter_javascript", "tree_sitter_java", "tree_sitter_kotlin"),
+            missing=(
+                "tree_sitter_javascript",
+                "tree_sitter_java",
+                "tree_sitter_kotlin",
+                "tree_sitter_c_sharp",
+            ),
             present=("tree_sitter", "tree_sitter_typescript"),
         )
     )
@@ -97,3 +105,5 @@ def test_registry_reports_missing_parser_dependencies_per_language() -> None:
     assert by_id["java"].dependency_missing == ("tree_sitter_java",)
     assert by_id["kotlin"].symbol_extraction is False
     assert by_id["kotlin"].dependency_missing == ("tree_sitter_kotlin",)
+    assert by_id["csharp"].symbol_extraction is False
+    assert by_id["csharp"].dependency_missing == ("tree_sitter_c_sharp",)

@@ -184,6 +184,7 @@ codegraph = [
   "tree-sitter-typescript>=0.23,<0.24",
   "tree-sitter-java>=0.23,<0.24",
   "tree-sitter-kotlin>=1.1,<1.2",
+  "tree-sitter-c-sharp>=0.23,<0.24",
 ]
 
 # Multi-User
