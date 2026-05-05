@@ -1,13 +1,18 @@
 import fs from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const resolveAppsRoot = () => {
-  const cwd = process.cwd()
-  if (fs.existsSync(path.resolve(cwd, "packages/ui"))) return cwd
-  if (fs.existsSync(path.resolve(cwd, "../packages/ui"))) return path.resolve(cwd, "..")
-  if (fs.existsSync(path.resolve(cwd, "../../tldw-frontend"))) return path.resolve(cwd, "../..")
-  throw new Error(`Unable to resolve apps root from ${cwd}`)
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const appsRoot = path.resolve(here, "../../../../..")
+  if (
+    fs.existsSync(path.resolve(appsRoot, "packages/ui")) &&
+    fs.existsSync(path.resolve(appsRoot, "tldw-frontend"))
+  ) {
+    return appsRoot
+  }
+  throw new Error(`Unable to resolve apps root from ${here}; computed ${appsRoot}`)
 }
 
 const appsRoot = resolveAppsRoot()

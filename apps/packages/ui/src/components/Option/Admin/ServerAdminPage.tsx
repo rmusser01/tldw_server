@@ -562,7 +562,7 @@ export const ServerAdminPage: React.FC = () => {
                   state="error"
                   title={t("settings:admin.systemStatsError", "Unable to load system statistics")}
                   message={error}
-                  className="ant-alert mb-3"
+                  className="mb-3"
                   primaryAction={{
                     label: t("common:retry", "Retry"),
                     onClick: handleRefresh,

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { getDesignSystemState } from "@/design-system"
 
@@ -11,56 +11,78 @@ vi.mock("~/components/Layouts/Layout", () => ({
 
 vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
   OnboardingWizard: ({ onFinish }: { onFinish?: () => void }) => (
-    <button type="button" onClick={onFinish}>
-      Mock wizard
-    </button>
+    <div>
+      <input data-testid="onboarding-server-url" />
+      <button type="button" onClick={onFinish}>
+        Mock wizard
+      </button>
+    </div>
   )
 }))
 
-type FormUiState = {
-  isConnecting: boolean
-  progress: {
-    serverReachable: "idle" | "checking" | "success" | "error" | "empty"
-    authentication: "idle" | "checking" | "success" | "error" | "empty"
-    knowledgeIndex: "idle" | "checking" | "success" | "error" | "empty"
-  }
-  errorKind: "auth_invalid" | "refused" | null
-  errorMessage: string | null
-  showSuccess: boolean
-  hasRunConnectionTest: boolean
+type MockConnectionState = {
+  phase: "idle" | "connected"
+  isConnected: boolean
+  isChecking: boolean
+  serverUrl: string
+  knowledgeStatus: "ready" | "indexing" | "empty" | "error"
+  lastStatusCode: number | null
+  lastError: string | null
+  errorKind: "auth" | null
 }
 
-const defaultFormUiState: FormUiState = {
-  isConnecting: false,
-  progress: {
-    serverReachable: "idle",
-    authentication: "idle",
-    knowledgeIndex: "idle"
-  },
-  errorKind: null,
-  errorMessage: null,
-  showSuccess: false,
-  hasRunConnectionTest: false
+type MockValidationResult = {
+  success: boolean
+  errorKind?: "auth_invalid" | "refused" | null
+  error?: string | null
 }
 
-const renderConnectionFormState = async (uiState: Partial<FormUiState>) => {
+type RenderConnectionFormOptions = {
+  validationResult?: MockValidationResult
+  connectedState?: Partial<MockConnectionState>
+  testConnectionRejects?: Error
+}
+
+const createIdleConnectionState = (): MockConnectionState => ({
+  phase: "idle",
+  isConnected: false,
+  isChecking: true,
+  serverUrl: "http://127.0.0.1:8000",
+  knowledgeStatus: "ready",
+  lastStatusCode: null,
+  lastError: null,
+  errorKind: null
+})
+
+const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) => {
   vi.resetModules()
-  const resolvedState: FormUiState = {
-    ...defaultFormUiState,
-    ...uiState,
-    progress: {
-      ...defaultFormUiState.progress,
-      ...uiState.progress
+  let connectionState = createIdleConnectionState()
+  const validationResult = options.validationResult ?? { success: true }
+  const setConfigPartial = vi.fn().mockResolvedValue(undefined)
+  const testConnectionFromOnboarding = vi.fn().mockImplementation(async () => {
+    if (options.testConnectionRejects) {
+      throw options.testConnectionRejects
     }
-  }
-
-  vi.doMock("react", async () => {
-    const actual = await vi.importActual<typeof import("react")>("react")
-    return {
-      ...actual,
-      useReducer: () => [resolvedState, vi.fn()]
+    connectionState = {
+      ...connectionState,
+      phase: "connected",
+      isConnected: true,
+      isChecking: false,
+      knowledgeStatus: "ready",
+      lastStatusCode: null,
+      lastError: null,
+      errorKind: null,
+      ...options.connectedState
     }
   })
+  const connectionActions = {
+    beginOnboarding: vi.fn(),
+    setConfigPartial,
+    testConnectionFromOnboarding,
+    setDemoMode: vi.fn(),
+    markFirstRunComplete: vi.fn().mockResolvedValue(undefined),
+    setUserPersona: vi.fn().mockResolvedValue(undefined)
+  }
 
   vi.doMock("react-i18next", () => ({
     useTranslation: () => ({
@@ -234,24 +256,8 @@ const renderConnectionFormState = async (uiState: Partial<FormUiState>) => {
   }))
 
   vi.doMock("@/hooks/useConnectionState", () => ({
-    useConnectionState: () => ({
-      phase: resolvedState.showSuccess ? "connected" : "idle",
-      isConnected: resolvedState.showSuccess,
-      isChecking: resolvedState.isConnecting,
-      serverUrl: "http://127.0.0.1:8000",
-      knowledgeStatus: "ready",
-      lastStatusCode: null,
-      lastError: null,
-      errorKind: null
-    }),
-    useConnectionActions: () => ({
-      beginOnboarding: vi.fn(),
-      setConfigPartial: vi.fn().mockResolvedValue(undefined),
-      testConnectionFromOnboarding: vi.fn().mockResolvedValue(undefined),
-      setDemoMode: vi.fn(),
-      markFirstRunComplete: vi.fn().mockResolvedValue(undefined),
-      setUserPersona: vi.fn().mockResolvedValue(undefined)
-    })
+    useConnectionState: () => connectionState,
+    useConnectionActions: () => connectionActions
   }))
 
   vi.doMock("@/hooks/useServerCapabilities", () => ({
@@ -265,9 +271,7 @@ const renderConnectionFormState = async (uiState: Partial<FormUiState>) => {
   vi.doMock("@/store/connection", () => ({
     useConnectionStore: Object.assign(vi.fn(), {
       getState: () => ({
-        state: {
-          isConnected: resolvedState.showSuccess
-        }
+        state: connectionState
       })
     })
   }))
@@ -373,7 +377,7 @@ const renderConnectionFormState = async (uiState: Partial<FormUiState>) => {
   }))
 
   vi.doMock("../validation", () => ({
-    validateApiKey: vi.fn().mockResolvedValue({ success: true }),
+    validateApiKey: vi.fn().mockResolvedValue(validationResult),
     validateMultiUserAuth: vi.fn(),
     validateMagicLinkAuth: vi.fn(),
     categorizeConnectionError: vi.fn().mockReturnValue(null)
@@ -386,6 +390,14 @@ const renderConnectionFormState = async (uiState: Partial<FormUiState>) => {
       <OnboardingConnectForm />
     </MemoryRouter>
   )
+}
+
+const waitForConnectButton = async () => {
+  const connectButton = await screen.findByTestId("onboarding-connect")
+  await waitFor(() => {
+    expect(connectButton).not.toBeDisabled()
+  })
+  return connectButton
 }
 
 describe("setup onboarding design-system state wiring", () => {
@@ -410,48 +422,49 @@ describe("setup onboarding design-system state wiring", () => {
       screen.getByRole("button", { name: /start setup|connect/i })
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Mock wizard" })).toBeInTheDocument()
+
+    const serverUrlInput = screen.getByTestId("onboarding-server-url")
+    fireEvent.click(screen.getByRole("button", { name: "Start setup" }))
+    expect(serverUrlInput).toHaveFocus()
   })
 
   it("announces retrying only while the connection test is busy", async () => {
-    await renderConnectionFormState({
-      isConnecting: true,
-      progress: {
-        serverReachable: "checking",
-        authentication: "idle",
-        knowledgeIndex: "idle"
-      }
-    })
+    await renderConnectionForm()
+    const connectButton = await waitForConnectButton()
+    fireEvent.click(connectButton)
 
-    expect(screen.getByText(getDesignSystemState("retrying").label)).toBeInTheDocument()
+    expect(
+      await screen.findByText(getDesignSystemState("retrying").label)
+    ).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(screen.getByText(getDesignSystemState("ready").label)).toBeInTheDocument()
+    })
   })
 
   it("uses auth-required labeling for failed auth progress instead of retrying", async () => {
-    await renderConnectionFormState({
-      errorKind: "auth_invalid",
-      errorMessage: "Invalid API key",
-      progress: {
-        serverReachable: "success",
-        authentication: "error",
-        knowledgeIndex: "idle"
+    await renderConnectionForm({
+      validationResult: {
+        success: false,
+        errorKind: "auth_invalid",
+        error: "Invalid API key"
       }
     })
+    const connectButton = await waitForConnectButton()
+    fireEvent.click(connectButton)
 
-    expect(
-      screen.getAllByText(getDesignSystemState("auth_required").label).length
-    ).toBeGreaterThan(0)
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(getDesignSystemState("auth_required").label).length
+      ).toBeGreaterThan(0)
+    })
     expect(screen.queryByText(getDesignSystemState("retrying").label)).not.toBeInTheDocument()
   })
 
   it("uses the canonical ready label on successful connection", async () => {
-    await renderConnectionFormState({
-      showSuccess: true,
-      hasRunConnectionTest: true,
-      progress: {
-        serverReachable: "success",
-        authentication: "success",
-        knowledgeIndex: "success"
-      }
-    })
+    await renderConnectionForm()
+    const connectButton = await waitForConnectButton()
+    fireEvent.click(connectButton)
 
     await waitFor(() => {
       expect(screen.getByText(getDesignSystemState("ready").label)).toBeInTheDocument()

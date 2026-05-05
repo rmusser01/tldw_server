@@ -64,7 +64,7 @@ export function StatePanel({
         <div className="flex flex-col gap-2">
           <span
             className={cn(
-              "inline-flex w-fit items-center rounded-pill border px-2 py-0.5 text-xs font-semibold",
+              "inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-semibold",
               toneClass
             )}
           >
@@ -72,7 +72,7 @@ export function StatePanel({
           </span>
           <div>
             <h2 className="text-base font-semibold text-text">{title}</h2>
-            {message ? <p className="mt-1 text-sm text-text-muted">{message}</p> : null}
+            {message ? <div className="mt-1 text-sm text-text-muted">{message}</div> : null}
           </div>
         </div>
 

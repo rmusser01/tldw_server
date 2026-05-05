@@ -165,6 +165,8 @@ describe("design-system state registry", () => {
     })
     expect(isDesignSystemStateKey("ready")).toBe(true)
     expect(isDesignSystemStateKey("healthy")).toBe(false)
+    expect(isDesignSystemStateKey("toString")).toBe(false)
+    expect(isDesignSystemStateKey("constructor")).toBe(false)
   })
 
   it("locks labels, severities, tokens, actions, diagnostics, and test expectations for every state", () => {

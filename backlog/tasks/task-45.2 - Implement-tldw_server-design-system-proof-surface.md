@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-04 17:49'
-updated_date: '2026-05-05 00:05'
+updated_date: '2026-05-05 00:54'
 labels:
   - frontend
   - design-system
@@ -41,6 +41,8 @@ Implement the first governed WebUI/browser-extension design-system migration sli
 
 <!-- SECTION:PLAN:BEGIN -->
 Final executed plan: 1) Preserve the approved contract and implementation plan while isolating work on branch codex/tldw-web-design-system-proof-surface. 2) Add state token aliases and Tailwind mappings as aliases to existing semantic tokens, then add a typed design-system state registry and shared state primitives in packages/ui. 3) Migrate only the agreed proof surface: backend recovery, route/error-boundary recovery, ConfigurationErrorScreen, ServerReadinessGate, setup/onboarding, /settings/health, and /admin/server state surfaces. 4) Tighten review findings with actionable admin guard recovery actions, runtime onboarding state tests, and a proof-surface static guard. 5) Run focused Vitest coverage, existing admin regression coverage, WebUI compile/token sync, extension build/token sync, and a browser smoke of /settings/health; document the one pre-existing extension compile blocker and Bandit skip.
+
+PR #1272 review-fix pass: 1) remove substrate leaks and invalid HTML wrappers in state primitives; 2) forward secondary action loading state and add coverage; 3) make design-system static guards cwd-independent; 4) harden state-key type guard and tests; 5) make setup CTA focus the server URL input and cover it; 6) rewrite onboarding runtime-state tests to avoid mocking React primitives; 7) clarify the two backlog review nits included in the PR; 8) run focused Vitest, diff checks, and update/push the PR.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -51,32 +53,34 @@ Worker 3 started Task 5 in .worktrees/tldw-web-design-system-proof-surface on br
 Final verification recorded on 2026-05-04: focused proof-surface Vitest suite passed from apps/tldw-frontend with 12 files / 38 tests; admin media-budget regression passed with 1 file / 3 tests; git diff --check passed. WebUI compile passed with NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 and token sync OK. Extension Chrome dev build passed with token sync OK; extension bun run compile is blocked before touched code by existing wxt.config.ts missing a declaration for ./scripts/post-build-tasks.mjs. Browser smoke opened http://localhost:18081/settings/health; canonical Degraded and Unavailable states rendered. Console errors were expected missing local backend/API key requests. Bandit skipped because this task touched frontend TypeScript/TSX/docs/task files only and no Python code.
 
 Draft PR opened on 2026-05-04: https://github.com/rmusser01/tldw_server/pull/1272
+
+PR #1272 review pass complete on rebased branch codex/tldw-web-design-system-proof-surface. Addressed Gemini/CodeRabbit comments: StatePanel now avoids rounded-pill and paragraph-wrapped ReactNode messages, DiagnosticRow no longer wraps arbitrary ReactNode values in span, ServerAdminPage no longer relies on ant-alert, secondary actions forward loading/disabled state, state-key guard uses own-property checks, static proof guards resolve from import.meta.url, setup CTA focuses the server URL input, onboarding runtime-state tests no longer mock React primitives, and the TASK-14 wording nit is clarified. The old TASK-16 status nit became obsolete after rebasing onto origin/dev because that task is already Done with DoD checked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first governed tldw_server WebUI/browser-extension design-system proof surface.
+Implemented and reviewed the first governed tldw_server WebUI/browser-extension design-system proof surface.
 
 What changed:
-- Added and verified canonical product-state infrastructure: state token aliases, registry coverage, shared state primitives, and proof-surface drift guards.
-- Migrated the agreed v1 proof surface only: backend recovery, route/error-boundary recovery, configuration/readiness gates, setup/onboarding states, /settings/health, and /admin/server state affordances.
-- Tightened review issues before finalization: admin guard primary actions now open the existing tldw_server documentation instead of rendering no-op buttons; onboarding progress labels now show Retrying only while busy, Sign in required for auth failures, and Ready for successful connection; onboarding tests now render runtime states instead of checking source strings.
+- Added canonical product-state infrastructure: state token aliases, registry coverage, shared state primitives, and proof-surface drift guards.
+- Migrated only the agreed v1 proof surface: backend recovery, route/error-boundary recovery, configuration/readiness gates, setup/onboarding states, /settings/health, and /admin/server state affordances.
+- Addressed PR #1272 review comments: removed AntD/internal styling leakage from StatePanel usage, fixed invalid generic ReactNode wrappers, forwarded secondary action loading state, hardened state-key checks, made static guards cwd-independent, focused setup on the server URL input, rewrote onboarding state tests without mocking React primitives, and clarified the TASK-14 wording nit.
+- Rebased the branch onto origin/dev; the old TASK-16 status nit is obsolete because dev already has TASK-16 as Done with Definition of Done checked.
 
 Why:
-- The contract calls for canonical state language without introducing a new palette or broadly migrating admin/product routes. This implementation aliases existing semantic tokens, keeps AntD as the mechanical substrate where already used, and guards the proof surface against drift while leaving broader inventory/migration for later.
+- The contract calls for canonical state language without introducing a new palette or broadly migrating admin/product routes. This implementation aliases existing semantic tokens, keeps AntD only as the mechanical substrate where already used, and guards the proof surface against drift while leaving broader inventory/migration for later.
 
 Verification:
-- Focused Vitest proof-surface suite: 12 files / 38 tests passed.
-- Admin media-budget regression: 1 file / 3 tests passed.
+- Focused Vitest proof-surface suite after rebase: 12 files / 39 tests passed.
+- Review-specific Vitest slice: 6 files / 21 tests passed.
 - git diff --check passed.
+- Review-pattern rg scan found no remaining targeted patterns.
 - WebUI compile/token sync passed with NEXT_PUBLIC_API_URL=http://127.0.0.1:8000.
-- Extension Chrome dev build/token sync passed.
-- Browser smoke for /settings/health rendered canonical Degraded and Unavailable states.
+- Extension Chrome dev build/token sync passed; warnings were existing duplicate import/font/chunk-size warnings.
 
-Known blocker/skips:
-- Extension bun run compile is blocked by existing wxt.config.ts missing a declaration for ./scripts/post-build-tasks.mjs before touched code is checked.
-- Bandit skipped because no Python code was touched.
+Known skips:
+- Bandit skipped because this review pass touched frontend TypeScript/TSX and Backlog/docs metadata only; no Python code was touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

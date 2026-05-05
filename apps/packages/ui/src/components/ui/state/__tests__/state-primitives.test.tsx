@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { PermissionNotice, RecoveryCallout, SetupRequiredPanel, StatePanel } from "../"
+import { ActionGroup, PermissionNotice, RecoveryCallout, SetupRequiredPanel, StatePanel } from "../"
 
 describe("state primitives", () => {
   it("renders canonical state labels with accessible primary actions", () => {
@@ -44,6 +44,20 @@ describe("state primitives", () => {
     )
 
     expect(screen.queryByLabelText("Diagnostics")).not.toBeInTheDocument()
+  })
+
+  it("forwards loading state to secondary actions", () => {
+    render(
+      <ActionGroup
+        secondaryActions={[
+          { label: "Sync diagnostics", onClick: vi.fn(), loading: true }
+        ]}
+      />
+    )
+
+    const action = screen.getByRole("button", { name: /sync diagnostics/i })
+    expect(action).toBeDisabled()
+    expect(action).toHaveAttribute("aria-busy", "true")
   })
 
   it("provides semantic wrappers for permission and setup states", () => {

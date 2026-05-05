@@ -48,7 +48,8 @@ export function ActionGroup({
           key={index}
           variant="outline"
           onClick={action.onClick}
-          disabled={action.disabled}
+          loading={action.loading}
+          disabled={action.disabled || action.loading}
           data-testid={action["data-testid"]}
         >
           {action.label}

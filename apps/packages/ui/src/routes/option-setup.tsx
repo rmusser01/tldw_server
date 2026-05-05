@@ -21,7 +21,9 @@ const OptionSetup = () => {
           label: "Start setup",
           onClick: () => {
             document
-              .querySelector<HTMLElement>("[data-testid='onboarding-connect']")
+              .querySelector<HTMLElement>(
+                "[data-testid='onboarding-server-url'] input, [data-testid='onboarding-server-url']"
+              )
               ?.focus()
           }
         }}

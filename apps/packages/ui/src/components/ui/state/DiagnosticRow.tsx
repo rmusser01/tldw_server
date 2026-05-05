@@ -23,7 +23,7 @@ export function DiagnosticRow({
       {value}
     </code>
   ) : (
-    <span className="break-words text-text">{value}</span>
+    <div className="break-words text-text">{value}</div>
   )
 
   return (

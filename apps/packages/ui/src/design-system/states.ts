@@ -205,5 +205,8 @@ export function getDesignSystemState(key: DesignSystemStateKey): DesignSystemSta
 }
 
 export function isDesignSystemStateKey(value: unknown): value is DesignSystemStateKey {
-  return typeof value === "string" && value in DESIGN_SYSTEM_STATES
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(DESIGN_SYSTEM_STATES, value)
+  )
 }
