@@ -374,6 +374,68 @@ public class Greeter {
     ]
 
 
+@pytest.mark.asyncio
+async def test_codegraph_search_finds_c_cpp_symbols_after_index(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "greeter.c").write_text(
+        """
+#include <stdio.h>
+
+int helper(int value) {
+    return value + 1;
+}
+
+int greet(int name) {
+    return helper(name);
+}
+""",
+        encoding="utf-8",
+    )
+    (workspace_root / "Greeter.cpp").write_text(
+        """
+#include <string>
+
+namespace demo {
+class Greeter {
+public:
+    std::string greet(std::string name) {
+        return helper(name);
+    }
+
+private:
+    std::string helper(std::string value) {
+        return value;
+    }
+};
+}
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    index_result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    c_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "function", "language": "c", "limit": 10},
+        context=_context(),
+    )
+    cpp_search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "helper", "kind": "method", "language": "cpp", "limit": 10},
+        context=_context(),
+    )
+
+    assert index_result["status"] == "complete"  # nosec B101
+    assert index_result["counters"]["files_indexed"] == 2  # nosec B101
+    assert [item["qualified_name"] for item in c_search["results"]] == ["helper"]  # nosec B101
+    assert [item["qualified_name"] for item in cpp_search["results"]] == ["demo.Greeter.helper"]  # nosec B101
+
+
 def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()

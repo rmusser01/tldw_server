@@ -139,15 +139,51 @@ def test_csharp_parser_can_parse_class() -> None:
     assert not tree.root_node.has_error
 
 
-def test_load_parser_reports_missing_java_kotlin_csharp_optional_dependencies(monkeypatch) -> None:
-    """Report missing JVM/.NET parser packages without raising import errors."""
+def test_c_parser_can_parse_function() -> None:
+    """Load the optional C parser and parse a compact function fixture."""
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+
+    result = loader.load_parser("c")
+    tree = result.parser.parse(b"int helper(int value) { return value + 1; }")
+
+    assert result.missing == ()
+    assert result.error is None
+    assert tree.root_node.type == "translation_unit"
+    assert not tree.root_node.has_error
+
+
+def test_cpp_parser_can_parse_class() -> None:
+    """Load the optional C++ parser and parse a compact class fixture."""
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+
+    result = loader.load_parser("cpp")
+    tree = result.parser.parse(b"class Greeter { int helper() { return 1; } };")
+
+    assert result.missing == ()
+    assert result.error is None
+    assert tree.root_node.type == "translation_unit"
+    assert not tree.root_node.has_error
+
+
+def test_load_parser_reports_missing_java_kotlin_csharp_c_cpp_optional_dependencies(monkeypatch) -> None:
+    """Report missing JVM/.NET/C-family parser packages without raising import errors."""
     loader = importlib.import_module(
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
     real_import_module = loader.importlib.import_module
 
     def fake_import_module(name: str) -> ModuleType:
-        if name in {"tree_sitter_java", "tree_sitter_kotlin", "tree_sitter_c_sharp"}:
+        if name in {
+            "tree_sitter_java",
+            "tree_sitter_kotlin",
+            "tree_sitter_c_sharp",
+            "tree_sitter_c",
+            "tree_sitter_cpp",
+        }:
             raise ModuleNotFoundError(f"No module named '{name}'")
         return real_import_module(name)
 
@@ -156,6 +192,8 @@ def test_load_parser_reports_missing_java_kotlin_csharp_optional_dependencies(mo
     java = loader.load_parser("java")
     kotlin = loader.load_parser("kotlin")
     csharp = loader.load_parser("csharp")
+    c = loader.load_parser("c")
+    cpp = loader.load_parser("cpp")
 
     assert java.parser is None
     assert java.missing == ("tree_sitter_java",)
@@ -166,3 +204,9 @@ def test_load_parser_reports_missing_java_kotlin_csharp_optional_dependencies(mo
     assert csharp.parser is None
     assert csharp.missing == ("tree_sitter_c_sharp",)
     assert csharp.error is None
+    assert c.parser is None
+    assert c.missing == ("tree_sitter_c",)
+    assert c.error is None
+    assert cpp.parser is None
+    assert cpp.missing == ("tree_sitter_cpp",)
+    assert cpp.error is None

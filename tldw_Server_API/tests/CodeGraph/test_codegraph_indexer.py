@@ -210,6 +210,66 @@ public class Greeter {
     assert helper_paths == ["Greeter.cs"]
 
 
+def test_indexer_extracts_c_cpp_graph_rows_during_index(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "greeter.c").write_text(
+        """
+#include <stdio.h>
+
+int helper(int value) {
+    return value + 1;
+}
+
+int greet(int name) {
+    return helper(name);
+}
+""",
+        encoding="utf-8",
+    )
+    (workspace / "Greeter.cpp").write_text(
+        """
+#include <string>
+
+namespace demo {
+class Greeter {
+public:
+    std::string greet(std::string name) {
+        return helper(name);
+    }
+
+private:
+    std::string helper(std::string value) {
+        return value;
+    }
+};
+}
+""",
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    files = {item.path: item for item in repo.list_files(limit=10)}
+    c_helpers = [node.qualified_name for node in repo.search_nodes("helper", language="c", limit=10)]
+    cpp_helpers = [node.qualified_name for node in repo.search_nodes("helper", language="cpp", limit=10)]
+
+    assert result.status == "complete"
+    assert files["greeter.c"].node_count > 0
+    assert files["Greeter.cpp"].node_count > 0
+    assert c_helpers == ["helper"]
+    assert cpp_helpers == ["demo.Greeter.helper"]
+
+
 def test_indexer_does_not_count_non_extractable_jvm_files_against_foreground_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -271,6 +331,50 @@ def test_indexer_does_not_count_non_extractable_csharp_files_against_foreground_
                 "tree_sitter_typescript",
                 "tree_sitter_java",
                 "tree_sitter_kotlin",
+            ),
+        )
+    )
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=registry)
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=1,
+    )
+
+    assert result.status == "complete"
+    assert result.counters["dependency_missing_language_skipped"] == 2
+    assert [item.path for item in repo.list_files(limit=10)] == ["app.py"]
+
+
+def test_indexer_does_not_count_non_extractable_c_cpp_files_against_foreground_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_load_parser(language_id: str) -> SimpleNamespace:
+        return SimpleNamespace(available=language_id not in {"c", "cpp"})
+
+    monkeypatch.setattr(indexer_module, "load_parser", fake_load_parser)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "A.c").write_text("int a() { return 1; }\n", encoding="utf-8")
+    (workspace / "B.cpp").write_text("int b() { return 1; }\n", encoding="utf-8")
+    (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    registry = CodeGraphLanguageRegistry(
+        dependency_health=DependencyHealth(
+            available=True,
+            missing=("tree_sitter_c", "tree_sitter_cpp"),
+            present=(
+                "tree_sitter",
+                "tree_sitter_javascript",
+                "tree_sitter_typescript",
+                "tree_sitter_java",
+                "tree_sitter_kotlin",
+                "tree_sitter_c_sharp",
             ),
         )
     )
@@ -657,7 +761,7 @@ def test_indexer_stops_when_foreground_time_budget_expires(tmp_path: Path) -> No
     assert result.counters["files_indexed"] == 1
 
 
-def test_indexer_skips_planned_language_files_until_extractors_exist(tmp_path: Path) -> None:
+def test_indexer_extracts_former_planned_cpp_extension_when_parser_exists(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "main.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
@@ -674,8 +778,11 @@ def test_indexer_skips_planned_language_files_until_extractors_exist(tmp_path: P
     )
 
     assert result.status == "complete"
-    assert result.counters["planned_language_skipped"] == 1
-    assert repo.counts()["files"] == 0
+    assert result.counters["files_indexed"] == 1
+    assert repo.list_files(limit=10)[0].path == "main.cc"
+    assert [node.qualified_name for node in repo.search_nodes("main", kind="function", language="cpp", limit=10)] == [
+        "main"
+    ]
 
 
 def test_sync_removes_deleted_files(tmp_path: Path) -> None:
