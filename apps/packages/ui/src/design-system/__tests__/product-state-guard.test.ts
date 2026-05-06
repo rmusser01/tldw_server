@@ -157,6 +157,32 @@ describe("design-system product-state guard rules", () => {
     expect(findings).toEqual([])
   })
 
+  it("gives repeated same-subject AntD product-state uses distinct ids", () => {
+    const findings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice() {
+          return (
+            <>
+              <Alert type="error" message="Server unavailable" />
+              <Alert type="warning" message="Setup required" />
+            </>
+          )
+        }
+      `
+    )
+    const alertFindings = findings.filter(
+      (finding) =>
+        finding.rule === "antd-product-state-import" &&
+        finding.subject === "Alert"
+    )
+
+    expect(alertFindings).toHaveLength(2)
+    expect(new Set(alertFindings.map((finding) => finding.id)).size).toBe(2)
+  })
+
   it("flags product-state text in literal AntD text-bearing props", () => {
     const findings = analyze(
       "src/components/Common/BetaNotice.tsx",
@@ -429,6 +455,30 @@ describe("design-system product-state guard rules", () => {
       })
     )
   })
+
+  it("gives repeated same-label canonical state literals distinct ids", () => {
+    const findings = analyze(
+      "src/components/Common/ReadyLabel.tsx",
+      `
+        export function ReadyLabel() {
+          return (
+            <>
+              <span>Ready</span>
+              <span>{"Ready"}</span>
+            </>
+          )
+        }
+      `
+    )
+    const readyFindings = findings.filter(
+      (finding) =>
+        finding.rule === "canonical-state-label" &&
+        finding.subject === "Ready"
+    )
+
+    expect(readyFindings).toHaveLength(2)
+    expect(new Set(readyFindings.map((finding) => finding.id)).size).toBe(2)
+  })
 })
 
 describe("design-system product-state guard baseline handling", () => {
@@ -532,6 +582,58 @@ describe("design-system product-state guard baseline handling", () => {
     ])
   })
 
+  it("does not allow a baseline entry to cover a new same-subject occurrence", () => {
+    const findings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice() {
+          return (
+            <>
+              <Alert type="error" message="Server unavailable" />
+              <Alert type="warning" message="Setup required" />
+            </>
+          )
+        }
+      `
+    ).filter(
+      (finding) =>
+        finding.rule === "antd-product-state-import" &&
+        finding.subject === "Alert"
+    )
+    const [existingFinding, newFinding] = findings
+
+    const result = guard.applyBaseline({
+      findings,
+      baseline: [
+        {
+          id: existingFinding.id,
+          path: existingFinding.path,
+          rule: existingFinding.rule,
+          subject: existingFinding.subject,
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing AntD Alert product-state UI before the guard.",
+          replacement: "tldw design-system state primitive",
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(result.allowedLegacy).toEqual([
+      expect.objectContaining({
+        id: existingFinding.id
+      })
+    ])
+    expect(result.blocked).toEqual([
+      expect.objectContaining({
+        id: newFinding.id,
+        state: "blocked"
+      })
+    ])
+  })
+
   it("rejects malformed baseline entries and stored blocked states", () => {
     const errors = guard.validateBaseline([
       {
@@ -608,6 +710,24 @@ describe("design-system product-state guard baseline handling", () => {
         expect.stringContaining("id must match rule/path/subject")
       ])
     )
+  })
+
+  it("accepts duplicate-suffixed baseline ids when their base identity matches", () => {
+    expect(
+      guard.validateBaseline([
+        {
+          id: "antd-product-state-import:src/components/Common/BetaNotice.tsx:Alert#antd-alert-betanotice-type-warning-abc123",
+          path: "src/components/Common/BetaNotice.tsx",
+          rule: "antd-product-state-import",
+          subject: "Alert",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing duplicate Alert product-state UI before the guard.",
+          replacement: "tldw design-system state primitive",
+          migrationQueue: "shared-product-state"
+        }
+      ])
+    ).toEqual([])
   })
 
   it("blocks findings and skips stale reporting when baseline validation fails", () => {

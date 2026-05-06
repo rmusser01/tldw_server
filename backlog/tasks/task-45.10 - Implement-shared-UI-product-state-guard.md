@@ -113,6 +113,19 @@ passing; bun run verify:design-system-state exited 0 with 260 allowed legacy
 exceptions, no Blocked product-state findings section, no Stale baseline entries
 section, and no baseline errors. From repo root: git diff --check exited 0.
 Bandit skipped: no Python files touched.
+
+Final review fix accepted. The guard now preserves duplicate same-rule/path/
+subject findings instead of letting one baseline entry cover later same-subject
+occurrences. The first occurrence keeps its base id; later occurrences receive
+deterministic duplicate-suffixed ids. The existing baseline was refreshed from
+260 to 523 entries to represent the newly exposed current duplicate debt, and
+the inventory documents preserving exact duplicate-suffixed ids for exceptions.
+Fresh verification from apps/packages/ui: product-state guard unit suite exited
+0 with 35/35 tests passing; focused design-system suite exited 0 with 4 test
+files passing and 43/43 tests passing; bun run verify:design-system-state exited
+0 with 523 allowed legacy exceptions and no blocked, stale, or baseline-error
+sections. From repo root: git diff --check exited 0. Final review re-check
+passed with no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -120,14 +133,18 @@ Bandit skipped: no Python files touched.
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented and closed out the shared UI product-state guard workflow. Tasks 1-3
 added the pure product-state rule engine, baseline/report semantics, CLI/package
-script, and the checked-in baseline for 260 existing shared UI product-state
-exceptions. Task 4 documented the contributor workflow in
+script, and the checked-in baseline for existing shared UI product-state
+exceptions. Final review found that same-rule/path/subject findings could share
+one baseline entry, so the guard now emits duplicate-suffixed ids for later
+occurrences while preserving the base id for the first occurrence. The refreshed
+baseline tracks 523 existing shared UI product-state exceptions. Task 4
+documented the contributor workflow in
 Docs/Design/tldw_web_design_system_inventory.md, including when to run the guard,
 expected design-system primitives for new shared product-state UI, and
 owner/reason/replacement/queue requirements for any new baseline exception.
 Final verification passed: focused Vitest guard suite from apps/packages/ui
-exited 0 with 4 files passing and 39/39 tests passing; bun run
-verify:design-system-state exited 0 with 260 allowed legacy exceptions, no
+exited 0 with 4 files passing and 43/43 tests passing; bun run
+verify:design-system-state exited 0 with 523 allowed legacy exceptions, no
 blocked product-state findings, no stale baseline entries, and no baseline
 errors; git diff --check exited 0 from the repo root. Bandit skipped: no Python
 files touched.

@@ -99,6 +99,7 @@ const RECOVERY_ACTION_WORDS = [
   "retry",
   "switch server"
 ]
+const DUPLICATE_FINDING_ID_SUFFIX_PATTERN = /#[-a-z0-9]+$/
 
 const RULE_REPLACEMENTS = {
   "antd-product-state-import": "tldw design-system state primitive",
@@ -156,7 +157,7 @@ export function analyzeSource({ relativePath, source }) {
     fileSubject
   })
 
-  return dedupeFindings(findings)
+  return disambiguateFindingIds(findings)
 }
 
 export function validateBaseline(baseline) {
@@ -205,7 +206,10 @@ export function validateBaseline(baseline) {
       isPresentString(entry.subject)
     ) {
       const expectedId = createFindingId(entry.rule, entry.path, entry.subject)
-      if (entry.id !== expectedId) {
+      if (
+        entry.id !== expectedId &&
+        !isDuplicateFindingId(entry.id, expectedId)
+      ) {
         errors.push(
           `${prefix} id must match rule/path/subject: expected ${expectedId}`
         )
@@ -473,8 +477,6 @@ function pushLocalComponentFinding(findings, relativePath, subject) {
 }
 
 function pushCanonicalLabelFindings(findings, relativePath, sourceFile) {
-  const labels = new Map()
-
   walk(sourceFile, (node) => {
     if (
       ts.isStringLiteral(node) ||
@@ -482,21 +484,22 @@ function pushCanonicalLabelFindings(findings, relativePath, sourceFile) {
       ts.isJsxText(node)
     ) {
       const label = canonicalLabelFromLiteral(node.getText(sourceFile), node.text)
-      if (label && !labels.has(label)) {
-        labels.set(label, node)
+      if (label) {
+        pushFinding(findings, {
+          relativePath,
+          rule: "canonical-state-label",
+          subject: label,
+          message: `"${label}" should come from the design-system state registry.`,
+          line: lineForNode(sourceFile, node),
+          identityHint: [
+            "label",
+            label,
+            findNearestOwnerName(node) ?? subjectFromPath(relativePath)
+          ].join("|")
+        })
       }
     }
   })
-
-  for (const [subject, node] of labels) {
-    pushFinding(findings, {
-      relativePath,
-      rule: "canonical-state-label",
-      subject,
-      message: `"${subject}" should come from the design-system state registry.`,
-      line: lineForNode(sourceFile, node)
-    })
-  }
 }
 
 function pushAntdFindings(
@@ -522,7 +525,7 @@ function pushAntdFindings(
     }
 
     const useContext = collectJsxUseContext(node, sourceFile)
-    const ownerName = findNearestJsxOwnerName(node)
+    const ownerName = findNearestOwnerName(node)
     if (
       !isProductStateAntdUse(importedName, useContext, {
         ownerName,
@@ -537,7 +540,12 @@ function pushAntdFindings(
       rule: "antd-product-state-import",
       subject: importedName,
       message: `${importedName} from AntD is rendering product-state UI directly.`,
-      line: lineForNode(sourceFile, node)
+      line: lineForNode(sourceFile, node),
+      identityHint: antdUseIdentityHint({
+        importedName,
+        ownerName: ownerName ?? context.fileSubject,
+        useContext
+      })
     })
   })
 }
@@ -602,7 +610,18 @@ function collectJsxUseContext(node, sourceFile) {
     hasCanonicalLabel,
     hasProductStateText,
     hasRecoveryAction,
-    hasSeverityProp
+    hasSeverityProp,
+    severityValues: attributes
+      .map((attribute) => [
+        jsxAttributeName(attribute),
+        jsxLiteralAttributeValue(attribute)
+      ])
+      .filter(
+        ([propName, propValue]) =>
+          SEVERITY_PROP_NAMES.has(propName) && typeof propValue === "string"
+      )
+      .map(([propName, propValue]) => `${propName}:${propValue.toLowerCase()}`),
+    texts
   }
 }
 
@@ -709,7 +728,7 @@ function jsxTagName(tagName) {
   return ts.isIdentifier(tagName) ? tagName.text : undefined
 }
 
-function findNearestJsxOwnerName(node) {
+function findNearestOwnerName(node) {
   let current = node.parent
 
   while (current) {
@@ -767,7 +786,10 @@ function canonicalLabelFromLiteral(rawText, valueText) {
   return CANONICAL_STATE_LABELS.find((label) => text === label)
 }
 
-function pushFinding(findings, { relativePath, rule, subject, message, line }) {
+function pushFinding(
+  findings,
+  { relativePath, rule, subject, message, line, identityHint }
+) {
   findings.push({
     id: createFindingId(rule, relativePath, subject),
     path: relativePath,
@@ -775,24 +797,90 @@ function pushFinding(findings, { relativePath, rule, subject, message, line }) {
     subject,
     message,
     ...(typeof line === "number" ? { line } : {}),
-    replacement: RULE_REPLACEMENTS[rule]
+    replacement: RULE_REPLACEMENTS[rule],
+    ...(identityHint ? { identityHint } : {})
   })
 }
 
-function dedupeFindings(findings) {
-  const seen = new Set()
-  const deduped = []
+function disambiguateFindingIds(findings) {
+  const groups = new Map()
 
   for (const finding of findings) {
-    if (seen.has(finding.id)) {
-      continue
-    }
-
-    seen.add(finding.id)
-    deduped.push(finding)
+    const group = groups.get(finding.id) ?? []
+    group.push(finding)
+    groups.set(finding.id, group)
   }
 
-  return deduped
+  const disambiguated = new Map()
+
+  for (const group of groups.values()) {
+    const suffixCounts = new Map()
+
+    group.forEach((finding, index) => {
+      const { identityHint, ...publicFinding } = finding
+      const suffixBase = duplicateFindingSuffix(
+        identityHint ?? `occurrence-${index + 1}`
+      )
+      const suffixCount = suffixCounts.get(suffixBase) ?? 0
+      suffixCounts.set(suffixBase, suffixCount + 1)
+
+      if (index === 0) {
+        disambiguated.set(finding, publicFinding)
+        return
+      }
+
+      const suffix =
+        suffixCount === 0 ? suffixBase : `${suffixBase}-${suffixCount + 1}`
+      disambiguated.set(finding, {
+        ...publicFinding,
+        id: `${publicFinding.id}#${suffix}`
+      })
+    })
+  }
+
+  return findings.map((finding) => disambiguated.get(finding))
+}
+
+function antdUseIdentityHint({ importedName, ownerName, useContext }) {
+  return [
+    "antd",
+    importedName,
+    ownerName,
+    ...useContext.severityValues,
+    ...useContext.texts.map(normalizeTextSignal).filter(Boolean)
+  ]
+    .filter(Boolean)
+    .join("|")
+}
+
+function duplicateFindingSuffix(identityHint) {
+  const normalized = identityHint
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  const readable = normalized.slice(0, 56).replace(/-+$/g, "")
+  const hash = stableHash(identityHint)
+
+  return `${readable || "occurrence"}-${hash}`
+}
+
+function isDuplicateFindingId(id, expectedId) {
+  if (!id.startsWith(`${expectedId}#`)) {
+    return false
+  }
+
+  return DUPLICATE_FINDING_ID_SUFFIX_PATTERN.test(id.slice(expectedId.length))
+}
+
+function stableHash(value) {
+  let hash = 0x811c9dc5
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+
+  return (hash >>> 0).toString(36)
 }
 
 function markBlocked(finding) {

@@ -419,7 +419,9 @@ Existing shared UI product-state debt is tracked in
 `apps/packages/ui/scripts/design-system-product-state-baseline.json`. Do not add
 new baseline entries unless a migration exception has an owner, reason,
 replacement, and queue; remove stale baseline entries when a migration removes
-the matching finding.
+the matching finding. When the guard reports a duplicate-suffixed finding ID for
+another occurrence of the same rule/path/subject, preserve that exact ID in the
+baseline so one legacy exception cannot cover a new occurrence.
 
 ## Non-Goals
 
