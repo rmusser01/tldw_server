@@ -131,10 +131,9 @@ export function analyzeSource({ relativePath, source }) {
   const findings = []
   const localAntdNames = collectAntdProductStateImports(sourceFile)
   const fileSubject = subjectFromPath(normalizedPath)
-  const localComponentSubjects = collectLocalComponentSubjects(
-    sourceFile,
-    fileSubject
-  )
+  const localComponentSubjects = normalizedPath.endsWith(".tsx")
+    ? collectLocalComponentSubjects(sourceFile, fileSubject)
+    : []
 
   for (const subject of localComponentSubjects) {
     pushLocalComponentFinding(findings, normalizedPath, subject)
@@ -258,6 +257,18 @@ export function applyBaseline({ findings, baseline }) {
   )
 
   return result
+}
+
+export async function runGuardOnSources({ sources, baseline }) {
+  const findings = sources.flatMap(({ relativePath, source }) =>
+    analyzeSource({ relativePath, source })
+  )
+  const result = applyBaseline({ findings, baseline })
+  const report = formatReport(result)
+  const exitCode =
+    result.blocked.length > 0 || result.baselineErrors.length > 0 ? 1 : 0
+
+  return { ...result, findings, report, exitCode }
 }
 
 export function formatReport(result) {

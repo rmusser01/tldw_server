@@ -297,6 +297,28 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("does not flag non-TSX spinner classes as local loading components", () => {
+    const findings = analyze(
+      "src/components/Common/SplashScreen/effects/tech/AsciiSpinner.ts",
+      `
+        export default class AsciiSpinner {
+          render() {
+            return "Loading"
+          }
+        }
+      `
+    )
+
+    expect(findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-loading-state",
+          subject: "AsciiSpinner"
+        })
+      ])
+    )
+  })
+
   it("exempts known canonical implementation roots", () => {
     const findings = analyze(
       "src/components/ui/feedback/LoadingState.tsx",
@@ -672,5 +694,71 @@ describe("design-system product-state guard baseline handling", () => {
         baselineErrors: []
       })
     ).toBe("No product-state guard issues found")
+  })
+})
+
+describe("design-system product-state guard runner", () => {
+  it("returns failure when blocked findings or baseline errors exist", async () => {
+    const result = await guard.runGuardOnSources({
+      sources: [
+        {
+          relativePath: "src/components/Common/NewRecoveryBanner.tsx",
+          source: `
+            export function NewRecoveryBanner() {
+              return <div>Retry connection</div>
+            }
+          `
+        }
+      ],
+      baseline: []
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.report).toContain("Blocked product-state findings")
+  })
+
+  it("returns success when findings are baselined and stale entries are only warnings", async () => {
+    const sources = [
+      {
+        relativePath: "src/components/Common/FeatureEmptyState.tsx",
+        source: `
+          export function FeatureEmptyState() {
+            return <div>No results yet</div>
+          }
+        `
+      }
+    ]
+    const findings = analyze(sources[0].relativePath, sources[0].source)
+    const result = await guard.runGuardOnSources({
+      sources,
+      baseline: [
+        {
+          id: findings[0].id,
+          path: findings[0].path,
+          rule: findings[0].rule,
+          subject: findings[0].subject,
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing empty state before the guard.",
+          replacement: "EmptyState",
+          migrationQueue: "shared-product-state"
+        },
+        {
+          id: "local-status-badge:src/components/Removed.tsx:Removed",
+          path: "src/components/Removed.tsx",
+          rule: "local-status-badge",
+          subject: "Removed",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Removed component.",
+          replacement: "Badge",
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.report).toContain("Allowed legacy product-state exceptions")
+    expect(result.report).toContain("Stale baseline entries")
   })
 })
