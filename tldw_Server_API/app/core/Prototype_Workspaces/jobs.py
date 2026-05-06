@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 
 from .models import PrototypeJobType, actor_key_for_session
 
@@ -20,6 +22,26 @@ PROTOTYPE_JOB_TYPES = {
     PrototypeJobType.SNAPSHOT_SAVE.value,
     PrototypeJobType.PUBLISH_VALIDATE_AND_PROMOTE.value,
 }
+_DEFAULT_JOBS_MANAGER: JobManager | None = None
+_DEFAULT_JOBS_MANAGER_KEY: tuple[str, str] | None = None
+
+
+def _jobs_manager_environment_key() -> tuple[str, str]:
+    return (
+        str(os.getenv("JOBS_DB_URL") or ""),
+        str(os.getenv("JOBS_DB_PATH") or ""),
+    )
+
+
+def _get_default_jobs_manager() -> JobManager:
+    global _DEFAULT_JOBS_MANAGER
+    global _DEFAULT_JOBS_MANAGER_KEY
+
+    key = _jobs_manager_environment_key()
+    if _DEFAULT_JOBS_MANAGER is None or key != _DEFAULT_JOBS_MANAGER_KEY:
+        _DEFAULT_JOBS_MANAGER = jobs_manager_from_env()
+        _DEFAULT_JOBS_MANAGER_KEY = key
+    return _DEFAULT_JOBS_MANAGER
 
 
 def build_branch_session_bootstrap_idempotency_key(
@@ -95,7 +117,7 @@ class PrototypeWorkspaceJobs:
         queue: str = PROTOTYPE_QUEUE,
     ) -> None:
         self._repo = repo
-        self._jobs_manager = jobs_manager or JobManager()
+        self._jobs_manager = jobs_manager if jobs_manager is not None else _get_default_jobs_manager()
         self._queue = str(queue or PROTOTYPE_QUEUE)
 
     @staticmethod

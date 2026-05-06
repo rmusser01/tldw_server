@@ -24,6 +24,15 @@ def prototype_jobs(repo):
     return jobs_cls(repo=repo)
 
 
+class _PromoteService:
+    def __init__(self) -> None:
+        self.called = False
+
+    async def promote_candidate(self, **_kwargs: Any) -> dict[str, Any]:
+        self.called = True
+        return {"status": "promoted"}
+
+
 async def _seed_branch_workspace(repo, prototype_db):
     workspace = await repo.create_workspace(
         owner_user_id=1,
@@ -57,6 +66,42 @@ def test_jobs_module_exports_expected_task_types() -> None:
         "snapshot_save",
         "publish_validate_and_promote",
     }.issubset(set(getattr(module, "PROTOTYPE_JOB_TYPES", set())))
+
+
+def test_default_jobs_manager_is_shared_for_same_environment(repo, tmp_path, monkeypatch) -> None:
+    module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.jobs")
+    jobs_cls = _load_attr(module, "PrototypeWorkspaceJobs", "PrototypeRuntimeJobs")
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "prototype_jobs.db"))
+    monkeypatch.setattr(module, "_DEFAULT_JOBS_MANAGER", None, raising=False)
+    monkeypatch.setattr(module, "_DEFAULT_JOBS_MANAGER_KEY", None, raising=False)
+
+    first = jobs_cls(repo=repo)
+    second = jobs_cls(repo=repo)
+
+    assert first._jobs_manager is second._jobs_manager
+
+
+@pytest.mark.asyncio
+async def test_publish_job_requires_reviewer_user_id_before_service_call() -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+    service = _PromoteService()
+
+    with pytest.raises(ValueError, match="reviewer_user_id is required"):
+        await worker_module.handle_prototype_job(
+            {
+                "job_type": "publish_validate_and_promote",
+                "payload": {
+                    "prototype_workspace_id": "pw_1",
+                    "candidate_snapshot_id": "snap_candidate",
+                },
+            },
+            service=service,
+        )
+
+    assert service.called is False
 
 
 @pytest.mark.asyncio

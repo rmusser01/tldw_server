@@ -17,6 +17,16 @@ from .models import PrototypeJobType
 from .service import PrototypeWorkspaceService
 
 
+def _required_int_payload(payload: dict[str, Any], key: str) -> int:
+    value = payload.get(key)
+    if value is None or str(value).strip() == "":
+        raise ValueError(f"{key} is required")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be an integer") from exc
+
+
 async def handle_prototype_job(
     job: dict[str, Any],
     *,
@@ -79,7 +89,7 @@ async def handle_prototype_job(
         result = await service.promote_candidate(
             prototype_workspace_id=str(payload.get("prototype_workspace_id") or ""),
             candidate_snapshot_id=str(payload.get("candidate_snapshot_id") or ""),
-            reviewer_user_id=int(payload.get("reviewer_user_id")),
+            reviewer_user_id=_required_int_payload(payload, "reviewer_user_id"),
             review_baseline_snapshot_id=payload.get("review_baseline_snapshot_id"),
             promotion_request_id=payload.get("promotion_request_id"),
             review_notes=payload.get("review_notes"),
