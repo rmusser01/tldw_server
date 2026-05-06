@@ -177,6 +177,29 @@ BYOK_SHARED_KEYS_ROUTER_DEFINITION_DATA = (
         "/organizations/shared-keys",
     ),
 )
+MCP_ROUTER_DEFINITION_DATA = (
+    (
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint",
+        "mcp_unified_endpoint",
+        "/api/v1",
+        ("mcp-unified",),
+        "/mcp/status",
+    ),
+    (
+        "tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage",
+        "mcp_catalogs_manage",
+        "/api/v1",
+        ("mcp-catalogs",),
+        "/mcp/catalogs",
+    ),
+    (
+        "tldw_Server_API.app.api.v1.endpoints.mcp_hub_management",
+        "mcp_hub_management",
+        "/api/v1",
+        ("mcp-hub",),
+        "/mcp/hub",
+    ),
+)
 
 
 def _main_source_text() -> str:
@@ -7031,6 +7054,235 @@ def test_iter_minimal_optional_router_specs_propagates_byok_shared_keys_runtime_
     )
 
     with pytest.raises(RuntimeError, match="user_keys exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
+
+
+def test_iter_minimal_optional_router_specs_defers_mcp_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal MCP specs keep module import and attr lookup lazy."""
+    import builtins
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    definitions_by_module = {
+        module_name: {
+            "module_name": module_name,
+            "expected_name": expected_name,
+            "prefix": prefix,
+            "tags": tags,
+            "path": path,
+        }
+        for module_name, expected_name, prefix, tags, path in MCP_ROUTER_DEFINITION_DATA
+    }
+    router_definitions = tuple(definitions_by_module.values())
+    access_count = {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for module_name, definition in definitions_by_module.items():
+        fake_module = ModuleType(module_name)
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake minimal MCP router."""
+            return {"status": "ok"}
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[f"{module_name}.router"] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    endpoints_package = "tldw_Server_API.app.api.v1.endpoints."
+    real_import = builtins.__import__
+
+    def _fake_endpoint_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        """Track selected imports and fake unrelated eager optional routers."""
+        if (
+            level == 0
+            and name.startswith(endpoints_package)
+        ):
+            if name in definitions_by_module:
+                import_calls.append(name)
+                return real_import(name, globals, locals, fromlist, level)
+            attrs = tuple(attr for attr in fromlist if attr != "*") or ("router",)
+            for attr_name in attrs:
+                _install_fake_router_module(
+                    monkeypatch,
+                    name,
+                    path="/minimal-unrelated-mcp-fake",
+                    attr_name=attr_name,
+                )
+            return sys.modules[name]
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_endpoint_import)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected minimal MCP routers."""
+        if module_name in definitions_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+    fake_main = ModuleType("tldw_Server_API.app.main")
+    fake_main.app = FastAPI()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.main", fake_main)
+
+    specs = list(iter_minimal_optional_router_specs())
+    assert [
+        module_name
+        for module_name in definitions_by_module
+        if module_name in import_calls
+    ] == []
+    assert access_count == {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {
+            str(definition["expected_name"])
+            for definition in router_definitions
+        }
+    }
+    assert set(selected_specs) == {
+        str(definition["expected_name"])
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        spec = selected_specs[str(definition["expected_name"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == ""
+        assert spec.skip_context == "in minimal test app"
+        assert spec.default_stable is True
+        assert [exc.__name__ for exc in spec.skip_exceptions] == [
+            "OptionalRouterMissingModule",
+            "OptionalRouterMissingAttribute",
+        ]
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
+    assert access_count == {
+        f"{definition['module_name']}.router": 1
+        for definition in router_definitions
+    }
+
+
+def test_iter_minimal_optional_router_specs_skips_mcp_missing_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal MCP specs skip missing optional router modules."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    mcp_modules = {
+        module_name
+        for module_name, _expected_name, _prefix, _tags, _path in MCP_ROUTER_DEFINITION_DATA
+    }
+    expected_names = {
+        expected_name
+        for _module_name, expected_name, _prefix, _tags, _path in MCP_ROUTER_DEFINITION_DATA
+    }
+
+    specs = list(iter_minimal_optional_router_specs())
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in expected_names
+    }
+    assert set(selected_specs) == expected_names
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Fail only the selected MCP router imports at registration."""
+        if module_name in mcp_modules:
+            raise ModuleNotFoundError(f"{module_name} missing during import", name=module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), selected_specs.values()) == 0
+    assert debug_messages == [
+        f"Skipping {expected_name} router in minimal test app: "
+        f"{module_name} missing during import"
+        for module_name, expected_name, _prefix, _tags, _path in MCP_ROUTER_DEFINITION_DATA
+    ]
+
+
+def test_iter_minimal_optional_router_specs_propagates_mcp_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal MCP runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "mcp_unified_endpoint")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected MCP router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="mcp_unified_endpoint exploded during import"):
         register_router_specs(FastAPI(), (selected_spec,))
 
 

@@ -779,38 +779,30 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, byok_shared_keys_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_unified_router
-
-        specs.append(RouterSpec(
-            router=mcp_unified_router,
+    for mcp_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint",
+            log_name="mcp_unified_endpoint",
             prefix=f"{API_V1_PREFIX}",
             tags=("mcp-unified",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping MCP unified router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage import router as mcp_catalogs_manage_router
-
-        specs.append(RouterSpec(
-            router=mcp_catalogs_manage_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage",
+            log_name="mcp_catalogs_manage",
             prefix=f"{API_V1_PREFIX}",
             tags=("mcp-catalogs",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping MCP catalogs router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.mcp_hub_management import router as mcp_hub_management_router
-
-        specs.append(RouterSpec(
-            router=mcp_hub_management_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mcp_hub_management",
+            log_name="mcp_hub_management",
             prefix=f"{API_V1_PREFIX}",
             tags=("mcp-hub",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping MCP hub router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, mcp_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.privileges import router as privileges_router
