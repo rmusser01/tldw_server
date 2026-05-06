@@ -743,27 +743,23 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, org_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.resource_governor import router as resource_governor_router
-
-        specs.append(RouterSpec(
-            router=resource_governor_router,
+    for access_resource_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.resource_governor",
+            log_name="resource_governor",
             prefix=f"{API_V1_PREFIX}",
             tags=("resource-governor",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping resource_governor router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.users import router as users_router
-
-        specs.append(RouterSpec(
-            router=users_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.users",
+            log_name="users",
             prefix=f"{API_V1_PREFIX}",
             tags=("users",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping users router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, access_resource_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped import router as shared_keys_scoped_router
