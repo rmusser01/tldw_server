@@ -1,5 +1,4 @@
 import React from "react"
-import type { LucideIcon } from "lucide-react"
 import {
   CalendarClock,
   FileOutput,
@@ -7,7 +6,8 @@ import {
   Newspaper,
   Play,
   Plus,
-  Rss
+  Rss,
+  type LucideIcon
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"

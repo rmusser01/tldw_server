@@ -12,21 +12,6 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("antd", () => ({
-  Button: ({ children, icon, ...rest }: any) => (
-    <button type="button" {...rest}>
-      {icon}
-      {children}
-    </button>
-  ),
-  Empty: ({ children, description, ...rest }: any) => (
-    <div {...rest}>
-      {description}
-      {children}
-    </div>
-  )
-}))
-
 describe("WatchlistsEmptyState", () => {
   it("adapts feed empty states to the canonical EmptyState primitive", () => {
     const onPrimaryAction = vi.fn()
