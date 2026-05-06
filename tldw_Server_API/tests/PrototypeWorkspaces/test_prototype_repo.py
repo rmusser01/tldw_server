@@ -2,10 +2,60 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 import pytest
 
 pytestmark = pytest.mark.unit
+
+
+def _workspace_row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": "pws_sql_review",
+        "owner_user_id": 1,
+        "title": "SQL review",
+        "description": None,
+        "creation_source": "prompt",
+        "canonical_snapshot_id": "snap_existing",
+        "last_known_good_snapshot_id": "snap_existing",
+        "canonical_preview_status": "pending",
+        "publish_validation_status": "unknown",
+        "preview_policy_json": "{}",
+        "share_policy_json": "{}",
+        "runtime_policy_json": "{}",
+        "designated_promoter_ids_json": "[]",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "archived_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def _session_row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": "pss_sql_review",
+        "prototype_workspace_id": "pws_sql_review",
+        "base_snapshot_id": "snap_existing",
+        "actor_user_id": None,
+        "actor_shared_actor_id": "psa_sql_review",
+        "actor_type": "external_collaborator",
+        "share_link_id": 101,
+        "acp_session_id": None,
+        "sandbox_session_id": None,
+        "sandbox_run_id": None,
+        "runtime_status": "running",
+        "preview_handle": None,
+        "preview_status": "ready",
+        "last_saved_snapshot_id": None,
+        "last_activity_at": "2026-01-01T00:00:00+00:00",
+        "expires_at": "2999-01-01T00:00:00+00:00",
+        "revoked_at": None,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    row.update(overrides)
+    return row
 
 
 def test_migration_086_creates_prototype_workspace_tables() -> None:
@@ -203,6 +253,119 @@ async def test_create_session_rejects_cross_workspace_shared_actor(repo):
             actor_type="external_collaborator",
             actor_shared_actor_id=actor_two["id"],
         )
+
+
+@pytest.mark.asyncio
+async def test_ensure_tables_uses_information_schema_for_postgres() -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    class RecordingPool:
+        pool = object()
+
+        def __init__(self) -> None:
+            self.fetchall_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, str]]:
+            self.fetchall_calls.append((sql, params))
+            return [
+                {"name": "prototype_workspaces"},
+                {"name": "prototype_snapshots"},
+                {"name": "prototype_sessions"},
+                {"name": "prototype_shared_actors"},
+                {"name": "prototype_promotion_requests"},
+            ]
+
+    pool = RecordingPool()
+    repo = PrototypeWorkspacesRepo(db_pool=pool)  # type: ignore[arg-type]
+
+    await repo.ensure_tables()
+
+    table_query = pool.fetchall_calls[0][0]
+    assert "information_schema.tables" in table_query
+    assert "sqlite_master" not in table_query
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_state_preserves_columns_in_sql_without_pre_read() -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    class RecordingPool:
+        pool = None
+
+        def __init__(self) -> None:
+            self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
+            self.fetchone_calls = 0
+
+        async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+            self.execute_calls.append((sql, params))
+
+        async def fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+            self.fetchone_calls += 1
+            if not self.execute_calls:
+                pytest.fail("update_workspace_state should not fetch existing state before updating")
+            return _workspace_row(id=params[0])
+
+    pool = RecordingPool()
+    repo = PrototypeWorkspacesRepo(db_pool=pool)  # type: ignore[arg-type]
+
+    updated = await repo.update_workspace_state(
+        "pws_sql_review",
+        canonical_snapshot_id="snap_new",
+    )
+
+    assert updated is not None
+    update_sql, update_params = pool.execute_calls[0]
+    assert "COALESCE(?, canonical_snapshot_id)" in update_sql
+    assert "COALESCE(?, last_known_good_snapshot_id)" in update_sql
+    assert "COALESCE(?, canonical_preview_status)" in update_sql
+    assert "COALESCE(?, publish_validation_status)" in update_sql
+    assert update_params[0] == "snap_new"
+
+
+@pytest.mark.asyncio
+async def test_find_active_session_filters_candidate_in_sql() -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    class RecordingPool:
+        pool = None
+
+        def __init__(self) -> None:
+            self.fetchone_calls: list[tuple[str, tuple[Any, ...]]] = []
+            self.fetchall_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        async def fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any]:
+            self.fetchone_calls.append((sql, params))
+            return _session_row()
+
+        async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+            self.fetchall_calls.append((sql, params))
+            return [_session_row()]
+
+    pool = RecordingPool()
+    repo = PrototypeWorkspacesRepo(db_pool=pool)  # type: ignore[arg-type]
+
+    session = await repo.find_active_session(
+        prototype_workspace_id="pws_sql_review",
+        base_snapshot_id="snap_existing",
+        actor_type="external_collaborator",
+        actor_shared_actor_id="psa_sql_review",
+    )
+
+    assert session is not None
+    query, params = (pool.fetchone_calls or pool.fetchall_calls)[0]
+    assert "base_snapshot_id = ?" in query
+    assert "actor_type = ?" in query
+    assert "actor_shared_actor_id = ?" in query
+    assert "runtime_status" in query
+    assert "expires_at" in query
+    assert "LIMIT 1" in query
+    assert params[:3] == ("pws_sql_review", "snap_existing", "external_collaborator")
 
 
 def test_apply_authnz_migrations_from_v85_includes_prototype_tables(tmp_path) -> None:

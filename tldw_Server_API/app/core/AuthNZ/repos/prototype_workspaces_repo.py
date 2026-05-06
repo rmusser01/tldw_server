@@ -77,27 +77,18 @@ def _normalize_promotion_status(status: str | None) -> str:
     return value
 
 
-def _normalize_datetime(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    try:
-        parsed = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
-
-
 @dataclass
 class PrototypeWorkspacesRepo:
     """Data access for prototype workspace metadata in the AuthNZ DB."""
 
     db_pool: DatabasePool
 
+    def _is_postgres_backend(self) -> bool:
+        return bool(getattr(self.db_pool, "pool", None))
+
     def _ts(self) -> datetime | str:
         now = datetime.now(timezone.utc)
-        return now if getattr(self.db_pool, "pool", None) is not None else now.isoformat()
+        return now if self._is_postgres_backend() else now.isoformat()
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -188,8 +179,17 @@ class PrototypeWorkspacesRepo:
             "prototype_shared_actors",
             "prototype_promotion_requests",
         }
+        if self._is_postgres_backend():
+            table_query = """
+            SELECT table_name AS name
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_type = 'BASE TABLE'
+            """
+        else:
+            table_query = "SELECT name FROM sqlite_master WHERE type='table'"
         rows = await self.db_pool.fetchall(
-            "SELECT name FROM sqlite_master WHERE type='table'",
+            table_query,
             (),
         )
         existing = {
@@ -268,32 +268,22 @@ class PrototypeWorkspacesRepo:
         canonical_preview_status: str | None = None,
         publish_validation_status: str | None = None,
     ) -> dict[str, Any] | None:
-        existing = await self.get_workspace(prototype_workspace_id)
-        if not existing:
-            return None
-
         ts = self._ts()
         await self.db_pool.execute(
             """
             UPDATE prototype_workspaces
-            SET canonical_snapshot_id = ?,
-                last_known_good_snapshot_id = ?,
-                canonical_preview_status = ?,
-                publish_validation_status = ?,
+            SET canonical_snapshot_id = COALESCE(?, canonical_snapshot_id),
+                last_known_good_snapshot_id = COALESCE(?, last_known_good_snapshot_id),
+                canonical_preview_status = COALESCE(?, canonical_preview_status),
+                publish_validation_status = COALESCE(?, publish_validation_status),
                 updated_at = ?
             WHERE id = ?
             """,
             (
-                canonical_snapshot_id if canonical_snapshot_id is not None else existing.get("canonical_snapshot_id"),
-                last_known_good_snapshot_id
-                if last_known_good_snapshot_id is not None
-                else existing.get("last_known_good_snapshot_id"),
-                canonical_preview_status
-                if canonical_preview_status is not None
-                else existing.get("canonical_preview_status"),
-                publish_validation_status
-                if publish_validation_status is not None
-                else existing.get("publish_validation_status"),
+                canonical_snapshot_id,
+                last_known_good_snapshot_id,
+                canonical_preview_status,
+                publish_validation_status,
                 ts,
                 prototype_workspace_id,
             ),
@@ -602,27 +592,38 @@ class PrototypeWorkspacesRepo:
         actor_shared_actor_id: str | None = None,
     ) -> dict[str, Any] | None:
         actor_type_value = _normalize_actor_type(actor_type)
-        rows = await self.list_sessions_for_workspace(
-            prototype_workspace_id,
-            include_revoked=False,
+        actor_user_param = int(actor_user_id) if actor_user_id is not None else None
+        row = await self.db_pool.fetchone(
+            """
+            SELECT id, prototype_workspace_id, base_snapshot_id, actor_user_id,
+                   actor_shared_actor_id, actor_type, share_link_id, acp_session_id,
+                   sandbox_session_id, sandbox_run_id, runtime_status, preview_handle,
+                   preview_status, last_saved_snapshot_id, last_activity_at, expires_at,
+                   revoked_at, created_at, updated_at
+            FROM prototype_sessions
+            WHERE prototype_workspace_id = ?
+              AND base_snapshot_id = ?
+              AND actor_type = ?
+              AND (? IS NULL OR actor_user_id = ?)
+              AND (? IS NULL OR actor_shared_actor_id = ?)
+              AND revoked_at IS NULL
+              AND (runtime_status IS NULL OR LOWER(runtime_status) NOT IN ('failed', 'revoked', 'closed'))
+              AND (expires_at IS NULL OR expires_at > ?)
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (
+                prototype_workspace_id,
+                base_snapshot_id,
+                actor_type_value,
+                actor_user_param,
+                actor_user_param,
+                actor_shared_actor_id,
+                actor_shared_actor_id,
+                self._ts(),
+            ),
         )
-        for session in rows:
-            if session.get("base_snapshot_id") != base_snapshot_id:
-                continue
-            if session.get("actor_type") != actor_type_value:
-                continue
-            if actor_user_id is not None and session.get("actor_user_id") != int(actor_user_id):
-                continue
-            if actor_shared_actor_id is not None and session.get("actor_shared_actor_id") != actor_shared_actor_id:
-                continue
-            runtime_status = str(session.get("runtime_status") or "").strip().lower()
-            if runtime_status in {"failed", "revoked", "closed"}:
-                continue
-            expires_at = _normalize_datetime(session.get("expires_at"))
-            if expires_at is not None and expires_at <= datetime.now(timezone.utc):
-                continue
-            return session
-        return None
+        return self._normalize_session_row(self._row_to_dict(row) if row else None)
 
     async def update_session_state(
         self,
