@@ -761,24 +761,23 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, access_resource_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped import router as shared_keys_scoped_router
-        from tldw_Server_API.app.api.v1.endpoints.user_keys import router as user_keys_router
-
-        specs.extend([
-            RouterSpec(
-                router=user_keys_router,
-                prefix=f"{API_V1_PREFIX}",
-                tags=("users",),
-            ),
-            RouterSpec(
-                router=shared_keys_scoped_router,
-                prefix=f"{API_V1_PREFIX}",
-                tags=("organizations",),
-            ),
-        ])
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping BYOK/shared keys routers in minimal test app: {e}")
+    for byok_shared_keys_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.user_keys",
+            log_name="user_keys",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("users",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped",
+            log_name="shared_keys_scoped",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("organizations",),
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, byok_shared_keys_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_unified_router
