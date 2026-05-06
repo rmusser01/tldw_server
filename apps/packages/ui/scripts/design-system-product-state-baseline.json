@@ -803,7 +803,29 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-error-access-den-jtxcdw",
+    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Ready",
+    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
+    "rule": "canonical-state-label",
+    "subject": "Ready",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
+    "replacement": "design-system state registry",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Unavailable",
+    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
+    "rule": "canonical-state-label",
+    "subject": "Unavailable",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
+    "replacement": "design-system state registry",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-error-access-den-15hzb7i",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -814,7 +836,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-alert-ru-tdtxs4",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-not-avai-fzf6y",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -825,7 +847,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-recent-a-4nh5p8",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-system-d-1qxngtg",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -836,7 +858,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-system-d-ve9d2w",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-host-loc-14cd7e9",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -847,13 +869,35 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-not-avai-7mpwwo",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-sandbox-uqls7g",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the stable duplicate-id guard.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-alert-ru-1esujwv",
+    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing antd-product-state-import product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-recent-a-xv18cq",
+    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing antd-product-state-import product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
@@ -5489,17 +5533,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-empty-state:src/components/Common/FeatureEmptyState.tsx:FeatureEmptyState",
-    "path": "src/components/Common/FeatureEmptyState.tsx",
-    "rule": "local-empty-state",
-    "subject": "FeatureEmptyState",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local FeatureEmptyState empty-state wrapper before the guard.",
-    "replacement": "EmptyState",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-empty-state:src/components/Knowledge/SearchTab/SearchEmptyState.tsx:SearchEmptyState",
     "path": "src/components/Knowledge/SearchTab/SearchEmptyState.tsx",
     "rule": "local-empty-state",
@@ -5507,17 +5540,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing local SearchEmptyState empty-state wrapper before the guard.",
-    "replacement": "EmptyState",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "local-empty-state:src/components/Option/Playground/PlaygroundEmpty.tsx:PlaygroundEmpty",
-    "path": "src/components/Option/Playground/PlaygroundEmpty.tsx",
-    "rule": "local-empty-state",
-    "subject": "PlaygroundEmpty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local PlaygroundEmpty empty-state wrapper before the guard.",
     "replacement": "EmptyState",
     "migrationQueue": "shared-product-state"
   },
