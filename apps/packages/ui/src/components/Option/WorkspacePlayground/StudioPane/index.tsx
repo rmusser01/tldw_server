@@ -47,9 +47,15 @@ import type {
   ArtifactType,
   GeneratedArtifact
 } from "@/types/workspace"
+import type { WorkProductTemplateId } from "@/workspace-templates/types"
+import {
+  DEFAULT_WORK_PRODUCT_TEMPLATE_ID,
+  getWorkProductTemplate
+} from "@/workspace-templates/work-product-templates"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
 import { getWorkspaceStudioNoSourcesHint } from "../source-location-copy"
+import { WorkProductTemplateChooser } from "./WorkProductTemplateChooser"
 import {
   useArtifactGeneration,
   useAudioTtsSettings,
@@ -489,6 +495,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
 
   // Local UI state
   const [slidesVisualStyleValue, setSlidesVisualStyleValue] = useState("")
+  const [selectedWorkProductTemplateId, setSelectedWorkProductTemplateId] =
+    useState<WorkProductTemplateId>(DEFAULT_WORK_PRODUCT_TEMPLATE_ID)
   const [selectedFlashcardDeck, setSelectedFlashcardDeck] = useState<"auto" | number>("auto")
   const [activeOutputType, setActiveOutputType] = useState<ArtifactType | null>(null)
   const [moreOutputsExpanded, setMoreOutputsExpanded] = useState(false)
@@ -1351,6 +1359,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                 <button
                   type="button"
                   disabled={isDisabled}
+                  aria-label={label}
                   onFocus={() => setActiveOutputType(type)}
                   onMouseEnter={() => setActiveOutputType(type)}
                   onClick={() => {
@@ -1390,6 +1399,27 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
 
           return (
             <div className="space-y-2">
+              <WorkProductTemplateChooser
+                selectedTemplateId={selectedWorkProductTemplateId}
+                selectedSourceCount={selectedMediaCount}
+                disabled={isGeneratingOutput}
+                onSelectTemplate={(templateId) => {
+                  const template = getWorkProductTemplate(templateId)
+                  setSelectedWorkProductTemplateId(templateId)
+                  if (
+                    template.id !== "executive_brief" ||
+                    selectedMediaCount < template.minSelectedSources ||
+                    isGeneratingOutput
+                  ) {
+                    return
+                  }
+                  setActiveOutputType(template.outputArtifactType)
+                  void handleGenerateOutput(template.outputArtifactType, {
+                    templateId
+                  })
+                }}
+              />
+
               <div className="grid grid-cols-2 gap-2">
                 {primaryButtons.map((btn) => renderOutputButton(btn.type))}
               </div>
@@ -1787,7 +1817,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                                     if (!hasSelectedSources || isGeneratingOutput) return
                                     void handleGenerateOutput(artifact.type, {
                                       mode: "replace",
-                                      targetArtifactId: artifact.id
+                                      targetArtifactId: artifact.id,
+                                      templateId: artifact.templateId
                                     })
                                   }}
                                   onKeyDown={handleIconButtonKeyDown}
@@ -1937,7 +1968,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                                   key === "replace" ? "replace" : "new_version"
                                 handleGenerateOutput(artifact.type, {
                                   mode,
-                                  targetArtifactId: artifact.id
+                                  targetArtifactId: artifact.id,
+                                  templateId: artifact.templateId
                                 })
                               }
                             }}
