@@ -407,6 +407,22 @@ bunx vitest run \
 Add or update tests if the migration changes accessible labels, actions,
 diagnostics, or state text.
 
+### Shared UI Product-State Guard
+
+Run `bun run verify:design-system-state` from `apps/packages/ui` before adding
+or changing shared UI product-state surfaces. New recovery, loading, empty,
+status, readiness, setup, auth, and permission UI in `apps/packages/ui/src`
+should use the design-system primitives under `src/components/ui` and
+`src/design-system/states.ts`.
+
+Existing shared UI product-state debt is tracked in
+`apps/packages/ui/scripts/design-system-product-state-baseline.json`. Do not add
+new baseline entries unless a migration exception has an owner, reason,
+replacement, and queue; remove stale baseline entries when a migration removes
+the matching finding. When the guard reports a duplicate-suffixed finding ID for
+another occurrence of the same rule/path/subject, preserve that exact ID in the
+baseline so one legacy exception cannot cover a new occurrence.
+
 ## Non-Goals
 
 - Do not remove Ant Design.
