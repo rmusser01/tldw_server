@@ -4,7 +4,7 @@ title: Implement product roadmap first slice
 status: In Progress
 assignee: []
 created_date: '2026-05-06 17:24'
-updated_date: '2026-05-06 18:27'
+updated_date: '2026-05-06 18:40'
 labels:
   - product
   - roadmap
@@ -43,6 +43,8 @@ Execute the approved first-slice implementation plan for the aligned tldw produc
 Task 1 complete. Implemented canonical workspace decision docs in commit dd012baa9. Spec compliance passed; code quality re-review approved after wording fix from parallel commercial workspace to parallel canonical workspace model. Verification included required rg checks and git diff --check.
 
 Task 2 complete. Implemented typed workspace API bridge in commit d113704e9. Added workspace request/response interfaces for existing /api/v1/workspaces methods, frontend hydration adapters from backend snake_case to local camelCase state, minimal reviewStatus compatibility, and focused service/store tests. Review gates: spec compliance passed; code quality passed after fixes for omitted backend fields, ignored upsert archived field, nullable update request types, reviewStatus sync coverage, and unknown artifact status fallback. Verification: bunx vitest run apps/packages/ui/src/store/__tests__/workspace-api-first.test.ts apps/packages/ui/src/store/__tests__/workspace-sync-contract.test.ts apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts => 3 files passed, 11 tests passed. git diff --check passed. Backend tests and Bandit skipped for Task 2 because no backend/Python files changed.
+
+Task 3 complete: added work product template metadata, expanded generated artifact review/template contract, and added artifact review persistence tests. Commit: b2c17db481df00dbba5bf7b48cc900bd730d6e8d. Verification: bunx vitest run src/workspace-templates/__tests__/work-product-templates.test.ts src/store/__tests__/workspace-artifact-review-contract.test.ts src/store/__tests__/workspace.test.ts src/store/__tests__/workspace.split-storage.test.ts from apps/packages/ui passed 4 files/55 tests; git diff --check passed. Spec review APPROVED; quality review APPROVED. Bandit skipped: no backend Python files changed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
