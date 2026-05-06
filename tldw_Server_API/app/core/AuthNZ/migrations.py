@@ -840,6 +840,8 @@ def migration_087_expand_share_tokens_resource_type_for_prototypes(conn: sqlite3
     ).fetchone()
     legacy_count = int(legacy_count_row[0]) if legacy_count_row else 0
 
+    conn.execute("DROP TABLE IF EXISTS share_tokens_new")
+
     if has_prototype_type and legacy_count == 0:
         logger.info("Migration 087: share_tokens already supports prototype_workspace; skipping")
         return
