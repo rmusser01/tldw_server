@@ -77,6 +77,18 @@ const SEVERITY_PROP_VALUES = new Set([
   "success",
   "warning"
 ])
+const TEXT_BEARING_PROP_NAMES = new Set([
+  "action",
+  "content",
+  "description",
+  "emptyText",
+  "label",
+  "message",
+  "placeholder",
+  "subTitle",
+  "text",
+  "title"
+])
 const RECOVERY_ACTION_WORDS = [
   "copy diagnostics",
   "diagnostics",
@@ -553,9 +565,8 @@ function collectJsxUseContext(node, sourceFile) {
   const attributes = getJsxAttributes(node)
 
   for (const attribute of attributes) {
-    const value = jsxAttributeValue(attribute, sourceFile)
-    if (value) {
-      texts.push(value)
+    if (TEXT_BEARING_PROP_NAMES.has(jsxAttributeName(attribute))) {
+      texts.push(...jsxRenderedAttributeTexts(attribute, sourceFile))
     }
   }
 
@@ -577,8 +588,8 @@ function collectJsxUseContext(node, sourceFile) {
     RECOVERY_ACTION_WORDS.some((word) => text.includes(word))
   )
   const hasSeverityProp = attributes.some((attribute) => {
-    const propName = attribute.name.text
-    const propValue = jsxAttributeValue(attribute, sourceFile)
+    const propName = jsxAttributeName(attribute)
+    const propValue = jsxLiteralAttributeValue(attribute)
 
     return (
       SEVERITY_PROP_NAMES.has(propName) &&
@@ -603,7 +614,11 @@ function getJsxAttributes(node) {
   return node.attributes.properties.filter(ts.isJsxAttribute)
 }
 
-function jsxAttributeValue(attribute, sourceFile) {
+function jsxAttributeName(attribute) {
+  return ts.isIdentifier(attribute.name) ? attribute.name.text : undefined
+}
+
+function jsxLiteralAttributeValue(attribute) {
   if (!attribute.initializer) {
     return undefined
   }
@@ -617,14 +632,45 @@ function jsxAttributeValue(attribute, sourceFile) {
     attribute.initializer.expression
   ) {
     const expression = attribute.initializer.expression
-    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    if (
+      ts.isStringLiteral(expression) ||
+      ts.isNoSubstitutionTemplateLiteral(expression)
+    ) {
       return expression.text
     }
-
-    return expression.getText(sourceFile)
   }
 
   return undefined
+}
+
+function jsxRenderedAttributeTexts(attribute, sourceFile) {
+  if (!attribute.initializer) {
+    return []
+  }
+
+  if (ts.isStringLiteral(attribute.initializer)) {
+    return [attribute.initializer.text]
+  }
+
+  if (
+    ts.isJsxExpression(attribute.initializer) &&
+    attribute.initializer.expression
+  ) {
+    const expression = attribute.initializer.expression
+
+    if (
+      ts.isStringLiteral(expression) ||
+      ts.isNoSubstitutionTemplateLiteral(expression)
+    ) {
+      return [expression.text]
+    }
+
+    if (ts.isJsxElement(expression) || ts.isJsxFragment(expression)) {
+      return jsxChildTexts(expression, sourceFile)
+    }
+  }
+
+  return []
 }
 
 function jsxChildTexts(node, sourceFile) {
@@ -647,6 +693,11 @@ function jsxChildTexts(node, sourceFile) {
     }
 
     if (ts.isJsxElement(child)) {
+      texts.push(...jsxChildTexts(child, sourceFile))
+      continue
+    }
+
+    if (ts.isJsxFragment(child)) {
       texts.push(...jsxChildTexts(child, sourceFile))
     }
   }

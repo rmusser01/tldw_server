@@ -135,6 +135,68 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("does not flag generic AntD JSX from handler source text", () => {
+    const findings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice({ message }) {
+          return (
+            <Alert
+              message={message}
+              onClose={() => {
+                // localStorage may be unavailable
+              }}
+            />
+          )
+        }
+      `
+    )
+
+    expect(findings).toEqual([])
+  })
+
+  it("flags product-state text in literal AntD text-bearing props", () => {
+    const findings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice() {
+          return <Alert message="Server unavailable" />
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "antd-product-state-import",
+        subject: "Alert"
+      })
+    )
+  })
+
+  it("recognizes string-literal expression severity props", () => {
+    const findings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice() {
+          return <Alert type={"error"} message="Heads up" />
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "antd-product-state-import",
+        subject: "Alert"
+      })
+    )
+  })
+
   it("allows AntD mechanics and metadata-only tags", () => {
     const findings = analyze(
       "src/components/Option/Models/ProviderTable.tsx",
