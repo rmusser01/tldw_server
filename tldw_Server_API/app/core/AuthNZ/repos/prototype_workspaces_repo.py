@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 _VALID_CREATION_SOURCES = {"prompt", "template", "existing_workspace"}
 _VALID_ACTOR_TYPES = {"owner", "internal_collaborator", "external_collaborator"}
 _VALID_PROMOTION_STATUSES = {"pending", "approved", "rejected", "promoted", "stale"}
+_VALID_PREVIEW_SCOPES = {"canonical", "session"}
 _ROW_CONVERSION_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
 
 
@@ -77,6 +78,13 @@ def _normalize_promotion_status(status: str | None) -> str:
     value = (status or "").strip().lower()
     if value not in _VALID_PROMOTION_STATUSES:
         raise ValueError(f"Invalid status: {status}")
+    return value
+
+
+def _normalize_preview_scope(preview_scope: str | None) -> str:
+    value = (preview_scope or "").strip().lower()
+    if value not in _VALID_PREVIEW_SCOPES:
+        raise ValueError(f"Invalid preview_scope: {preview_scope}")
     return value
 
 
@@ -176,6 +184,16 @@ class PrototypeWorkspacesRepo:
             out["reviewed_by_user_id"] = int(out["reviewed_by_user_id"])
         return out
 
+    @staticmethod
+    def _normalize_preview_handle_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        out = dict(row)
+        out["preview_handle"] = out.get("id")
+        out["metadata"] = _load_json_dict(out.get("metadata_json"))
+        out["is_active"] = _to_bool(out.get("is_active"))
+        return out
+
     async def ensure_tables(self) -> None:
         required = {
             "prototype_workspaces",
@@ -183,6 +201,7 @@ class PrototypeWorkspacesRepo:
             "prototype_sessions",
             "prototype_shared_actors",
             "prototype_promotion_requests",
+            "prototype_preview_handles",
         }
         if self._is_postgres_backend():
             table_query = """
@@ -711,6 +730,147 @@ class PrototypeWorkspacesRepo:
             ),
         )
         return await self.get_session(prototype_session_id)
+
+    async def replace_active_preview_handle_record(
+        self,
+        *,
+        preview_handle: str,
+        preview_scope: str,
+        scope_id: str,
+        prototype_workspace_id: str,
+        prototype_session_id: str | None,
+        actor_key: str,
+        target_ref: str,
+        runtime_policy_profile: str,
+        metadata: dict[str, Any] | None = None,
+        created_at: str | datetime | None = None,
+    ) -> dict[str, Any]:
+        preview_scope_value = _normalize_preview_scope(preview_scope)
+        ts = self._ts()
+        created_at_value = created_at if created_at is not None else ts
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_preview_handles
+            SET is_active = ?, revoked_at = ?
+            WHERE scope_id = ? AND is_active = ?
+            """,
+            (
+                False,
+                created_at_value,
+                scope_id,
+                True,
+            ),
+        )
+        await self.db_pool.execute(
+            """
+            INSERT INTO prototype_preview_handles (
+                id, preview_scope, scope_id, prototype_workspace_id, prototype_session_id,
+                actor_key, target_ref, runtime_policy_profile, metadata_json,
+                is_active, created_at, revoked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                preview_handle,
+                preview_scope_value,
+                scope_id,
+                prototype_workspace_id,
+                prototype_session_id,
+                actor_key,
+                target_ref,
+                runtime_policy_profile,
+                json.dumps(metadata or {}),
+                True,
+                created_at_value,
+                None,
+            ),
+        )
+        created = await self.get_preview_handle_record(preview_handle)
+        return created or {}
+
+    async def get_preview_handle_record(self, preview_handle: str) -> dict[str, Any] | None:
+        row = await self.db_pool.fetchone(
+            """
+            SELECT id, preview_scope, scope_id, prototype_workspace_id, prototype_session_id,
+                   actor_key, target_ref, runtime_policy_profile, metadata_json,
+                   is_active, created_at, revoked_at
+            FROM prototype_preview_handles
+            WHERE id = ?
+            """,
+            (preview_handle,),
+        )
+        return self._normalize_preview_handle_row(self._row_to_dict(row) if row else None)
+
+    async def get_active_preview_handle_for_scope(self, scope_id: str) -> dict[str, Any] | None:
+        row = await self.db_pool.fetchone(
+            """
+            SELECT id, preview_scope, scope_id, prototype_workspace_id, prototype_session_id,
+                   actor_key, target_ref, runtime_policy_profile, metadata_json,
+                   is_active, created_at, revoked_at
+            FROM prototype_preview_handles
+            WHERE scope_id = ? AND is_active = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (scope_id, True),
+        )
+        return self._normalize_preview_handle_row(self._row_to_dict(row) if row else None)
+
+    async def revoke_preview_handle_record(
+        self,
+        preview_handle: str,
+        *,
+        revoked_at: str | datetime | None = None,
+    ) -> bool:
+        existing = await self.get_preview_handle_record(preview_handle)
+        if not existing or not existing.get("is_active"):
+            return False
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_preview_handles
+            SET is_active = ?, revoked_at = ?
+            WHERE id = ?
+            """,
+            (
+                False,
+                revoked_at if revoked_at is not None else self._ts(),
+                preview_handle,
+            ),
+        )
+        return True
+
+    async def restore_preview_handle_record_if_scope_unclaimed(
+        self,
+        preview_handle: str,
+    ) -> dict[str, Any] | None:
+        existing = await self.get_preview_handle_record(preview_handle)
+        if not existing:
+            return None
+        scope_id = str(existing.get("scope_id") or "")
+        if not scope_id:
+            return None
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_preview_handles
+            SET is_active = ?, revoked_at = NULL
+            WHERE id = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM prototype_preview_handles
+                  WHERE scope_id = ? AND is_active = ? AND id <> ?
+              )
+            """,
+            (
+                True,
+                preview_handle,
+                scope_id,
+                True,
+                preview_handle,
+            ),
+        )
+        restored = await self.get_preview_handle_record(preview_handle)
+        if restored and restored.get("is_active"):
+            return restored
+        return None
 
     async def create_promotion_request(
         self,

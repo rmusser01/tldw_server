@@ -107,6 +107,38 @@ async def test_preview_broker_keeps_one_active_target_per_scope(repo, prototype_
 
 
 @pytest.mark.asyncio
+async def test_preview_broker_recovers_preview_record_after_memory_clear(repo, prototype_db, preview_broker):
+    module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
+    broker_cls = _load_attr(module, "PrototypePreviewBroker", "PrototypeWorkspacePreviewBroker")
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+    grant = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9018",
+    )
+    parsed = urlparse(grant["preview_url"])
+    query = parse_qs(parsed.query)
+    exp = int(query["exp"][0])
+
+    broker_cls._records.clear()
+    broker_cls._active_scope_handles.clear()
+    recovered_broker = broker_cls(repo=repo)
+
+    renewed = await recovered_broker.renew_preview_grant(grant["preview_handle"])
+    validated = await recovered_broker.validate_preview_grant(
+        preview_handle=grant["preview_handle"],
+        token=grant["token"],
+        exp=exp,
+        actor_key=f"shared_actor:{session['actor_shared_actor_id']}",
+    )
+
+    assert renewed["preview_handle"] == grant["preview_handle"]
+    assert validated is not None
+    assert validated["preview_handle"] == grant["preview_handle"]
+
+
+@pytest.mark.asyncio
 async def test_revoked_shared_actor_blocks_future_preview_grants(repo, prototype_db, preview_broker):
     workspace, actor, session = await _seed_preview_scope(repo, prototype_db)
 
@@ -221,3 +253,64 @@ async def test_failed_preview_persistence_restores_previous_active_handle(
 
     assert restored is not None
     assert refreshed_session["preview_handle"] == first["preview_handle"]
+
+
+@pytest.mark.asyncio
+async def test_failed_preview_persistence_does_not_restore_previous_after_concurrent_active_change(
+    repo,
+    prototype_db,
+    preview_broker,
+    monkeypatch,
+):
+    models_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.models")
+    record_cls = _load_attr(models_module, "PrototypePreviewHandleRecord")
+    preview_scope = _load_attr(models_module, "PrototypePreviewScope")
+    preview_scope_id = _load_attr(models_module, "preview_scope_id")
+    broker_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
+    broker_cls = _load_attr(broker_module, "PrototypePreviewBroker", "PrototypeWorkspacePreviewBroker")
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+    first = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9019",
+    )
+    scope_id = preview_scope_id(
+        preview_scope="session",
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+    )
+
+    async def fail_update(*_args: Any, **_kwargs: Any) -> None:
+        replacement = record_cls(
+            handle_id="pph_concurrent_active",
+            preview_scope=preview_scope.SESSION,
+            scope_id=scope_id,
+            prototype_workspace_id=workspace["id"],
+            prototype_session_id=session["id"],
+            actor_key=f"shared_actor:{session['actor_shared_actor_id']}",
+            target_ref="http://127.0.0.1:9020",
+            runtime_policy_profile="locked_collab",
+            metadata={"snapshot_id": "snap_preview_base"},
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        with broker_cls._lock:
+            previous = broker_cls._records[first["preview_handle"]]
+            previous.is_active = False
+            previous.revoked_at = "concurrent-revocation"
+            broker_cls._records[replacement.handle_id] = replacement
+            broker_cls._active_scope_handles[scope_id] = replacement.handle_id
+        return None
+
+    monkeypatch.setattr(repo, "update_session_state", fail_update)
+
+    with pytest.raises(RuntimeError, match="failed to persist preview handle"):
+        await preview_broker.issue_preview_grant(
+            prototype_workspace_id=workspace["id"],
+            prototype_session_id=session["id"],
+            snapshot_id="snap_preview_base",
+            runtime_target_url="http://127.0.0.1:9021",
+        )
+
+    assert broker_cls._active_scope_handles[scope_id] == "pph_concurrent_active"
+    assert broker_cls._records[first["preview_handle"]].is_active is False

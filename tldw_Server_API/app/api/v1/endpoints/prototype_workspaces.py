@@ -408,6 +408,8 @@ async def renew_preview_grant(
     preview_broker = await _maybe_await(_get_preview_broker())
     record = preview_broker.get_preview_record(preview_handle)
     if not record:
+        record = await preview_broker.get_preview_record_async(preview_handle)
+    if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype preview handle not found")
 
     repo = await _maybe_await(_get_repo())

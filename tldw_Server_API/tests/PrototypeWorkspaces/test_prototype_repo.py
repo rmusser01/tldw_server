@@ -276,6 +276,7 @@ async def test_ensure_tables_uses_information_schema_for_postgres() -> None:
                 {"name": "prototype_sessions"},
                 {"name": "prototype_shared_actors"},
                 {"name": "prototype_promotion_requests"},
+                {"name": "prototype_preview_handles"},
             ]
 
     pool = RecordingPool()

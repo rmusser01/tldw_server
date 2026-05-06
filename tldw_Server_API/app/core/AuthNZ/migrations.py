@@ -783,6 +783,45 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
 
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS prototype_preview_handles (
+            id TEXT PRIMARY KEY,
+            preview_scope TEXT NOT NULL
+                CHECK (preview_scope IN ('canonical', 'session')),
+            scope_id TEXT NOT NULL,
+            prototype_workspace_id TEXT NOT NULL,
+            prototype_session_id TEXT,
+            actor_key TEXT NOT NULL,
+            target_ref TEXT NOT NULL,
+            runtime_policy_profile TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (prototype_session_id, prototype_workspace_id)
+                REFERENCES prototype_sessions(id, prototype_workspace_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_workspace "
+        "ON prototype_preview_handles(prototype_workspace_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_session "
+        "ON prototype_preview_handles(prototype_session_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_scope_active "
+        "ON prototype_preview_handles(scope_id, is_active)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_prototype_preview_handles_active_scope "
+        "ON prototype_preview_handles(scope_id) WHERE is_active = 1"
+    )
+
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS prototype_promotion_requests (
             id TEXT PRIMARY KEY,
             prototype_workspace_id TEXT NOT NULL,
@@ -925,6 +964,7 @@ def migration_087_expand_share_tokens_resource_type_for_prototypes(conn: sqlite3
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
+    conn.execute("DROP TABLE IF EXISTS prototype_preview_handles")
     conn.execute("DROP TABLE IF EXISTS prototype_sessions")
     conn.execute("DROP TABLE IF EXISTS prototype_shared_actors")
     conn.execute("DROP TABLE IF EXISTS prototype_snapshots")

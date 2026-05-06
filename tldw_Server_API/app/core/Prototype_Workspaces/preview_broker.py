@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, ClassVar
 
+from loguru import logger
+
 from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
@@ -38,6 +40,16 @@ def _normalize_iso8601(value: Any) -> datetime | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
 def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
@@ -154,6 +166,7 @@ class PrototypePreviewBroker:
             created_at=now.isoformat(),
         )
         previous_handle_id: str | None = None
+        previous_persisted_record = await self._repo.get_active_preview_handle_for_scope(scope_id)
 
         with self._lock:
             previous_handle_id = self._active_scope_handles.get(scope_id)
@@ -162,6 +175,18 @@ class PrototypePreviewBroker:
             self._active_scope_handles[scope_id] = handle_id
 
         try:
+            await self._repo.replace_active_preview_handle_record(
+                preview_handle=handle_id,
+                preview_scope=preview_scope.value,
+                scope_id=scope_id,
+                prototype_workspace_id=prototype_workspace_id,
+                prototype_session_id=prototype_session_id,
+                actor_key=actor_key,
+                target_ref=str(runtime_target_url),
+                runtime_policy_profile=resolved_runtime_policy,
+                metadata=dict(record.metadata),
+                created_at=record.created_at,
+            )
             if prototype_session_id:
                 updated = await self._repo.update_session_state(
                     prototype_session_id,
@@ -179,16 +204,44 @@ class PrototypePreviewBroker:
                 if not updated_workspace:
                     raise RuntimeError("failed to persist canonical preview state")
         except Exception:
+            should_restore_previous = False
+            revoked_at = _utc_now().isoformat()
+            try:
+                await self._repo.revoke_preview_handle_record(handle_id, revoked_at=revoked_at)
+            except Exception as cleanup_exc:
+                logger.debug(
+                    "Failed to revoke preview handle {} during rollback: {}",
+                    handle_id,
+                    cleanup_exc,
+                )
             with self._lock:
                 failed_record = self._records.get(handle_id)
                 if failed_record is not None:
                     failed_record.is_active = False
-                    failed_record.revoked_at = _utc_now().isoformat()
+                    failed_record.revoked_at = revoked_at
                 if self._active_scope_handles.get(scope_id) == handle_id:
                     self._active_scope_handles.pop(scope_id, None)
-                if previous_handle_id:
+                    should_restore_previous = True
+                elif self._active_scope_handles.get(scope_id) is None:
+                    should_restore_previous = True
+            if should_restore_previous and previous_persisted_record:
+                try:
+                    restored = await self._repo.restore_preview_handle_record_if_scope_unclaimed(
+                        str(previous_persisted_record["preview_handle"])
+                    )
+                except Exception as cleanup_exc:
+                    logger.debug(
+                        "Failed to restore previous preview handle {} during rollback: {}",
+                        previous_persisted_record.get("preview_handle"),
+                        cleanup_exc,
+                    )
+                else:
+                    if restored:
+                        self._sync_record_cache(self._record_from_dict(restored))
+            elif should_restore_previous and previous_handle_id:
+                with self._lock:
                     previous_record = self._records.get(previous_handle_id)
-                    if previous_record is not None:
+                    if previous_record is not None and self._active_scope_handles.get(scope_id) is None:
                         previous_record.is_active = True
                         previous_record.revoked_at = None
                         self._active_scope_handles[scope_id] = previous_handle_id
@@ -214,15 +267,19 @@ class PrototypePreviewBroker:
         handle_id = str(preview_handle or "").strip()
         if not handle_id:
             return False
+        record = await self._load_record(handle_id, require_active=True)
+        if not record:
+            return False
+        revoked_at = _utc_now().isoformat()
+        revoked = await self._repo.revoke_preview_handle_record(handle_id, revoked_at=revoked_at)
         with self._lock:
             record = self._records.get(handle_id)
-            if not record or not record.is_active:
-                return False
-            record.is_active = False
-            record.revoked_at = _utc_now().isoformat()
-            if self._active_scope_handles.get(record.scope_id) == handle_id:
+            if record is not None:
+                record.is_active = False
+                record.revoked_at = revoked_at
+            if record is not None and self._active_scope_handles.get(record.scope_id) == handle_id:
                 self._active_scope_handles.pop(record.scope_id, None)
-        return True
+        return revoked
 
     def get_preview_record(self, preview_handle: str) -> dict[str, Any] | None:
         handle_id = str(preview_handle or "").strip()
@@ -234,16 +291,24 @@ class PrototypePreviewBroker:
                 return None
             return self._record_to_dict(record)
 
+    async def get_preview_record_async(self, preview_handle: str) -> dict[str, Any] | None:
+        handle_id = str(preview_handle or "").strip()
+        if not handle_id:
+            return None
+        record = await self._load_record(handle_id, require_active=False)
+        if not record:
+            return None
+        return self._record_to_dict(record)
+
     async def renew_preview_grant(self, preview_handle: str) -> dict[str, Any]:
         handle_id = str(preview_handle or "").strip()
         if not handle_id:
             raise PrototypePreviewHandleNotFound("preview handle is required")
 
-        with self._lock:
-            record = self._records.get(handle_id)
-            if not record or not record.is_active:
-                raise PrototypePreviewHandleNotFound("preview handle not found")
-            record_dict = self._record_to_dict(record)
+        record = await self._load_record(handle_id, require_active=True)
+        if not record:
+            raise PrototypePreviewHandleNotFound("preview handle not found")
+        record_dict = self._record_to_dict(record)
 
         if not await self._is_grant_still_authorized(record):
             raise RuntimeError("preview handle is no longer authorized")
@@ -278,20 +343,17 @@ class PrototypePreviewBroker:
         if not handle_id or not token or exp <= now or not expected_actor_key:
             return None
 
-        with self._lock:
-            record = self._records.get(handle_id)
-            if not record or not record.is_active:
-                return None
-            if record.actor_key != expected_actor_key:
-                return None
-            expected_sig = self._build_signature(
-                preview_handle=handle_id,
-                actor_key=expected_actor_key,
-                exp=exp,
-            )
-            if not hmac.compare_digest(token, expected_sig):
-                return None
-            record_dict = self._record_to_dict(record)
+        record = await self._load_record(handle_id, require_active=True)
+        if not record or record.actor_key != expected_actor_key:
+            return None
+        expected_sig = self._build_signature(
+            preview_handle=handle_id,
+            actor_key=expected_actor_key,
+            exp=exp,
+        )
+        if not hmac.compare_digest(token, expected_sig):
+            return None
+        record_dict = self._record_to_dict(record)
         if not await self._is_grant_still_authorized(record):
             return None
         return record_dict
@@ -393,6 +455,30 @@ class PrototypePreviewBroker:
             hashlib.sha256,
         ).hexdigest()
 
+    async def _load_record(
+        self,
+        handle_id: str,
+        *,
+        require_active: bool,
+    ) -> PrototypePreviewHandleRecord | None:
+        persisted = await self._repo.get_preview_handle_record(handle_id)
+        if not persisted:
+            return None
+        record = self._record_from_dict(persisted)
+        self._sync_record_cache(record)
+        if require_active and not record.is_active:
+            return None
+        return record
+
+    @classmethod
+    def _sync_record_cache(cls, record: PrototypePreviewHandleRecord) -> None:
+        with cls._lock:
+            cls._records[record.handle_id] = record
+            if record.is_active:
+                cls._active_scope_handles[record.scope_id] = record.handle_id
+            elif cls._active_scope_handles.get(record.scope_id) == record.handle_id:
+                cls._active_scope_handles.pop(record.scope_id, None)
+
     @classmethod
     def _revoke_scope_locked(cls, *, scope_id: str, revoked_at: str) -> None:
         existing_handle = cls._active_scope_handles.get(scope_id)
@@ -405,6 +491,25 @@ class PrototypePreviewBroker:
         record.is_active = False
         record.revoked_at = revoked_at
         cls._active_scope_handles.pop(scope_id, None)
+
+    @staticmethod
+    def _record_from_dict(row: dict[str, Any]) -> PrototypePreviewHandleRecord:
+        return PrototypePreviewHandleRecord(
+            handle_id=str(row.get("preview_handle") or row.get("id") or ""),
+            preview_scope=PrototypePreviewScope(str(row["preview_scope"])),
+            scope_id=str(row["scope_id"]),
+            prototype_workspace_id=str(row["prototype_workspace_id"]),
+            prototype_session_id=(
+                str(row["prototype_session_id"]) if row.get("prototype_session_id") is not None else None
+            ),
+            actor_key=str(row["actor_key"]),
+            target_ref=str(row["target_ref"]),
+            runtime_policy_profile=str(row["runtime_policy_profile"]),
+            metadata=dict(row.get("metadata") or {}),
+            is_active=_coerce_bool(row.get("is_active")),
+            created_at=str(row["created_at"]) if row.get("created_at") is not None else None,
+            revoked_at=str(row["revoked_at"]) if row.get("revoked_at") is not None else None,
+        )
 
     @staticmethod
     def _record_to_dict(record: PrototypePreviewHandleRecord) -> dict[str, Any]:

@@ -506,6 +506,31 @@ class TestPrototypeWorkspaceEndpoints:
         )
         assert body["token"]
 
+    def test_preview_grant_renewal_recovers_after_broker_memory_clear(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, seed_snapshot = _seed_workspace(test_services, title="Preview renewal recovered")
+        preview_grant = _run(
+            test_services.preview_broker.issue_preview_grant(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id=seed_snapshot["snapshot_id"],
+                runtime_target_url="runtime://canonical/preview-renewal-recovered",
+            )
+        )
+        broker_cls = type(test_services.preview_broker)
+        broker_cls._records.clear()
+        broker_cls._active_scope_handles.clear()
+
+        renewed = client.post(
+            f"/api/v1/prototype-previews/{preview_grant['preview_handle']}/renew",
+            json={},
+        )
+
+        assert renewed.status_code == 200
+        assert renewed.json()["preview_handle"] == preview_grant["preview_handle"]
+
     def test_preview_grant_renewal_rejects_unknown_body_fields(
         self,
         client: TestClient,
