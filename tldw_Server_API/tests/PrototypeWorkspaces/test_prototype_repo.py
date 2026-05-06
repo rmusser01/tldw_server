@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -285,6 +286,31 @@ async def test_ensure_tables_uses_information_schema_for_postgres() -> None:
     table_query = pool.fetchall_calls[0][0]
     assert "information_schema.tables" in table_query
     assert "sqlite_master" not in table_query
+
+
+def test_row_to_dict_logs_conversion_failures(monkeypatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos import prototype_workspaces_repo as repo_module
+
+    class BrokenRow:
+        def keys(self) -> list[str]:
+            return ["id"]
+
+        def __getitem__(self, _key: str) -> str:
+            raise TypeError("broken row access")
+
+    warnings: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        repo_module,
+        "logger",
+        SimpleNamespace(debug=lambda *args: warnings.append(args)),
+        raising=False,
+    )
+
+    result = repo_module.PrototypeWorkspacesRepo._row_to_dict(BrokenRow())
+
+    assert result == {}
+    assert warnings
+    assert "Failed to convert prototype workspace row" in warnings[0][0]
 
 
 @pytest.mark.asyncio

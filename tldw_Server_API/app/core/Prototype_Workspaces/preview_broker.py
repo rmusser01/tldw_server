@@ -60,6 +60,10 @@ def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
     )
 
 
+class PrototypePreviewHandleNotFound(RuntimeError):
+    """Raised when a preview handle cannot be found or renewed."""
+
+
 class PrototypePreviewBroker:
     """Issue opaque preview handles and short-lived signed grants."""
 
@@ -233,12 +237,12 @@ class PrototypePreviewBroker:
     async def renew_preview_grant(self, preview_handle: str) -> dict[str, Any]:
         handle_id = str(preview_handle or "").strip()
         if not handle_id:
-            raise RuntimeError("preview handle is required")
+            raise PrototypePreviewHandleNotFound("preview handle is required")
 
         with self._lock:
             record = self._records.get(handle_id)
             if not record or not record.is_active:
-                raise RuntimeError("preview handle not found")
+                raise PrototypePreviewHandleNotFound("preview handle not found")
             record_dict = self._record_to_dict(record)
 
         if not await self._is_grant_still_authorized(record):

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ....core.AuthNZ.User_DB_Handling import User, get_request_user
 from ..schemas.prototype_workspace_schemas import (
     PrototypeCollaboratorSessionCreateRequest,
-    PrototypeWorkspaceDetailResponse,
     PrototypePreviewGrantResponse,
     PrototypePreviewRenewRequest,
     PrototypePromotionCreateRequest,
@@ -19,6 +18,7 @@ from ..schemas.prototype_workspace_schemas import (
     PrototypePromotionReviewResponse,
     PrototypeSessionJobResponse,
     PrototypeWorkspaceCreateRequest,
+    PrototypeWorkspaceDetailResponse,
     PrototypeWorkspaceResponse,
     PrototypeWorkspaceSessionCreateRequest,
 )
@@ -401,9 +401,10 @@ async def review_promotion_request(
 )
 async def renew_preview_grant(
     preview_handle: str,
-    _body: PrototypePreviewRenewRequest,
+    body: PrototypePreviewRenewRequest,
     user: User = Depends(get_request_user),
 ):
+    body.model_dump()
     preview_broker = await _maybe_await(_get_preview_broker())
     record = preview_broker.get_preview_record(preview_handle)
     if not record:
@@ -416,11 +417,15 @@ async def renew_preview_grant(
     if _coerce_user_id(user) != int(workspace["owner_user_id"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can renew prototype previews")
 
+    from tldw_Server_API.app.core.Prototype_Workspaces.preview_broker import (
+        PrototypePreviewHandleNotFound,
+    )
+
     try:
         renewed = await preview_broker.renew_preview_grant(preview_handle)
+    except PrototypePreviewHandleNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except RuntimeError as exc:
         detail = str(exc)
-        if "not found" in detail:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail) from exc
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from exc
     return PrototypePreviewGrantResponse.model_validate(renewed)

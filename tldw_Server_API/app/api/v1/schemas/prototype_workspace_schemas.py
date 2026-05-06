@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PrototypeWorkspaceCreateRequest(BaseModel):
@@ -142,7 +142,7 @@ class PrototypePromotionReviewResponse(BaseModel):
 
 
 class PrototypePreviewRenewRequest(BaseModel):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 class PrototypePreviewGrantResponse(BaseModel):

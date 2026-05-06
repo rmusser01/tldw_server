@@ -6,11 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 
 _VALID_CREATION_SOURCES = {"prompt", "template", "existing_workspace"}
 _VALID_ACTOR_TYPES = {"owner", "internal_collaborator", "external_collaborator"}
 _VALID_PROMOTION_STATUSES = {"pending", "approved", "rejected", "promoted", "stale"}
+_ROW_CONVERSION_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
 
 
 def _to_bool(value: Any) -> bool:
@@ -100,11 +103,13 @@ class PrototypeWorkspacesRepo:
             try:
                 keys = row.keys()
                 return {key: row[key] for key in keys}
-            except Exception:
+            except _ROW_CONVERSION_EXCEPTIONS as exc:
+                logger.debug("Failed to convert prototype workspace row by keys: {}", exc)
                 return {}
         try:
             return dict(row)
-        except Exception:
+        except _ROW_CONVERSION_EXCEPTIONS as exc:
+            logger.debug("Failed to convert prototype workspace row with dict(): {}", exc)
             return {}
 
     @staticmethod

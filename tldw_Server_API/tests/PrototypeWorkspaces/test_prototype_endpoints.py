@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from types import SimpleNamespace
 
 import pytest
@@ -504,6 +505,55 @@ class TestPrototypeWorkspaceEndpoints:
             f"/api/v1/prototype-previews/{preview_grant['preview_handle']}?"
         )
         assert body["token"]
+
+    def test_preview_grant_renewal_rejects_unknown_body_fields(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, seed_snapshot = _seed_workspace(test_services, title="Preview renewal strict body")
+        preview_grant = _run(
+            test_services.preview_broker.issue_preview_grant(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id=seed_snapshot["snapshot_id"],
+                runtime_target_url="runtime://canonical/preview-renewal-strict",
+            )
+        )
+
+        renewed = client.post(
+            f"/api/v1/prototype-previews/{preview_grant['preview_handle']}/renew",
+            json={"extend_seconds": 600},
+        )
+
+        assert renewed.status_code == 422
+
+    def test_preview_grant_renewal_maps_typed_missing_handle_to_404(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace, _seed_snapshot = _seed_workspace(test_services, title="Preview renewal typed error")
+        broker_module = importlib.import_module(
+            "tldw_Server_API.app.core.Prototype_Workspaces.preview_broker"
+        )
+        missing_handle_error = getattr(broker_module, "PrototypePreviewHandleNotFound", RuntimeError)
+
+        def fake_record(_preview_handle: str) -> dict[str, str]:
+            return {"prototype_workspace_id": workspace["id"]}
+
+        async def fake_renew(_preview_handle: str) -> dict[str, str]:
+            raise missing_handle_error("preview handle disappeared")
+
+        monkeypatch.setattr(test_services.preview_broker, "get_preview_record", fake_record)
+        monkeypatch.setattr(test_services.preview_broker, "renew_preview_grant", fake_renew)
+
+        renewed = client.post(
+            "/api/v1/prototype-previews/ph_raced_away/renew",
+            json={},
+        )
+
+        assert renewed.status_code == 404
 
     def test_revoked_preview_grant_renewal_returns_404(
         self,
