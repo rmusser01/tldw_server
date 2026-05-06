@@ -91,6 +91,11 @@ Task 1 accepted. Commits: 5800111ce, 1f65113f, 7204b7d. Focused Vitest
 passed from apps/packages/ui with 13/13 tests. Spec review approved.
 Code-quality review approved after scoped AntD owner and helper-function
 false-positive fixes.
+
+Task 2 accepted. Commits: 81848299c and 9d9d625db. Focused Vitest passed from
+apps/packages/ui with 25/25 tests. Spec review approved. Code-quality review
+approved after baseline identity validation was added and Ready canonical-label
+coverage was restored.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
