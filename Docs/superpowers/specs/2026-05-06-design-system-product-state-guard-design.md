@@ -166,27 +166,74 @@ output over exhaustive detection. False positives should become allowed
 mechanics or baseline entries with a migration note. False negatives can be
 covered as the migration proceeds.
 
+Product-state context detection:
+
+The guard should not flag every AntD `Alert`, `Tag`, `Badge`, `Empty`, `Spin`,
+or `Result` import by import name alone. It should flag a finding when the
+import is used in JSX and at least one product-state signal is present:
+
+- The file, component, or function name matches a product-state pattern such as
+  `*Status*`, `*Error*`, `*Empty*`, `*Loading*`, `*Recovery*`,
+  `*Connection*`, `*Unavailable*`, `*Readiness*`, or `*Permission*`.
+- Nearby literal text, props, or translation defaults include canonical state
+  labels or recovery actions such as unavailable, degraded, retrying, blocked,
+  setup, sign in, permission denied, retry, diagnostics, or reconnect.
+- The JSX usage sets status/severity props that communicate application state,
+  such as `type="error"`, `status="warning"`, `color="success"`, or
+  equivalent variant mappings.
+- The component renders primary recovery actions such as retry, open setup,
+  open settings, copy diagnostics, switch server, or reload.
+
+The same import should not be flagged when usage is clearly mechanical or
+metadata-only, such as table rendering, form validation plumbing, popover/modal
+mechanics, static domain tags, provider/model chips, or file-type/source-type
+labels.
+
 ## Allowed Roots And Adapters
 
 The guard scans `apps/packages/ui/src`, but canonical design-system
 implementation files are not legacy violations just because they implement the
 approved primitives.
 
-Default allowed roots:
+Default canonical roots:
 
-- `src/components/ui/**`
-- `src/design-system/**`
-- `src/assets/**`
+- `src/components/ui/primitives/Alert.tsx`
+- `src/components/ui/primitives/Badge.tsx`
+- `src/components/ui/feedback/EmptyState.tsx`
+- `src/components/ui/feedback/LoadingState.tsx`
+- `src/components/ui/layout/ModalFooter.tsx`
+- `src/components/ui/state/ActionGroup.tsx`
+- `src/components/ui/state/DiagnosticRow.tsx`
+- `src/components/ui/state/PermissionNotice.tsx`
+- `src/components/ui/state/RecoveryCallout.tsx`
+- `src/components/ui/state/SetupRequiredPanel.tsx`
+- `src/components/ui/state/StatePanel.tsx`
+- `src/components/ui/**/index.ts`
+- `src/design-system/states.ts`
+- `src/design-system/index.ts`
+- `src/assets/tailwind.css`
+- `src/assets/tailwind-shared.css`
 - `src/**/*.test.ts`
 - `src/**/*.test.tsx`
 - `src/**/__tests__/**`
 - `src/assets/locale/**`
 - `src/public/_locales/**`
 
-Allowed roots still need ordinary unit tests, but they should not be counted as
-product-state drift by this guard. For example, `LoadingState` can implement
-loading mechanics, and `StatePanel` can render canonical labels from the state
-registry.
+These files still need ordinary unit tests, but they should not be counted as
+legacy product-state drift by this guard. For example, `LoadingState` can
+implement loading mechanics, and `StatePanel` can render canonical labels from
+the state registry.
+
+New files under `src/components/ui/**` or `src/design-system/**` are not
+automatically exempt. They should either be added to the explicit canonical-root
+list as part of a design-system primitive change, or be scanned by the guard.
+This prevents a duplicate local product-state component from bypassing the
+guard just because it was placed under the canonical namespace.
+
+Canonical roots should also have a lightweight conformance rule: if a canonical
+file imports or renders an AntD product-state primitive, it should do so only to
+implement the approved tldw-owned primitive semantics, not to introduce a second
+parallel state language.
 
 Domain adapters may also be allowed when they are thin mappings into the design
 system. An adapter exception must be explicit, path-scoped, and include the
@@ -226,10 +273,16 @@ Baseline rules:
   enough to distinguish multiple matches.
 - Entries must include `id`, `path`, `rule`, `subject`, `state`, `owner`,
   `reason`, `replacement`, and `migrationQueue`.
+- Baseline entry `state` values must be `allowed_legacy_exception` or
+  `active_migration_target`. `blocked` is emitted for unbaselined findings and
+  must not be stored in the baseline.
 - Removed baseline entries must not silently reappear.
 - New baseline entries are allowed only when intentionally documenting a
   migration exception.
 - The report should print remaining baseline totals grouped by rule and queue.
+- Baseline entries that do not match any live finding should be reported as
+  stale. Stale entries exit zero in Stage A, but they should be removed in the
+  same cleanup PR that removes the underlying violation.
 
 This prevents a new violation in an already-baselined file from being hidden by
 the older baseline entry.
@@ -259,15 +312,18 @@ Proposed files:
 Data flow:
 
 1. Collect source files under `apps/packages/ui/src`.
-2. Skip allowed roots and explicit adapter roots for this guard.
+2. Apply canonical-root handling and explicit adapter exceptions for this guard.
 3. Parse each remaining file for imports, component/function names, JSX
    identifiers, and canonical state labels.
-4. Emit raw findings with rule id, path, subject, stable finding id, reason,
+4. Classify AntD product-state imports using the context signals above, not by
+   import name alone.
+5. Emit raw findings with rule id, path, subject, stable finding id, reason,
    and suggested replacement.
-5. Subtract matching baseline entries by finding id.
-6. Fail on new unbaselined findings.
-7. Print new findings, active migration targets, allowed legacy exceptions, and
-   remaining baseline totals.
+6. Subtract matching baseline entries by finding id.
+7. Mark baseline entries with no matching live finding as stale.
+8. Fail on new unbaselined findings.
+9. Print new findings, active migration targets, allowed legacy exceptions,
+   stale baseline entries, and remaining baseline totals.
 
 The implementation should use structured parsing where practical for imports
 and JSX identifiers. Limited text checks are acceptable for hardcoded canonical
@@ -303,6 +359,7 @@ Baseline exceptions: 18
   local-recovery-banner: 5
   local-empty-state: 4
   local-loading-state: 2
+Stale baseline entries: 0
 ```
 
 ## Testing Strategy
@@ -317,6 +374,8 @@ Focused tests:
   adapter, test, and localization contexts.
 - AntD `Table`, `Modal`, `Tooltip`, `Popover`, `Drawer`, `Card`,
   `Descriptions`, `Select`, `Switch`, and inputs are not flagged as mechanics.
+- AntD `Alert`, `Tag`, `Badge`, `Empty`, `Spin`, and `Result` imports are not
+  flagged unless JSX usage also has product-state context signals.
 - Metadata tags for provider, model, source type, file type, and user-authored
   tags are not flagged as product-state chips.
 - A known violation passes only when a baseline entry matches its stable
@@ -325,8 +384,10 @@ Focused tests:
   its stable finding id does not match the baseline.
 - `active_migration_target` entries exit zero but are grouped separately from
   passive legacy exceptions.
-- Canonical design-system roots such as `src/components/ui/**` and
-  `src/design-system/**` are not reported as legacy drift.
+- A baseline entry with no matching live finding is reported as stale.
+- Explicit canonical design-system files are not reported as legacy drift, but
+  new unlisted files under `src/components/ui/**` or `src/design-system/**` are
+  still scanned or must be added intentionally to the canonical-root list.
 - Report output includes path, rule, reason, and replacement.
 
 Real scan smoke:

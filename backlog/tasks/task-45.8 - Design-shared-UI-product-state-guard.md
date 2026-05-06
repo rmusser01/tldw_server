@@ -53,6 +53,14 @@ Verification: spec review loop approved on the third pass. git diff --check
 passed. Line-length scan passed for the spec and task file after wrapping the
 Backlog notes. Runtime tests and Bandit were skipped because this task only
 adds documentation and Backlog metadata.
+
+Post-review design polish addressed three planning issues before implementation
+planning: narrowed canonical-root exemptions to explicit known design-system
+files, defined concrete product-state context signals for AntD state imports,
+and added stale-baseline reporting so removed violations do not leave dead debt.
+The follow-up spec review approved those changes; it added one advisory schema
+clarification, now applied, that baseline entry states should be limited to
+allowed_legacy_exception and active_migration_target.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -69,6 +77,11 @@ advisory implementation-planning recommendations remaining.
 Verification is documentation-focused: spec review approved, git diff --check
 passed, and no executable code paths were touched. Runtime tests and Bandit are
 not applicable for this docs-only design task.
+
+Follow-up review fixes were applied to clarify canonical-root conformance,
+product-state context detection, and stale-baseline reporting before the
+implementation plan.
+The refreshed spec review approved the design after those edits.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
