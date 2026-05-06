@@ -377,11 +377,12 @@ Response (scaffold example):
 ```
 
 `status_reason_code` is additive and derived from existing status data. Clients
-should use it for stable grouping of queued, starting, running, completed,
-limit-applied, nonzero-exit, policy-failed, runtime-unavailable, timeout,
-canceled, killed, queue-expired, runtime-error, and unknown outcomes. Raw
-`phase`, `message`, and `exit_code` remain available for display and operator
-diagnostics.
+should use the exact returned literals for stable grouping: `queued`,
+`starting`, `running`, `completed`, `limits_applied`, `nonzero_exit`,
+`policy_failed`, `runtime_unavailable`, `startup_timeout`,
+`execution_timeout`, `canceled_by_user`, `killed`, `queue_ttl_expired`,
+`runtime_error`, and `unknown`. Raw `phase`, `message`, and `exit_code` remain
+available for display and operator diagnostics.
 
 ## Stream logs (WebSocket)
 WS `/api/v1/sandbox/runs/{id}/stream`
