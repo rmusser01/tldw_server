@@ -91,6 +91,12 @@ const RUNTIME_WARNING_LABELS: Record<string, string> = {
   weaker_than_vm_isolation: "Weaker than VM isolation"
 }
 
+type SandboxDiagnosticsErrorState = {
+  title: string
+  description: string
+  alertType: "warning" | "error"
+}
+
 const MonitoringDashboardPage: React.FC = () => {
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
@@ -105,7 +111,7 @@ const MonitoringDashboardPage: React.FC = () => {
   const [securityLoading, setSecurityLoading] = useState(false)
   const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
   const [sandboxDiagnosticsLoading, setSandboxDiagnosticsLoading] = useState(false)
-  const [sandboxDiagnosticsError, setSandboxDiagnosticsError] = useState<string | null>(null)
+  const [sandboxDiagnosticsError, setSandboxDiagnosticsError] = useState<SandboxDiagnosticsErrorState | null>(null)
 
   // Alert rules state
   const [alertRules, setAlertRules] = useState<any[]>([])
@@ -166,10 +172,21 @@ const MonitoringDashboardPage: React.FC = () => {
       setSandboxDiagnostics(diagnostics)
       setSandboxDiagnosticsError(null)
     } catch (err: any) {
+      const guardState = deriveAdminGuardFromError(err)
+      const isForbidden = guardState === "forbidden"
       setSandboxDiagnostics(null)
-      setSandboxDiagnosticsError(
-        sanitizeAdminErrorMessage(err, "Sandbox runtime diagnostics are not available.")
-      )
+      setSandboxDiagnosticsError({
+        title: isForbidden
+          ? "Sandbox diagnostics access denied"
+          : "Sandbox diagnostics unavailable",
+        description: sanitizeAdminErrorMessage(
+          err,
+          isForbidden
+            ? "You don't have permission to view sandbox runtime diagnostics."
+            : "Sandbox runtime diagnostics are not available."
+        ),
+        alertType: isForbidden ? "error" : "warning"
+      })
     } finally {
       setSandboxDiagnosticsLoading(false)
     }
@@ -550,9 +567,9 @@ const MonitoringDashboardPage: React.FC = () => {
         <Space orientation="vertical" style={{ width: "100%" }} size="middle">
           {sandboxDiagnosticsError && (
             <Alert
-              type="warning"
-              title="Sandbox diagnostics unavailable"
-              description={sandboxDiagnosticsError}
+              type={sandboxDiagnosticsError.alertType}
+              title={sandboxDiagnosticsError.title}
+              description={sandboxDiagnosticsError.description}
               showIcon
             />
           )}

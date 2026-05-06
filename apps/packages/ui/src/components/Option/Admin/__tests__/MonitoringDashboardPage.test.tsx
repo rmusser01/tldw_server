@@ -183,6 +183,24 @@ describe("MonitoringDashboardPage", () => {
     expect(screen.getByText(/not VM-grade isolation/i)).toBeTruthy()
   })
 
+  it("distinguishes forbidden sandbox diagnostics from unavailable diagnostics", async () => {
+    mocks.getSandboxRuntimeDiagnostics.mockRejectedValue(
+      Object.assign(
+        new Error("Request failed: 403 (GET /api/v1/sandbox/admin/runtime-diagnostics)"),
+        { status: 403 }
+      )
+    )
+
+    render(<MonitoringDashboardPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Sandbox diagnostics access denied")).toBeTruthy()
+    })
+    expect(screen.queryByText("Sandbox diagnostics unavailable")).toBeNull()
+    expect(screen.getByText(/Request failed: 403/)).toBeTruthy()
+    expect(screen.queryByText(/\/api\/v1\/sandbox\/admin\/runtime-diagnostics/)).toBeNull()
+  })
+
   describe("MON-001: alert assignment uses correct user ID and field name", () => {
     it("fetches current user profile on mount", async () => {
       render(<MonitoringDashboardPage />)
