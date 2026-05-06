@@ -7,6 +7,14 @@ from dataclasses import dataclass
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 
 
+class OptionalRouterMissingModule(ImportError):
+    """Raised when the target optional router module itself is unavailable."""
+
+
+class OptionalRouterMissingAttribute(AttributeError):
+    """Raised when an optional router module is missing the configured router attr."""
+
+
 @dataclass(frozen=True)
 class ImportedRouterSpec:
     """RouterSpec metadata for a router imported inside a router group."""
@@ -19,7 +27,10 @@ class ImportedRouterSpec:
     default_stable: bool = True
     attr_name: str = "router"
     skip_context: str = ""
-    skip_exceptions: tuple[type[Exception], ...] = (ImportError, AttributeError)
+    skip_exceptions: tuple[type[Exception], ...] = (
+        OptionalRouterMissingModule,
+        OptionalRouterMissingAttribute,
+    )
 
 
 def append_imported_router_spec(
@@ -28,11 +39,18 @@ def append_imported_router_spec(
 ) -> None:
     """Append an imported router spec without importing until registration."""
     def _router_factory():
-        module = importlib.import_module(definition.import_path)
+        try:
+            module = importlib.import_module(definition.import_path)
+        except ModuleNotFoundError as e:
+            if e.name == definition.import_path:
+                raise OptionalRouterMissingModule(str(e)) from e
+            raise
         try:
             return getattr(module, definition.attr_name)
         except AttributeError as e:
-            raise AttributeError(f"{definition.import_path}.{definition.attr_name}") from e
+            raise OptionalRouterMissingAttribute(
+                f"{definition.import_path}.{definition.attr_name}"
+            ) from e
 
     specs.append(
         RouterSpec(

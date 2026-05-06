@@ -534,7 +534,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/persona",
             tags=("persona",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.archetype_endpoints",
@@ -542,7 +541,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/persona/archetypes",
             tags=("persona-archetypes",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes",
@@ -550,7 +548,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/notes",
             tags=("notes",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
     ):
         append_imported_router_spec(specs, persona_notes_spec)
