@@ -62,7 +62,16 @@ export const PublicShare: React.FC<PublicShareProps> = ({ token }) => {
   const isPrototypeWorkspace = data.resource_type === "prototype_workspace"
 
   const handlePrototypeContinue = () => {
-    navigate(`/prototype-workspaces?share_token=${encodeURIComponent(token)}`)
+    const target = `/prototype-workspaces?share_token=${encodeURIComponent(token)}`
+    if (data.is_password_protected && passwordVerified && password) {
+      navigate(target, {
+        state: {
+          prototypeSharePassword: password
+        }
+      })
+      return
+    }
+    navigate(target)
   }
 
   return (

@@ -35,6 +35,19 @@ const buildWrapper = () => {
   )
 }
 
+const buildWrapperWithClient = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false }
+    }
+  })
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+  return { queryClient, wrapper }
+}
+
 describe("usePrototypeWorkspaces", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -144,6 +157,23 @@ describe("usePrototypeWorkspaces", () => {
     expect(fetchWithTldwAuthMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/api/v1/prototype-workspaces/pw_1"
     )
+  })
+
+  it("uses a semantic null detail key while the workspace id is unavailable", () => {
+    const { queryClient, wrapper } = buildWrapperWithClient()
+
+    renderHook(() => usePrototypeWorkspace(null), { wrapper })
+
+    expect(fetchWithTldwAuthMock).not.toHaveBeenCalled()
+    expect(queryClient.getQueryCache().getAll().map((query) => query.queryKey)).toContainEqual([
+      "prototype-workspaces",
+      "workspaces",
+      "detail",
+      null
+    ])
+    expect(queryClient.getQueryCache().find({
+      queryKey: ["prototype-workspaces", "workspaces", "detail", "unknown"]
+    })).toBeUndefined()
   })
 
   it("creates an owner branch session through the authenticated tldw fetch helper", async () => {

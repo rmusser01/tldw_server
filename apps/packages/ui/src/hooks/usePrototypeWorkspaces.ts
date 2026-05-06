@@ -20,11 +20,11 @@ import {
 export const prototypeWorkspaceQueryKeys = {
   all: () => ["prototype-workspaces"] as const,
   workspaces: () => [...prototypeWorkspaceQueryKeys.all(), "workspaces"] as const,
-  workspace: (prototypeWorkspaceId: string) =>
+  workspace: (prototypeWorkspaceId: string | null | undefined) =>
     [
       ...prototypeWorkspaceQueryKeys.workspaces(),
       "detail",
-      String(prototypeWorkspaceId)
+      prototypeWorkspaceId ?? null
     ] as const,
   sessions: (prototypeWorkspaceId: string) =>
     [
@@ -57,10 +57,9 @@ export const useCreatePrototypeWorkspace = () => {
 }
 
 export const usePrototypeWorkspace = (prototypeWorkspaceId: string | null | undefined) => {
+  const queryWorkspaceId = prototypeWorkspaceId ?? null
   return useQuery<PrototypeWorkspaceDetail, Error>({
-    queryKey: prototypeWorkspaceQueryKeys.workspace(
-      prototypeWorkspaceId ?? "unknown"
-    ),
+    queryKey: prototypeWorkspaceQueryKeys.workspace(queryWorkspaceId),
     queryFn: () => getPrototypeWorkspaceRequest(String(prototypeWorkspaceId)),
     enabled: Boolean(prototypeWorkspaceId)
   })

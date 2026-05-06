@@ -9,6 +9,10 @@ const searchParamsState = vi.hoisted(() => ({
   value: new URLSearchParams()
 }))
 
+const locationState = vi.hoisted(() => ({
+  value: null as unknown
+}))
+
 const hookState = vi.hoisted(() => ({
   usePrototypeWorkspace: vi.fn()
 }))
@@ -19,6 +23,7 @@ vi.mock("react-router-dom", async () => {
   )
   return {
     ...actual,
+    useLocation: () => ({ state: locationState.value }),
     useSearchParams: () => [searchParamsState.value, vi.fn()]
   }
 })
@@ -44,15 +49,17 @@ vi.mock("../PrototypeWorkspaceSessionView", () => ({
   PrototypeWorkspaceSessionView: ({
     prototypeWorkspaceId,
     sessionToken,
-    shareToken
+    shareToken,
+    initialPassword
   }: {
     prototypeWorkspaceId?: string | null
     sessionToken?: string | null
     shareToken?: string | null
+    initialPassword?: string | null
   }) => (
     <div data-testid="prototype-workspace-session-view">
       Workspace:{prototypeWorkspaceId ?? "none"} Session:{sessionToken ?? "none"}{" "}
-      Share:{shareToken ?? "none"}
+      Share:{shareToken ?? "none"} Password:{initialPassword ?? "none"}
     </div>
   )
 }))
@@ -60,6 +67,7 @@ vi.mock("../PrototypeWorkspaceSessionView", () => ({
 describe("PrototypeWorkspacePage", () => {
   beforeEach(() => {
     searchParamsState.value = new URLSearchParams()
+    locationState.value = null
     usePrototypeWorkspaceStore.getState().reset()
     hookState.usePrototypeWorkspace.mockReturnValue({
       data: null
@@ -140,5 +148,20 @@ describe("PrototypeWorkspacePage", () => {
     expect(
       screen.getByTestId("prototype-workspace-session-view")
     ).toHaveTextContent("Workspace:none Session:none Share:share-token-1")
+  })
+
+  it("passes prototype share passwords from navigation state into collaborator entry", () => {
+    searchParamsState.value = new URLSearchParams({
+      share_token: "share-token-1"
+    })
+    locationState.value = {
+      prototypeSharePassword: "demo-pass"
+    }
+
+    render(<PrototypeWorkspacePage />)
+
+    expect(
+      screen.getByTestId("prototype-workspace-session-view")
+    ).toHaveTextContent("Password:demo-pass")
   })
 })

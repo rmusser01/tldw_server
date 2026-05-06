@@ -12,6 +12,7 @@ interface PrototypeWorkspaceSessionViewProps {
   prototypeWorkspaceId?: string | null
   sessionToken?: string | null
   shareToken?: string | null
+  initialPassword?: string | null
   workspace?: PrototypeWorkspaceDetail | null
 }
 
@@ -19,6 +20,7 @@ export const PrototypeWorkspaceSessionView = ({
   prototypeWorkspaceId,
   sessionToken,
   shareToken,
+  initialPassword,
   workspace
 }: PrototypeWorkspaceSessionViewProps) => {
   const activeWorkspaceId = usePrototypeWorkspaceStore(
@@ -44,7 +46,7 @@ export const PrototypeWorkspaceSessionView = ({
   )
 
   const [displayName, setDisplayName] = useState("Stakeholder")
-  const [password, setPassword] = useState("")
+  const [password, setPassword] = useState(initialPassword ?? "")
   const [candidateSnapshotId, setCandidateSnapshotId] = useState("")
   const [requestReason, setRequestReason] = useState("")
 

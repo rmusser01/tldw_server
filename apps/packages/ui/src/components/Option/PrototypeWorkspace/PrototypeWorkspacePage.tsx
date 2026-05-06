@@ -1,12 +1,17 @@
 import { useEffect } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useLocation, useSearchParams } from "react-router-dom"
 import { usePrototypeWorkspace } from "@/hooks/usePrototypeWorkspaces"
 import { usePrototypeWorkspaceStore } from "@/store/prototype-workspace"
 import { PrototypeWorkspaceOwnerView } from "./PrototypeWorkspaceOwnerView"
 import { PrototypeWorkspaceSessionView } from "./PrototypeWorkspaceSessionView"
 
+interface PrototypeWorkspaceLocationState {
+  prototypeSharePassword?: unknown
+}
+
 export const PrototypeWorkspacePage = () => {
   const [searchParams] = useSearchParams()
+  const location = useLocation()
 
   const activeWorkspaceId = usePrototypeWorkspaceStore(
     (state) => state.activeWorkspaceId
@@ -21,6 +26,11 @@ export const PrototypeWorkspacePage = () => {
   const workspaceId = searchParams.get("workspace")
   const sessionToken = searchParams.get("session_token")
   const shareToken = searchParams.get("share_token")
+  const navigationState = location.state as PrototypeWorkspaceLocationState | null
+  const initialSharePassword =
+    typeof navigationState?.prototypeSharePassword === "string"
+      ? navigationState.prototypeSharePassword
+      : null
 
   useEffect(() => {
     if (workspaceId) {
@@ -52,6 +62,7 @@ export const PrototypeWorkspacePage = () => {
         prototypeWorkspaceId={resolvedWorkspaceId}
         sessionToken={sessionToken}
         shareToken={shareToken}
+        initialPassword={initialSharePassword}
         workspace={workspaceDetail.data}
       />
     )

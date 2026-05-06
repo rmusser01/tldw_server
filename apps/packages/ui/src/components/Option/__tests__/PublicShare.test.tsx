@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PublicShare } from "../PublicShare"
@@ -66,6 +66,53 @@ describe("PublicShare", () => {
 
     expect(routerMocks.navigate).toHaveBeenCalledWith(
       "/prototype-workspaces?share_token=prototype-token"
+    )
+  })
+
+  it("passes a verified prototype share password through navigation state", async () => {
+    const verifyPassword = vi.fn().mockResolvedValue({ verified: true })
+    hookMocks.usePublicPreview.mockReturnValue({
+      data: {
+        resource_type: "prototype_workspace",
+        resource_name: "Sales dashboard",
+        resource_description: "Stakeholder prototype",
+        is_password_protected: true,
+        access_level: "full_edit",
+        allow_clone: false
+      },
+      isLoading: false,
+      error: null
+    })
+    hookMocks.useVerifySharePassword.mockReturnValue({
+      isPending: false,
+      mutateAsync: verifyPassword
+    })
+
+    render(<PublicShare token="prototype-token" />)
+
+    fireEvent.change(screen.getByPlaceholderText("Enter password"), {
+      target: { value: "demo-pass" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Verify Password" }))
+
+    await waitFor(() => {
+      expect(verifyPassword).toHaveBeenCalledWith({
+        token: "prototype-token",
+        password: "demo-pass"
+      })
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Prototype Collaboration" })
+    )
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith(
+      "/prototype-workspaces?share_token=prototype-token",
+      {
+        state: {
+          prototypeSharePassword: "demo-pass"
+        }
+      }
     )
   })
 })
