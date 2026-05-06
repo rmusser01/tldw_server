@@ -6,6 +6,12 @@ Feature: NotebookLM-Style Three-Pane Research Interface
 Location: apps/packages/ui/src/components/Option/WorkspacePlayground/
 Status: Planning
 
+Current first-slice decision: `WorkspacePlayground` is the canonical shell for
+the roadmap first slice, while `ChatWorkspace` and `DocumentWorkspace` remain
+specialized routes. See
+`Docs/Design/Workspace_Canonical_Model_Decision_2026_05.md`. Server sync should
+use the existing `/api/v1/workspaces` family first.
+
 ---
 ## 1. Executive Summary
 

@@ -6,6 +6,13 @@ The Workspace Playground persistence path moved from a single monolithic `localS
 
 Primary implementation: `apps/packages/ui/src/store/workspace.ts`.
 
+Current first-slice decision: `WorkspacePlayground` is the canonical shell for
+the roadmap first slice, with `ChatWorkspace` and `DocumentWorkspace` kept as
+specialized routes during this slice. See
+`Docs/Design/Workspace_Canonical_Model_Decision_2026_05.md`. Server sync should
+use the existing `/api/v1/workspaces` family first, with this browser-local store
+remaining the responsive cache and offline-friendly UI state.
+
 ## Storage Topology
 
 `WORKSPACE_STORAGE_KEY` is `tldw-workspace`. In split mode this key is the index key, and per-workspace payloads are stored separately.
