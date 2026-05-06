@@ -84,6 +84,15 @@ Execution notes:
   unless Python files are touched.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Task 1 accepted. Commits: 5800111ce, 1f65113f, 7204b7d. Focused Vitest
+passed from apps/packages/ui with 13/13 tests. Spec review approved.
+Code-quality review approved after scoped AntD owner and helper-function
+false-positive fixes.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
