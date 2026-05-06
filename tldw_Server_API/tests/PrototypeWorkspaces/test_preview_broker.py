@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -23,6 +24,23 @@ def preview_broker(repo):
     module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
     broker_cls = _load_attr(module, "PrototypePreviewBroker", "PrototypeWorkspacePreviewBroker")
     return broker_cls(repo=repo)
+
+
+def test_preview_broker_requires_configured_stable_signing_secret(repo, monkeypatch):
+    module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
+    broker_cls = _load_attr(module, "PrototypePreviewBroker", "PrototypeWorkspacePreviewBroker")
+    monkeypatch.delenv("PROTOTYPE_PREVIEW_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SINGLE_USER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: SimpleNamespace(JWT_SECRET_KEY=None, SINGLE_USER_API_KEY=None),
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="stable signing secret"):
+        broker_cls(repo=repo)
 
 
 async def _seed_preview_scope(repo, prototype_db):

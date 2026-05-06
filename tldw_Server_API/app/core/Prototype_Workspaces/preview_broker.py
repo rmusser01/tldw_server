@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-import secrets
 import threading
 import time
 import uuid
@@ -14,6 +13,7 @@ from typing import Any, ClassVar
 from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 from .models import (
     PrototypePreviewHandleRecord,
@@ -22,8 +22,6 @@ from .models import (
     actor_key_for_session,
     preview_scope_id,
 )
-
-_FALLBACK_SIGNING_SECRET = secrets.token_urlsafe(32)
 
 
 def _utc_now() -> datetime:
@@ -40,6 +38,26 @@ def _normalize_iso8601(value: Any) -> datetime | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
+    settings = get_settings()
+    candidates = (
+        signing_secret,
+        os.getenv("PROTOTYPE_PREVIEW_SIGNING_SECRET"),
+        getattr(settings, "JWT_SECRET_KEY", None),
+        getattr(settings, "SINGLE_USER_API_KEY", None),
+        os.getenv("JWT_SECRET_KEY"),
+        os.getenv("SINGLE_USER_API_KEY"),
+    )
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    raise RuntimeError(
+        "Prototype preview grants require a stable signing secret; set "
+        "PROTOTYPE_PREVIEW_SIGNING_SECRET, JWT_SECRET_KEY, or SINGLE_USER_API_KEY"
+    )
 
 
 class PrototypePreviewBroker:
@@ -60,13 +78,7 @@ class PrototypePreviewBroker:
         self._repo = repo
         self._base_preview_path = str(base_preview_path or "/api/v1/prototype-previews").rstrip("/")
         self._grant_ttl_seconds = max(int(grant_ttl_seconds), 30)
-        self._signing_secret = (
-            signing_secret
-            or os.getenv("PROTOTYPE_PREVIEW_SIGNING_SECRET")
-            or os.getenv("JWT_SECRET_KEY")
-            or os.getenv("SINGLE_USER_API_KEY")
-            or _FALLBACK_SIGNING_SECRET
-        )
+        self._signing_secret = _resolve_stable_signing_secret(signing_secret)
 
     async def issue_preview_grant(
         self,
@@ -335,9 +347,7 @@ class PrototypePreviewBroker:
         if actor.get("is_revoked"):
             return False
         expires_at = _normalize_iso8601(actor.get("expires_at"))
-        if expires_at and expires_at <= _utc_now():
-            return False
-        return True
+        return not (expires_at and expires_at <= _utc_now())
 
     async def _resolve_runtime_policy_profile(
         self,
@@ -372,9 +382,9 @@ class PrototypePreviewBroker:
         return token, exp
 
     def _build_signature(self, *, preview_handle: str, actor_key: str, exp: int) -> str:
-        msg = f"{preview_handle}:{actor_key}:{int(exp)}".encode("utf-8")
+        msg = f"{preview_handle}:{actor_key}:{int(exp)}".encode()
         return hmac.new(
-            self._signing_secret.encode("utf-8"),
+            self._signing_secret.encode(),
             msg,
             hashlib.sha256,
         ).hexdigest()

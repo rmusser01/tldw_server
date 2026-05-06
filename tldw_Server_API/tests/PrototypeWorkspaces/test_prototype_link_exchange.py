@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -14,8 +15,8 @@ from tldw_Server_API.app.api.v1.endpoints.sharing import router
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_001_create_users_table,
     migration_077_create_sharing_tables,
-    migration_087_expand_share_tokens_resource_type_for_prototypes,
     migration_086_create_prototype_workspace_tables,
+    migration_087_expand_share_tokens_resource_type_for_prototypes,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
@@ -297,6 +298,24 @@ def test_app(monkeypatch, sharing_repo, prototype_repo, token_service):
 @pytest.fixture
 def client(test_app):
     return TestClient(test_app)
+
+
+def test_access_service_requires_configured_stable_signing_secret(
+    prototype_repo,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Prototype_Workspaces import access
+
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SINGLE_USER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        access,
+        "get_settings",
+        lambda: SimpleNamespace(JWT_SECRET_KEY=None, SINGLE_USER_API_KEY=None),
+    )
+
+    with pytest.raises(RuntimeError, match="stable signing secret"):
+        access.PrototypeAccessService(prototype_repo)
 
 
 def test_public_prototype_exchange_creates_shared_actor(client, prototype_share_token):

@@ -20,7 +20,6 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 PROTOTYPE_SHARED_ACTOR_COOKIE = "prototype_shared_actor"
 DEFAULT_EXTERNAL_RUNTIME_POLICY_PROFILE = "locked_collab"
 DEFAULT_EXTERNAL_DISPLAY_NAME = "External Collaborator"
-_FALLBACK_SIGNING_SECRET = secrets.token_urlsafe(32)
 
 
 class PrototypeAccessError(RuntimeError):
@@ -41,6 +40,25 @@ class PrototypeExternalAccessContext:
     is_resume: bool
 
 
+def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
+    settings = get_settings()
+    candidates = (
+        signing_secret,
+        getattr(settings, "JWT_SECRET_KEY", None),
+        getattr(settings, "SINGLE_USER_API_KEY", None),
+        os.getenv("JWT_SECRET_KEY"),
+        os.getenv("SINGLE_USER_API_KEY"),
+    )
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    raise RuntimeError(
+        "Prototype access tokens require a stable signing secret; set "
+        "JWT_SECRET_KEY or SINGLE_USER_API_KEY"
+    )
+
+
 class PrototypeAccessService:
     """Create or resume external prototype collaborators for private-link exchange."""
 
@@ -53,18 +71,7 @@ class PrototypeAccessService:
     ) -> None:
         self._repo = repo
         self._session_ttl_seconds = max(int(session_ttl_seconds), 60)
-        settings = get_settings()
-        configured_signing_secret = (
-            getattr(settings, "JWT_SECRET_KEY", None)
-            or getattr(settings, "SINGLE_USER_API_KEY", None)
-        )
-        self._signing_secret = (
-            signing_secret
-            or configured_signing_secret
-            or os.getenv("JWT_SECRET_KEY")
-            or os.getenv("SINGLE_USER_API_KEY")
-            or _FALLBACK_SIGNING_SECRET
-        )
+        self._signing_secret = _resolve_stable_signing_secret(signing_secret)
 
     async def exchange_external_collaborator(
         self,
@@ -377,9 +384,7 @@ def _is_active_resume_candidate(
     if actor.get("is_revoked") or actor.get("revoked_at"):
         return False
     expires_at = _parse_optional_ts(actor.get("expires_at"))
-    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
-        return False
-    return True
+    return expires_at is None or expires_at > datetime.now(timezone.utc)
 
 
 def _b64url(raw: bytes) -> str:
