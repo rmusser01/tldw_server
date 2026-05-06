@@ -9,8 +9,12 @@ export type EmptyStateSize = "sm" | "md" | "lg";
 export interface EmptyStateAction {
   /** Button label */
   label: React.ReactNode;
+  /** Optional button icon */
+  icon?: React.ReactNode;
   /** Native title text for compatibility with legacy wrappers */
   title?: string;
+  /** Test ID for compatibility wrappers */
+  "data-testid"?: string;
   /** Click handler */
   onClick?: () => void;
   /** Show loading spinner */
@@ -257,6 +261,8 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
                   loading={primaryAction.loading}
                   disabled={primaryAction.disabled}
                   title={primaryAction.title}
+                  icon={primaryAction.icon}
+                  data-testid={primaryAction["data-testid"]}
                 >
                   {primaryAction.label}
                 </Button>
@@ -269,6 +275,8 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
                   loading={secondaryAction.loading}
                   disabled={secondaryAction.disabled}
                   title={secondaryAction.title}
+                  icon={secondaryAction.icon}
+                  data-testid={secondaryAction["data-testid"]}
                 >
                   {secondaryAction.label}
                 </Button>
