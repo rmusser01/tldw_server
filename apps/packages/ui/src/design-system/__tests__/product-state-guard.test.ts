@@ -192,6 +192,36 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("does not let sibling component names turn generic AntD JSX into product-state", () => {
+    const source = `
+      import { Alert } from "antd"
+
+      export function GenericNotice() {
+        return <Alert message="Heads up" />
+      }
+
+      export function HealthStatus() {
+        return <Alert message="Server unavailable" />
+      }
+    `
+    const findings = analyze(
+      "src/components/Option/Settings/HealthPanel.tsx",
+      source
+    )
+    const alertFindings = findings.filter(
+      (finding) =>
+        finding.rule === "antd-product-state-import" &&
+        finding.subject === "Alert"
+    )
+    const productStateAlertLine =
+      source
+        .split("\n")
+        .findIndex((line) => line.includes('message="Server unavailable"')) + 1
+
+    expect(alertFindings).toHaveLength(1)
+    expect(alertFindings[0].line).toBe(productStateAlertLine)
+  })
+
   it("does not exempt new files merely because they live under canonical namespaces", () => {
     const findings = analyze(
       "src/components/ui/feedback/ProjectOfflineBanner.tsx",
@@ -207,6 +237,40 @@ describe("design-system product-state guard rules", () => {
         rule: "local-recovery-banner",
         subject: "ProjectOfflineBanner"
       })
+    )
+  })
+
+  it("does not flag helper functions with loading-like names as local state wrappers", () => {
+    const findings = analyze(
+      "src/components/Common/EpubHelpers.tsx",
+      `
+        function handleEpubLoading() {
+          return true
+        }
+
+        const useUnifiedLoading = () => true
+
+        export function EpubMetadata() {
+          return <span>EPUB</span>
+        }
+      `
+    )
+
+    expect(findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-loading-state",
+          subject: "handleEpubLoading"
+        })
+      ])
+    )
+    expect(findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-loading-state",
+          subject: "useUnifiedLoading"
+        })
+      ])
     )
   })
 

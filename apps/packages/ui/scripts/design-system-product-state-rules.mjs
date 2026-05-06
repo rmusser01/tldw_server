@@ -118,16 +118,18 @@ export function analyzeSource({ relativePath, source }) {
 
   const findings = []
   const localAntdNames = collectAntdProductStateImports(sourceFile)
-  const componentNames = collectComponentNames(sourceFile)
   const fileSubject = subjectFromPath(normalizedPath)
+  const localComponentSubjects = collectLocalComponentSubjects(
+    sourceFile,
+    fileSubject
+  )
 
-  for (const subject of new Set([fileSubject, ...componentNames])) {
+  for (const subject of localComponentSubjects) {
     pushLocalComponentFinding(findings, normalizedPath, subject)
   }
 
   pushCanonicalLabelFindings(findings, normalizedPath, sourceFile)
   pushAntdFindings(findings, normalizedPath, sourceFile, localAntdNames, {
-    componentNames,
     fileSubject
   })
 
@@ -176,17 +178,24 @@ function collectAntdProductStateImports(sourceFile) {
   return localNames
 }
 
-function collectComponentNames(sourceFile) {
-  const names = new Set()
+function collectLocalComponentSubjects(sourceFile, fileSubject) {
+  const subjects = new Set([fileSubject])
 
   walk(sourceFile, (node) => {
     if (ts.isFunctionDeclaration(node) && node.name) {
-      names.add(node.name.text)
+      if (
+        isLikelyComponentName(node.name.text) &&
+        (functionLikeReturnsJsx(node) || hasExportModifier(node))
+      ) {
+        subjects.add(node.name.text)
+      }
       return
     }
 
     if (ts.isClassDeclaration(node) && node.name) {
-      names.add(node.name.text)
+      if (isLikelyComponentName(node.name.text)) {
+        subjects.add(node.name.text)
+      }
       return
     }
 
@@ -199,11 +208,17 @@ function collectComponentNames(sourceFile) {
       (ts.isArrowFunction(node.initializer) ||
         ts.isFunctionExpression(node.initializer))
     ) {
-      names.add(node.name.text)
+      if (
+        isLikelyComponentName(node.name.text) &&
+        (functionLikeReturnsJsx(node.initializer) ||
+          hasExportModifier(node.parent?.parent))
+      ) {
+        subjects.add(node.name.text)
+      }
     }
   })
 
-  return names
+  return subjects
 }
 
 function pushLocalComponentFinding(findings, relativePath, subject) {
@@ -298,7 +313,13 @@ function pushAntdFindings(
     }
 
     const useContext = collectJsxUseContext(node, sourceFile)
-    if (!isProductStateAntdUse(importedName, useContext, context)) {
+    const ownerName = findNearestJsxOwnerName(node)
+    if (
+      !isProductStateAntdUse(importedName, useContext, {
+        ownerName,
+        fileSubject: context.fileSubject
+      })
+    ) {
       return
     }
 
@@ -326,9 +347,8 @@ function isProductStateAntdUse(importedName, useContext, context) {
     return false
   }
 
-  return [context.fileSubject, ...context.componentNames].some((name) =>
-    PRODUCT_STATE_NAME_PATTERN.test(name)
-  )
+  const scopedName = context.ownerName ?? context.fileSubject
+  return scopedName ? PRODUCT_STATE_NAME_PATTERN.test(scopedName) : false
 }
 
 function collectJsxUseContext(node, sourceFile) {
@@ -441,6 +461,55 @@ function jsxTagName(tagName) {
   return ts.isIdentifier(tagName) ? tagName.text : undefined
 }
 
+function findNearestJsxOwnerName(node) {
+  let current = node.parent
+
+  while (current) {
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isClassDeclaration(current) ||
+      ts.isMethodDeclaration(current)
+    ) {
+      return current.name && ts.isIdentifier(current.name)
+        ? current.name.text
+        : undefined
+    }
+
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const variable = findVariableDeclarationOwner(current)
+      if (variable && ts.isIdentifier(variable.name)) {
+        return variable.name.text
+      }
+    }
+
+    current = current.parent
+  }
+
+  return undefined
+}
+
+function findVariableDeclarationOwner(functionNode) {
+  let current = functionNode.parent
+
+  while (current) {
+    if (ts.isVariableDeclaration(current)) {
+      return current
+    }
+
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isClassDeclaration(current) ||
+      ts.isMethodDeclaration(current)
+    ) {
+      return undefined
+    }
+
+    current = current.parent
+  }
+
+  return undefined
+}
+
 function canonicalLabelFromLiteral(rawText, valueText) {
   const text = (valueText ?? rawText).trim()
   return CANONICAL_STATE_LABELS.find((label) => text === label)
@@ -485,6 +554,56 @@ function normalizeTextSignal(text) {
 function subjectFromPath(relativePath) {
   const filename = relativePath.split("/").pop() ?? ""
   return filename.replace(/\.[^.]+$/, "")
+}
+
+function hasExportModifier(node) {
+  return Boolean(
+    node?.modifiers?.some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword
+    )
+  )
+}
+
+function isLikelyComponentName(name) {
+  return /^[A-Z][A-Za-z0-9]*$/.test(name)
+}
+
+function functionLikeReturnsJsx(functionNode) {
+  if (!functionNode.body) {
+    return false
+  }
+
+  if (!ts.isBlock(functionNode.body)) {
+    return containsJsx(functionNode.body)
+  }
+
+  let returnsJsx = false
+  walk(functionNode.body, (node) => {
+    if (returnsJsx || !ts.isReturnStatement(node) || !node.expression) {
+      return
+    }
+
+    returnsJsx = containsJsx(node.expression)
+  })
+
+  return returnsJsx
+}
+
+function containsJsx(node) {
+  let hasJsx = false
+
+  walk(node, (child) => {
+    if (
+      hasJsx ||
+      ts.isJsxElement(child) ||
+      ts.isJsxSelfClosingElement(child) ||
+      ts.isJsxFragment(child)
+    ) {
+      hasJsx = true
+    }
+  })
+
+  return hasJsx
 }
 
 function normalizePath(path) {
