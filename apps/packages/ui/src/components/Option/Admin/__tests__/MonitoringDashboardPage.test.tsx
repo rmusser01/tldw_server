@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   snoozeAlert: vi.fn(),
   escalateAlert: vi.fn(),
   getDashboardActivity: vi.fn(),
+  getSandboxRuntimeDiagnostics: vi.fn(),
   getCurrentUserProfile: vi.fn()
 }))
 
@@ -31,6 +32,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     snoozeAlert: (...args: unknown[]) => mocks.snoozeAlert(...args),
     escalateAlert: (...args: unknown[]) => mocks.escalateAlert(...args),
     getDashboardActivity: (...args: unknown[]) => mocks.getDashboardActivity(...args),
+    getSandboxRuntimeDiagnostics: (...args: unknown[]) => mocks.getSandboxRuntimeDiagnostics(...args),
     getCurrentUserProfile: (...args: unknown[]) => mocks.getCurrentUserProfile(...args)
   }
 }))
@@ -63,6 +65,20 @@ describe("MonitoringDashboardPage", () => {
     mocks.listAlertRules.mockResolvedValue([])
     mocks.listAlertHistory.mockResolvedValue([])
     mocks.getDashboardActivity.mockResolvedValue({ entries: [] })
+    mocks.getSandboxRuntimeDiagnostics.mockResolvedValue({
+      source: "feature_discovery",
+      summary: {
+        total: 0,
+        ready: 0,
+        unavailable: 0,
+        host_gated: 0,
+        scaffold: 0,
+        host_local_warning_runtimes: [],
+        repair_supported_runtimes: []
+      },
+      runtimes: [],
+      startup_warning_summary: null
+    })
     mocks.getCurrentUserProfile.mockResolvedValue({ id: 42, username: "admin" })
     mocks.createAlertRule.mockResolvedValue({ item: { id: 1 } })
     mocks.assignAlert.mockResolvedValue({})
@@ -101,6 +117,88 @@ describe("MonitoringDashboardPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("No alert rules configured")).toBeNull()
     })
+  })
+
+  it("shows host-local sandbox runtime warnings for weaker isolation runtimes", async () => {
+    mocks.getSandboxRuntimeDiagnostics.mockResolvedValue({
+      source: "feature_discovery",
+      summary: {
+        total: 2,
+        ready: 2,
+        unavailable: 0,
+        host_gated: 0,
+        scaffold: 0,
+        host_local_warning_runtimes: ["seatbelt", "worktree"],
+        repair_supported_runtimes: []
+      },
+      runtimes: [
+        {
+          name: "seatbelt",
+          available: true,
+          implementation_state: "supported",
+          readiness: "ready",
+          reasons: [],
+          normalized_reasons: [],
+          boundary_class: "host_local",
+          vm_grade_isolation: false,
+          untrusted_eligible: false,
+          isolation_warnings: ["host_local_boundary", "not_untrusted_eligible"],
+          strict_deny_all_supported: false,
+          strict_allowlist_supported: false,
+          session_reuse_model: "none",
+          requires_live_health_check: false,
+          repair_supported: false,
+          recommended_action: "none"
+        },
+        {
+          name: "worktree",
+          available: true,
+          implementation_state: "supported",
+          readiness: "ready",
+          reasons: [],
+          normalized_reasons: [],
+          boundary_class: "host_local",
+          vm_grade_isolation: false,
+          untrusted_eligible: false,
+          isolation_warnings: ["host_local_boundary", "not_untrusted_eligible"],
+          strict_deny_all_supported: false,
+          strict_allowlist_supported: false,
+          session_reuse_model: "ephemeral",
+          requires_live_health_check: false,
+          repair_supported: false,
+          recommended_action: "inspect_reasons"
+        }
+      ],
+      startup_warning_summary: null
+    })
+
+    render(<MonitoringDashboardPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Sandbox Runtime Isolation")).toBeTruthy()
+    })
+    expect(screen.getByText("Host-local sandbox runtimes require operator review")).toBeTruthy()
+    expect(screen.getByText("seatbelt")).toBeTruthy()
+    expect(screen.getByText("worktree")).toBeTruthy()
+    expect(screen.getByText(/not VM-grade isolation/i)).toBeTruthy()
+  })
+
+  it("distinguishes forbidden sandbox diagnostics from unavailable diagnostics", async () => {
+    mocks.getSandboxRuntimeDiagnostics.mockRejectedValue(
+      Object.assign(
+        new Error("Request failed: 403 (GET /api/v1/sandbox/admin/runtime-diagnostics)"),
+        { status: 403 }
+      )
+    )
+
+    render(<MonitoringDashboardPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Sandbox diagnostics access denied")).toBeTruthy()
+    })
+    expect(screen.queryByText("Sandbox diagnostics unavailable")).toBeNull()
+    expect(screen.getByText(/Request failed: 403/)).toBeTruthy()
+    expect(screen.queryByText(/\/api\/v1\/sandbox\/admin\/runtime-diagnostics/)).toBeNull()
   })
 
   describe("MON-001: alert assignment uses correct user ID and field name", () => {
