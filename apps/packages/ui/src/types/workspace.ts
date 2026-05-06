@@ -115,6 +115,7 @@ export type ArtifactType =
   | "data_table"
 
 export type ArtifactStatus = "pending" | "generating" | "completed" | "failed"
+export type ArtifactReviewStatus = "draft"
 
 export type StudyMaterialsPolicy = "general" | "workspace"
 
@@ -149,6 +150,7 @@ export interface GeneratedArtifact {
   type: ArtifactType
   title: string
   status: ArtifactStatus
+  reviewStatus?: ArtifactReviewStatus
   previousVersionId?: string
   estimatedTokens?: number
   estimatedCostUsd?: number
