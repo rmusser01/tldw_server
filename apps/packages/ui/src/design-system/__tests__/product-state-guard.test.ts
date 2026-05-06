@@ -327,6 +327,24 @@ describe("design-system product-state guard rules", () => {
       })
     )
   })
+
+  it("flags hardcoded standalone Ready labels outside approved roots", () => {
+    const findings = analyze(
+      "src/components/Common/ReadyLabel.tsx",
+      `
+        export function ReadyLabel() {
+          return <span>Ready</span>
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "canonical-state-label",
+        subject: "Ready"
+      })
+    )
+  })
 })
 
 describe("design-system product-state guard baseline handling", () => {
@@ -357,7 +375,7 @@ describe("design-system product-state guard baseline handling", () => {
       "src/components/Common/StatusBadge.tsx",
       `
         export function StatusBadge() {
-          return <span>Ready</span>
+          return <span>Operational</span>
         }
       `
     )
@@ -482,6 +500,28 @@ describe("design-system product-state guard baseline handling", () => {
         expect.stringContaining(
           "duplicate baseline id local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge"
         )
+      ])
+    )
+  })
+
+  it("rejects baseline ids that do not match rule, path, and subject", () => {
+    const errors = guard.validateBaseline([
+      {
+        id: "local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge",
+        path: "src/components/Common/RenamedStatusBadge.tsx",
+        rule: "local-status-badge",
+        subject: "StatusBadge",
+        state: "allowed_legacy_exception",
+        owner: "design-system",
+        reason: "Path was renamed without updating the stable id.",
+        replacement: "Badge with design-system state registry mapping",
+        migrationQueue: "shared-product-state"
+      }
+    ])
+
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("id must match rule/path/subject")
       ])
     )
   })

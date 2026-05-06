@@ -40,6 +40,7 @@ const CANONICAL_STATE_LABELS = [
   "Degraded",
   "Retrying",
   "Blocked",
+  "Ready",
   "Loading"
 ]
 
@@ -185,6 +186,20 @@ export function validateBaseline(baseline) {
         `${prefix} state must be allowed_legacy_exception or active_migration_target`
       )
     }
+
+    if (
+      isPresentString(entry.id) &&
+      isPresentString(entry.rule) &&
+      isPresentString(entry.path) &&
+      isPresentString(entry.subject)
+    ) {
+      const expectedId = createFindingId(entry.rule, entry.path, entry.subject)
+      if (entry.id !== expectedId) {
+        errors.push(
+          `${prefix} id must match rule/path/subject: expected ${expectedId}`
+        )
+      }
+    }
   })
 
   return errors
@@ -223,7 +238,11 @@ export function applyBaseline({ findings, baseline }) {
     matchedBaselineIds.add(baselineEntry.id)
     const allowedFinding = {
       ...finding,
-      ...baselineEntry
+      state: baselineEntry.state,
+      owner: baselineEntry.owner,
+      reason: baselineEntry.reason,
+      replacement: baselineEntry.replacement,
+      migrationQueue: baselineEntry.migrationQueue
     }
 
     if (baselineEntry.state === "active_migration_target") {
