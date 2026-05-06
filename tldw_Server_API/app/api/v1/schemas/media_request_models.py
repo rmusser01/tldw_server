@@ -166,6 +166,10 @@ MediaType = Literal['video', 'audio', 'document', 'pdf', 'ebook', 'email', 'code
 # Define allowed chunking methods (adjust as needed based on your library)
 ChunkMethod = Literal['semantic', 'tokens', 'paragraphs', 'sentences','words', 'ebook_chapters', 'json', 'propositions']
 
+ChunkingMode = Literal['auto', 'manual']
+
+AutoChunkingGoal = Literal['balanced', 'qa_search', 'navigation_summary']
+
 # Define allowed PDF parsing engines
 PdfEngine = Literal['pymupdf4llm', 'pymupdf', 'docling'] # Add others if supported
 
@@ -175,6 +179,18 @@ OcrMode = Literal['always', 'fallback']
 class ChunkingOptions(BaseModel):
     """Pydantic model for chunking specific options"""
     perform_chunking: bool = Field(True, description="Enable chunk-based processing of the media content")
+    chunking_mode: Optional[ChunkingMode] = Field(
+        None,
+        description="Chunking control mode. Omitted preserves legacy/manual behavior; 'auto' lets the server plan media-aware chunking.",
+    )
+    auto_chunking_goal: AutoChunkingGoal = Field(
+        "balanced",
+        description="Goal used by automatic chunking when chunking_mode='auto'",
+    )
+    auto_chunking_use_llm: bool = Field(
+        False,
+        description="Explicit opt-in to AI-assisted automatic chunk boundary refinement when available",
+    )
     chunk_method: Optional[ChunkMethod] = Field(None, description="Method used to chunk content (e.g., 'sentences', 'recursive', 'chapter')")
     use_adaptive_chunking: bool = Field(False, description="Whether to enable adaptive chunking")
     use_multi_level_chunking: bool = Field(False, description="Whether to enable multi-level chunking")
@@ -721,6 +737,10 @@ class WebScrapingRequest(BaseModel):
     crawl_strategy: Optional[str] = None
     include_external: Optional[bool] = None
     score_threshold: Optional[float] = None
+    perform_chunking: bool = True
+    chunking_mode: Optional[ChunkingMode] = None
+    auto_chunking_goal: AutoChunkingGoal = "balanced"
+    auto_chunking_use_llm: bool = False
 
 class IngestWebContentRequest(BaseModel):
     # Core fields
@@ -751,6 +771,9 @@ class IngestWebContentRequest(BaseModel):
     api_name: Optional[str] = None
     api_key: Optional[str] = None
     perform_chunking: bool = True
+    chunking_mode: Optional[ChunkingMode] = None
+    auto_chunking_goal: AutoChunkingGoal = "balanced"
+    auto_chunking_use_llm: bool = False
     chunk_method: Optional[str] = None
     use_adaptive_chunking: bool = False
     use_multi_level_chunking: bool = False

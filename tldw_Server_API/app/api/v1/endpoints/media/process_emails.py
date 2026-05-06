@@ -19,7 +19,9 @@ from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEmailsForm
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    attach_chunking_plan_to_result,
+    resolve_chunking_for_result,
+    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -69,11 +71,15 @@ async def process_emails_endpoint(
     items: list[ProcessItem] = []
     saved_files_info: list[dict[str, Any]] = []
     chunk_options_dict: dict[str, Any] | None = None
+    chunking_plan: dict[str, Any] | None = None
 
     # Prepare base chunking options before batch processing so the worker
     # closure can use them when invoking the email processing library.
     if form_data.perform_chunking:
-        chunk_options_dict = prepare_chunking_options_dict(form_data)
+        chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+            form_data,
+            media_type="email",
+        )
 
     # Resolve validator via media exports so tests that monkeypatch
     # media.file_validator_instance continue to work.
@@ -366,22 +372,26 @@ async def process_emails_endpoint(
     try:
         if form_data.perform_chunking:
             # Build chunk options once using shared helper + templates.
-            chunk_options_dict = prepare_chunking_options_dict(form_data)
+            first_filename = None
+            try:
+                if saved_files_info:
+                    first_filename = saved_files_info[0].get("original_filename")
+            except Exception:
+                logger.debug("Could not determine first filename")
+                first_filename = None
+
+            chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type="email",
+                source_name=first_filename,
+            )
             try:
                 TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
             except Exception:
                 logger.debug("TemplateClassifier not available")
                 TemplateClassifier = None
 
-            if chunk_options_dict is not None:
-                first_filename = None
-                try:
-                    if saved_files_info:
-                        first_filename = saved_files_info[0].get("original_filename")
-                except Exception:
-                    logger.debug("Could not determine first filename")
-                    first_filename = None
-
+            if chunk_options_dict is not None and chunking_plan is None:
                 chunk_options_dict = apply_chunking_template_if_any(
                     form_data=form_data,
                     db=db,
@@ -413,23 +423,35 @@ async def process_emails_endpoint(
                     continue
                 text = res.get("content")
                 if not isinstance(text, str) or not text.strip():
+                    attach_chunking_plan_to_result(res, chunking_plan)
+                    continue
+
+                result_chunk_options, result_chunking_plan = resolve_chunking_for_result(
+                    form_data,
+                    res,
+                    media_type="email",
+                    default_chunk_options=chunk_options_dict,
+                    default_chunking_plan=chunking_plan,
+                )
+                attach_chunking_plan_to_result(res, result_chunking_plan)
+                if not result_chunk_options:
                     continue
 
                 if use_hier and ck is not None:
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
-                        method=chunk_options_dict.get("method") or "sentences",
-                        max_size=chunk_options_dict.get("max_size") or 1000,
-                        overlap=chunk_options_dict.get("overlap") or 200,
-                        language=chunk_options_dict.get("language"),
-                        template=chunk_options_dict.get("hierarchical_template")
+                        method=result_chunk_options.get("method") or "sentences",
+                        max_size=result_chunk_options.get("max_size") or 1000,
+                        overlap=result_chunk_options.get("overlap") or 200,
+                        language=result_chunk_options.get("language"),
+                        template=result_chunk_options.get("hierarchical_template")
                         if isinstance(
-                            chunk_options_dict.get("hierarchical_template"), dict
+                            result_chunk_options.get("hierarchical_template"), dict
                         )
                         else None,
                     )
                 else:
-                    chunks = _improved_chunking_process(text, chunk_options_dict)
+                    chunks = _improved_chunking_process(text, result_chunk_options)
 
                 res["chunks"] = chunks
     except Exception:

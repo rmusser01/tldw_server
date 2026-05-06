@@ -36,7 +36,9 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    attach_chunking_plan_to_result,
+    resolve_chunking_for_result,
+    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -140,6 +142,7 @@ async def process_videos_endpoint(
     # Map temporary path -> original filename
     temp_path_to_original_name: dict[str, str] = {}
     chunk_options_dict: dict[str, Any] | None = None
+    chunking_plan: dict[str, Any] | None = None
 
     # --- Use TempDirManager for reliable cleanup ---
     with TempDirManager(cleanup=True, prefix="process_video_") as temp_dir:
@@ -309,21 +312,25 @@ async def process_videos_endpoint(
     # Optional template/hierarchical re-chunking of video transcripts (best-effort).
     try:
         if form_data.perform_chunking:
-            chunk_options_dict = prepare_chunking_options_dict(form_data)
+            first_url = (form_data.urls or [None])[0]
+            first_filename = None
+            try:
+                if saved_files_info:
+                    first_filename = saved_files_info[0].get("original_filename")
+            except Exception:
+                first_filename = None
+
+            chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type="video",
+                source_name=first_filename or first_url,
+            )
             try:
                 TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
             except Exception:
                 TemplateClassifier = None
 
-            if chunk_options_dict is not None:
-                first_url = (form_data.urls or [None])[0]
-                first_filename = None
-                try:
-                    if saved_files_info:
-                        first_filename = saved_files_info[0].get("original_filename")
-                except Exception:
-                    first_filename = None
-
+            if chunk_options_dict is not None and chunking_plan is None:
                 chunk_options_dict = apply_chunking_template_if_any(
                     form_data=form_data,
                     db=db,
@@ -355,23 +362,35 @@ async def process_videos_endpoint(
                     continue
                 text = res.get("content")
                 if not isinstance(text, str) or not text.strip():
+                    attach_chunking_plan_to_result(res, chunking_plan)
+                    continue
+
+                result_chunk_options, result_chunking_plan = resolve_chunking_for_result(
+                    form_data,
+                    res,
+                    media_type="video",
+                    default_chunk_options=chunk_options_dict,
+                    default_chunking_plan=chunking_plan,
+                )
+                attach_chunking_plan_to_result(res, result_chunking_plan)
+                if not result_chunk_options:
                     continue
 
                 if use_hier and ck is not None:
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
-                        method=chunk_options_dict.get("method") or "sentences",
-                        max_size=chunk_options_dict.get("max_size") or 500,
-                        overlap=chunk_options_dict.get("overlap") or 200,
-                        language=chunk_options_dict.get("language"),
-                        template=chunk_options_dict.get("hierarchical_template")
+                        method=result_chunk_options.get("method") or "sentences",
+                        max_size=result_chunk_options.get("max_size") or 500,
+                        overlap=result_chunk_options.get("overlap") or 200,
+                        language=result_chunk_options.get("language"),
+                        template=result_chunk_options.get("hierarchical_template")
                         if isinstance(
-                            chunk_options_dict.get("hierarchical_template"), dict
+                            result_chunk_options.get("hierarchical_template"), dict
                         )
                         else None,
                     )
                 else:
-                    chunks = _improved_chunking_process(text, chunk_options_dict)
+                    chunks = _improved_chunking_process(text, result_chunk_options)
 
                 res["chunks"] = chunks
     except Exception:

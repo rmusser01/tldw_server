@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from fastapi import Form, HTTPException, status
 from loguru import logger
@@ -46,6 +47,60 @@ def _resolve_transcription_model_or_default(
         )
         return default_model
     return model or default_model
+
+
+def _coerce_form_bool(value: Any) -> bool:
+    if hasattr(value, "default"):
+        value = value.default
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(value)
+
+
+def _coerce_form_string(value: Any) -> str | None:
+    if hasattr(value, "default"):
+        value = value.default
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return str(value)
+
+
+def _coerce_hierarchical_template(value: Any) -> dict[str, Any] | None:
+    if hasattr(value, "default"):
+        value = value.default
+    if value is None or value == "":
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=HTTP_422_UNPROCESSABLE,
+                detail=[
+                    {
+                        "loc": ["body", "hierarchical_template"],
+                        "msg": "hierarchical_template must be a JSON object",
+                        "type": "value_error.jsondecode",
+                    }
+                ],
+            ) from exc
+        if isinstance(parsed, dict):
+            return parsed
+    raise HTTPException(
+        status_code=HTTP_422_UNPROCESSABLE,
+        detail=[
+            {
+                "loc": ["body", "hierarchical_template"],
+                "msg": "hierarchical_template must be a JSON object",
+                "type": "type_error.dict",
+            }
+        ],
+    )
 
 
 async def get_add_media_form(
@@ -185,6 +240,18 @@ async def get_add_media_form(
         description="OCR prompt preset (general|doc|table|spotting|json)",
     ),
     perform_chunking: bool = Form(True, description="Enable chunking"),
+    chunking_mode: str | None = Form(
+        None,
+        description="Chunking mode: auto or manual. Omitted preserves legacy behavior.",
+    ),
+    auto_chunking_goal: str = Form(
+        "balanced",
+        description="Automatic chunking goal: balanced, qa_search, or navigation_summary",
+    ),
+    auto_chunking_use_llm: bool = Form(
+        False,
+        description="Explicitly allow AI-assisted automatic chunk boundary refinement",
+    ),
     chunk_method: ChunkMethod | None = Form(
         None,
         description="Chunking method",
@@ -206,6 +273,22 @@ async def get_add_media_form(
     custom_chapter_pattern: str | None = Form(
         None,
         description="Regex pattern for custom chapter splitting",
+    ),
+    auto_apply_template: bool = Form(
+        False,
+        description="Automatically select and apply a matching chunking template",
+    ),
+    chunking_template_name: str | None = Form(
+        None,
+        description="Explicit chunking template name",
+    ),
+    hierarchical_chunking: bool = Form(
+        False,
+        description="Enable hierarchical chunking",
+    ),
+    hierarchical_template: str | dict[str, Any] | None = Form(
+        None,
+        description="Custom hierarchical chunking template JSON object",
     ),
     perform_rolling_summarization: bool = Form(
         False,
@@ -333,6 +416,12 @@ async def get_add_media_form(
             perform_chunking = (
                 perform_chunking.strip().lower() in {"true", "1", "yes", "on"}
             )
+        chunking_mode = _coerce_form_string(chunking_mode)
+        auto_chunking_goal = _coerce_form_string(auto_chunking_goal) or "balanced"
+        auto_chunking_use_llm = _coerce_form_bool(auto_chunking_use_llm)
+        auto_apply_template = _coerce_form_bool(auto_apply_template)
+        hierarchical_chunking = _coerce_form_bool(hierarchical_chunking)
+        hierarchical_template = _coerce_hierarchical_template(hierarchical_template)
         try:
             if isinstance(context_window_size, str):
                 context_window_size = int(context_window_size)
@@ -383,6 +472,9 @@ async def get_add_media_form(
             ocr_output_format=ocr_output_format,
             ocr_prompt_preset=ocr_prompt_preset,
             perform_chunking=perform_chunking,
+            chunking_mode=chunking_mode,
+            auto_chunking_goal=auto_chunking_goal,
+            auto_chunking_use_llm=auto_chunking_use_llm,
             chunk_method=chunk_method,
             use_adaptive_chunking=use_adaptive_chunking,
             use_multi_level_chunking=use_multi_level_chunking,
@@ -390,6 +482,10 @@ async def get_add_media_form(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             custom_chapter_pattern=custom_chapter_pattern,
+            auto_apply_template=auto_apply_template,
+            chunking_template_name=chunking_template_name,
+            hierarchical_chunking=hierarchical_chunking,
+            hierarchical_template=hierarchical_template,
             perform_rolling_summarization=perform_rolling_summarization,
             summarize_recursively=summarize_recursively,
             enable_contextual_chunking=enable_contextual_chunking,
@@ -426,6 +522,8 @@ async def get_add_media_form(
             status_code=HTTP_422_UNPROCESSABLE,
             detail=serializable_errors,
         ) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
             "Unexpected error creating AddMediaForm: {}",

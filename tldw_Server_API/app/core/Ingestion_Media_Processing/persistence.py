@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     prepare_chunking_options_dict,
     prepare_common_options,
+    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
@@ -729,6 +730,7 @@ _METADATA_COMMON_TYPED_KEYS: dict[str, tuple[type, ...]] = {
     "keywords": (list,),
     "tags": (list,),
     "email": (dict,),
+    "chunking_plan": (dict,),
 }
 
 _METADATA_CONTRACTS: dict[str, dict[str, Any]] = {
@@ -1279,6 +1281,79 @@ def _merge_video_lite_summary_safe_metadata(
 
     merged["video_lite"] = video_lite_meta
     return merged
+
+
+_SAFE_METADATA_ALLOWED_KEYS = frozenset(
+    {
+        "title",
+        "author",
+        "doi",
+        "pmid",
+        "pmcid",
+        "arxiv_id",
+        "s2_paper_id",
+        "url",
+        "pdf_url",
+        "pmc_url",
+        "date",
+        "year",
+        "venue",
+        "journal",
+        "license",
+        "license_url",
+        "publisher",
+        "source",
+        "creators",
+        "rights",
+        "source_hash",
+        "chunking_plan",
+    }
+)
+
+
+def _json_safe_metadata_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        cleaned_list = []
+        for item in value:
+            cleaned = _json_safe_metadata_value(item)
+            if cleaned is not None:
+                cleaned_list.append(cleaned)
+        return cleaned_list
+    if isinstance(value, dict):
+        cleaned_dict: dict[str, Any] = {}
+        for key, item in value.items():
+            if key is None:
+                continue
+            cleaned = _json_safe_metadata_value(item)
+            if cleaned is not None or item is None:
+                cleaned_dict[str(key)] = cleaned
+        return cleaned_dict
+    return None
+
+
+def build_safe_metadata_subset(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy safe metadata fields while preserving nested JSON-safe plan data."""
+    safe_meta: dict[str, Any] = {}
+    if not isinstance(metadata, dict):
+        return safe_meta
+
+    for key, value in metadata.items():
+        if key not in _SAFE_METADATA_ALLOWED_KEYS:
+            continue
+        cleaned = _json_safe_metadata_value(value)
+        if cleaned is not None:
+            safe_meta[key] = cleaned
+
+    ext_ids = metadata.get("externalIds")
+    if isinstance(ext_ids, dict):
+        for ext_key in ("DOI", "ArXiv", "PMID", "PMCID"):
+            ext_value = ext_ids.get(ext_key)
+            if ext_value:
+                safe_meta[ext_key.lower()] = ext_value
+
+    return safe_meta
 
 
 def _shared_transcript_dedupe_candidates(
@@ -3447,6 +3522,20 @@ async def persist_primary_av_item(
     content_for_db = process_result.get("transcript", process_result.get("content"))
     analysis_for_db = process_result.get("summary", process_result.get("analysis"))
     metadata_for_db = process_result.get("metadata", {}) or {}
+    if not isinstance(metadata_for_db, dict):
+        metadata_for_db = {}
+    if getattr(form_data, "chunking_mode", None) == "auto":
+        with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
+            _, auto_chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type=media_type,
+                source_name=str(original_input_ref or ""),
+                extracted_text=content_for_db if isinstance(content_for_db, str) else None,
+            )
+            if auto_chunking_plan:
+                metadata_for_db = dict(metadata_for_db)
+                metadata_for_db["chunking_plan"] = auto_chunking_plan
+                process_result["metadata"] = metadata_for_db
 
     # Use the model reported by the processor if available, else fall back.
     transcription_model_used = metadata_for_db.get(
@@ -3497,40 +3586,7 @@ async def persist_primary_av_item(
         # Build a safe metadata subset for persistence.
         safe_meta: dict[str, Any] = {}
         try:
-            allowed_keys = {
-                "title",
-                "author",
-                "doi",
-                "pmid",
-                "pmcid",
-                "arxiv_id",
-                "s2_paper_id",
-                "url",
-                "pdf_url",
-                "pmc_url",
-                "date",
-                "year",
-                "venue",
-                "journal",
-                "license",
-                "license_url",
-                "publisher",
-                "source",
-                "creators",
-                "rights",
-                "source_hash",
-            }
-            for k, v in metadata_for_db.items():
-                if k in allowed_keys and isinstance(v, (str, int, float, bool)):
-                    safe_meta[k] = v
-                elif k in allowed_keys and isinstance(v, list):
-                    safe_meta[k] = [x for x in v if isinstance(x, (str, int, float, bool))]
-            # Extract from externalIds if present.
-            ext = metadata_for_db.get("externalIds")
-            if isinstance(ext, dict):
-                for kk in ("DOI", "ArXiv", "PMID", "PMCID"):
-                    if ext.get(kk):
-                        safe_meta[kk.lower()] = ext.get(kk)
+            safe_meta = build_safe_metadata_subset(metadata_for_db)
             safe_meta = _merge_video_lite_summary_safe_metadata(
                 safe_meta,
                 process_result=process_result,
@@ -5486,6 +5542,20 @@ async def persist_doc_item_and_children(
     content_for_db = final_result.get("content", "")
     analysis_for_db = final_result.get("summary") or final_result.get("analysis")
     metadata_for_db = final_result.get("metadata", {}) or {}
+    if not isinstance(metadata_for_db, dict):
+        metadata_for_db = {}
+    if getattr(form_data, "chunking_mode", None) == "auto":
+        with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
+            _, auto_chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type=media_type,
+                source_name=str(item_input_ref or processing_filename or ""),
+                extracted_text=content_for_db if isinstance(content_for_db, str) else None,
+            )
+            if auto_chunking_plan:
+                metadata_for_db = dict(metadata_for_db)
+                metadata_for_db["chunking_plan"] = auto_chunking_plan
+                final_result["metadata"] = metadata_for_db
 
     extracted_keywords = final_result.get("keywords", [])
     combined_keywords = set(getattr(form_data, "keywords", None) or [])
@@ -5580,45 +5650,7 @@ async def persist_doc_item_and_children(
             )
             safe_meta: dict[str, Any] = {}
             try:
-                allowed_keys = {
-                    "title",
-                    "author",
-                    "doi",
-                    "pmid",
-                    "pmcid",
-                    "arxiv_id",
-                    "s2_paper_id",
-                    "url",
-                    "pdf_url",
-                    "pmc_url",
-                    "date",
-                    "year",
-                    "venue",
-                    "journal",
-                    "license",
-                    "license_url",
-                    "publisher",
-                    "source",
-                    "creators",
-                    "rights",
-                    "source_hash",
-                }
-                for key, value in (metadata_for_db or {}).items():
-                    if key in allowed_keys and isinstance(
-                        value, (str, int, float, bool)
-                    ):
-                        safe_meta[key] = value
-                    elif key in allowed_keys and isinstance(value, list):
-                        safe_meta[key] = [
-                            x
-                            for x in value
-                            if isinstance(x, (str, int, float, bool))
-                        ]
-                ext_ids = (metadata_for_db or {}).get("externalIds")
-                if isinstance(ext_ids, dict):
-                    for ext_key in ("DOI", "ArXiv", "PMID", "PMCID"):
-                        if ext_ids.get(ext_key):
-                            safe_meta[ext_key.lower()] = ext_ids.get(ext_key)
+                safe_meta = build_safe_metadata_subset(metadata_for_db)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 safe_meta = {}
 

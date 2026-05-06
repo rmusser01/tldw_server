@@ -111,6 +111,84 @@ async def test_media_ingest_worker_updates_progress_fields(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_media_ingest_worker_returns_auto_chunking_plan(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    class _DummyDB:
+        def __init__(self, path: str):
+            self.db_path_str = path
+            self.client_id = "media_ingest_test"
+
+        def close_connection(self):
+            return None
+
+    def _fake_create_db(_user_id: str):
+        return _DummyDB(str(tmp_path / "media.db"))
+
+    seen: dict[str, object] = {}
+
+    async def _fake_process_document_like_item(**kwargs):
+        seen["chunk_options"] = kwargs.get("chunk_options")
+        return {
+            "status": "Success",
+            "db_id": 234,
+            "media_uuid": "media-uuid-234",
+            "warnings": None,
+            "db_message": "Media added to database.",
+            "content": "# Intro\n\nChunkable body.",
+        }
+
+    monkeypatch.setattr(worker, "_create_db", _fake_create_db, raising=True)
+    monkeypatch.setattr(
+        worker,
+        "process_document_like_item",
+        _fake_process_document_like_item,
+        raising=True,
+    )
+
+    jm = JobManager()
+    payload = {
+        "batch_id": "batch-auto",
+        "media_type": "document",
+        "source": str(tmp_path / "doc.md"),
+        "source_kind": "file",
+        "input_ref": "doc.md",
+        "options": {
+            "media_type": "document",
+            "perform_chunking": True,
+            "chunking_mode": "auto",
+            "auto_chunking_goal": "qa_search",
+            "auto_chunking_use_llm": True,
+            "chunk_method": "words",
+            "chunk_size": 333,
+            "chunk_overlap": 1,
+        },
+    }
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload=payload,
+        owner_user_id="1",
+    )
+
+    job = jm.get_job(int(row.get("id")))
+    progress = worker._ProgressState()
+    result = await worker._handle_job(job, jm, progress)
+
+    assert seen["chunk_options"]["method"] == "semantic"
+    assert seen["chunk_options"]["max_size"] == 700
+    assert result["chunking_plan"]["mode"] == "auto"
+    assert result["chunking_plan"]["goal"] == "qa_search"
+    assert result["chunking_plan"]["used_llm"] is False
+    assert "ai_assist_unavailable" in result["chunking_plan"]["fallback_reason"]
+
+
+@pytest.mark.asyncio
 async def test_media_ingest_worker_returns_existing_media_id_for_skipped_dedupe_result(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)

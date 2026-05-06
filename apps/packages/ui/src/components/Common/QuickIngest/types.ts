@@ -64,10 +64,20 @@ export type QuickIngestTab = "queue" | "options" | "results"
 /**
  * Common processing options shared across all media types.
  */
+export type ChunkingMode = "auto" | "manual"
+
+export type AutoChunkingGoal =
+  | "balanced"
+  | "qa_search"
+  | "navigation_summary"
+
 export type CommonOptions = {
   perform_analysis: boolean
   perform_chunking: boolean
   overwrite_existing: boolean
+  chunking_mode?: ChunkingMode
+  auto_chunking_goal?: AutoChunkingGoal
+  auto_chunking_use_llm?: boolean
 }
 
 /**

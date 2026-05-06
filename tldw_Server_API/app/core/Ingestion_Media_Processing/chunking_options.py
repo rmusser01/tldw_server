@@ -4,6 +4,12 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.Chunking.auto_planner import (
+    merge_profiles,
+    plan_auto_chunking,
+    profile_from_source,
+    profile_from_text,
+)
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -231,6 +237,149 @@ def prepare_chunking_options_dict(form_data: Any) -> dict[str, Any] | None:
 
     logging.info("Chunking enabled with options: {}", chunk_options)
     return chunk_options
+
+
+def resolve_chunking_options_and_plan(
+    form_data: Any,
+    *,
+    media_type: str | None = None,
+    source_name: str | None = None,
+    extracted_text: str | None = None,
+    template_name: str | None = None,
+    template_status: str | None = None,
+    template_error: str | None = None,
+    llm_available: bool = False,
+    semantic_available: bool = True,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """
+    Resolve effective chunking options and optional Auto Chunking plan metadata.
+
+    Legacy requests that omit ``chunking_mode`` and explicit Manual requests
+    keep the existing ``prepare_chunking_options_dict`` behavior. Auto requests
+    intentionally ignore stale manual fields and use the deterministic planner.
+    """
+    if not getattr(form_data, "perform_chunking", False):
+        logging.info("Chunking disabled.")
+        return None, None
+
+    if getattr(form_data, "chunking_mode", None) != "auto":
+        return prepare_chunking_options_dict(form_data), None
+
+    effective_media_type = media_type or getattr(form_data, "media_type", None)
+    source_profile = _profile_from_form_source(
+        form_data,
+        media_type=effective_media_type,
+        source_name=source_name,
+    )
+    text_profile = profile_from_text(extracted_text)
+    profile = merge_profiles(source_profile, text_profile)
+
+    decision = plan_auto_chunking(
+        perform_chunking=True,
+        chunking_mode="auto",
+        media_type=effective_media_type,
+        goal=getattr(form_data, "auto_chunking_goal", "balanced"),
+        profile=profile,
+        template_name=template_name or getattr(form_data, "chunking_template_name", None),
+        template_status=template_status,
+        template_error=template_error,
+        requested_llm=bool(getattr(form_data, "auto_chunking_use_llm", False)),
+        llm_available=llm_available,
+        semantic_available=semantic_available,
+    )
+    return decision.chunk_options, decision.chunking_plan
+
+
+def attach_chunking_plan_to_result(
+    result: dict[str, Any],
+    chunking_plan: dict[str, Any] | None,
+) -> None:
+    """Attach Auto Chunking plan metadata to an endpoint result in-place."""
+    if not chunking_plan:
+        return
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        result["metadata"] = metadata
+    metadata["chunking_plan"] = chunking_plan
+
+
+def resolve_chunking_for_result(
+    form_data: Any,
+    result: dict[str, Any],
+    *,
+    media_type: str | None = None,
+    default_chunk_options: dict[str, Any] | None = None,
+    default_chunking_plan: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """
+    Resolve final chunking options for a completed process result.
+
+    Auto requests can use extracted content signals here, while legacy/manual
+    paths keep the options prepared before processor dispatch.
+    """
+    if getattr(form_data, "chunking_mode", None) != "auto":
+        return default_chunk_options, default_chunking_plan
+
+    extracted_text = result.get("content")
+    if not isinstance(extracted_text, str):
+        extracted_text = None
+    source_name = result.get("input_ref") or result.get("processing_source")
+    if source_name is not None:
+        source_name = str(source_name)
+
+    chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+        form_data,
+        media_type=media_type,
+        source_name=source_name,
+        extracted_text=extracted_text,
+    )
+    return (
+        chunk_options if chunk_options is not None else default_chunk_options,
+        chunking_plan if chunking_plan is not None else default_chunking_plan,
+    )
+
+
+def _profile_from_form_source(
+    form_data: Any,
+    *,
+    media_type: str | None,
+    source_name: str | None,
+):
+    source = source_name or _first_form_source_name(form_data)
+    filename: str | None = None
+    url: str | None = None
+    if source:
+        source_text = str(source)
+        if "://" in source_text:
+            url = source_text
+        else:
+            filename = source_text
+
+    language = getattr(form_data, "chunk_language", None)
+    if not language:
+        language = getattr(form_data, "transcription_language", None)
+
+    return profile_from_source(
+        media_type=media_type,
+        filename=filename,
+        url=url,
+        title=getattr(form_data, "title", None),
+        language=language,
+    )
+
+
+def _first_form_source_name(form_data: Any) -> str | None:
+    urls = getattr(form_data, "urls", None)
+    if isinstance(urls, list) and urls:
+        first = urls[0]
+        if first:
+            return str(first)
+    for attr_name in ("original_filename", "filename", "source_name"):
+        value = getattr(form_data, attr_name, None)
+        if value:
+            return str(value)
+    return None
 
 
 def apply_chunking_template_if_any(

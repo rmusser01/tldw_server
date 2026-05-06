@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Optional
 
 #
@@ -22,6 +23,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
 )
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
+from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    attach_chunking_plan_to_result,
+    resolve_chunking_options_and_plan,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
@@ -111,6 +116,30 @@ def _collect_fallback_unsupported_controls(
     return sorted(set(unsupported))
 
 
+def _web_chunking_form(
+    *,
+    perform_chunking: bool,
+    chunking_mode: str | None,
+    auto_chunking_goal: str,
+    auto_chunking_use_llm: bool,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        media_type="web",
+        perform_chunking=perform_chunking,
+        chunking_mode=chunking_mode,
+        auto_chunking_goal=auto_chunking_goal,
+        auto_chunking_use_llm=auto_chunking_use_llm,
+        chunk_method=None,
+        chunk_size=500,
+        chunk_overlap=200,
+        chunk_language=None,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        hierarchical_chunking=False,
+        hierarchical_template=None,
+    )
+
+
 def _build_fallback_context(
     *,
     fallback_error: Exception,
@@ -153,6 +182,10 @@ async def process_web_scraping_task(
     crawl_strategy: Optional[str] = None,
     include_external: Optional[bool] = None,
     score_threshold: Optional[float] = None,
+    perform_chunking: bool = True,
+    chunking_mode: Optional[str] = None,
+    auto_chunking_goal: str = "balanced",
+    auto_chunking_use_llm: bool = False,
 ) -> dict[str, Any]:
     """
     Enhanced web scraping with production features:
@@ -264,6 +297,10 @@ async def process_web_scraping_task(
             crawl_strategy=crawl_strategy,
             include_external=include_external,
             score_threshold=score_threshold,
+            perform_chunking=perform_chunking,
+            chunking_mode=chunking_mode,
+            auto_chunking_goal=auto_chunking_goal,
+            auto_chunking_use_llm=auto_chunking_use_llm,
         )
 
         return result
@@ -382,6 +419,12 @@ async def process_web_scraping_task(
                 )
 
             fallback_context["degraded_controls_applied"] = degraded_controls
+            chunking_form = _web_chunking_form(
+                perform_chunking=perform_chunking,
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+            )
 
             # 2) Summarize after the fact, if the method doesn't handle it
             #    (For "Individual URLs," you already did so inside scrape_and_summarize_multiple.)
@@ -406,6 +449,18 @@ async def process_web_scraping_task(
             # 3) If "persist" mode, insert into DB; if ephemeral, store ephemeral
             #    (We can store all articles in the DB or ephemeral. Typically you'd store each as a new "media" row.)
             if mode == "ephemeral":
+                if perform_chunking:
+                    for article in result_list:
+                        if not isinstance(article, dict):
+                            continue
+                        content_text = article.get("content")
+                        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                            chunking_form,
+                            media_type="web",
+                            source_name=str(article.get("url") or ""),
+                            extracted_text=content_text if isinstance(content_text, str) else None,
+                        )
+                        attach_chunking_plan_to_result(article, chunking_plan)
                 # Just store the entire "result_list" in ephemeral, returning the ephemeral ID.
                 # Or store each article individually. Up to you. We'll do one ephemeral object:
                 ephemeral_id = ephemeral_storage.store_data({"articles": result_list})
@@ -438,6 +493,16 @@ async def process_web_scraping_task(
                         # We'll treat article['content'] as the main text
                         # Combine content and metadata
                         content_text = article.get("content", "")
+                        chunk_options = None
+                        chunking_plan = None
+                        if perform_chunking:
+                            chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                                chunking_form,
+                                media_type="web",
+                                source_name=str(article.get("url") or ""),
+                                extracted_text=content_text if isinstance(content_text, str) else None,
+                            )
+                            attach_chunking_plan_to_result(article, chunking_plan)
 
                         # Fix the function call to match the actual signature
                         # Build safe metadata
@@ -447,40 +512,55 @@ async def process_web_scraping_task(
                             "url": article.get("url"),
                             "source": "web",
                         }
+                        if chunking_plan:
+                            safe_meta["chunking_plan"] = chunking_plan
                         safe_metadata_json = json.dumps({k: v for k, v in safe_meta.items() if v is not None}, ensure_ascii=False)
 
                         # Build plaintext chunks for FTS-first retrieval
-                        try:
-                            ck = Chunker()
-                            # Use sane defaults in fallback path
-                            flat = ck.chunk_text_hierarchical_flat(content_text, method='sentences')
-                            kind_map = {
-                                'paragraph': 'text',
-                                'list_unordered': 'list',
-                                'list_ordered': 'list',
-                                'code_fence': 'code',
-                                'table_md': 'table',
-                                'header_line': 'heading',
-                                'header_atx': 'heading',
-                            }
+                        if not perform_chunking:
                             chunks_for_sql = []
-                            for it in flat:
-                                md = it.get('metadata') or {}
-                                ctype = kind_map.get(str(md.get('paragraph_kind') or '').lower(), 'text')
-                                small = {}
-                                if md.get('ancestry_titles'):
-                                    small['ancestry_titles'] = md.get('ancestry_titles')
-                                if md.get('section_path'):
-                                    small['section_path'] = md.get('section_path')
-                                chunks_for_sql.append({
-                                    'text': it.get('text',''),
-                                    'start_char': md.get('start_offset'),
-                                    'end_char': md.get('end_offset'),
-                                    'chunk_type': ctype,
-                                    'metadata': small,
-                                })
-                        except Exception:
-                            chunks_for_sql = []
+                        else:
+                            try:
+                                ck = Chunker()
+                                options = chunk_options or {
+                                    "method": "sentences",
+                                    "max_size": 500,
+                                    "overlap": 200,
+                                }
+                                flat = ck.chunk_text_hierarchical_flat(
+                                    content_text,
+                                    method=options.get("method") or "sentences",
+                                    max_size=options.get("max_size") or 500,
+                                    overlap=options.get("overlap") or 200,
+                                    language=options.get("language"),
+                                )
+                                kind_map = {
+                                    'paragraph': 'text',
+                                    'list_unordered': 'list',
+                                    'list_ordered': 'list',
+                                    'code_fence': 'code',
+                                    'table_md': 'table',
+                                    'header_line': 'heading',
+                                    'header_atx': 'heading',
+                                }
+                                chunks_for_sql = []
+                                for it in flat:
+                                    md = it.get('metadata') or {}
+                                    ctype = kind_map.get(str(md.get('paragraph_kind') or '').lower(), 'text')
+                                    small = {}
+                                    if md.get('ancestry_titles'):
+                                        small['ancestry_titles'] = md.get('ancestry_titles')
+                                    if md.get('section_path'):
+                                        small['section_path'] = md.get('section_path')
+                                    chunks_for_sql.append({
+                                        'text': it.get('text',''),
+                                        'start_char': md.get('start_offset'),
+                                        'end_char': md.get('end_offset'),
+                                        'chunk_type': ctype,
+                                        'metadata': small,
+                                    })
+                            except Exception:
+                                chunks_for_sql = []
 
                         media_id, media_uuid, message = get_media_repository(db).add_media_with_keywords(
                             url=article.get("url", ""),
@@ -772,6 +852,12 @@ async def ingest_web_content_orchestrate(
                 crawl_strategy=getattr(request, "crawl_strategy", None),
                 include_external=getattr(request, "include_external", None),
                 score_threshold=getattr(request, "score_threshold", None),
+                perform_chunking=bool(getattr(request, "perform_chunking", True)),
+                chunking_mode=getattr(request, "chunking_mode", None),
+                auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
+                auto_chunking_use_llm=bool(
+                    getattr(request, "auto_chunking_use_llm", False)
+                ),
             )
             articles: list[dict[str, Any]] = []
             if isinstance(service_result, dict):
@@ -842,6 +928,12 @@ async def ingest_web_content_orchestrate(
                 crawl_strategy=getattr(request, "crawl_strategy", None),
                 include_external=getattr(request, "include_external", None),
                 score_threshold=getattr(request, "score_threshold", None),
+                perform_chunking=bool(getattr(request, "perform_chunking", True)),
+                chunking_mode=getattr(request, "chunking_mode", None),
+                auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
+                auto_chunking_use_llm=bool(
+                    getattr(request, "auto_chunking_use_llm", False)
+                ),
             )
             articles: list[dict[str, Any]] = []
             if isinstance(service_result, list):

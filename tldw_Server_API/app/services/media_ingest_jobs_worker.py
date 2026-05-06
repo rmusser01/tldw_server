@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     prepare_chunking_options_dict,
+    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_batch_media,
@@ -255,8 +256,12 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         def cancel_check():
             return _should_cancel(jm, job_id)
 
-        chunk_options = prepare_chunking_options_dict(form_data)
-        if chunk_options is not None:
+        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+            form_data,
+            media_type=str(form_data.media_type) if form_data.media_type else None,
+            source_name=str(input_ref or source),
+        )
+        if chunk_options is not None and chunking_plan is None:
             try:
                 first_url = source if source_kind == "url" else None
                 first_filename = payload.get("original_filename")
@@ -341,7 +346,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
         if isinstance(result_item, dict):
-            return {
+            job_result = {
                 "status": result_item.get("status"),
                 "media_id": result_item.get("db_id"),
                 "media_uuid": result_item.get("media_uuid"),
@@ -349,6 +354,9 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
                 "warnings": result_item.get("warnings"),
                 "db_message": result_item.get("db_message"),
             }
+            if chunking_plan is not None:
+                job_result["chunking_plan"] = chunking_plan
+            return job_result
         return {"status": "Error", "error": "No result produced"}
 
     finally:

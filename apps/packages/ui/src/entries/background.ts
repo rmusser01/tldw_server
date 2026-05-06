@@ -17,7 +17,10 @@ import {
   normalizePersistentAddResponse,
   shouldFallbackToPersistentAdd,
 } from "@/services/tldw/quick-ingest-fallback";
-import { resolvePerformChunking } from "@/services/tldw/ingest-defaults";
+import {
+  applyQuickIngestChunkingFields,
+  shouldSubmitQuickIngestAdvancedField,
+} from "@/services/tldw/quick-ingest-chunking";
 import {
   ensureSidepanelOpen,
   pickFirstString,
@@ -1834,7 +1837,6 @@ export default defineBackground({
         const fields: Record<string, any> = {
           media_type: mediaType,
           perform_analysis: Boolean(common.perform_analysis),
-          perform_chunking: resolvePerformChunking(common.perform_chunking),
           overwrite_existing: Boolean(common.overwrite_existing),
         };
         const resolvedDefaults: {
@@ -1860,6 +1862,7 @@ export default defineBackground({
         for (const [k, v] of Object.entries(
           advancedValues as Record<string, any>,
         )) {
+          if (!shouldSubmitQuickIngestAdvancedField(k, common)) continue;
           if (k.includes(".")) assignPath(nested, k.split("."), v);
           else fields[k] = v;
         }
@@ -1900,12 +1903,11 @@ export default defineBackground({
         ) {
           fields.pdf_parsing_engine = document.ocr ? "pymupdf4llm" : "";
         }
-        if (chunkingTemplateName) {
-          fields.chunking_template_name = chunkingTemplateName;
-        }
-        if (autoApplyTemplate) {
-          fields.auto_apply_template = true;
-        }
+        applyQuickIngestChunkingFields(fields, {
+          common,
+          chunkingTemplateName,
+          autoApplyTemplate,
+        });
         return fields;
       };
 
@@ -1914,6 +1916,7 @@ export default defineBackground({
         for (const [k, v] of Object.entries(
           advancedValues as Record<string, any>,
         )) {
+          if (!shouldSubmitQuickIngestAdvancedField(k, common)) continue;
           if (k.includes(".")) assignPath(nestedBody, k.split("."), v);
           else nestedBody[k] = v;
         }
@@ -1948,6 +1951,7 @@ export default defineBackground({
           summarize_checkbox: Boolean(common.perform_analysis),
           ...normalizedBody,
         };
+        applyQuickIngestChunkingFields(body, { common });
         if (typeof entry?.keywords === "string") {
           const trimmed = entry.keywords.trim();
           if (trimmed) {

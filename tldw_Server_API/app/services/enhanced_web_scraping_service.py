@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -19,6 +20,10 @@ from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    attach_chunking_plan_to_result,
+    resolve_chunking_options_and_plan,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
@@ -52,6 +57,30 @@ _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS = (
 )
 _PLATFORM_ADMIN_ROLES = frozenset({"admin"})
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+
+
+def _web_chunking_form(
+    *,
+    perform_chunking: bool,
+    chunking_mode: str | None,
+    auto_chunking_goal: str,
+    auto_chunking_use_llm: bool,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        media_type="web",
+        perform_chunking=perform_chunking,
+        chunking_mode=chunking_mode,
+        auto_chunking_goal=auto_chunking_goal,
+        auto_chunking_use_llm=auto_chunking_use_llm,
+        chunk_method=None,
+        chunk_size=500,
+        chunk_overlap=200,
+        chunk_language=None,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        hierarchical_chunking=False,
+        hierarchical_template=None,
+    )
 
 
 def _normalized_claim_values(values: Any) -> set[str]:
@@ -121,6 +150,10 @@ class WebScrapingService:
         crawl_strategy: Optional[str] = None,
         include_external: Optional[bool] = None,
         score_threshold: Optional[float] = None,
+        perform_chunking: bool = True,
+        chunking_mode: Optional[str] = None,
+        auto_chunking_goal: str = "balanced",
+        auto_chunking_use_llm: bool = False,
     ) -> dict[str, Any]:
         """
         Process web scraping task with enhanced features.
@@ -602,6 +635,12 @@ class WebScrapingService:
                 reg.set_gauge("webscraping.persist.last_batch_articles", float(len(result.get("articles", []))), {"method": str(result.get("method", "unknown"))})
             except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
                 reg = None
+            chunking_form = _web_chunking_form(
+                perform_chunking=perform_chunking,
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+            )
             _batch_t0 = time.perf_counter()
             for article in result.get("articles", []):
                 logger.debug(f"Processing article: url={article.get('url')}, "
@@ -672,6 +711,16 @@ class WebScrapingService:
                             "crawl_score": crawl_score,
                         }
                     )
+                    chunk_options = None
+                    chunking_plan = None
+                    if perform_chunking:
+                        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                            chunking_form,
+                            media_type="web",
+                            source_name=str(article.get("url") or ""),
+                            extracted_text=content_with_metadata,
+                        )
+                        attach_chunking_plan_to_result(article, chunking_plan)
 
                     # Prepare segments
 
@@ -691,47 +740,63 @@ class WebScrapingService:
                         "crawl_parent_url": crawl_parent,
                         "crawl_score": crawl_score,
                     }
+                    if chunking_plan:
+                        safe_meta["chunking_plan"] = chunking_plan
                     safe_metadata_json = json.dumps({k: v for k, v in safe_meta.items() if v is not None}, ensure_ascii=False)
 
                     # Build plaintext chunks for chunk-level FTS
-                    try:
-                        # Chunk in a worker thread to avoid blocking the event loop for long documents
-                        flat = await asyncio.to_thread(
-                            lambda _cwm=content_with_metadata: Chunker().chunk_text_hierarchical_flat(_cwm, method='sentences')
-                        )
-                        kind_map = {
-                            'paragraph': 'text',
-                            'list_unordered': 'list',
-                            'list_ordered': 'list',
-                            'code_fence': 'code',
-                            'table_md': 'table',
-                            'header_line': 'heading',
-                            'header_atx': 'heading',
-                        }
+                    if not perform_chunking:
                         chunks_for_sql = []
-                        for it in flat:
-                            md = it.get('metadata') or {}
-                            ctype = kind_map.get(str(md.get('paragraph_kind') or '').lower(), 'text')
-                            small = {}
-                            if md.get('ancestry_titles'):
-                                small['ancestry_titles'] = md.get('ancestry_titles')
-                            if md.get('section_path'):
-                                small['section_path'] = md.get('section_path')
-                            chunks_for_sql.append({
-                                'text': it.get('text',''),
-                                'start_char': md.get('start_offset'),
-                                'end_char': md.get('end_offset'),
-                                'chunk_type': ctype,
-                                'metadata': small,
-                            })
-                    except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"webscraping.persist: chunking failed; storing without chunks: {e}")
+                    else:
                         try:
-                            if reg:
-                                reg.increment("app_warning_events_total", 1, {"component": "webscraping", "event": "chunking_failed"})
-                        except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
-                            logger.debug("metrics increment failed for webscraping chunking_failed")
-                        chunks_for_sql = []
+                        # Chunk in a worker thread to avoid blocking the event loop for long documents
+                            options = chunk_options or {
+                                "method": "sentences",
+                                "max_size": 500,
+                                "overlap": 200,
+                            }
+                            flat = await asyncio.to_thread(
+                                lambda _cwm=content_with_metadata, _opts=options: Chunker().chunk_text_hierarchical_flat(
+                                    _cwm,
+                                    method=_opts.get("method") or "sentences",
+                                    max_size=_opts.get("max_size") or 500,
+                                    overlap=_opts.get("overlap") or 200,
+                                    language=_opts.get("language"),
+                                )
+                            )
+                            kind_map = {
+                                'paragraph': 'text',
+                                'list_unordered': 'list',
+                                'list_ordered': 'list',
+                                'code_fence': 'code',
+                                'table_md': 'table',
+                                'header_line': 'heading',
+                                'header_atx': 'heading',
+                            }
+                            chunks_for_sql = []
+                            for it in flat:
+                                md = it.get('metadata') or {}
+                                ctype = kind_map.get(str(md.get('paragraph_kind') or '').lower(), 'text')
+                                small = {}
+                                if md.get('ancestry_titles'):
+                                    small['ancestry_titles'] = md.get('ancestry_titles')
+                                if md.get('section_path'):
+                                    small['section_path'] = md.get('section_path')
+                                chunks_for_sql.append({
+                                    'text': it.get('text',''),
+                                    'start_char': md.get('start_offset'),
+                                    'end_char': md.get('end_offset'),
+                                    'chunk_type': ctype,
+                                    'metadata': small,
+                                })
+                        except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
+                            logger.debug(f"webscraping.persist: chunking failed; storing without chunks: {e}")
+                            try:
+                                if reg:
+                                    reg.increment("app_warning_events_total", 1, {"component": "webscraping", "event": "chunking_failed"})
+                            except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
+                                logger.debug("metrics increment failed for webscraping chunking_failed")
+                            chunks_for_sql = []
 
                     # Run blocking DB write off the event loop and observe latency
                     _t0 = time.perf_counter()

@@ -77,6 +77,21 @@ export const MEDIA_ADD_SCHEMA_FALLBACK: Array<{
   { name: 'pdf_parsing_engine', type: 'string', description: 'PDF parsing engine', title: 'Pdf Parsing Engine' },
   { name: 'perform_analysis', type: 'boolean', description: 'Perform analysis', title: 'Perform Analysis' },
   { name: 'perform_chunking', type: 'boolean', description: 'Enable chunking', title: 'Perform Chunking' },
+  {
+    name: 'chunking_mode',
+    type: 'string',
+    description: 'Use automatic or manual chunking settings',
+    title: 'Chunking Mode',
+    enum: ['auto', 'manual']
+  },
+  {
+    name: 'auto_chunking_goal',
+    type: 'string',
+    description: 'Optimization goal when chunking mode is automatic',
+    title: 'Auto Chunking Goal',
+    enum: ['balanced', 'qa_search', 'navigation_summary']
+  },
+  { name: 'auto_chunking_use_llm', type: 'boolean', description: 'Allow LLM-assisted automatic chunk planning when available', title: 'Auto Chunking Use Llm' },
   { name: 'perform_claims_extraction', type: 'string', description: 'Extract factual claims', title: 'Perform Claims Extraction' },
   { name: 'perform_confabulation_check_of_analysis', type: 'boolean', description: 'Enable confabulation check', title: 'Confabulation Check' },
   { name: 'perform_rolling_summarization', type: 'boolean', description: 'Rolling summarization', title: 'Rolling Summarization' },
@@ -181,6 +196,27 @@ export const WEB_SCRAPING_SCHEMA_FALLBACK: Array<{
     description: 'Persist results or keep them ephemeral.',
     title: 'Mode',
     enum: ['persist', 'ephemeral']
+  },
+  { name: 'perform_chunking', type: 'boolean', description: 'Enable chunking.', title: 'Perform Chunking' },
+  {
+    name: 'chunking_mode',
+    type: 'string',
+    description: 'Use automatic or manual chunking settings.',
+    title: 'Chunking Mode',
+    enum: ['auto', 'manual']
+  },
+  {
+    name: 'auto_chunking_goal',
+    type: 'string',
+    description: 'Optimization goal when chunking mode is automatic.',
+    title: 'Auto Chunking Goal',
+    enum: ['balanced', 'qa_search', 'navigation_summary']
+  },
+  {
+    name: 'auto_chunking_use_llm',
+    type: 'boolean',
+    description: 'Allow LLM-assisted automatic chunk planning when available.',
+    title: 'Auto Chunking Use Llm'
   }
 ]
 

@@ -18,6 +18,10 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    attach_chunking_plan_to_result,
+    resolve_chunking_options_and_plan,
+)
 from tldw_Server_API.app.services.web_scraping_service import (
     ingest_web_content_orchestrate,
 )
@@ -114,7 +118,17 @@ async def ingest_web_content(
     # Optional chunking stub (kept for behavioural parity with legacy).
     if request.perform_chunking:
         logger.info("Performing chunking on each article (placeholder).")
-        # Real chunking logic would go here.
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            _, chunking_plan = resolve_chunking_options_and_plan(
+                request,
+                media_type="web",
+                source_name=str(item.get("url") or ""),
+                extracted_text=content if isinstance(content, str) else None,
+            )
+            attach_chunking_plan_to_result(item, chunking_plan)
 
     # Timestamp results when requested.
     if request.timestamp_option:
