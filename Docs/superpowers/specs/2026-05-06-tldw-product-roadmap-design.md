@@ -168,6 +168,10 @@ allows. The horizon should also avoid full route consolidation; it should decide
 the canonical workspace model first and implement only the smallest UX changes
 needed to prove the golden path.
 
+First implementation slice: canonical workspace decision record, typed
+server/local workspace bridge, executive brief template, and generated artifact
+review contract.
+
 ### Milestone 1: Workspace Consolidation Discovery
 
 Outcome: a decision record for the canonical workspace model.
