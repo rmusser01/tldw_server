@@ -1172,6 +1172,48 @@ export interface MediaIngestionBudgetDiagnostics {
   error?: string | null
 }
 
+export interface SandboxAdminRuntimeDiagnosticsSummary {
+  total: number
+  ready: number
+  unavailable: number
+  host_gated: number
+  scaffold: number
+  host_local_warning_runtimes?: string[]
+  repair_supported_runtimes?: string[]
+}
+
+export interface SandboxAdminRuntimeDiagnosticsItem {
+  name: string
+  available: boolean
+  implementation_state?: string | null
+  readiness: string
+  reasons?: string[]
+  normalized_reasons?: string[]
+  boundary_class?: string | null
+  vm_grade_isolation?: boolean
+  untrusted_eligible?: boolean
+  isolation_warnings?: string[]
+  strict_deny_all_supported?: boolean
+  strict_allowlist_supported?: boolean
+  session_reuse_model?: string | null
+  requires_live_health_check?: boolean
+  repair_supported?: boolean
+  recommended_action?: string
+}
+
+export interface SandboxAdminStartupWarningSummary {
+  present: boolean
+  blocking: boolean
+  codes?: string[]
+}
+
+export interface SandboxAdminRuntimeDiagnosticsResponse {
+  source: "feature_discovery"
+  summary: SandboxAdminRuntimeDiagnosticsSummary
+  runtimes: SandboxAdminRuntimeDiagnosticsItem[]
+  startup_warning_summary?: SandboxAdminStartupWarningSummary | null
+}
+
 export class TldwApiClientBase {
   private storage: Storage
   private config: TldwConfig | null = null
@@ -2051,6 +2093,13 @@ export class TldwApiClientBase {
     })
     return await bgRequest<MediaIngestionBudgetDiagnostics>({
       path: `/api/v1/resource-governor/diag/media-budget${query}`,
+      method: "GET"
+    })
+  }
+
+  async getSandboxRuntimeDiagnostics(): Promise<SandboxAdminRuntimeDiagnosticsResponse> {
+    return await bgRequest<SandboxAdminRuntimeDiagnosticsResponse>({
+      path: "/api/v1/sandbox/admin/runtime-diagnostics",
       method: "GET"
     })
   }
