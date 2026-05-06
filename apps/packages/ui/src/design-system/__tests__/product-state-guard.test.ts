@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
 const guard = await import("../../../scripts/design-system-product-state-rules.mjs")
+const guardCli = await import(
+  "../../../scripts/verify-design-system-product-state.mjs"
+)
 
 const analyze = (relativePath: string, source: string) =>
   guard.analyzeSource({
@@ -181,6 +184,9 @@ describe("design-system product-state guard rules", () => {
 
     expect(alertFindings).toHaveLength(2)
     expect(new Set(alertFindings.map((finding) => finding.id)).size).toBe(2)
+    expect(alertFindings.every((finding) => finding.id.includes("#"))).toBe(
+      true
+    )
   })
 
   it("flags product-state text in literal AntD text-bearing props", () => {
@@ -478,6 +484,9 @@ describe("design-system product-state guard rules", () => {
 
     expect(readyFindings).toHaveLength(2)
     expect(new Set(readyFindings.map((finding) => finding.id)).size).toBe(2)
+    expect(readyFindings.every((finding) => finding.id.includes("#"))).toBe(
+      true
+    )
   })
 })
 
@@ -630,6 +639,73 @@ describe("design-system product-state guard baseline handling", () => {
       expect.objectContaining({
         id: newFinding.id,
         state: "blocked"
+      })
+    ])
+  })
+
+  it("does not let a newly inserted earlier duplicate inherit a legacy base id", () => {
+    const baseFindings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice() {
+          return <Alert type="error" message="Server unavailable" />
+        }
+      `
+    ).filter(
+      (finding) =>
+        finding.rule === "antd-product-state-import" &&
+        finding.subject === "Alert"
+    )
+
+    const changedFindings = analyze(
+      "src/components/Common/BetaNotice.tsx",
+      `
+        import { Alert } from "antd"
+
+        export function BetaNotice() {
+          return (
+            <>
+              <Alert type="warning" message="Setup required" />
+              <Alert type="error" message="Server unavailable" />
+            </>
+          )
+        }
+      `
+    ).filter(
+      (finding) =>
+        finding.rule === "antd-product-state-import" &&
+        finding.subject === "Alert"
+    )
+
+    const result = guard.applyBaseline({
+      findings: changedFindings,
+      baseline: [
+        {
+          id: baseFindings[0].id,
+          path: baseFindings[0].path,
+          rule: baseFindings[0].rule,
+          subject: baseFindings[0].subject,
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing AntD Alert product-state UI before the guard.",
+          replacement: "tldw design-system state primitive",
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(baseFindings[0].id).not.toContain("#")
+    expect(changedFindings).toHaveLength(2)
+    expect(changedFindings.every((finding) => finding.id.includes("#"))).toBe(
+      true
+    )
+    expect(result.allowedLegacy).toEqual([])
+    expect(result.blocked).toHaveLength(2)
+    expect(result.staleBaseline).toEqual([
+      expect.objectContaining({
+        id: baseFindings[0].id
       })
     ])
   })
@@ -942,5 +1018,33 @@ describe("design-system product-state guard runner", () => {
     expect(result.exitCode).toBe(0)
     expect(result.report).toContain("Allowed legacy product-state exceptions")
     expect(result.report).toContain("Stale baseline entries")
+  })
+
+  it("reads source files with bounded concurrency while preserving source order", async () => {
+    const filePaths = ["b.ts", "a.ts", "c.ts", "d.ts"]
+    let activeReads = 0
+    let maxActiveReads = 0
+
+    const sources = await guardCli.readSourcesInOrder({
+      filePaths,
+      concurrency: 2,
+      toRelativePath: (filePath: string) => `src/${filePath}`,
+      readFile: async (filePath: string) => {
+        activeReads += 1
+        maxActiveReads = Math.max(maxActiveReads, activeReads)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        activeReads -= 1
+
+        return `source:${filePath}`
+      }
+    })
+
+    expect(maxActiveReads).toBeLessThanOrEqual(2)
+    expect(sources).toEqual([
+      { relativePath: "src/b.ts", source: "source:b.ts" },
+      { relativePath: "src/a.ts", source: "source:a.ts" },
+      { relativePath: "src/c.ts", source: "source:c.ts" },
+      { relativePath: "src/d.ts", source: "source:d.ts" }
+    ])
   })
 })

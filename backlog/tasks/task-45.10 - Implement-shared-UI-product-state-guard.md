@@ -4,7 +4,7 @@ title: Implement shared UI product-state guard
 status: Done
 assignee: []
 created_date: '2026-05-06 01:02'
-updated_date: '2026-05-06 01:57'
+updated_date: '2026-05-06 04:21'
 labels:
   - design-system
   - frontend
@@ -116,16 +116,20 @@ Bandit skipped: no Python files touched.
 
 Final review fix accepted. The guard now preserves duplicate same-rule/path/
 subject findings instead of letting one baseline entry cover later same-subject
-occurrences. The first occurrence keeps its base id; later occurrences receive
-deterministic duplicate-suffixed ids. The existing baseline was refreshed from
-260 to 523 entries to represent the newly exposed current duplicate debt, and
-the inventory documents preserving exact duplicate-suffixed ids for exceptions.
-Fresh verification from apps/packages/ui: product-state guard unit suite exited
-0 with 35/35 tests passing; focused design-system suite exited 0 with 4 test
-files passing and 43/43 tests passing; bun run verify:design-system-state exited
-0 with 523 allowed legacy exceptions and no blocked, stale, or baseline-error
-sections. From repo root: git diff --check exited 0. Final review re-check
-passed with no findings.
+occurrences. Every occurrence in a duplicate group receives a deterministic
+duplicate-suffixed id; singleton findings keep their base ids. The existing
+baseline was refreshed from 260 to 523 entries to represent the newly exposed
+current duplicate debt, and the inventory documents preserving exact
+duplicate-suffixed ids for exceptions. Fresh verification from apps/packages/ui:
+product-state guard unit suite exited 0 with 35/35 tests passing; focused
+design-system suite exited 0 with 4 test files passing and 43/43 tests passing;
+bun run verify:design-system-state exited 0 with 523 allowed legacy exceptions
+and no blocked, stale, or baseline-error sections. From repo root: git diff
+--check exited 0. Final review re-check passed with no findings.
+
+PR #1338 review-fix pass started. Actionable comments to address: make duplicate finding IDs stable without positional unsuffixed first occurrence; bound verify-design-system-state file read concurrency; short-circuit JSX-return traversal after a JSX return is found.
+
+PR #1338 review fixes completed: duplicate product-state finding groups now suffix every occurrence so legacy base IDs cannot be inherited by newly inserted earlier duplicates; baseline refreshed with stable duplicate IDs while keeping 523 live exceptions; source reads are bounded and order-preserving; JSX-return traversal short-circuits after finding JSX.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -135,19 +139,21 @@ Implemented and closed out the shared UI product-state guard workflow. Tasks 1-3
 added the pure product-state rule engine, baseline/report semantics, CLI/package
 script, and the checked-in baseline for existing shared UI product-state
 exceptions. Final review found that same-rule/path/subject findings could share
-one baseline entry, so the guard now emits duplicate-suffixed ids for later
-occurrences while preserving the base id for the first occurrence. The refreshed
-baseline tracks 523 existing shared UI product-state exceptions. Task 4
-documented the contributor workflow in
+one baseline entry, so the guard now emits duplicate-suffixed ids for every
+occurrence in duplicate groups while singleton findings preserve compact base
+ids. The refreshed baseline tracks 523 existing shared UI product-state
+exceptions. Task 4 documented the contributor workflow in
 Docs/Design/tldw_web_design_system_inventory.md, including when to run the guard,
 expected design-system primitives for new shared product-state UI, and
 owner/reason/replacement/queue requirements for any new baseline exception.
-Final verification passed: focused Vitest guard suite from apps/packages/ui
-exited 0 with 4 files passing and 43/43 tests passing; bun run
+Final verification passed: focused Vitest guard coverage from apps/packages/ui
+exited 0 with 2 files passing and 40/40 tests passing; bun run
 verify:design-system-state exited 0 with 523 allowed legacy exceptions, no
 blocked product-state findings, no stale baseline entries, and no baseline
 errors; git diff --check exited 0 from the repo root. Bandit skipped: no Python
 files touched.
+
+Addressed PR #1338 review comments for the product-state design-system guard. Added regression coverage for duplicate ID stability and bounded source reading, refreshed the baseline to stable duplicate IDs, and verified with focused Vitest coverage, verify:design-system-state, and git diff --check. Bandit was not applicable because the touched scope contains no Python.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

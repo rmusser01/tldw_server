@@ -814,20 +814,21 @@ function disambiguateFindingIds(findings) {
   const disambiguated = new Map()
 
   for (const group of groups.values()) {
+    if (group.length === 1) {
+      const { identityHint, ...publicFinding } = group[0]
+      disambiguated.set(group[0], publicFinding)
+      continue
+    }
+
     const suffixCounts = new Map()
 
     group.forEach((finding, index) => {
       const { identityHint, ...publicFinding } = finding
       const suffixBase = duplicateFindingSuffix(
-        identityHint ?? `occurrence-${index + 1}`
+        occurrenceIdentityHint(finding, identityHint, index)
       )
       const suffixCount = suffixCounts.get(suffixBase) ?? 0
       suffixCounts.set(suffixBase, suffixCount + 1)
-
-      if (index === 0) {
-        disambiguated.set(finding, publicFinding)
-        return
-      }
 
       const suffix =
         suffixCount === 0 ? suffixBase : `${suffixBase}-${suffixCount + 1}`
@@ -839,6 +840,15 @@ function disambiguateFindingIds(findings) {
   }
 
   return findings.map((finding) => disambiguated.get(finding))
+}
+
+function occurrenceIdentityHint(finding, identityHint, index) {
+  return [
+    identityHint ?? `occurrence-${index + 1}`,
+    typeof finding.line === "number" ? `line:${finding.line}` : undefined
+  ]
+    .filter(Boolean)
+    .join("|")
 }
 
 function antdUseIdentityHint({ importedName, ownerName, useContext }) {
@@ -1003,12 +1013,13 @@ function functionLikeReturnsJsx(functionNode) {
   }
 
   let returnsJsx = false
-  walk(functionNode.body, (node) => {
-    if (returnsJsx || !ts.isReturnStatement(node) || !node.expression) {
-      return
+  walkUntil(functionNode.body, (node) => {
+    if (!ts.isReturnStatement(node) || !node.expression) {
+      return false
     }
 
     returnsJsx = containsJsx(node.expression)
+    return returnsJsx
   })
 
   return returnsJsx
@@ -1017,15 +1028,17 @@ function functionLikeReturnsJsx(functionNode) {
 function containsJsx(node) {
   let hasJsx = false
 
-  walk(node, (child) => {
+  walkUntil(node, (child) => {
     if (
-      hasJsx ||
       ts.isJsxElement(child) ||
       ts.isJsxSelfClosingElement(child) ||
       ts.isJsxFragment(child)
     ) {
       hasJsx = true
+      return true
     }
+
+    return false
   })
 
   return hasJsx
@@ -1046,4 +1059,21 @@ function isPresentString(value) {
 function walk(node, visitor) {
   visitor(node)
   ts.forEachChild(node, (child) => walk(child, visitor))
+}
+
+function walkUntil(node, visitor) {
+  if (visitor(node)) {
+    return true
+  }
+
+  let shouldStop = false
+  ts.forEachChild(node, (child) => {
+    if (shouldStop) {
+      return
+    }
+
+    shouldStop = walkUntil(child, visitor)
+  })
+
+  return shouldStop
 }
