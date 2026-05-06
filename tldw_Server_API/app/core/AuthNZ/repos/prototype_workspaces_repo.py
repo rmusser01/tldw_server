@@ -295,6 +295,27 @@ class PrototypeWorkspacesRepo:
         )
         return await self.get_workspace(prototype_workspace_id)
 
+    async def archive_workspace(
+        self,
+        prototype_workspace_id: str,
+        *,
+        archived_at: str | datetime | None = None,
+    ) -> dict[str, Any] | None:
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_workspaces
+            SET archived_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                archived_at if archived_at is not None else ts,
+                ts,
+                prototype_workspace_id,
+            ),
+        )
+        return await self.get_workspace(prototype_workspace_id)
+
     async def create_snapshot(
         self,
         *,
@@ -335,6 +356,15 @@ class PrototypeWorkspacesRepo:
         )
         created = await self.get_snapshot(snapshot_id)
         return created or {}
+
+    async def delete_snapshot(self, snapshot_id: str) -> None:
+        await self.db_pool.execute(
+            """
+            DELETE FROM prototype_snapshots
+            WHERE id = ?
+            """,
+            (snapshot_id,),
+        )
 
     async def get_snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
         row = await self.db_pool.fetchone(

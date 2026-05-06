@@ -82,22 +82,28 @@ class PrototypeWorkspaceService:
             runtime_policy=runtime_policy,
             designated_promoter_ids=designated_promoter_ids,
         )
-        seed_snapshot = await self._repo.create_snapshot(
-            prototype_workspace_id=workspace["id"],
-            snapshot_id=f"psnap_{uuid.uuid4().hex}",
-            created_by_user_id=int(owner_user_id),
-            storage_ref="prototype://seed",
-            prompt_summary=prompt,
-            diff_summary={"creation_source": creation_source},
-        )
-        updated = await self._repo.update_workspace_state(
-            workspace["id"],
-            canonical_snapshot_id=seed_snapshot["snapshot_id"],
-            last_known_good_snapshot_id=seed_snapshot["snapshot_id"],
-            canonical_preview_status="uninitialized",
-            publish_validation_status="pending",
-        )
-        return updated or workspace
+        try:
+            seed_snapshot = await self._repo.create_snapshot(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id=f"psnap_{uuid.uuid4().hex}",
+                created_by_user_id=int(owner_user_id),
+                storage_ref="prototype://seed",
+                prompt_summary=prompt,
+                diff_summary={"creation_source": creation_source},
+            )
+            updated = await self._repo.update_workspace_state(
+                workspace["id"],
+                canonical_snapshot_id=seed_snapshot["snapshot_id"],
+                last_known_good_snapshot_id=seed_snapshot["snapshot_id"],
+                canonical_preview_status="uninitialized",
+                publish_validation_status="pending",
+            )
+            if not updated or updated.get("canonical_snapshot_id") != seed_snapshot["snapshot_id"]:
+                raise RuntimeError("failed to persist prototype workspace seed snapshot")
+            return updated
+        except Exception:
+            await self._repo.archive_workspace(workspace["id"])
+            raise
 
     async def create_or_reuse_branch_session(
         self,
@@ -224,11 +230,17 @@ class PrototypeWorkspaceService:
             prompt_summary=prompt_summary,
             preview_health=preview_health,
         )
-        await self._repo.update_session_state(
-            prototype_session_id,
-            last_saved_snapshot_id=snapshot["snapshot_id"],
-            last_activity_at=_utc_now(),
-        )
+        try:
+            updated_session = await self._repo.update_session_state(
+                prototype_session_id,
+                last_saved_snapshot_id=snapshot["snapshot_id"],
+                last_activity_at=_utc_now(),
+            )
+            if not updated_session or updated_session.get("last_saved_snapshot_id") != snapshot["snapshot_id"]:
+                raise RuntimeError("failed to persist session snapshot state")
+        except Exception:
+            await self._repo.delete_snapshot(snapshot["snapshot_id"])
+            raise
         return snapshot
 
     async def promote_candidate(
@@ -326,6 +338,12 @@ class PrototypeWorkspaceService:
                 details={"reason": failure_reason},
             ).to_dict()
 
+        previous_workspace_state = {
+            "canonical_snapshot_id": workspace.get("canonical_snapshot_id"),
+            "last_known_good_snapshot_id": workspace.get("last_known_good_snapshot_id"),
+            "canonical_preview_status": workspace.get("canonical_preview_status"),
+            "publish_validation_status": workspace.get("publish_validation_status"),
+        }
         preview_grant = await self._preview_broker.issue_preview_grant(
             prototype_workspace_id=prototype_workspace_id,
             snapshot_id=candidate_snapshot_id,
@@ -338,23 +356,35 @@ class PrototypeWorkspaceService:
                 "validation_mode": "publish",
             },
         )
-        updated_workspace = await self._repo.update_workspace_state(
-            prototype_workspace_id,
-            canonical_snapshot_id=candidate_snapshot_id,
-            last_known_good_snapshot_id=candidate_snapshot_id,
-            canonical_preview_status="ready",
-            publish_validation_status="validated",
-        )
-        if not updated_workspace or updated_workspace.get("canonical_snapshot_id") != candidate_snapshot_id:
-            await self._preview_broker.revoke_preview_handle(preview_grant["preview_handle"])
-            raise RuntimeError("failed to persist canonical workspace update")
-        if promotion_request:
-            await self._repo.update_promotion_request(
-                promotion_request["id"],
-                status="promoted",
-                reviewed_by_user_id=reviewer_id,
-                review_notes=review_notes,
+        try:
+            updated_workspace = await self._repo.update_workspace_state(
+                prototype_workspace_id,
+                canonical_snapshot_id=candidate_snapshot_id,
+                last_known_good_snapshot_id=candidate_snapshot_id,
+                canonical_preview_status="ready",
+                publish_validation_status="validated",
             )
+            if not updated_workspace or updated_workspace.get("canonical_snapshot_id") != candidate_snapshot_id:
+                raise RuntimeError("failed to persist canonical workspace update")
+            if promotion_request:
+                updated_request = await self._repo.update_promotion_request(
+                    promotion_request["id"],
+                    status="promoted",
+                    reviewed_by_user_id=reviewer_id,
+                    review_notes=review_notes,
+                )
+                if not updated_request or updated_request.get("status") != "promoted":
+                    raise RuntimeError("failed to persist promotion request update")
+        except Exception:
+            await self._preview_broker.revoke_preview_handle(preview_grant["preview_handle"])
+            await self._repo.update_workspace_state(
+                prototype_workspace_id,
+                canonical_snapshot_id=previous_workspace_state["canonical_snapshot_id"],
+                last_known_good_snapshot_id=previous_workspace_state["last_known_good_snapshot_id"],
+                canonical_preview_status=previous_workspace_state["canonical_preview_status"],
+                publish_validation_status=previous_workspace_state["publish_validation_status"],
+            )
+            raise
 
         return PrototypePromotionResult(
             status="promoted",

@@ -99,6 +99,64 @@ def test_build_promote_idempotency_key_uses_workspace_candidate_and_canonical_sn
 
 
 @pytest.mark.asyncio
+async def test_create_workspace_archives_partial_workspace_when_seed_snapshot_fails(
+    repo,
+    prototype_db,
+    monkeypatch,
+):
+    module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    service_cls = _load_attr(module, "PrototypeWorkspaceService")
+    service = service_cls(repo=repo)
+
+    async def fail_create_snapshot(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("seed snapshot failed")
+
+    monkeypatch.setattr(repo, "create_snapshot", fail_create_snapshot)
+
+    with pytest.raises(RuntimeError, match="seed snapshot failed"):
+        await service.create_workspace(
+            owner_user_id=1,
+            title="Partial seed failure",
+            creation_source="prompt",
+        )
+
+    row = prototype_db.execute(
+        "SELECT archived_at FROM prototype_workspaces WHERE title = ?",
+        ("Partial seed failure",),
+    ).fetchone()
+    assert row is not None
+    assert row[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_save_session_snapshot_deletes_snapshot_when_session_state_update_fails(
+    repo,
+    prototype_db,
+    monkeypatch,
+):
+    module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    service_cls = _load_attr(module, "PrototypeWorkspaceService")
+    service = service_cls(repo=repo)
+    workspace, base_snapshot, session, _candidate = await _seed_promotable_workspace(repo, prototype_db)
+
+    async def fail_update_session_state(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("session state update failed")
+
+    monkeypatch.setattr(repo, "update_session_state", fail_update_session_state)
+
+    with pytest.raises(RuntimeError, match="session state update failed"):
+        await service.save_session_snapshot(
+            prototype_session_id=session["id"],
+            snapshot_id="snap_orphaned_save",
+            storage_ref="prototype://failed-save",
+        )
+
+    assert await repo.get_snapshot("snap_orphaned_save") is None
+    updated_workspace = await repo.get_workspace(workspace["id"])
+    assert updated_workspace["canonical_snapshot_id"] == base_snapshot["snapshot_id"]
+
+
+@pytest.mark.asyncio
 async def test_promote_candidate_requires_validation(repo, prototype_db, promotion_service):
     workspace, base_snapshot, _session, candidate = await _seed_promotable_workspace(repo, prototype_db)
 
@@ -211,3 +269,48 @@ async def test_promote_candidate_fails_closed_when_workspace_update_does_not_per
 
     updated_workspace = await repo.get_workspace(workspace["id"])
     assert updated_workspace["canonical_snapshot_id"] == base_snapshot["snapshot_id"]
+
+
+@pytest.mark.asyncio
+async def test_promote_candidate_revokes_preview_and_reverts_workspace_when_request_update_fails(
+    repo,
+    prototype_db,
+    passing_promotion_service,
+    monkeypatch,
+):
+    workspace, base_snapshot, session, candidate = await _seed_promotable_workspace(repo, prototype_db)
+    promotion_request = await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=candidate["snapshot_id"],
+        requested_by_user_id=2,
+    )
+    revoked_handles: list[str] = []
+    original_revoke = passing_promotion_service._preview_broker.revoke_preview_handle
+
+    async def recording_revoke(preview_handle: str) -> bool:
+        revoked_handles.append(preview_handle)
+        return await original_revoke(preview_handle)
+
+    async def fail_update_promotion_request(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("promotion request update failed")
+
+    monkeypatch.setattr(
+        passing_promotion_service._preview_broker,
+        "revoke_preview_handle",
+        recording_revoke,
+    )
+    monkeypatch.setattr(repo, "update_promotion_request", fail_update_promotion_request)
+
+    with pytest.raises(RuntimeError, match="promotion request update failed"):
+        await passing_promotion_service.promote_candidate(
+            prototype_workspace_id=workspace["id"],
+            candidate_snapshot_id=candidate["snapshot_id"],
+            reviewer_user_id=1,
+            promotion_request_id=promotion_request["id"],
+        )
+
+    updated_workspace = await repo.get_workspace(workspace["id"])
+    assert updated_workspace["canonical_snapshot_id"] == base_snapshot["snapshot_id"]
+    assert updated_workspace["last_known_good_snapshot_id"] == base_snapshot["snapshot_id"]
+    assert revoked_handles
