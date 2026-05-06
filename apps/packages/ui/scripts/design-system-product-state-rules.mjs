@@ -40,7 +40,6 @@ const CANONICAL_STATE_LABELS = [
   "Degraded",
   "Retrying",
   "Blocked",
-  "Ready",
   "Loading"
 ]
 
@@ -61,7 +60,7 @@ const PRODUCT_STATE_WORDS = [
 ]
 
 const RECOVERY_COMPONENT_PATTERN =
-  /(Error|Connection|Unavailable|Recovery|Offline|Readiness|Permission)Banner$/
+  /(Error|Connection|Unavailable|Recovery|Offline|Readiness|Permission).*Banner$/
 const EMPTY_COMPONENT_PATTERN = /(EmptyState|Empty)$/
 const LOADING_COMPONENT_PATTERN = /(LoadingState|Loading|Spinner)$/
 const STATUS_COMPONENT_PATTERN = /(StatusBadge|StatusTag|StatusChip|StatusDot)$/
@@ -93,9 +92,21 @@ const RULE_REPLACEMENTS = {
   "local-recovery-banner": "RecoveryCallout or StatePanel",
   "local-empty-state": "EmptyState",
   "local-loading-state": "LoadingState",
-  "local-status-badge": "Badge with design-system state mapping",
+  "local-status-badge": "Badge with design-system state registry mapping",
   "canonical-state-label": "design-system state registry"
 }
+
+const REQUIRED_BASELINE_FIELDS = [
+  "id",
+  "path",
+  "rule",
+  "subject",
+  "state",
+  "owner",
+  "reason",
+  "replacement",
+  "migrationQueue"
+]
 
 export function createFindingId(rule, relativePath, subject) {
   return `${rule}:${normalizePath(relativePath)}:${subject}`
@@ -134,6 +145,162 @@ export function analyzeSource({ relativePath, source }) {
   })
 
   return dedupeFindings(findings)
+}
+
+export function validateBaseline(baseline) {
+  if (!Array.isArray(baseline)) {
+    return ["baseline must be a JSON array"]
+  }
+
+  const errors = []
+  const seenIds = new Set()
+
+  baseline.forEach((entry, index) => {
+    const prefix = `baseline[${index}]`
+
+    if (!isRecord(entry)) {
+      errors.push(`${prefix} must be an object`)
+      return
+    }
+
+    for (const field of REQUIRED_BASELINE_FIELDS) {
+      if (!isPresentString(entry[field])) {
+        errors.push(`${prefix} ${field} is required`)
+      }
+    }
+
+    if (isPresentString(entry.id)) {
+      if (seenIds.has(entry.id)) {
+        errors.push(`${prefix} duplicate baseline id ${entry.id}`)
+      } else {
+        seenIds.add(entry.id)
+      }
+    }
+
+    if (
+      isPresentString(entry.state) &&
+      !VALID_BASELINE_STATES.has(entry.state)
+    ) {
+      errors.push(
+        `${prefix} state must be allowed_legacy_exception or active_migration_target`
+      )
+    }
+  })
+
+  return errors
+}
+
+export function applyBaseline({ findings, baseline }) {
+  const liveFindings = Array.isArray(findings) ? findings : []
+  const baselineErrors = validateBaseline(baseline)
+  const result = {
+    blocked: [],
+    activeMigrationTargets: [],
+    allowedLegacy: [],
+    staleBaseline: [],
+    baselineErrors
+  }
+
+  if (baselineErrors.length > 0) {
+    result.blocked = liveFindings.map(markBlocked)
+    return result
+  }
+
+  const baselineById = new Map()
+  for (const entry of baseline) {
+    baselineById.set(entry.id, entry)
+  }
+
+  const matchedBaselineIds = new Set()
+  for (const finding of liveFindings) {
+    const baselineEntry = baselineById.get(finding.id)
+
+    if (!baselineEntry) {
+      result.blocked.push(markBlocked(finding))
+      continue
+    }
+
+    matchedBaselineIds.add(baselineEntry.id)
+    const allowedFinding = {
+      ...finding,
+      ...baselineEntry
+    }
+
+    if (baselineEntry.state === "active_migration_target") {
+      result.activeMigrationTargets.push(allowedFinding)
+      continue
+    }
+
+    result.allowedLegacy.push(allowedFinding)
+  }
+
+  result.staleBaseline = baseline.filter(
+    (entry) => !matchedBaselineIds.has(entry.id)
+  )
+
+  return result
+}
+
+export function formatReport(result) {
+  const baselineErrors = result?.baselineErrors ?? []
+  const blocked = sortedEntries(result?.blocked ?? [])
+  const activeMigrationTargets = sortedEntries(
+    result?.activeMigrationTargets ?? []
+  )
+  const allowedLegacy = sortedEntries(result?.allowedLegacy ?? [])
+  const staleBaseline = sortedEntries(result?.staleBaseline ?? [])
+
+  if (
+    baselineErrors.length === 0 &&
+    blocked.length === 0 &&
+    activeMigrationTargets.length === 0 &&
+    allowedLegacy.length === 0 &&
+    staleBaseline.length === 0
+  ) {
+    return "No product-state guard issues found"
+  }
+
+  const sections = []
+
+  if (baselineErrors.length > 0) {
+    sections.push(formatTextList("Invalid baseline entries", baselineErrors))
+  }
+
+  if (blocked.length > 0) {
+    sections.push(formatEntryList("Blocked product-state findings", blocked))
+  }
+
+  if (activeMigrationTargets.length > 0) {
+    sections.push(
+      formatEntryList(
+        "Active product-state migration targets",
+        activeMigrationTargets
+      )
+    )
+  }
+
+  if (allowedLegacy.length > 0) {
+    sections.push(
+      formatEntryList(
+        "Allowed legacy product-state exceptions",
+        allowedLegacy
+      )
+    )
+  }
+
+  if (staleBaseline.length > 0) {
+    sections.push(formatEntryList("Stale baseline entries", staleBaseline))
+  }
+
+  const remainingBaseline = sortedEntries([
+    ...activeMigrationTargets,
+    ...allowedLegacy
+  ])
+  if (remainingBaseline.length > 0) {
+    sections.push(formatBaselineTotals(remainingBaseline))
+  }
+
+  return sections.join("\n\n")
 }
 
 function isExcludedPath(relativePath) {
@@ -547,6 +714,91 @@ function dedupeFindings(findings) {
   return deduped
 }
 
+function markBlocked(finding) {
+  return {
+    ...finding,
+    state: "blocked"
+  }
+}
+
+function sortedEntries(entries) {
+  return [...entries].sort((left, right) =>
+    [
+      left.rule,
+      left.path,
+      left.subject,
+      left.id
+    ]
+      .join("\0")
+      .localeCompare(
+        [
+          right.rule,
+          right.path,
+          right.subject,
+          right.id
+        ].join("\0")
+      )
+  )
+}
+
+function formatTextList(heading, items) {
+  return [heading, ...items.map((item) => `- ${item}`)].join("\n")
+}
+
+function formatEntryList(heading, entries) {
+  return [heading, ...entries.flatMap(formatEntry)].join("\n")
+}
+
+function formatEntry(entry) {
+  const lines = [
+    `- ${entry.rule}: ${entry.path} (${entry.subject})`
+  ]
+
+  appendEntryDetail(lines, "id", entry.id)
+  appendEntryDetail(lines, "line", entry.line)
+  appendEntryDetail(lines, "message", entry.message)
+  appendEntryDetail(lines, "owner", entry.owner)
+  appendEntryDetail(lines, "replacement", entry.replacement)
+  appendEntryDetail(lines, "migrationQueue", entry.migrationQueue)
+  appendEntryDetail(lines, "reason", entry.reason)
+
+  return lines
+}
+
+function appendEntryDetail(lines, label, value) {
+  if (value === undefined || value === null || value === "") {
+    return
+  }
+
+  lines.push(`  ${label}: ${value}`)
+}
+
+function formatBaselineTotals(entries) {
+  return [
+    `Baseline exceptions: ${entries.length}`,
+    "By rule:",
+    ...formatCountGroup(entries, "rule"),
+    "By migration queue:",
+    ...formatCountGroup(entries, "migrationQueue")
+  ].join("\n")
+}
+
+function formatCountGroup(entries, field) {
+  const counts = new Map()
+
+  for (const entry of entries) {
+    if (!entry[field]) {
+      continue
+    }
+
+    counts.set(entry[field], (counts.get(entry[field]) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([label, count]) => `- ${label}: ${count}`)
+}
+
 function lineForNode(sourceFile, node) {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
 }
@@ -612,6 +864,14 @@ function containsJsx(node) {
 
 function normalizePath(path) {
   return path.replaceAll("\\", "/")
+}
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function isPresentString(value) {
+  return typeof value === "string" && value.trim().length > 0
 }
 
 function walk(node, visitor) {

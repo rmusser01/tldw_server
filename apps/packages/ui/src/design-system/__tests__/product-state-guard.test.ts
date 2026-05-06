@@ -328,3 +328,309 @@ describe("design-system product-state guard rules", () => {
     )
   })
 })
+
+describe("design-system product-state guard baseline handling", () => {
+  it("marks unbaselined findings as blocked", () => {
+    const findings = analyze(
+      "src/components/Common/ConnectionProblemBanner.tsx",
+      `
+        export function ConnectionProblemBanner() {
+          return <div>Server unavailable</div>
+        }
+      `
+    )
+
+    const result = guard.applyBaseline({ findings, baseline: [] })
+
+    expect(result.blocked).toEqual([
+      expect.objectContaining({
+        state: "blocked",
+        rule: "local-recovery-banner"
+      })
+    ])
+    expect(result.allowedLegacy).toEqual([])
+    expect(result.activeMigrationTargets).toEqual([])
+  })
+
+  it("allows valid legacy and active-migration baseline entries", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        export function StatusBadge() {
+          return <span>Ready</span>
+        }
+      `
+    )
+    const [finding] = findings
+
+    const result = guard.applyBaseline({
+      findings,
+      baseline: [
+        {
+          id: finding.id,
+          path: finding.path,
+          rule: finding.rule,
+          subject: finding.subject,
+          state: "active_migration_target",
+          owner: "design-system",
+          reason: "Existing generic status wrapper selected for cleanup.",
+          replacement: "Badge with design-system state registry mapping",
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(result.blocked).toEqual([])
+    expect(result.activeMigrationTargets).toHaveLength(1)
+    expect(result.activeMigrationTargets[0]).toEqual(
+      expect.objectContaining({
+        state: "active_migration_target",
+        owner: "design-system"
+      })
+    )
+  })
+
+  it("does not allow a same-path same-rule finding with a different subject", () => {
+    const result = guard.applyBaseline({
+      findings: [
+        {
+          id: "local-status-badge:src/components/Common/StatusBadge.tsx:NewStatusBadge",
+          path: "src/components/Common/StatusBadge.tsx",
+          rule: "local-status-badge",
+          subject: "NewStatusBadge",
+          message: "Use Badge with a state registry mapping.",
+          replacement: "Badge with design-system state registry mapping"
+        }
+      ],
+      baseline: [
+        {
+          id: "local-status-badge:src/components/Common/StatusBadge.tsx:OldStatusBadge",
+          path: "src/components/Common/StatusBadge.tsx",
+          rule: "local-status-badge",
+          subject: "OldStatusBadge",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing generic status wrapper before the guard.",
+          replacement: "Badge with design-system state registry mapping",
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(result.blocked).toEqual([
+      expect.objectContaining({
+        id: "local-status-badge:src/components/Common/StatusBadge.tsx:NewStatusBadge",
+        state: "blocked"
+      })
+    ])
+    expect(result.staleBaseline).toEqual([
+      expect.objectContaining({
+        id: "local-status-badge:src/components/Common/StatusBadge.tsx:OldStatusBadge"
+      })
+    ])
+  })
+
+  it("rejects malformed baseline entries and stored blocked states", () => {
+    const errors = guard.validateBaseline([
+      {
+        id: "local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge",
+        path: "src/components/Common/StatusBadge.tsx",
+        rule: "local-status-badge",
+        subject: "StatusBadge",
+        state: "blocked",
+        owner: "",
+        reason: "",
+        replacement: "",
+        migrationQueue: ""
+      }
+    ])
+
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "state must be allowed_legacy_exception or active_migration_target"
+        ),
+        expect.stringContaining("owner is required"),
+        expect.stringContaining("reason is required"),
+        expect.stringContaining("replacement is required"),
+        expect.stringContaining("migrationQueue is required")
+      ])
+    )
+  })
+
+  it("rejects non-array baselines", () => {
+    expect(guard.validateBaseline({})).toEqual([
+      "baseline must be a JSON array"
+    ])
+  })
+
+  it("rejects duplicate baseline ids", () => {
+    const baselineEntry = {
+      id: "local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge",
+      path: "src/components/Common/StatusBadge.tsx",
+      rule: "local-status-badge",
+      subject: "StatusBadge",
+      state: "allowed_legacy_exception",
+      owner: "design-system",
+      reason: "Existing generic status wrapper before the guard.",
+      replacement: "Badge with design-system state registry mapping",
+      migrationQueue: "shared-product-state"
+    }
+
+    expect(guard.validateBaseline([baselineEntry, baselineEntry])).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "duplicate baseline id local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge"
+        )
+      ])
+    )
+  })
+
+  it("blocks findings and skips stale reporting when baseline validation fails", () => {
+    const finding = {
+      id: "local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge",
+      path: "src/components/Common/StatusBadge.tsx",
+      rule: "local-status-badge",
+      subject: "StatusBadge",
+      message: "Use Badge with a state registry mapping.",
+      replacement: "Badge with design-system state registry mapping"
+    }
+
+    const result = guard.applyBaseline({
+      findings: [finding],
+      baseline: [
+        {
+          id: finding.id,
+          path: finding.path,
+          rule: finding.rule,
+          subject: finding.subject,
+          state: "blocked",
+          owner: "design-system",
+          reason: "Stored blocked states must fail closed.",
+          replacement: finding.replacement,
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(result.blocked).toEqual([
+      expect.objectContaining({
+        id: finding.id,
+        state: "blocked"
+      })
+    ])
+    expect(result.activeMigrationTargets).toEqual([])
+    expect(result.allowedLegacy).toEqual([])
+    expect(result.staleBaseline).toEqual([])
+    expect(result.baselineErrors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "state must be allowed_legacy_exception or active_migration_target"
+        )
+      ])
+    )
+  })
+
+  it("reports stale baseline entries when no live finding matches the entry id", () => {
+    const result = guard.applyBaseline({
+      findings: [],
+      baseline: [
+        {
+          id: "local-empty-state:src/components/Option/Old/RemovedEmpty.tsx:RemovedEmpty",
+          path: "src/components/Option/Old/RemovedEmpty.tsx",
+          rule: "local-empty-state",
+          subject: "RemovedEmpty",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Removed component should no longer need a baseline entry.",
+          replacement: "EmptyState",
+          migrationQueue: "shared-product-state"
+        }
+      ]
+    })
+
+    expect(result.staleBaseline).toEqual([
+      expect.objectContaining({
+        id: "local-empty-state:src/components/Option/Old/RemovedEmpty.tsx:RemovedEmpty"
+      })
+    ])
+  })
+
+  it("formats blocked, active migration, legacy, stale, and invalid groups distinctly", () => {
+    const report = guard.formatReport({
+      blocked: [
+        {
+          id: "local-recovery-banner:src/components/Common/NewBanner.tsx:NewBanner",
+          path: "src/components/Common/NewBanner.tsx",
+          rule: "local-recovery-banner",
+          subject: "NewBanner",
+          message: "Use RecoveryCallout or StatePanel.",
+          replacement: "RecoveryCallout or StatePanel",
+          state: "blocked"
+        }
+      ],
+      activeMigrationTargets: [
+        {
+          id: "local-status-badge:src/components/Common/StatusBadge.tsx:StatusBadge",
+          path: "src/components/Common/StatusBadge.tsx",
+          rule: "local-status-badge",
+          subject: "StatusBadge",
+          message: "Use Badge with a state registry mapping.",
+          replacement: "Badge with design-system state registry mapping",
+          state: "active_migration_target",
+          owner: "design-system",
+          reason: "Selected for the next shared product-state cleanup.",
+          migrationQueue: "shared-product-state"
+        }
+      ],
+      allowedLegacy: [
+        {
+          id: "local-empty-state:src/components/Common/FeatureEmpty.tsx:FeatureEmpty",
+          path: "src/components/Common/FeatureEmpty.tsx",
+          rule: "local-empty-state",
+          subject: "FeatureEmpty",
+          message: "Use EmptyState.",
+          replacement: "EmptyState",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing empty wrapper before the guard.",
+          migrationQueue: "shared-product-state"
+        }
+      ],
+      staleBaseline: [
+        {
+          id: "local-empty-state:src/components/Option/Old/RemovedEmpty.tsx:RemovedEmpty",
+          path: "src/components/Option/Old/RemovedEmpty.tsx",
+          rule: "local-empty-state",
+          subject: "RemovedEmpty",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Removed.",
+          replacement: "EmptyState",
+          migrationQueue: "shared-product-state"
+        }
+      ],
+      baselineErrors: ["baseline[0] owner is required"]
+    })
+
+    expect(report).toContain("Blocked product-state findings")
+    expect(report).toContain("Stale baseline entries")
+    expect(report).toContain("Invalid baseline entries")
+    expect(report).toContain("Baseline exceptions: 2")
+    expect(report).toContain("local-status-badge: 1")
+    expect(report).toContain("local-empty-state: 1")
+    expect(report).toContain("shared-product-state: 2")
+  })
+
+  it("formats an empty result as no product-state guard issues", () => {
+    expect(
+      guard.formatReport({
+        blocked: [],
+        activeMigrationTargets: [],
+        allowedLegacy: [],
+        staleBaseline: [],
+        baselineErrors: []
+      })
+    ).toBe("No product-state guard issues found")
+  })
+})
