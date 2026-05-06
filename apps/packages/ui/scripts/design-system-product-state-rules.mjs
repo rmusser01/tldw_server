@@ -143,8 +143,11 @@ export function analyzeSource({ relativePath, source }) {
 
   const findings = []
   const localAntdNames = collectAntdProductStateImports(sourceFile)
-  const canonicalUsage = collectCanonicalDesignSystemUsage(sourceFile)
   const fileSubject = subjectFromPath(normalizedPath)
+  const canonicalUsage = collectCanonicalDesignSystemUsage(
+    sourceFile,
+    fileSubject
+  )
   const localComponentSubjects = normalizedPath.endsWith(".tsx")
     ? collectLocalComponentSubjects(sourceFile, fileSubject)
     : []
@@ -392,7 +395,7 @@ function collectAntdProductStateImports(sourceFile) {
   return localNames
 }
 
-function collectCanonicalDesignSystemUsage(sourceFile) {
+function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
   const imports = {
     emptyState: new Set()
   }
@@ -430,7 +433,11 @@ function collectCanonicalDesignSystemUsage(sourceFile) {
   }
 
   return {
-    emptyState: hasJsxTag(sourceFile, imports.emptyState)
+    emptyStateOwners: collectJsxTagOwners(
+      sourceFile,
+      imports.emptyState,
+      fileSubject
+    )
   }
 }
 
@@ -496,7 +503,10 @@ function pushLocalComponentFinding(
     })
   }
 
-  if (EMPTY_COMPONENT_PATTERN.test(subject) && !canonicalUsage.emptyState) {
+  if (
+    EMPTY_COMPONENT_PATTERN.test(subject) &&
+    !canonicalUsage.emptyStateOwners?.has(subject)
+  ) {
     pushFinding(findings, {
       relativePath,
       rule: "local-empty-state",
@@ -524,23 +534,30 @@ function pushLocalComponentFinding(
   }
 }
 
-function hasJsxTag(sourceFile, localNames) {
+function collectJsxTagOwners(sourceFile, localNames, fallbackOwner) {
+  const owners = new Set()
+
   if (!localNames || localNames.size === 0) {
-    return false
+    return owners
   }
 
-  let hasMatch = false
-  walkUntil(sourceFile, (node) => {
+  walk(sourceFile, (node) => {
     if (!ts.isJsxSelfClosingElement(node) && !ts.isJsxOpeningElement(node)) {
-      return false
+      return
     }
 
     const localName = jsxTagName(node.tagName)
-    hasMatch = localName ? localNames.has(localName) : false
-    return hasMatch
+    if (!localName || !localNames.has(localName)) {
+      return
+    }
+
+    const ownerName = findNearestOwnerName(node) ?? fallbackOwner
+    if (ownerName) {
+      owners.add(ownerName)
+    }
   })
 
-  return hasMatch
+  return owners
 }
 
 function pushCanonicalLabelFindings(findings, relativePath, sourceFile) {

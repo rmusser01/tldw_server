@@ -4,7 +4,7 @@ title: Adapt FeatureEmptyState to shared EmptyState
 status: Done
 assignee: []
 created_date: '2026-05-06 05:50'
-updated_date: '2026-05-06 06:05'
+updated_date: '2026-05-06 15:12'
 labels:
   - design-system
   - frontend
@@ -41,12 +41,18 @@ Started Ingestion/Library design-system slice from current origin/dev. Scope: ad
 Implemented FeatureEmptyState as a compatibility adapter over components/ui/feedback/EmptyState, preserving legacy action/title/className/icon behavior. Added focused adapter coverage, MediaTrashPage consumer coverage, and a product-state guard regression for canonical EmptyState adapters. Baseline cleanup removes migrated/stale local-empty-state entries and reconciles existing MonitoringDashboard stale IDs found by the verifier.
 
 Verification: bunx vitest run src/components/Common/__tests__/FeatureEmptyState.test.tsx src/components/Review/__tests__/MediaTrashPage.connection.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 43/43; bun run verify:design-system-state exited 0 with 525 allowed legacy exceptions; git diff --check exited 0. Full package tsc remains blocked by existing unrelated package-wide type errors. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
+
+PR review pass started for PR #1341. Actionable findings: Qodo guard suppression should be scoped per owner instead of file-wide; CodeRabbit baseline canonical-state-label entries should be grouped with canonical labels.
+
+PR review fixes: scoped canonical EmptyState guard suppression to the owner component instead of a file-wide flag, added the sibling LegacyEmptyState regression, and moved MonitoringDashboard canonical-state-label baseline entries into the canonical-label group.
+
+Review-fix verification: bunx vitest run src/components/Common/__tests__/FeatureEmptyState.test.tsx src/components/Review/__tests__/MediaTrashPage.connection.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 44/44; bun run verify:design-system-state exited 0 with 525 allowed legacy exceptions; git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Adapted Common/FeatureEmptyState into a thin design-system compatibility adapter over the canonical EmptyState primitive, added the small EmptyState action title passthrough needed for legacy parity, covered both adapter and MediaTrashPage usage, and taught the product-state guard not to flag adapters that genuinely render canonical EmptyState. Reconciled the guard baseline by removing migrated/stale empty-state debt and refreshing pre-existing MonitoringDashboard entries required for the verifier to stay green on current dev.
+Adapted FeatureEmptyState to the shared EmptyState primitive and completed PR review fixes. The product-state guard now suppresses local-empty-state only for the component that actually renders canonical EmptyState, with regression coverage for sibling empty-state components, and the baseline canonical-state-label entries are grouped with the canonical-label section.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

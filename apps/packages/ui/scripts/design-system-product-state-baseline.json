@@ -803,28 +803,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Ready",
-    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
-    "replacement": "design-system state registry",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Unavailable",
-    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Unavailable",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
-    "replacement": "design-system state registry",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-error-access-den-15hzb7i",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
@@ -5189,6 +5167,28 @@
     "owner": "design-system",
     "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx before the guard.",
     "replacement": "getDesignSystemState(...)",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Ready",
+    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
+    "rule": "canonical-state-label",
+    "subject": "Ready",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
+    "replacement": "design-system state registry",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Unavailable",
+    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
+    "rule": "canonical-state-label",
+    "subject": "Unavailable",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
+    "replacement": "design-system state registry",
     "migrationQueue": "shared-product-state"
   },
   {

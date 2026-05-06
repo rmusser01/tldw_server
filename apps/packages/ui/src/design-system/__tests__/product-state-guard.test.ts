@@ -109,6 +109,40 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("still flags sibling empty-state components that do not render canonical EmptyState", () => {
+    const findings = analyze(
+      "src/components/Common/FeatureEmptyState.tsx",
+      `
+        import { EmptyState } from "@/components/ui/feedback/EmptyState"
+
+        export function FeatureEmptyState() {
+          return <EmptyState title="No results yet" />
+        }
+
+        export function LegacyEmptyState() {
+          return <div>No results yet</div>
+        }
+      `
+    )
+
+    expect(findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-empty-state",
+          subject: "FeatureEmptyState"
+        })
+      ])
+    )
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-empty-state",
+          subject: "LegacyEmptyState"
+        })
+      ])
+    )
+  })
+
   it("flags AntD product-state JSX only when product-state context is present", () => {
     const findings = analyze(
       "src/components/Option/Settings/health-status.tsx",
