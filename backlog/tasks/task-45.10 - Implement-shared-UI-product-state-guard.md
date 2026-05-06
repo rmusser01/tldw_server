@@ -103,13 +103,34 @@ allowed legacy exceptions, no blocked findings, no baseline errors, and no stale
 entries. Spec review approved after JSX handler-source false positives were
 fixed and the baseline was refreshed. Code-quality review approved.
 
-Task 4 accepted. Docs/Design/tldw_web_design_system_inventory.md now documents when to run bun run verify:design-system-state from apps/packages/ui, directs new shared UI product-state surfaces to src/components/ui and src/design-system/states.ts, and records baseline entry requirements plus stale-entry cleanup expectations. Final verification from apps/packages/ui: focused Vitest guard suite exited 0 with 4 test files passing and 39/39 tests passing; bun run verify:design-system-state exited 0 with 260 allowed legacy exceptions, no Blocked product-state findings section, no Stale baseline entries section, and no baseline errors. From repo root: git diff --check exited 0. Bandit skipped: no Python files touched.
+Task 4 accepted. Docs/Design/tldw_web_design_system_inventory.md now documents
+when to run bun run verify:design-system-state from apps/packages/ui, directs new
+shared UI product-state surfaces to src/components/ui and
+src/design-system/states.ts, and records baseline entry requirements plus
+stale-entry cleanup expectations. Final verification from apps/packages/ui:
+focused Vitest guard suite exited 0 with 4 test files passing and 39/39 tests
+passing; bun run verify:design-system-state exited 0 with 260 allowed legacy
+exceptions, no Blocked product-state findings section, no Stale baseline entries
+section, and no baseline errors. From repo root: git diff --check exited 0.
+Bandit skipped: no Python files touched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented and closed out the shared UI product-state guard workflow. Tasks 1-3 added the pure product-state rule engine, baseline/report semantics, CLI/package script, and the checked-in baseline for 260 existing shared UI product-state exceptions. Task 4 documented the contributor workflow in Docs/Design/tldw_web_design_system_inventory.md, including when to run the guard, expected design-system primitives for new shared product-state UI, and owner/reason/replacement/queue requirements for any new baseline exception. Final verification passed: focused Vitest guard suite from apps/packages/ui exited 0 with 4 files passing and 39/39 tests passing; bun run verify:design-system-state exited 0 with 260 allowed legacy exceptions, no blocked product-state findings, no stale baseline entries, and no baseline errors; git diff --check exited 0 from the repo root. Bandit skipped: no Python files touched.
+Implemented and closed out the shared UI product-state guard workflow. Tasks 1-3
+added the pure product-state rule engine, baseline/report semantics, CLI/package
+script, and the checked-in baseline for 260 existing shared UI product-state
+exceptions. Task 4 documented the contributor workflow in
+Docs/Design/tldw_web_design_system_inventory.md, including when to run the guard,
+expected design-system primitives for new shared product-state UI, and
+owner/reason/replacement/queue requirements for any new baseline exception.
+Final verification passed: focused Vitest guard suite from apps/packages/ui
+exited 0 with 4 files passing and 39/39 tests passing; bun run
+verify:design-system-state exited 0 with 260 allowed legacy exceptions, no
+blocked product-state findings, no stale baseline entries, and no baseline
+errors; git diff --check exited 0 from the repo root. Bandit skipped: no Python
+files touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
