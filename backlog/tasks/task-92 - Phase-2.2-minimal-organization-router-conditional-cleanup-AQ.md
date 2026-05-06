@@ -4,7 +4,7 @@ title: Phase 2.2 minimal organization router conditional cleanup AQ
 status: Done
 assignee: []
 created_date: '2026-05-06 00:31'
-updated_date: '2026-05-06 00:43'
+updated_date: '2026-05-06 01:03'
 labels:
   - phase2.2
   - router-cleanup
@@ -20,7 +20,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Convert the minimal-test orgs and org_invites optional router block from eager try/import handling to lazy ImportedRouterSpec registration with precise optional-missing skip semantics.
+Convert the minimal-test orgs and org_invites optional router block from eager try/import handling to lazy ImportedRouterSpec registration with precise optional-missing skip semantics. This unblocks later Phase 2/3 router extraction work by removing another minimal-test eager import island that would otherwise keep optional router registration coupled to import-time side effects.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -45,12 +45,16 @@ Baseline before edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bi
 Implemented orgs and org_invites as ImportedRouterSpec entries using default precise optional-missing exceptions. Verification after implementation: focused org tests 3 passed; full router group contract 104 passed; main router contract 6 passed; OpenAPI contract 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported zero findings; git diff --check passed.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1333 against dev for this slice.
+
+Review follow-up: documented the later-phase unblocker explicitly. This AQ slice removes another minimal-test eager import island so later router extraction and optional-registration hardening can proceed without preserving organization import-time side effects.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Changed the minimal-test organization router tranche so orgs and org_invites are registered through lazy ImportedRouterSpec definitions instead of eager try/import blocks. This preserves prefixes and tags while narrowing skip behavior to the shared optional missing-module or missing-attribute cases, so real runtime import defects propagate during registration instead of being swallowed. Added router contract coverage for lazy attr lookup, optional missing import skips, and runtime import failure propagation. Verification: baseline router group contracts passed before edits; RED focused org tests failed before the production edit; after the edit, focused org tests passed 3/3, router group contracts passed 104/104, main router contracts passed 6/6, OpenAPI contracts passed 69/69, Bandit on minimal.py reported zero findings, and git diff --check passed.
+
+Review follow-up: documented the later-phase unblocker for this Phase 2.2 extraction in TASK-92.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
