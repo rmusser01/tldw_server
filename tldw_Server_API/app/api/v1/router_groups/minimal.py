@@ -668,49 +668,37 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, writing_email_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.jobs_admin import router as jobs_admin_router
-
-        specs.append(RouterSpec(
-            router=jobs_admin_router,
+    for ops_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.jobs_admin",
+            log_name="jobs_admin",
             prefix=f"{API_V1_PREFIX}",
             tags=("jobs",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping jobs_admin router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.audit import router as audit_router
-
-        specs.append(RouterSpec(
-            router=audit_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.audit",
+            log_name="audit",
             prefix=f"{API_V1_PREFIX}",
             tags=("audit",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping audit router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router
-
-        specs.append(RouterSpec(
-            router=config_info_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.config_info",
+            log_name="config_info",
             prefix=f"{API_V1_PREFIX}",
             tags=("config",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping config_info router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.config_admin import router as config_admin_router
-
-        specs.append(RouterSpec(
-            router=config_admin_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.config_admin",
+            log_name="config_admin",
             prefix=f"{API_V1_PREFIX}",
             tags=("config", "admin"),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping config_admin router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, ops_spec)
 
     admin_router_added = False
     try:
