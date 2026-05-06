@@ -96,6 +96,12 @@ Task 2 accepted. Commits: 81848299c and 9d9d625db. Focused Vitest passed from
 apps/packages/ui with 25/25 tests. Spec review approved. Code-quality review
 approved after baseline identity validation was added and Ready canonical-label
 coverage was restored.
+
+Task 3 accepted. Commits: 987cbc35d and 0bfc74590. Focused Vitest passed from
+apps/packages/ui with 31/31 tests. The real guard command exited 0 with 260
+allowed legacy exceptions, no blocked findings, no baseline errors, and no stale
+entries. Spec review approved after JSX handler-source false positives were
+fixed and the baseline was refreshed. Code-quality review approved.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
