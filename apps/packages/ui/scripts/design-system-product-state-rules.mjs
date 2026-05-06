@@ -144,12 +144,16 @@ export function analyzeSource({ relativePath, source }) {
   const findings = []
   const localAntdNames = collectAntdProductStateImports(sourceFile)
   const fileSubject = subjectFromPath(normalizedPath)
+  const canonicalUsage = collectCanonicalDesignSystemUsage(
+    sourceFile,
+    fileSubject
+  )
   const localComponentSubjects = normalizedPath.endsWith(".tsx")
     ? collectLocalComponentSubjects(sourceFile, fileSubject)
     : []
 
   for (const subject of localComponentSubjects) {
-    pushLocalComponentFinding(findings, normalizedPath, subject)
+    pushLocalComponentFinding(findings, normalizedPath, subject, canonicalUsage)
   }
 
   pushCanonicalLabelFindings(findings, normalizedPath, sourceFile)
@@ -391,6 +395,52 @@ function collectAntdProductStateImports(sourceFile) {
   return localNames
 }
 
+function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
+  const imports = {
+    emptyState: new Set()
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      continue
+    }
+
+    const importPath = statement.moduleSpecifier.text
+    if (
+      !importPath.startsWith("@/components/ui") &&
+      !importPath.startsWith("@tldw/ui/components/ui")
+    ) {
+      continue
+    }
+
+    const importClause = statement.importClause
+    const namedBindings = importClause?.namedBindings
+    if (namedBindings && ts.isNamedImports(namedBindings)) {
+      for (const element of namedBindings.elements) {
+        const importedName = element.propertyName?.text ?? element.name.text
+        if (importedName === "EmptyState") {
+          imports.emptyState.add(element.name.text)
+        }
+      }
+    }
+
+    if (importClause?.name && /\/EmptyState$/.test(importPath)) {
+      imports.emptyState.add(importClause.name.text)
+    }
+  }
+
+  return {
+    emptyStateOwners: collectJsxTagOwners(
+      sourceFile,
+      imports.emptyState,
+      fileSubject
+    )
+  }
+}
+
 function collectLocalComponentSubjects(sourceFile, fileSubject) {
   const subjects = new Set([fileSubject])
 
@@ -434,7 +484,12 @@ function collectLocalComponentSubjects(sourceFile, fileSubject) {
   return subjects
 }
 
-function pushLocalComponentFinding(findings, relativePath, subject) {
+function pushLocalComponentFinding(
+  findings,
+  relativePath,
+  subject,
+  canonicalUsage = {}
+) {
   if (!subject) {
     return
   }
@@ -448,7 +503,10 @@ function pushLocalComponentFinding(findings, relativePath, subject) {
     })
   }
 
-  if (EMPTY_COMPONENT_PATTERN.test(subject)) {
+  if (
+    EMPTY_COMPONENT_PATTERN.test(subject) &&
+    !canonicalUsage.emptyStateOwners?.has(subject)
+  ) {
     pushFinding(findings, {
       relativePath,
       rule: "local-empty-state",
@@ -474,6 +532,32 @@ function pushLocalComponentFinding(findings, relativePath, subject) {
       message: `${subject} should map status through the design system.`
     })
   }
+}
+
+function collectJsxTagOwners(sourceFile, localNames, fallbackOwner) {
+  const owners = new Set()
+
+  if (!localNames || localNames.size === 0) {
+    return owners
+  }
+
+  walk(sourceFile, (node) => {
+    if (!ts.isJsxSelfClosingElement(node) && !ts.isJsxOpeningElement(node)) {
+      return
+    }
+
+    const localName = jsxTagName(node.tagName)
+    if (!localName || !localNames.has(localName)) {
+      return
+    }
+
+    const ownerName = findNearestOwnerName(node) ?? fallbackOwner
+    if (ownerName) {
+      owners.add(ownerName)
+    }
+  })
+
+  return owners
 }
 
 function pushCanonicalLabelFindings(findings, relativePath, sourceFile) {
