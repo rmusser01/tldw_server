@@ -1,10 +1,10 @@
 ---
 id: TASK-45.10
 title: Implement shared UI product-state guard
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-06 01:02'
-updated_date: '2026-05-06 01:02'
+updated_date: '2026-05-06 01:57'
 labels:
   - design-system
   - frontend
@@ -35,20 +35,20 @@ and keep the implementation conservative and test-driven.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Pure product-state guard rules are implemented with Vitest coverage for
+- [x] #1 Pure product-state guard rules are implemented with Vitest coverage for
   local recovery, empty, loading, status, AntD product-state context, allowed
   mechanics, canonical labels, canonical roots, stable finding IDs, baseline
   validation, stale baseline reporting, and report formatting.
-- [ ] #2 A CLI script scans apps/packages/ui/src, reads a checked-in baseline,
+- [x] #2 A CLI script scans apps/packages/ui/src, reads a checked-in baseline,
   prints actionable grouped output, exits nonzero for blocked findings or
   invalid baselines, and exits zero for baselined legacy debt and stale-entry
   warnings.
-- [ ] #3 apps/packages/ui/package.json exposes bun run verify:design-system-state
+- [x] #3 apps/packages/ui/package.json exposes bun run verify:design-system-state
   and the real shared UI scan passes with an explicit baseline for current
   legacy product-state debt.
-- [ ] #4 Docs/Design/tldw_web_design_system_inventory.md documents the guard
+- [x] #4 Docs/Design/tldw_web_design_system_inventory.md documents the guard
   workflow and baseline rules for future shared UI product-state work.
-- [ ] #5 Focused design-system Vitest tests, bun run verify:design-system-state,
+- [x] #5 Focused design-system Vitest tests, bun run verify:design-system-state,
   git diff --check, and applicable security checks or documented skips are
   recorded before completion.
 <!-- AC:END -->
@@ -102,14 +102,22 @@ apps/packages/ui with 31/31 tests. The real guard command exited 0 with 260
 allowed legacy exceptions, no blocked findings, no baseline errors, and no stale
 entries. Spec review approved after JSX handler-source false positives were
 fixed and the baseline was refreshed. Code-quality review approved.
+
+Task 4 accepted. Docs/Design/tldw_web_design_system_inventory.md now documents when to run bun run verify:design-system-state from apps/packages/ui, directs new shared UI product-state surfaces to src/components/ui and src/design-system/states.ts, and records baseline entry requirements plus stale-entry cleanup expectations. Final verification from apps/packages/ui: focused Vitest guard suite exited 0 with 4 test files passing and 39/39 tests passing; bun run verify:design-system-state exited 0 with 260 allowed legacy exceptions, no Blocked product-state findings section, no Stale baseline entries section, and no baseline errors. From repo root: git diff --check exited 0. Bandit skipped: no Python files touched.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented and closed out the shared UI product-state guard workflow. Tasks 1-3 added the pure product-state rule engine, baseline/report semantics, CLI/package script, and the checked-in baseline for 260 existing shared UI product-state exceptions. Task 4 documented the contributor workflow in Docs/Design/tldw_web_design_system_inventory.md, including when to run the guard, expected design-system primitives for new shared product-state UI, and owner/reason/replacement/queue requirements for any new baseline exception. Final verification passed: focused Vitest guard suite from apps/packages/ui exited 0 with 4 files passing and 39/39 tests passing; bun run verify:design-system-state exited 0 with 260 allowed legacy exceptions, no blocked product-state findings, no stale baseline entries, and no baseline errors; git diff --check exited 0 from the repo root. Bandit skipped: no Python files touched.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
