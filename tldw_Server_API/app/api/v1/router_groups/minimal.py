@@ -725,27 +725,23 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         except Exception as admin_byok_error:  # noqa: BLE001
             logger.debug(f"Skipping admin_byok router in minimal test app: {admin_byok_error}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.orgs import router as orgs_router
-
-        specs.append(RouterSpec(
-            router=orgs_router,
+    for org_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.orgs",
+            log_name="orgs",
             prefix=f"{API_V1_PREFIX}",
             tags=("organizations",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping orgs router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.org_invites import router as org_invites_router
-
-        specs.append(RouterSpec(
-            router=org_invites_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.org_invites",
+            log_name="org_invites",
             prefix=f"{API_V1_PREFIX}",
             tags=("invites",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping org_invites router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, org_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.resource_governor import router as resource_governor_router
