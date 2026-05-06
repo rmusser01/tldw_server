@@ -477,7 +477,11 @@ function findNearestJsxOwnerName(node) {
 
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
       const variable = findVariableDeclarationOwner(current)
-      if (variable && ts.isIdentifier(variable.name)) {
+      if (
+        variable &&
+        ts.isIdentifier(variable.name) &&
+        isLikelyComponentName(variable.name.text)
+      ) {
         return variable.name.text
       }
     }

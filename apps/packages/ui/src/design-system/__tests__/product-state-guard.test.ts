@@ -222,6 +222,29 @@ describe("design-system product-state guard rules", () => {
     expect(alertFindings[0].line).toBe(productStateAlertLine)
   })
 
+  it("keeps product-state component ownership through lower-case JSX callbacks", () => {
+    const findings = analyze(
+      "src/components/Option/Settings/HealthPanel.tsx",
+      `
+        import { Spin } from "antd"
+
+        const items = ["api"]
+
+        export function HealthStatus() {
+          const rows = items.map(() => <Spin size="small" />)
+          return <>{rows}</>
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "antd-product-state-import",
+        subject: "Spin"
+      })
+    )
+  })
+
   it("does not exempt new files merely because they live under canonical namespaces", () => {
     const findings = analyze(
       "src/components/ui/feedback/ProjectOfflineBanner.tsx",
