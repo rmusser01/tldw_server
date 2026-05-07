@@ -193,17 +193,17 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     )
 
     if _audio_jobs_imports_enabled_for_runtime():
-        def _audio_jobs_router_factory():
-            from tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs import router as audio_jobs_router
-
-            return audio_jobs_router
-
-        specs.append(RouterSpec(
-            router=_audio_jobs_router_factory,
-            prefix=f"{API_V1_PREFIX}/audio",
-            tags=("audio-jobs",),
-            route_key="audio-jobs",
-        ))
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs",
+                log_name="audio-jobs",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-jobs",),
+                route_key="audio-jobs",
+                skip_context=minimal_skip_context,
+            ),
+        )
     else:
         logger.info("Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)")
 

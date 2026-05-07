@@ -9965,6 +9965,189 @@ def test_iter_minimal_optional_router_specs_includes_audio_jobs_when_opted_in(
     assert by_first_path["/jobs"].route_key == "audio-jobs"
 
 
+def test_iter_minimal_optional_router_specs_defers_audio_jobs_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal audio_jobs spec keeps router attr lookup lazy."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_audio_jobs")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs"
+    fake_module = ModuleType(module_name)
+    router = APIRouter()
+    access_count = {f"{module_name}.router": 0}
+    import_calls: list[str] = []
+
+    @router.get("/jobs")
+    def _endpoint() -> dict[str, str]:
+        """Return a deterministic response for the fake audio jobs router."""
+        return {"status": "ok"}
+
+    def _module_getattr(name: str) -> APIRouter:
+        """Track lazy router attribute resolution for the fake module."""
+        if name != "router":
+            raise AttributeError(name)
+        access_count[f"{module_name}.router"] += 1
+        return router
+
+    fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy audio jobs router module import."""
+        if import_name == module_name:
+            import_calls.append(import_name)
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    assert import_calls == []
+    assert access_count == {f"{module_name}.router": 0}
+
+    selected_spec = next(spec for spec in specs if spec.route_key == "audio-jobs")
+    assert selected_spec.name == "audio-jobs"
+    assert selected_spec.prefix == "/api/v1/audio"
+    assert selected_spec.tags == ("audio-jobs",)
+    assert selected_spec.skip_context == "in minimal test app"
+    assert selected_spec.default_stable is True
+    assert selected_spec.skip_exceptions == (
+        OptionalRouterMissingModule,
+        OptionalRouterMissingAttribute,
+    )
+    assert _first_router_path(selected_spec.router) == "/jobs"
+    assert import_calls == [module_name]
+    assert access_count == {f"{module_name}.router": 1}
+
+
+def test_iter_minimal_optional_router_specs_skips_audio_jobs_missing_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal audio_jobs spec skips missing optional router module."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_audio_jobs")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.route_key == "audio-jobs")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Fail only the selected missing audio jobs router import."""
+        if import_name == module_name:
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), (selected_spec,)) == 0
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
+    ]
+    assert len(skip_debug_messages) == 1
+    skip_message = skip_debug_messages[0]
+    assert skip_message.startswith("Skipping audio-jobs router in minimal test app:")
+    assert module_name in skip_message
+    assert "missing during import" in skip_message
+
+
+def test_iter_minimal_optional_router_specs_skips_audio_jobs_missing_attribute_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal audio_jobs spec skips missing optional router attribute."""
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_audio_jobs")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs"
+    monkeypatch.setitem(sys.modules, module_name, ModuleType(module_name))
+
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.route_key == "audio-jobs")
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), (selected_spec,)) == 0
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
+    ]
+    assert len(skip_debug_messages) == 1
+    skip_message = skip_debug_messages[0]
+    assert skip_message.startswith("Skipping audio-jobs router in minimal test app:")
+    assert f"{module_name}.router" in skip_message
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "message"),
+    (
+        (RuntimeError, "audio jobs exploded during import"),
+        (ImportError, "audio jobs dependency failed during import"),
+        (AttributeError, "audio jobs attribute failed during import"),
+    ),
+)
+def test_iter_minimal_optional_router_specs_propagates_audio_jobs_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[Exception],
+    message: str,
+) -> None:
+    """Verify minimal audio_jobs runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_audio_jobs")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.route_key == "audio-jobs")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only the selected audio jobs router import at registration."""
+        if import_name == module_name:
+            raise exception_type(message)
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(exception_type, match=message):
+        register_router_specs(FastAPI(), (selected_spec,))
+
+
 def test_iter_minimal_optional_router_specs_includes_media_audio_when_opted_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
