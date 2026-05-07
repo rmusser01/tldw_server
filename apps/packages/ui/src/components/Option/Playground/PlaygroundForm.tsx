@@ -662,7 +662,9 @@ export const PlaygroundForm = ({
   const {
     hasMcp,
     healthState: mcpHealthState,
-    tools: mcpTools,
+    discoveredTools: discoveredMcpTools,
+    chatTools: chatMcpTools,
+    toolCounts: mcpToolCounts,
     toolsLoading: mcpToolsLoading,
     catalogs: mcpCatalogs,
     catalogsLoading: mcpCatalogsLoading,
@@ -676,11 +678,13 @@ export const PlaygroundForm = ({
     setToolCatalogId,
     setToolModules,
     setToolCatalogStrict,
+    setToolEnabled: setMcpToolEnabled,
+    resetToolFilter: resetMcpToolFilter,
   } = useMcpTools({ enabled: mcpToolsEnabled });
   const mcpCtrl = useMcpToolsControl({
     hasMcp,
     mcpHealthState,
-    mcpTools,
+    mcpTools: chatMcpTools,
     mcpToolsLoading,
     mcpCatalogs,
     toolCatalog,
@@ -3231,7 +3235,7 @@ export const PlaygroundForm = ({
     systemPrompt,
     hasMcp,
     mcpHealthState,
-    mcpTools,
+    mcpTools: chatMcpTools,
     toolChoice,
     temporaryChat,
     serverChatId,
@@ -4036,7 +4040,7 @@ export const PlaygroundForm = ({
       hasMcp={hasMcp}
       mcpHealthState={mcpHealthState}
       mcpToolsLoading={mcpToolsLoading}
-      mcpToolsCount={mcpTools.length}
+      mcpToolsCount={chatMcpTools.length}
       toolChoice={toolChoice}
       onToolChoiceChange={setToolChoice}
       toolRunStatusLabel={toolRunStatusLabel}
@@ -5568,6 +5572,12 @@ export const PlaygroundForm = ({
               moduleOptionsLoading={moduleOptionsLoading}
               toolModules={toolModules}
               onModuleSelect={handleModuleSelect}
+              discoveredTools={discoveredMcpTools}
+              toolCounts={mcpToolCounts}
+              toolsLoading={mcpToolsLoading}
+              mcpHealthState={mcpHealthState}
+              onToolEnabledChange={setMcpToolEnabled}
+              onResetToolFilter={resetMcpToolFilter}
               isSmallModel={isSmallModel}
               t={t}
             />

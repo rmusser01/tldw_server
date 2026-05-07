@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-07 14:20'
-updated_date: '2026-05-07 14:36'
+updated_date: '2026-05-07 14:41'
 labels:
   - mcp
   - chat
@@ -63,6 +63,8 @@ Stage 1 complete: added `apps/packages/ui/src/utils/chat-tools.ts` and `apps/pac
 Stage 2 complete: extended MCP disabled-tool setting/store/useMcpTools contract with scoped disabled preferences, discoveredTools, availableTools, chatTools, collision names, counts, and toggle helpers. Verified RED with hook tests failing on missing discoveredTools/chatTools fields, then GREEN with `bunx vitest run src/hooks/__tests__/useMcpTools.gating.test.tsx src/utils/__tests__/chat-tools.test.ts` in `apps/packages/ui` reporting 2 files / 11 tests passed.
 
 Stage 3 complete: pageAssistModel now uses stored chatTools by default; ChatTldw and raw preview use the shared request normalizer; no-tools requests omit tools/tool_choice and loop-compat headers. Verified RED on new request/raw-preview/helper tests, then GREEN with `bunx vitest run src/utils/__tests__/chat-tools.test.ts src/models/__tests__/pageAssistModel.mcp-tools.test.ts src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx` in `apps/packages/ui` reporting 3 files / 11 tests passed.
+
+Stage 4 complete: added shared `McpToolSelector`, wired it into Playground MCP settings and sidepanel ControlRow, and switched Playground MCP control/raw-preview counts to chatTools. Verified RED with the selector test failing on missing component, then GREEN with `bunx vitest run src/components/Common/__tests__/McpToolSelector.test.tsx src/hooks/playground/__tests__/useMcpToolsControl.test.tsx src/components/Option/Playground/__tests__/Playground.request-budget.test.tsx src/hooks/__tests__/useMcpTools.gating.test.tsx` in `apps/packages/ui` reporting 4 files / 10 tests passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

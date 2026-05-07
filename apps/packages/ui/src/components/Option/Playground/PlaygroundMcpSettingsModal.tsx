@@ -1,6 +1,8 @@
 import React from "react"
 import { InputNumber, Modal, Select, Switch, Input } from "antd"
 import { ModalFooter } from "@/components/ui/layout"
+import { McpToolSelector } from "@/components/Common/McpToolSelector"
+import type { ChatToolFilterCounts, ResolvedMcpTool } from "@/utils/chat-tools"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +43,14 @@ export interface PlaygroundMcpSettingsModalProps {
   toolModules: string[]
   onModuleSelect: (value?: string[]) => void
 
+  // Personal tool filter
+  discoveredTools: ResolvedMcpTool[]
+  toolCounts: ChatToolFilterCounts
+  toolsLoading: boolean
+  mcpHealthState: string
+  onToolEnabledChange: (toolName: string, enabled: boolean) => void
+  onResetToolFilter: () => void
+
   // Small model hint
   isSmallModel: boolean
 
@@ -72,6 +82,12 @@ export const PlaygroundMcpSettingsModal: React.FC<PlaygroundMcpSettingsModalProp
       moduleOptionsLoading,
       toolModules,
       onModuleSelect,
+      discoveredTools,
+      toolCounts,
+      toolsLoading,
+      mcpHealthState,
+      onToolEnabledChange,
+      onResetToolFilter,
       isSmallModel,
       t
     } = props
@@ -110,6 +126,21 @@ export const PlaygroundMcpSettingsModal: React.FC<PlaygroundMcpSettingsModalProp
             </div>
           ) : (
             <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-text-muted">
+                  {t("playground:composer.mcpToolSelectorLabel", "Tools")}
+                </label>
+                <McpToolSelector
+                  discoveredTools={discoveredTools}
+                  toolCounts={toolCounts}
+                  toolsLoading={toolsLoading}
+                  hasMcp={hasMcp}
+                  healthState={mcpHealthState}
+                  onToolEnabledChange={onToolEnabledChange}
+                  onReset={onResetToolFilter}
+                  t={t}
+                />
+              </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-text-muted">
                   {t("playground:composer.mcpCatalogLabel", "Catalog")}

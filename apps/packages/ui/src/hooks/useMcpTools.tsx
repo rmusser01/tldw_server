@@ -159,6 +159,24 @@ const normalizeDisabledToolNames = (toolNames: string[]): string[] => {
   return [...seen].sort((left, right) => left.localeCompare(right))
 }
 
+const normalizeDisabledToolPreferences = (
+  preferences: McpDisabledToolPreferences | null | undefined
+): McpDisabledToolPreferences => {
+  if (
+    preferences &&
+    typeof preferences === "object" &&
+    preferences.version === 1 &&
+    preferences.scopes &&
+    typeof preferences.scopes === "object"
+  ) {
+    return preferences
+  }
+  return {
+    version: 1,
+    scopes: {}
+  }
+}
+
 type UseMcpToolsOptions = {
   enabled?: boolean
 }
@@ -188,11 +206,17 @@ export const useMcpTools = (
   const [storedStrict, persistStrict] = useSetting(MCP_TOOL_CATALOG_STRICT_SETTING)
   const [storedDisabledToolPreferences, persistStoredDisabledToolPreferences] =
     useSetting(MCP_DISABLED_TOOLS_SETTING)
+  const normalizedStoredDisabledToolPreferences = React.useMemo(
+    () => normalizeDisabledToolPreferences(storedDisabledToolPreferences),
+    [storedDisabledToolPreferences]
+  )
   const [disabledToolPreferences, setDisabledToolPreferences] =
-    React.useState<McpDisabledToolPreferences>(storedDisabledToolPreferences)
+    React.useState<McpDisabledToolPreferences>(
+      normalizedStoredDisabledToolPreferences
+    )
   React.useEffect(() => {
-    setDisabledToolPreferences(storedDisabledToolPreferences)
-  }, [storedDisabledToolPreferences])
+    setDisabledToolPreferences(normalizedStoredDisabledToolPreferences)
+  }, [normalizedStoredDisabledToolPreferences])
   const activeToolPreferenceScope = React.useMemo(
     () => deriveMcpToolPreferenceScope(connectionConfig),
     [connectionConfig]

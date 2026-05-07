@@ -104,15 +104,15 @@
 
 **Tests:** `bunx vitest run apps/packages/ui/src/components/Common/__tests__/McpToolSelector.test.tsx apps/packages/ui/src/hooks/playground/__tests__/useMcpToolsControl.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Write failing selector tests for toggle behavior, unexecutable display, disabled display, collision display, and empty/degraded state labels.
-- [ ] Run selector tests and verify expected failures.
-- [ ] Implement `McpToolSelector`.
-- [ ] Wire selector into `PlaygroundMcpSettingsModal`.
-- [ ] Wire selector into sidepanel `ControlRow`.
-- [ ] Update Playground count props to use `chatTools.length` for chat-enabled counts.
-- [ ] Run selector and focused existing MCP control tests until green.
+- [x] Write failing selector tests for toggle behavior, unexecutable display, disabled display, collision display, and empty/degraded state labels.
+- [x] Run selector tests and verify expected failures.
+- [x] Implement `McpToolSelector`.
+- [x] Wire selector into `PlaygroundMcpSettingsModal`.
+- [x] Wire selector into sidepanel `ControlRow`.
+- [x] Update Playground count props to use `chatTools.length` for chat-enabled counts.
+- [x] Run selector and focused existing MCP control tests until green.
 
 ## Stage 5: Focused Verification And Cleanup
 
