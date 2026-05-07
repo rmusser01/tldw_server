@@ -1,10 +1,10 @@
 ---
 id: TASK-45.15
 title: Adapt WorkspaceChatEmpty to shared EmptyState
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-07 02:10'
-updated_date: '2026-05-07 02:19'
+updated_date: '2026-05-07 02:21'
 labels:
   - design-system
   - ui
@@ -14,6 +14,7 @@ references:
   - >-
     apps/packages/ui/src/components/Option/WorkspacePlayground/ChatPane/index.tsx
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - 'https://github.com/rmusser01/tldw_server/pull/1351'
 documentation:
   - Docs/Design/tldw_web_design_system_contract.md
 parent_task_id: TASK-45
@@ -52,12 +53,18 @@ Verification: bunx vitest run src/components/Option/WorkspacePlayground/__tests_
 Broader check: bunx vitest run src/components/Option/WorkspacePlayground --maxWorkers=1 --reporter=dot was attempted and failed in unrelated existing WorkspacePlayground suites outside this slice: AddSourceModal tab ordering, StudioPane stage 3 output/audio expectations, and WorkspacePlayground tests whose workspace-store mocks lack createWorkspaceStorage. The touched ChatPane and guard tests passed after the scoped fix.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adapted WorkspaceChatEmpty to render the canonical EmptyState primitive directly while preserving its existing research-start copy, source-aware prompt chips, Knowledge QA link, source guidance, add-source CTA, and template actions. Removed the WorkspaceChatEmpty local-empty-state baseline exception so the product-state guard now has no local-empty-state bucket and 520 total baseline exceptions. Updated ChatPane stage 2, stage 3, and stage 5 tests to render with MemoryRouter now that the real empty shell path includes the existing Knowledge QA Link. Opened PR #1351 against dev. Verification passed for the full ChatPane focused suite plus the product-state guard test, the design-system guard CLI, and git diff --check. The broader WorkspacePlayground folder run was attempted and failed in unrelated existing suites outside this slice, documented in implementation notes.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
