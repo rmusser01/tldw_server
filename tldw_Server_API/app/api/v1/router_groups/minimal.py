@@ -500,7 +500,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/guardian",
             tags=("guardian",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.family_wizard",
@@ -508,7 +507,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/guardian",
             tags=("guardian",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.self_monitoring",
@@ -516,7 +514,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/self-monitoring",
             tags=("self-monitoring",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
     ):
         append_imported_router_spec(specs, guardian_safety_spec)
