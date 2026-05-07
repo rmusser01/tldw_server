@@ -2506,7 +2506,6 @@ async def add_media_orchestrate(
         media_mod = None  # type: ignore[assignment]
 
     _validate_inputs = validate_add_media_inputs
-    _prepare_chunking_options_dict = prepare_chunking_options_dict
     _prepare_common_options = prepare_common_options
     _determine_final_status = determine_add_media_final_status
 

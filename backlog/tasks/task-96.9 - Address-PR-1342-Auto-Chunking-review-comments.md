@@ -4,7 +4,7 @@ title: Address PR 1342 Auto Chunking review comments
 status: Done
 assignee: []
 created_date: '2026-05-07 00:35'
-updated_date: '2026-05-07 00:58'
+updated_date: '2026-05-07 01:12'
 labels:
   - review-fix
   - auto-chunking
@@ -38,12 +38,18 @@ Resolve all actionable review comments on PR #1342 for the Auto Chunking branch.
 Implemented PR #1342 review fixes: shared chunking form coercion, mapping-aware Auto resolver, resolved Auto chunk options in persistence, finalized job chunking_plan preference, per-result hierarchical chunking decisions, web scraping logging/scope fixes, and Quick Ingest Auto/Manual stale-field filtering.
 
 Verification: backend focused suite 36 passed; frontend focused Vitest suite 69 passed; OpenAPI internal refs test passed; Bandit touched backend scope reported 0 findings in /tmp/bandit_auto_chunking_review.json; git diff --check passed.
+
+Follow-up PR review pass: verified live PR #1342 unresolved threads. Most are already fixed at branch tip; adding explicit /media/add Auto chunking regression coverage and removing the stale prepare_chunking_options_dict helper alias before resolving remaining review threads.
+
+Follow-up verification: tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py passed 12 tests; focused Auto Chunking backend suite passed 48 tests; targeted media/add regression tests passed 2 tests; Bandit on persistence.py reported 0 findings in /tmp/bandit_auto_chunking_media_add_followup.json; git diff --check passed.
+
+Frontend review verification rerun: direct root-level bunx vitest invocation failed before collection because UI alias config was not loaded; reran from apps/packages/ui with package vitest config and Quick Ingest focused suite passed 69 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved PR #1342 review comments across backend Auto Chunking contracts, persistence, process endpoints, web scraping, and Quick Ingest frontend filtering. Added regression coverage for mapping-backed Auto payloads, safe metadata, empty template names, internal structure_aware schema values, finalized job chunking plans, stale Manual-field submission/preset matching, manual value clamping, and web-scrape template forwarding. Verification recorded in implementation notes.
+Follow-up review issue addressed: /api/v1/media/add no longer carries the stale prepare_chunking_options_dict helper alias, and new regression tests prove Auto mode routes resolved planner chunk options into both document-like and audio/video batch processors instead of stale manual options. Existing unresolved PR threads were rechecked against the branch tip before resolution.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
