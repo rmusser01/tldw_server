@@ -553,7 +553,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/web-clipper",
             tags=("web-clipper",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.skills",
@@ -561,7 +560,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/skills",
             tags=("skills",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.translate",
@@ -569,7 +567,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("translation",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.slides",
@@ -577,7 +574,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("slides",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
     ):
         append_imported_router_spec(specs, utility_spec)

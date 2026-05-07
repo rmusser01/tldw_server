@@ -5472,7 +5472,10 @@ def test_iter_minimal_optional_router_specs_defers_utility_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (Exception,)
+        assert spec.skip_exceptions == (
+            OptionalRouterMissingModule,
+            OptionalRouterMissingAttribute,
+        )
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -5485,10 +5488,10 @@ def test_iter_minimal_optional_router_specs_defers_utility_attr_lookup(
     }
 
 
-def test_iter_minimal_optional_router_specs_skips_utility_runtime_import_failures(
+def test_iter_minimal_optional_router_specs_skips_utility_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal utility specs preserve broad import failure skipping."""
+    """Verify minimal utility specs skip missing optional router modules."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -5496,10 +5499,10 @@ def test_iter_minimal_optional_router_specs_skips_utility_runtime_import_failure
     )
 
     utility_modules = {
-        "tldw_Server_API.app.api.v1.endpoints.web_clipper",
-        "tldw_Server_API.app.api.v1.endpoints.skills",
-        "tldw_Server_API.app.api.v1.endpoints.translate",
-        "tldw_Server_API.app.api.v1.endpoints.slides",
+        "web clipper": "tldw_Server_API.app.api.v1.endpoints.web_clipper",
+        "skills": "tldw_Server_API.app.api.v1.endpoints.skills",
+        "translate": "tldw_Server_API.app.api.v1.endpoints.translate",
+        "slides": "tldw_Server_API.app.api.v1.endpoints.slides",
     }
 
     specs = list(iter_minimal_optional_router_specs())
@@ -5513,9 +5516,12 @@ def test_iter_minimal_optional_router_specs_skips_utility_runtime_import_failure
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Crash only the selected utility router imports at registration."""
-        if module_name in utility_modules:
-            raise RuntimeError(f"{module_name} exploded during import")
+        """Fail only the selected utility router imports at registration."""
+        if module_name in utility_modules.values():
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -5527,16 +5533,55 @@ def test_iter_minimal_optional_router_specs_skips_utility_runtime_import_failure
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
-    assert debug_messages == [
-        "Skipping web clipper router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.web_clipper exploded during import",
-        "Skipping skills router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.skills exploded during import",
-        "Skipping translate router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.translate exploded during import",
-        "Skipping slides router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.slides exploded during import",
-    ]
+    assert len(debug_messages) == len(utility_modules)
+    for router_name, module_name in utility_modules.items():
+        assert any(
+            f"Skipping {router_name} router" in message
+            and "in minimal test app" in message
+            and module_name in message
+            for message in debug_messages
+        )
+
+
+@pytest.mark.parametrize(
+    ("router_name", "module_name"),
+    (
+        ("web clipper", "tldw_Server_API.app.api.v1.endpoints.web_clipper"),
+        ("skills", "tldw_Server_API.app.api.v1.endpoints.skills"),
+        ("translate", "tldw_Server_API.app.api.v1.endpoints.translate"),
+        ("slides", "tldw_Server_API.app.api.v1.endpoints.slides"),
+    ),
+)
+def test_iter_minimal_optional_router_specs_propagates_utility_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    router_name: str,
+    module_name: str,
+) -> None:
+    """Verify minimal utility runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == router_name)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected utility router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_kanban_attr_lookup(
