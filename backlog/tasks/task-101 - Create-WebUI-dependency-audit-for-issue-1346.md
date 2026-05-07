@@ -4,7 +4,7 @@ title: Create WebUI dependency audit for issue 1346
 status: In Progress
 assignee: []
 created_date: '2026-05-07 01:36'
-updated_date: '2026-05-07 02:26'
+updated_date: '2026-05-07 02:33'
 labels:
   - webui
   - dependencies
@@ -62,6 +62,10 @@ Task 3 progress generated /tmp/tldw-webui-dependency-usage.json from 4605 scanne
 Review correction started: spec review found false-positive package counts from broad text/config-key matching, especially generic names like next. Reopening task status while the import/config-aware table correction is applied.
 
 Review correction progress regenerated the table from strict import/config/package-script evidence. Corrected generic-name false positives across the table; next now has WebUI-only evidence and no shared UI local-variable matches. Quick candidates remain pubsub-js/buffer/stream-browserify remove-now, clsx and axios remain replace-later.
+
+Task 3 data-quality correction started: review found postcss-import plugin-key evidence was missing and pdfjs-dist had a count/site mismatch between direct script evidence and runtime worker/version reference. Keeping TASK-101 In Progress for Task 4/final closeout.
+
+Task 3 data-quality correction completed: postcss-import now counts the direct PostCSS plugin key in apps/tldw-frontend/postcss.config.mjs, and pdfjs-dist now aligns import count, representative sites, and consumer surface across copy-pdf-worker.mjs plus the shared PdfDocument runtime worker/version reference. TASK-101 remains In Progress for Task 4/final closeout.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
