@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next"
 import { ModelSelect } from "@/components/Common/ModelSelect"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { FeatureHint, useFeatureHintSeen } from "@/components/Common/FeatureHint"
+import { McpToolSelector } from "@/components/Common/McpToolSelector"
 import { CharacterSelect } from "./CharacterSelect"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -81,7 +82,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const {
     hasMcp,
     healthState: mcpHealthState,
-    tools: mcpTools,
+    discoveredTools: discoveredMcpTools,
+    chatTools: chatMcpTools,
+    toolCounts: mcpToolCounts,
     toolsLoading: mcpToolsLoading,
     catalogs: mcpCatalogs,
     catalogsLoading: mcpCatalogsLoading,
@@ -94,8 +97,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     setToolCatalog,
     setToolCatalogId,
     setToolModules,
-    setToolCatalogStrict
+    setToolCatalogStrict,
+    setToolEnabled: setMcpToolEnabled,
+    resetToolFilter: resetMcpToolFilter
   } = useMcpTools()
+  const chatMcpToolCount = chatMcpTools.length
 
   const [catalogDraft, setCatalogDraft] = React.useState(toolCatalog)
   const [advancedToolsExpanded, setAdvancedToolsExpanded] = React.useState(false)
@@ -309,7 +315,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
               ? t("sidepanel:controlRow.mcpToolsUnhealthy", "MCP tools are offline")
               : mcpToolsLoading
                 ? t("sidepanel:controlRow.mcpToolsLoading", "Loading tools...")
-                : mcpTools.length === 0
+                : chatMcpToolCount === 0
                   ? t("sidepanel:controlRow.mcpToolsEmpty", "No MCP tools available")
                   : ""
         }
@@ -317,7 +323,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           !hasMcp ||
           mcpHealthState === "unhealthy" ||
           mcpToolsLoading ||
-          mcpTools.length === 0
+          chatMcpToolCount === 0
             ? undefined
             : false
         }
@@ -332,7 +338,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             !hasMcp ||
             mcpHealthState === "unhealthy" ||
             mcpToolsLoading ||
-            mcpTools.length === 0
+            chatMcpToolCount === 0
           }
         >
           <Radio.Button value="auto">
@@ -352,48 +358,17 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       <div className="text-caption text-text-muted font-medium">
         {t("sidepanel:controlRow.mcpToolsLabel", "MCP tools")}
       </div>
-      {mcpToolsLoading ? (
-        <div className="text-xs text-text-muted">
-          {t("sidepanel:controlRow.mcpToolsLoading", "Loading tools...")}
-        </div>
-      ) : mcpTools.length === 0 ? (
-        <div className="text-xs text-text-muted">
-          {!hasMcp
-            ? t("sidepanel:controlRow.mcpToolsUnavailable", "MCP tools unavailable")
-            : mcpHealthState === "unhealthy"
-              ? t("sidepanel:controlRow.mcpToolsUnhealthy", "MCP tools are offline")
-              : t("sidepanel:controlRow.mcpToolsEmpty", "No MCP tools available")}
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-1">
-          {mcpTools.slice(0, 6).map((tool, index) => {
-            const toolFn = (tool as any)?.function
-            const name =
-              (typeof tool?.name === "string" && tool.name) ||
-              (typeof toolFn?.name === "string" && toolFn.name) ||
-              (typeof (tool as any)?.id === "string" && (tool as any).id) ||
-              `tool-${index + 1}`
-            const description =
-              (typeof tool?.description === "string" && tool.description) ||
-              (typeof toolFn?.description === "string" && toolFn.description) ||
-              ""
-            return (
-              <span
-                key={`${name}-${index}`}
-                title={description || name}
-                className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text"
-              >
-                {name}
-              </span>
-            )
-          })}
-          {mcpTools.length > 6 && (
-            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-muted">
-              +{mcpTools.length - 6}
-            </span>
-          )}
-        </div>
-      )}
+      <McpToolSelector
+        discoveredTools={discoveredMcpTools}
+        toolCounts={mcpToolCounts}
+        toolsLoading={mcpToolsLoading}
+        hasMcp={hasMcp}
+        healthState={mcpHealthState}
+        onToolEnabledChange={setMcpToolEnabled}
+        onReset={resetMcpToolFilter}
+        compact
+        t={t}
+      />
 
       <div className="panel-divider my-1" />
       <div className="text-caption text-text-muted font-medium">

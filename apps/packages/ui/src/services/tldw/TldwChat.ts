@@ -11,19 +11,7 @@ import {
   getLastChatCompletionDebugSnapshot,
   type ChatCompletionDebugSnapshot
 } from "./chat-request-debug"
-
-type ToolFunctionSchema = Record<string, unknown>
-type ToolFunction = {
-  name: string
-  description?: string
-  parameters?: ToolFunctionSchema
-}
-type OpenAiTool = {
-  type: "function"
-  function: ToolFunction
-}
-
-const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
+import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -259,85 +247,6 @@ const buildRequestMessages = (
   )
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const sanitizeToolName = (name: string): string | null => {
-  const trimmed = name.trim()
-  if (!trimmed) return null
-  if (TOOL_NAME_PATTERN.test(trimmed)) return trimmed
-
-  let sanitized = trimmed.replace(/[^a-zA-Z0-9_-]+/g, "_")
-  sanitized = sanitized.replace(/^_+|_+$/g, "")
-  if (!sanitized) return null
-  if (sanitized.length > 64) sanitized = sanitized.slice(0, 64)
-  return TOOL_NAME_PATTERN.test(sanitized) ? sanitized : null
-}
-
-const normalizeChatTools = (
-  tools?: Record<string, unknown>[]
-): Record<string, unknown>[] | undefined => {
-  if (!Array.isArray(tools) || tools.length === 0) return undefined
-
-  const seen = new Set<string>()
-  const normalized = tools
-    .map((tool) => {
-      if (!isRecord(tool)) return null
-
-      const functionRecord = isRecord(tool.function) ? tool.function : undefined
-      const rawName =
-        (typeof tool.name === "string" && tool.name) ||
-        (functionRecord &&
-        typeof functionRecord.name === "string" &&
-        functionRecord.name
-          ? functionRecord.name
-          : "")
-      const name = rawName ? sanitizeToolName(rawName) : null
-      if (!name || seen.has(name)) return null
-
-      if (rawName !== name) {
-        console.warn(
-          `[tldw] Tool name "${rawName}" normalized to "${name}" to satisfy server schema.`
-        )
-      }
-      seen.add(name)
-
-      const description =
-        typeof tool.description === "string"
-          ? tool.description
-          : functionRecord &&
-              typeof functionRecord.description === "string"
-            ? functionRecord.description
-            : undefined
-
-      const schemaCandidates: Array<unknown> = [
-        functionRecord?.parameters,
-        tool.parameters,
-        tool.input_schema,
-        tool.json_schema
-      ]
-      const parameters =
-        (schemaCandidates.find((candidate) =>
-          isRecord(candidate)
-        ) as ToolFunctionSchema | undefined) || {
-          type: "object",
-          properties: {}
-        }
-
-      return {
-        type: "function",
-        function: {
-          name,
-          description,
-          parameters
-        }
-      } as OpenAiTool
-    })
-    .filter(Boolean) as Record<string, unknown>[]
-
-  return normalized.length > 0 ? normalized : undefined
-}
-
 export interface TldwChatOptions {
   model: string
   routing?: ChatCompletionRequest["routing"]
@@ -422,7 +331,7 @@ export class TldwChatService {
   ): Promise<string> {
     try {
       await tldwClient.initialize()
-      const normalizedTools = normalizeChatTools(options.tools)
+      const normalizedTools = normalizeChatToolsForRequest(options.tools)
       const toolChoice = normalizedTools ? options.toolChoice : undefined
       const requestMessages = buildRequestMessages(messages, options)
       if (requestMessages.length === 0) {
@@ -447,8 +356,12 @@ export class TldwChatService {
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
         reasoning_effort: options.reasoningEffort,
-        tool_choice: toolChoice,
-        tools: normalizedTools,
+        ...(normalizedTools
+          ? {
+              tool_choice: toolChoice,
+              tools: normalizedTools
+            }
+          : {}),
         save_to_db: options.saveToDb,
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -498,7 +411,7 @@ export class TldwChatService {
   ): AsyncGenerator<string, void, unknown> {
     try {
       await tldwClient.initialize()
-      const normalizedTools = normalizeChatTools(options.tools)
+      const normalizedTools = normalizeChatToolsForRequest(options.tools)
       const toolChoice = normalizedTools ? options.toolChoice : undefined
       const requestMessages = buildRequestMessages(messages, options)
       if (requestMessages.length === 0) {
@@ -536,8 +449,12 @@ export class TldwChatService {
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
         reasoning_effort: options.reasoningEffort,
-        tool_choice: toolChoice,
-        tools: normalizedTools,
+        ...(normalizedTools
+          ? {
+              tool_choice: toolChoice,
+              tools: normalizedTools
+            }
+          : {}),
         save_to_db: options.saveToDb,
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,

@@ -229,6 +229,69 @@ export const MCP_TOOL_CATALOG_SETTING = defineSetting(
   }
 )
 
+export type McpDisabledToolScopePreference = {
+  disabledToolNames: string[]
+  updatedAt?: string
+}
+
+export type McpDisabledToolPreferences = {
+  version: 1
+  scopes: Record<string, McpDisabledToolScopePreference>
+}
+
+const DEFAULT_MCP_DISABLED_TOOL_PREFERENCES: McpDisabledToolPreferences = {
+  version: 1,
+  scopes: {}
+}
+
+const coerceMcpDisabledToolPreferences = (
+  value: unknown
+): McpDisabledToolPreferences => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_MCP_DISABLED_TOOL_PREFERENCES
+  }
+  const data = value as Record<string, unknown>
+  if (data.version !== 1 || !data.scopes || typeof data.scopes !== "object") {
+    return DEFAULT_MCP_DISABLED_TOOL_PREFERENCES
+  }
+  const scopes: Record<string, McpDisabledToolScopePreference> = {}
+  for (const [scope, rawPreference] of Object.entries(
+    data.scopes as Record<string, unknown>
+  )) {
+    const normalizedScope = scope.trim()
+    if (!normalizedScope) continue
+    if (!rawPreference || typeof rawPreference !== "object") continue
+    const preference = rawPreference as Record<string, unknown>
+    const disabledToolNames = coerceStringArray(
+      preference.disabledToolNames,
+      []
+    )
+    const updatedAt =
+      typeof preference.updatedAt === "string" && preference.updatedAt.trim()
+        ? preference.updatedAt.trim()
+        : undefined
+    scopes[normalizedScope] = {
+      disabledToolNames,
+      ...(updatedAt ? { updatedAt } : {})
+    }
+  }
+  return {
+    version: 1,
+    scopes
+  }
+}
+
+export const MCP_DISABLED_TOOLS_SETTING = defineSetting(
+  "tldw:mcp:disabledTools:v1",
+  DEFAULT_MCP_DISABLED_TOOL_PREFERENCES,
+  coerceMcpDisabledToolPreferences,
+  {
+    area: "local",
+    localStorageKey: "tldw:mcp:disabledTools:v1",
+    mirrorToLocalStorage: true
+  }
+)
+
 export const MCP_TOOL_CATALOG_ID_SETTING = defineSetting(
   "tldw:mcp:catalogId",
   null as number | null,

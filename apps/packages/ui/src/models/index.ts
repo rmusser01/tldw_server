@@ -9,6 +9,7 @@ import { tldwModels } from "@/services/tldw"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption, type ToolChoice } from "@/store/option"
 import { useMcpToolsStore } from "@/store/mcp-tools"
+import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 
 const isValidReasoningEffort = (
@@ -47,17 +48,6 @@ const parseJsonObject = (value?: string) => {
   return undefined
 }
 
-const filterExecutableTools = (
-  tools?: Record<string, unknown>[]
-): Record<string, unknown>[] | undefined => {
-  if (!Array.isArray(tools)) return tools
-  return tools.filter((tool) => {
-    if (!tool || typeof tool !== "object") return false
-    if (!("canExecute" in tool)) return true
-    return Boolean((tool as Record<string, unknown>).canExecute)
-  })
-}
-
 export const pageAssistModel = async ({
   model,
   toolChoice,
@@ -80,10 +70,13 @@ export const pageAssistModel = async ({
   } = useStoreMessageOption.getState()
   const {
     tools: storedTools,
+    chatTools: storedChatTools,
     healthState: mcpHealthState
   } = useMcpToolsStore.getState()
   const resolvedToolChoice = toolChoice ?? storedToolChoice
-  const resolvedTools = filterExecutableTools(tools ?? storedTools)
+  const resolvedTools = normalizeChatToolsForRequest(
+    tools ?? storedChatTools ?? storedTools
+  )
   const normalizedModelId = String(model || "").replace(/^tldw:/, "")
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
@@ -108,7 +101,7 @@ export const pageAssistModel = async ({
     resolvedTools.length > 0
       ? resolvedTools
       : undefined
-  const effectiveToolChoice = effectiveTools ? resolvedToolChoice : "none"
+  const effectiveToolChoice = effectiveTools ? resolvedToolChoice : undefined
   const resolvedConversationId =
     conversationId && conversationId.trim().length > 0
       ? conversationId.trim()
@@ -160,7 +153,7 @@ export const pageAssistModel = async ({
     const headers = {
       ...(resolvedExtraHeadersBase ?? {})
     } as Record<string, unknown>
-    if (effectiveToolChoice !== "none") {
+    if (effectiveTools) {
       headers["X-TLDW-Loop-Compat"] = "1"
     }
     return Object.keys(headers).length > 0 ? headers : undefined
