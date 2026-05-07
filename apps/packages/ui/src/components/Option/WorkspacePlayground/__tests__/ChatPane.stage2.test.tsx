@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import type { Message as StoreMessage } from "@/store/option/types"
@@ -281,6 +282,18 @@ vi.mock("antd", async () => {
   }
 })
 
+function renderChatPaneNode() {
+  return (
+    <MemoryRouter>
+      <ChatPane />
+    </MemoryRouter>
+  )
+}
+
+function renderChatPane() {
+  return render(renderChatPaneNode())
+}
+
 describe("ChatPane Stage 2 citation traceability and retrieval transparency", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -332,7 +345,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
         title: `Source ${index + 1}`
       }))
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const moreButton = screen.getByRole("button", {
       name: "Show more sources"
@@ -367,7 +380,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
 
     expect(mockFocusSourceByMediaId).toHaveBeenCalledWith(42)
@@ -394,7 +407,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
 
     expect(mockFocusSourceById).toHaveBeenCalledWith("source-alpha")
@@ -432,7 +445,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("Retrieval info")).toBeInTheDocument()
     expect(screen.getByText(/Chunks retrieved/i)).toBeInTheDocument()
@@ -461,7 +474,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ])
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const modelSelect = await screen.findByRole("combobox", {
       name: "Select model"
@@ -486,7 +499,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("Retrieval info")).toBeInTheDocument()
     expect(screen.getByText("0.600")).toBeInTheDocument()
@@ -510,7 +523,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("Retrieval info")).toBeInTheDocument()
     expect(screen.getByText(/30 prompt \+ 70 completion = 100 tokens/i)).toBeInTheDocument()
@@ -531,7 +544,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("0.350")).toBeInTheDocument()
     expect(screen.getByText("Low")).toBeInTheDocument()
@@ -547,7 +560,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const dropZone = screen.getByTestId("chat-drop-zone")
     const dataTransfer = {
@@ -601,7 +614,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const dropZone = screen.getByTestId("chat-drop-zone")
     const dataTransfer = {
@@ -678,7 +691,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const dropZone = screen.getByTestId("chat-drop-zone")
     const dataTransfer = {
@@ -749,10 +762,10 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    const { rerender } = render(<ChatPane />)
+    const { rerender } = renderChatPane()
 
     workspaceStoreState.selectedSourceIds = ["source-1"]
-    rerender(<ChatPane />)
+    rerender(renderChatPaneNode())
 
     expect(mockMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -772,7 +785,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
 
     expect(mockCreateChatBranch).toHaveBeenCalledWith(0)
@@ -794,7 +807,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Variant next" }))
 
     const updater = mockSetMessages.mock.calls.at(-1)?.[0]
