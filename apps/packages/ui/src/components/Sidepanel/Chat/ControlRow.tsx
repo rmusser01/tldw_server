@@ -102,6 +102,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     resetToolFilter: resetMcpToolFilter
   } = useMcpTools()
   const chatMcpToolCount = chatMcpTools.length
+  const translateMcpToolSelector = React.useCallback(
+    (key: string, fallback?: string, options?: Record<string, unknown>) =>
+      t(key, fallback ?? key, options),
+    [t]
+  )
 
   const [catalogDraft, setCatalogDraft] = React.useState(toolCatalog)
   const [advancedToolsExpanded, setAdvancedToolsExpanded] = React.useState(false)
@@ -367,7 +372,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         onToolEnabledChange={setMcpToolEnabled}
         onReset={resetMcpToolFilter}
         compact
-        t={t}
+        t={translateMcpToolSelector}
       />
 
       <div className="panel-divider my-1" />
