@@ -125,11 +125,11 @@
 - `bun run verify:openapi` in `apps/packages/ui`
 - `bun run verify:openapi` in `apps/extension`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Run all focused Vitest coverage for the implementation slice.
-- [ ] Run OpenAPI verification in `apps/packages/ui`.
-- [ ] Run OpenAPI verification in `apps/extension`.
-- [ ] Run `git diff --check`.
-- [ ] Run Bandit if executable Python changed; otherwise document the non-Python skip.
-- [ ] Update `TASK-113` notes/final summary and commit.
+- [x] Run all focused Vitest coverage for the implementation slice.
+- [x] Run OpenAPI verification in `apps/packages/ui`.
+- [x] Run OpenAPI verification in `apps/extension`.
+- [x] Run `git diff --check`.
+- [x] Run Bandit if executable Python changed; otherwise document the non-Python skip.
+- [x] Update `TASK-113` notes/final summary and commit.
