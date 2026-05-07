@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import pytest
 
 from tldw_Server_API.app.services import web_scraping_service as ws_service
+from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced_ws_service
 
 
 pytestmark = pytest.mark.unit
@@ -46,6 +47,26 @@ def _force_fallback(monkeypatch):
         raise RuntimeError("enhanced service unavailable in test")
 
     monkeypatch.setattr(ws_service, "get_web_scraping_service", _raise, raising=True)
+
+
+def test_web_chunking_forms_preserve_request_llm_selection():
+    legacy_form = ws_service._web_chunking_form(
+        perform_chunking=True,
+        chunking_mode="auto",
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=True,
+        api_name="openai/gpt-4o",
+    )
+    enhanced_form = enhanced_ws_service._web_chunking_form(
+        perform_chunking=True,
+        chunking_mode="auto",
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=True,
+        api_name="openai/gpt-4o",
+    )
+
+    assert legacy_form.api_name == "openai/gpt-4o"
+    assert enhanced_form.api_name == "openai/gpt-4o"
 
 
 @pytest.fixture(autouse=True)

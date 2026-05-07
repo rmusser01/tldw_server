@@ -25,8 +25,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
-    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
@@ -121,6 +121,9 @@ def _web_chunking_form(
     chunking_mode: str | None,
     auto_chunking_goal: str,
     auto_chunking_use_llm: bool,
+    api_name: str | None = None,
+    api_provider: str | None = None,
+    model_name: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         media_type="web",
@@ -128,6 +131,9 @@ def _web_chunking_form(
         chunking_mode=chunking_mode,
         auto_chunking_goal=auto_chunking_goal,
         auto_chunking_use_llm=auto_chunking_use_llm,
+        api_name=api_name,
+        api_provider=api_provider,
+        model_name=model_name,
         chunk_method=None,
         chunk_size=500,
         chunk_overlap=200,
@@ -407,6 +413,7 @@ async def process_web_scraping_task(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
+                api_name=api_name,
             )
 
             # 2) Summarize after the fact, if the method doesn't handle it
@@ -437,7 +444,7 @@ async def process_web_scraping_task(
                         if not isinstance(article, dict):
                             continue
                         content_text = article.get("content")
-                        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
                             chunking_form,
                             media_type="web",
                             source_name=str(article.get("url") or ""),
@@ -479,7 +486,7 @@ async def process_web_scraping_task(
                         chunk_options = None
                         chunking_plan = None
                         if perform_chunking:
-                            chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                            chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
                                 chunking_form,
                                 media_type="web",
                                 source_name=str(article.get("url") or ""),

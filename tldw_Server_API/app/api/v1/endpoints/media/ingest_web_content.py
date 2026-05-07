@@ -19,8 +19,8 @@ from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
-    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.services.web_scraping_service import (
     ingest_web_content_orchestrate,
@@ -113,7 +113,7 @@ async def ingest_web_content(
             if not isinstance(item, dict):
                 continue
             content = item.get("content")
-            _, chunking_plan = resolve_chunking_options_and_plan(
+            _, chunking_plan = await async_resolve_chunking_options_and_plan(
                 request,
                 media_type="web",
                 source_name=str(item.get("url") or ""),

@@ -11,6 +11,12 @@ from tldw_Server_API.app.core.Chunking.auto_planner import (
     profile_from_source,
     profile_from_text,
 )
+from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
+    AutoChunkBoundaryAssistant,
+    AutoChunkBoundaryAssistantRequest,
+    ChatAutoChunkBoundaryAssistant,
+    apply_auto_chunk_boundary_result,
+)
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -255,6 +261,7 @@ def resolve_chunking_options_and_plan(
     template_status: str | None = None,
     template_error: str | None = None,
     llm_available: bool = False,
+    llm_requested_override: bool | None = None,
     semantic_available: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """
@@ -279,6 +286,11 @@ def resolve_chunking_options_and_plan(
     )
     text_profile = profile_from_text(extracted_text)
     profile = merge_profiles(source_profile, text_profile)
+    requested_llm = (
+        _coerce_raw_bool(_get_raw_form_value(form_data, "auto_chunking_use_llm", False))
+        if llm_requested_override is None
+        else bool(llm_requested_override)
+    )
 
     decision = plan_auto_chunking(
         perform_chunking=True,
@@ -289,11 +301,71 @@ def resolve_chunking_options_and_plan(
         template_name=template_name or _get_raw_form_value(form_data, "chunking_template_name"),
         template_status=template_status,
         template_error=template_error,
-        requested_llm=_coerce_raw_bool(_get_raw_form_value(form_data, "auto_chunking_use_llm", False)),
+        requested_llm=requested_llm,
         llm_available=llm_available,
         semantic_available=semantic_available,
     )
     return decision.chunk_options, decision.chunking_plan
+
+
+async def async_resolve_chunking_options_and_plan(
+    form_data: Any,
+    *,
+    media_type: str | None = None,
+    source_name: str | None = None,
+    extracted_text: str | None = None,
+    template_name: str | None = None,
+    template_status: str | None = None,
+    template_error: str | None = None,
+    semantic_available: bool = True,
+    boundary_assistant: AutoChunkBoundaryAssistant | None = None,
+    assistant_timeout_sec: float = 8.0,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Async Auto Chunking resolver with optional LLM boundary refinement."""
+    llm_requested = _coerce_raw_bool(_get_raw_form_value(form_data, "auto_chunking_use_llm", False))
+    chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+        form_data,
+        media_type=media_type,
+        source_name=source_name,
+        extracted_text=extracted_text,
+        template_name=template_name,
+        template_status=template_status,
+        template_error=template_error,
+        llm_available=False,
+        llm_requested_override=False,
+        semantic_available=semantic_available,
+    )
+    if not chunk_options or not chunking_plan:
+        return chunk_options, chunking_plan
+    if not llm_requested:
+        return chunk_options, chunking_plan
+
+    provider, model = _resolve_boundary_assistant_provider_model(form_data)
+    assistant = boundary_assistant or ChatAutoChunkBoundaryAssistant()
+    assistant_plan = dict(chunking_plan)
+    assistant_plan["used_llm"] = False
+    request = AutoChunkBoundaryAssistantRequest(
+        chunk_options=chunk_options,
+        chunking_plan=assistant_plan,
+        media_type=media_type or _get_raw_form_value(form_data, "media_type"),
+        source_name=source_name or _first_form_source_name(form_data),
+        extracted_text=extracted_text,
+        provider=provider,
+        model=model,
+        timeout_sec=assistant_timeout_sec,
+    )
+    try:
+        result = await assistant.refine(request)
+    except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as exc:
+        from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
+            AutoChunkBoundaryAssistantResult,
+        )
+
+        result = AutoChunkBoundaryAssistantResult.fallback(
+            reason="ai_assist_provider_error",
+            rationale=f"{type(exc).__name__}: assistant failed.",
+        )
+    return apply_auto_chunk_boundary_result(chunk_options, chunking_plan, result)
 
 
 def attach_chunking_plan_to_result(
@@ -346,6 +418,42 @@ def resolve_chunking_for_result(
     )
 
 
+async def async_resolve_chunking_for_result(
+    form_data: Any,
+    result: dict[str, Any],
+    *,
+    media_type: str | None = None,
+    default_chunk_options: dict[str, Any] | None = None,
+    default_chunking_plan: dict[str, Any] | None = None,
+    boundary_assistant: AutoChunkBoundaryAssistant | None = None,
+    allow_llm_assist: bool = True,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Async final chunking resolver for completed process results."""
+    if _get_raw_form_value(form_data, "chunking_mode") != "auto":
+        return default_chunk_options, default_chunking_plan
+    if not allow_llm_assist:
+        return default_chunk_options, default_chunking_plan
+
+    extracted_text = result.get("content")
+    if not isinstance(extracted_text, str):
+        extracted_text = None
+    source_name = result.get("input_ref") or result.get("processing_source")
+    if source_name is not None:
+        source_name = str(source_name)
+
+    chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
+        form_data,
+        media_type=media_type,
+        source_name=source_name,
+        extracted_text=extracted_text,
+        boundary_assistant=boundary_assistant,
+    )
+    return (
+        chunk_options if chunk_options is not None else default_chunk_options,
+        chunking_plan if chunking_plan is not None else default_chunking_plan,
+    )
+
+
 def _profile_from_form_source(
     form_data: Any,
     *,
@@ -386,6 +494,26 @@ def _first_form_source_name(form_data: Any) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _resolve_boundary_assistant_provider_model(form_data: Any) -> tuple[str | None, str | None]:
+    provider = _get_raw_form_value(form_data, "api_provider")
+    model = _get_raw_form_value(form_data, "model_name")
+    api_name = _get_raw_form_value(form_data, "api_name")
+    if api_name:
+        api_name_text = str(api_name).strip()
+        if "/" in api_name_text:
+            provider_part, model_part = api_name_text.split("/", 1)
+            if not provider:
+                provider = provider_part.strip() or None
+            if not model:
+                model = model_part.strip() or None
+        elif not provider:
+            provider = api_name_text or None
+    return (
+        str(provider).strip() if provider else None,
+        str(model).strip() if model else None,
+    )
 
 
 def apply_chunking_template_if_any(

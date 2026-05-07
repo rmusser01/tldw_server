@@ -204,6 +204,98 @@ async def test_media_ingest_worker_returns_auto_chunking_plan(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_media_ingest_worker_uses_async_auto_chunking_resolver(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    class _DummyDB:
+        def __init__(self, path: str):
+            self.db_path_str = path
+            self.client_id = "media_ingest_test"
+
+        def close_connection(self):
+            return None
+
+    async_resolver_calls = []
+    seen: dict[str, object] = {}
+
+    async def _fake_async_resolver(*args, **kwargs):
+        async_resolver_calls.append((args, kwargs))
+        return (
+            {
+                "method": "semantic",
+                "max_size": 820,
+                "overlap": 82,
+                "adaptive": False,
+                "multi_level": False,
+                "language": None,
+            },
+            {
+                "mode": "auto",
+                "goal": "balanced",
+                "used_llm": True,
+                "method": "semantic",
+                "max_size": 820,
+                "overlap": 82,
+                "template_name": None,
+                "derived_views": ["topic_sections"],
+                "fallback_reason": None,
+                "rationale": "Assistant selected topic shifts.",
+                "profile": {"media_type": "document"},
+                "provider": "openai",
+                "model": "gpt-test",
+            },
+        )
+
+    async def _fake_process_document_like_item(**kwargs):
+        seen["chunk_options"] = kwargs.get("chunk_options")
+        return {
+            "status": "Success",
+            "db_id": 235,
+            "media_uuid": "media-uuid-235",
+            "warnings": None,
+            "db_message": "Media added to database.",
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _DummyDB(str(tmp_path / "media.db")), raising=True)
+    monkeypatch.setattr(worker, "async_resolve_chunking_options_and_plan", _fake_async_resolver, raising=True)
+    monkeypatch.setattr(worker, "process_document_like_item", _fake_process_document_like_item, raising=True)
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-auto-async",
+            "media_type": "document",
+            "source": str(tmp_path / "doc.md"),
+            "source_kind": "file",
+            "input_ref": "doc.md",
+            "options": {
+                "media_type": "document",
+                "perform_chunking": True,
+                "chunking_mode": "auto",
+                "auto_chunking_use_llm": True,
+            },
+        },
+        owner_user_id="1",
+    )
+
+    result = await worker._handle_job(jm.get_job(int(row.get("id"))), jm, worker._ProgressState())
+
+    assert async_resolver_calls
+    assert seen["chunk_options"]["method"] == "semantic"
+    assert seen["chunk_options"]["max_size"] == 820
+    assert result["chunking_plan"]["used_llm"] is True
+    assert result["chunking_plan"]["provider"] == "openai"
+
+
+@pytest.mark.asyncio
 async def test_media_ingest_worker_returns_existing_media_id_for_skipped_dedupe_result(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)

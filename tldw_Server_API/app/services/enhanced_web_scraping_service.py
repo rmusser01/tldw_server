@@ -21,8 +21,8 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
-    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
@@ -65,6 +65,9 @@ def _web_chunking_form(
     chunking_mode: str | None,
     auto_chunking_goal: str,
     auto_chunking_use_llm: bool,
+    api_name: str | None = None,
+    api_provider: str | None = None,
+    model_name: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         media_type="web",
@@ -72,6 +75,9 @@ def _web_chunking_form(
         chunking_mode=chunking_mode,
         auto_chunking_goal=auto_chunking_goal,
         auto_chunking_use_llm=auto_chunking_use_llm,
+        api_name=api_name,
+        api_provider=api_provider,
+        model_name=model_name,
         chunk_method=None,
         chunk_size=500,
         chunk_overlap=200,
@@ -729,6 +735,7 @@ class WebScrapingService:
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
+                api_name=api_name,
             )
             _batch_t0 = time.perf_counter()
             for article in result.get("articles", []):
@@ -795,7 +802,7 @@ class WebScrapingService:
                     chunk_options = None
                     chunking_plan = None
                     if perform_chunking:
-                        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
                             chunking_form,
                             media_type="web",
                             source_name=str(article.get("url") or ""),

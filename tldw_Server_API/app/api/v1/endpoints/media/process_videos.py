@@ -36,8 +36,8 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
+    async_resolve_chunking_for_result,
     attach_chunking_plan_to_result,
-    resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
@@ -330,6 +330,9 @@ async def process_videos_endpoint(
             )
 
             ck: _Chunker | None = None
+            batch_auto_chunk_options = chunk_options_dict
+            batch_auto_chunking_plan = chunking_plan
+            batch_llm_chunking_resolved = False
 
             for res in batch_result.get("results", []):
                 if not isinstance(res, dict):
@@ -342,14 +345,19 @@ async def process_videos_endpoint(
                     attach_chunking_plan_to_result(res, chunking_plan)
                     continue
 
-                result_chunk_options, result_chunking_plan = resolve_chunking_for_result(
+                result_chunk_options, result_chunking_plan = await async_resolve_chunking_for_result(
                     form_data,
                     res,
                     media_type="video",
-                    default_chunk_options=chunk_options_dict,
-                    default_chunking_plan=chunking_plan,
+                    default_chunk_options=batch_auto_chunk_options,
+                    default_chunking_plan=batch_auto_chunking_plan,
+                    allow_llm_assist=not batch_llm_chunking_resolved,
                 )
                 attach_chunking_plan_to_result(res, result_chunking_plan)
+                if getattr(form_data, "auto_chunking_use_llm", False) and result_chunking_plan:
+                    batch_auto_chunk_options = result_chunk_options
+                    batch_auto_chunking_plan = result_chunking_plan
+                    batch_llm_chunking_resolved = True
                 if not result_chunk_options:
                     continue
 
