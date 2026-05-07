@@ -3,6 +3,8 @@
  * Types for the NotebookLM-style three-pane research interface
  */
 
+import type { WorkProductTemplateId } from "@/workspace-templates/types"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Source Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +117,26 @@ export type ArtifactType =
   | "data_table"
 
 export type ArtifactStatus = "pending" | "generating" | "completed" | "failed"
+export type ArtifactReviewStatus =
+  | "draft"
+  | "reviewing"
+  | "accepted"
+  | "needs_revision"
+  | "exported"
+  | "assigned"
+
+export interface ArtifactSourceLineage {
+  sourceId: string
+  mediaId?: number
+  title?: string
+  citationCount?: number
+}
+
+export interface ArtifactReviewChecklistItem {
+  id: string
+  label: string
+  checked: boolean
+}
 
 export type StudyMaterialsPolicy = "general" | "workspace"
 
@@ -149,6 +171,11 @@ export interface GeneratedArtifact {
   type: ArtifactType
   title: string
   status: ArtifactStatus
+  templateId?: WorkProductTemplateId
+  reviewStatus?: ArtifactReviewStatus
+  sourceLineage?: ArtifactSourceLineage[]
+  reviewChecklist?: ArtifactReviewChecklistItem[]
+  exportTargets?: Array<"markdown" | "docx" | "pdf" | "slides" | "chatbook">
   previousVersionId?: string
   estimatedTokens?: number
   estimatedCostUsd?: number
