@@ -13,7 +13,7 @@
 ## Source Context
 
 - Spec: `Docs/superpowers/specs/2026-05-07-webui-dependency-trimming-design.md`
-- Backlog task: `TASK-101`
+- Backlog task: `TASK-104`
 - GitHub issue: `https://github.com/rmusser01/tldw_server/issues/1346`
 - Primary manifests:
   - `apps/tldw-frontend/package.json`
@@ -27,7 +27,7 @@
 Do not edit package manifests, lockfiles, runtime TypeScript, React components, or tests in this audit slice. The only intended repository changes are:
 
 - create `Docs/Design/WebUI_Dependency_Audit.md`
-- update `backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md`
+- update `backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md`
 
 If the audit reveals that a package can be removed immediately, record it as `remove-now` and create or note the follow-up task. Do not remove it in this slice.
 
@@ -35,7 +35,7 @@ If the audit reveals that a package can be removed immediately, record it as `re
 
 - Create `Docs/Design/WebUI_Dependency_Audit.md`
   - Owns the dependency table, methodology, decision rules, ranked follow-up queue, verification log, and known skips.
-- Modify `backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md`
+- Modify `backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md`
   - Records plan link, progress notes, verification, acceptance-criteria checks, and final summary.
 
 No helper script should be committed unless the audit becomes too large to reproduce with documented commands. Prefer temporary `/tmp` inventory files and paste the final summarized results into the audit document.
@@ -61,7 +61,7 @@ Guardrail defaults:
 
 **Files:**
 - Create: `Docs/Design/WebUI_Dependency_Audit.md`
-- Modify: `backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md`
+- Modify: `backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md`
 
 - [ ] **Step 1: Add the audit document scaffold**
 
@@ -77,7 +77,7 @@ Status: Draft audit for issue #1346
 
 - GitHub issue: https://github.com/rmusser01/tldw_server/issues/1346
 - Design spec: ../superpowers/specs/2026-05-07-webui-dependency-trimming-design.md
-- Backlog task: TASK-101
+- Backlog task: TASK-104
 
 ## Scope
 
@@ -133,17 +133,17 @@ This audit does not remove packages or rewrite runtime code.
 Run:
 
 ```bash
-backlog task edit TASK-101 --doc Docs/superpowers/plans/2026-05-07-webui-dependency-audit-implementation-plan.md --append-notes "Started dependency audit implementation plan. First slice is docs-only audit artifact; package removals and axios replacement are follow-up work." --plain
+backlog task edit TASK-104 --doc Docs/superpowers/plans/2026-05-07-webui-dependency-audit-implementation-plan.md --append-notes "Started dependency audit implementation plan. First slice is docs-only audit artifact; package removals and axios replacement are follow-up work." --plain
 ```
 
 If the command replaces the existing spec documentation link, immediately restore
 both docs with:
 
 ```bash
-backlog task edit TASK-101 --doc Docs/superpowers/specs/2026-05-07-webui-dependency-trimming-design.md --doc Docs/superpowers/plans/2026-05-07-webui-dependency-audit-implementation-plan.md --plain
+backlog task edit TASK-104 --doc Docs/superpowers/specs/2026-05-07-webui-dependency-trimming-design.md --doc Docs/superpowers/plans/2026-05-07-webui-dependency-audit-implementation-plan.md --plain
 ```
 
-Expected: `TASK-101` shows both the spec and plan paths in Documentation and has
+Expected: `TASK-104` shows both the spec and plan paths in Documentation and has
 the note appended.
 
 - [ ] **Step 3: Verify scaffold sections exist**
@@ -161,17 +161,17 @@ Expected: all four section names are printed.
 Run:
 
 ```bash
-git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md"
+git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md"
 git commit -m "docs: scaffold webui dependency audit"
 ```
 
-Expected: commit succeeds with only the audit doc and `TASK-101` changes.
+Expected: commit succeeds with only the audit doc and `TASK-104` changes.
 
 ## Task 2: Generate The Dependency Declaration Inventory
 
 **Files:**
 - Modify: `Docs/Design/WebUI_Dependency_Audit.md`
-- Modify: `backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md`
+- Modify: `backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md`
 
 - [ ] **Step 1: Generate a direct declaration list**
 
@@ -232,7 +232,7 @@ Add the declaration-generation command summary under `## Verification` so review
 Run:
 
 ```bash
-git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md"
+git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md"
 git commit -m "docs: inventory webui dependency declarations"
 ```
 
@@ -242,7 +242,7 @@ Expected: commit succeeds with audit and Backlog task changes only.
 
 **Files:**
 - Modify: `Docs/Design/WebUI_Dependency_Audit.md`
-- Modify: `backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md`
+- Modify: `backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md`
 
 - [ ] **Step 1: Generate usage signals**
 
@@ -340,7 +340,7 @@ Add rationale in `Risk`, `Expected impact`, and `Follow-up slice`.
 Run:
 
 ```bash
-git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md"
+git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md"
 git commit -m "docs: classify webui dependency usage"
 ```
 
@@ -350,7 +350,7 @@ Expected: commit succeeds with audit and Backlog task changes only.
 
 **Files:**
 - Modify: `Docs/Design/WebUI_Dependency_Audit.md`
-- Modify: `backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md`
+- Modify: `backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md`
 
 - [ ] **Step 1: Rank quick cleanup candidates**
 
@@ -398,14 +398,14 @@ Expected:
 
 - `rg` prints all major candidate names and decision values from the audit.
 - `git diff --check` exits 0.
-- `git status --short` shows only the audit doc and `TASK-101` before the final commit.
+- `git status --short` shows only the audit doc and `TASK-104` before the final commit.
 
-- [ ] **Step 5: Update TASK-101**
+- [ ] **Step 5: Update TASK-104**
 
 Run:
 
 ```bash
-backlog task edit TASK-101 --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4 --check-ac 5 --check-ac 6 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 --status Done --append-notes "Created WebUI dependency audit artifact. Verification: documented inventory commands, rg audit check, git diff --check. Bandit skipped because this audit slice is docs/backlog only and touches no Python code." --final-summary "Created Docs/Design/WebUI_Dependency_Audit.md for issue #1346. The audit classifies direct WebUI/shared UI dependencies, includes extension impact checks for shared UI candidates, ranks quick cleanup and axios replacement follow-ups, and records docs-only verification." --plain
+backlog task edit TASK-104 --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4 --check-ac 5 --check-ac 6 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 --status Done --append-notes "Created WebUI dependency audit artifact. Verification: documented inventory commands, rg audit check, git diff --check. Bandit skipped because this audit slice is docs/backlog only and touches no Python code." --final-summary "Created Docs/Design/WebUI_Dependency_Audit.md for issue #1346. The audit classifies direct WebUI/shared UI dependencies, includes extension impact checks for shared UI candidates, ranks quick cleanup and axios replacement follow-ups, and records docs-only verification." --plain
 ```
 
 Expected: all acceptance criteria and Definition of Done items are checked, task
@@ -416,7 +416,7 @@ status is `Done`, and final summary is populated.
 Run:
 
 ```bash
-git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-101 - Create-WebUI-dependency-audit-for-issue-1346.md"
+git add Docs/Design/WebUI_Dependency_Audit.md "backlog/tasks/task-104 - Create-WebUI-dependency-audit-for-issue-1346.md"
 git commit -m "docs: audit webui dependencies"
 ```
 
