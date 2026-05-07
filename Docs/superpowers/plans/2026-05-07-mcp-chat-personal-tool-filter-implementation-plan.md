@@ -70,13 +70,13 @@
 
 **Tests:** `bunx vitest run apps/packages/ui/src/hooks/__tests__/useMcpTools.gating.test.tsx apps/packages/ui/src/utils/__tests__/chat-tools.test.ts`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Add failing hook tests for discovered-vs-available-vs-chat tools, disabled persistence, scoped isolation, and newly discovered tools defaulting enabled.
-- [ ] Run the hook tests and verify the expected failures.
-- [ ] Add `MCP_DISABLED_TOOLS_SETTING` and extend `mcp-tools` store state/actions.
-- [ ] Update `useMcpTools` to hydrate preferences, compute scope, store discovered/chat tools, and expose toggle helpers/counts.
-- [ ] Run focused hook and utility tests until green.
+- [x] Add failing hook tests for discovered-vs-available-vs-chat tools, disabled persistence, scoped isolation, and newly discovered tools defaulting enabled.
+- [x] Run the hook tests and verify the expected failures.
+- [x] Add `MCP_DISABLED_TOOLS_SETTING` and extend `mcp-tools` store state/actions.
+- [x] Update `useMcpTools` to hydrate preferences, compute scope, store discovered/chat tools, and expose toggle helpers/counts.
+- [x] Run focused hook and utility tests until green.
 
 ## Stage 3: Request Construction And Raw Preview Parity
 

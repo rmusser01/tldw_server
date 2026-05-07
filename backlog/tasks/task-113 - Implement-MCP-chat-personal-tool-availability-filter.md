@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-07 14:20'
-updated_date: '2026-05-07 14:22'
+updated_date: '2026-05-07 14:30'
 labels:
   - mcp
   - chat
@@ -59,6 +59,8 @@ Plan file: Docs/superpowers/plans/2026-05-07-mcp-chat-personal-tool-filter-imple
 
 <!-- SECTION:NOTES:BEGIN -->
 Stage 1 complete: added `apps/packages/ui/src/utils/chat-tools.ts` and `apps/packages/ui/src/utils/__tests__/chat-tools.test.ts`. Verified RED with module-not-found failure, then GREEN with `bunx vitest run apps/packages/ui/src/utils/__tests__/chat-tools.test.ts` reporting 1 file / 6 tests passed.
+
+Stage 2 complete: extended MCP disabled-tool setting/store/useMcpTools contract with scoped disabled preferences, discoveredTools, availableTools, chatTools, collision names, counts, and toggle helpers. Verified RED with hook tests failing on missing discoveredTools/chatTools fields, then GREEN with `bunx vitest run src/hooks/__tests__/useMcpTools.gating.test.tsx src/utils/__tests__/chat-tools.test.ts` in `apps/packages/ui` reporting 2 files / 11 tests passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
