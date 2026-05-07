@@ -153,30 +153,27 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, embedding_spec)
 
     if audio_imports_enabled_for_runtime():
-        def _audio_router_factory():
-            from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
-
-            return audio_router
-
-        def _audio_ws_router_factory():
-            from tldw_Server_API.app.api.v1.endpoints.audio.audio import ws_router as audio_ws_router
-
-            return audio_ws_router
-
-        specs.extend([
-            RouterSpec(
-                router=_audio_router_factory,
+        audio_module_path = "tldw_Server_API.app.api.v1.endpoints.audio.audio"
+        for audio_spec in (
+            ImportedRouterSpec(
+                import_path=audio_module_path,
+                log_name="audio",
                 prefix=f"{API_V1_PREFIX}/audio",
                 tags=("audio",),
                 route_key="audio",
+                skip_context=minimal_skip_context,
             ),
-            RouterSpec(
-                router=_audio_ws_router_factory,
+            ImportedRouterSpec(
+                import_path=audio_module_path,
+                log_name="audio-websocket",
                 prefix=f"{API_V1_PREFIX}/audio",
                 tags=("audio-ws",),
                 route_key="audio-websocket",
+                attr_name="ws_router",
+                skip_context=minimal_skip_context,
             ),
-        ])
+        ):
+            append_imported_router_spec(specs, audio_spec)
     else:
         logger.info("Skipping audio routers in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
 
