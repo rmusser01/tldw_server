@@ -5216,7 +5216,10 @@ def test_iter_minimal_optional_router_specs_defers_workflow_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (Exception,)
+        assert [exc.__name__ for exc in spec.skip_exceptions] == [
+            "OptionalRouterMissingModule",
+            "OptionalRouterMissingAttribute",
+        ]
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -5229,10 +5232,10 @@ def test_iter_minimal_optional_router_specs_defers_workflow_attr_lookup(
     }
 
 
-def test_iter_minimal_optional_router_specs_skips_workflow_runtime_import_failures(
+def test_iter_minimal_optional_router_specs_skips_workflow_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal workflow specs preserve broad import failure skipping."""
+    """Verify minimal workflow specs skip missing optional router modules."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -5256,9 +5259,9 @@ def test_iter_minimal_optional_router_specs_skips_workflow_runtime_import_failur
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Crash only the selected workflow router imports at registration."""
+        """Fail only the selected workflow router imports at registration."""
         if module_name in workflow_modules:
-            raise RuntimeError(f"{module_name} exploded during import")
+            raise ModuleNotFoundError(f"{module_name} missing during import", name=module_name)
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -5272,12 +5275,43 @@ def test_iter_minimal_optional_router_specs_skips_workflow_runtime_import_failur
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
         "Skipping workflows router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.workflows exploded during import",
+        "tldw_Server_API.app.api.v1.endpoints.workflows missing during import",
         "Skipping chat_workflows router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.chat_workflows exploded during import",
+        "tldw_Server_API.app.api.v1.endpoints.chat_workflows missing during import",
         "Skipping scheduler_workflows router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows exploded during import",
+        "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows missing during import",
     ]
+
+
+def test_iter_minimal_optional_router_specs_propagates_workflow_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal workflow runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.workflows"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "workflows")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected workflow router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="workflows exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_utility_attr_lookup(

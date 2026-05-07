@@ -433,21 +433,18 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             log_name="workflows",
             tags=("workflows",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.chat_workflows",
             log_name="chat_workflows",
             tags=("chat-workflows",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.scheduler_workflows",
             log_name="scheduler_workflows",
             tags=("scheduler",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(Exception,),
         ),
     ):
         append_imported_router_spec(specs, workflow_spec)
