@@ -1,10 +1,10 @@
 ---
 id: TASK-101
 title: Create WebUI dependency audit for issue 1346
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-07 01:36'
-updated_date: '2026-05-07 02:33'
+updated_date: '2026-05-07 03:04'
 labels:
   - webui
   - dependencies
@@ -39,7 +39,7 @@ Implement the first approved work unit from the WebUI dependency trimming design
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Task 3 review-correction plan: rebuild /tmp/tldw-webui-dependency-usage.json with a strict import/config-aware matcher, including static/side-effect/export imports, dynamic imports, require, require.resolve, vi.mock/jest.mock, CSS @import, true config plugin keys, and explicit package-script evidence; regenerate the whole audit table from that corrected signal; update verification and TASK-101 notes; run table validation, git diff --check, and git status --short; commit only the audit doc and TASK-101.
+Task 4 closeout plan: verify the existing audit follow-up sections against the final ranking requirements; make only narrow wording edits where needed; remove the temporary Task 4 pending blocker; record final verification and docs-only Bandit skip; close TASK-101 as Done; commit only Docs/Design/WebUI_Dependency_Audit.md and this Backlog task.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -66,12 +66,14 @@ Review correction progress regenerated the table from strict import/config/packa
 Task 3 data-quality correction started: review found postcss-import plugin-key evidence was missing and pdfjs-dist had a count/site mismatch between direct script evidence and runtime worker/version reference. Keeping TASK-101 In Progress for Task 4/final closeout.
 
 Task 3 data-quality correction completed: postcss-import now counts the direct PostCSS plugin key in apps/tldw-frontend/postcss.config.mjs, and pdfjs-dist now aligns import count, representative sites, and consumer surface across copy-pdf-worker.mjs plus the shared PdfDocument runtime worker/version reference. TASK-101 remains In Progress for Task 4/final closeout.
+
+Task 4 closeout completed: confirmed the ranked follow-up queue already satisfied the plan, made only narrow wording edits to clarify cleanup attempt order and follow-up verification, and removed the temporary Task 4 pending blocker from Known Skips. Final verification run: rg -n "pubsub-js|buffer|stream-browserify|clsx|axios|dompurify|defer-design|remove-now|replace-later" Docs/Design/WebUI_Dependency_Audit.md; git diff --check; git status --short. Bandit remains skipped because this slice changed only documentation and Backlog task metadata, with no Python or runtime code changes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 3 classification has been corrected after spec review. The audit now uses strict import/config/package-script evidence rather than broad text/config-key substring signals, including corrected generic-name handling for next. Quick candidates remain conservative: pubsub-js, buffer, and stream-browserify have no package evidence; clsx and axios remain replace-later. TASK-101 is back In Progress because Task 4/final review closeout remains pending.
+Completed the WebUI dependency audit for issue #1346. The audit links the issue, TASK-100, and the approved design/plan; covers WebUI/shared UI declarations plus extension impact checks; records the required package evidence table; explicitly keeps or defers complex/security-sensitive stacks; ranks quick cleanup and replacement follow-ups without changing package manifests; and records final verification plus the docs-only Bandit skip.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

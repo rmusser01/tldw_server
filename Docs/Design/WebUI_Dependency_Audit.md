@@ -173,26 +173,26 @@ This audit does not remove packages or rewrite runtime code.
 
 ### Quick Cleanup Candidates
 
-1. `pubsub-js` and `@types/pubsub-js`: no import/config/package-script usage found in the corrected scan.
-2. `buffer` and `stream-browserify`: no package import/config/package-script usage found; raw `Buffer`, `ArrayBuffer`, and local `buffer` variable hits are not package evidence.
-3. `@hookform/resolvers` and `react-hook-form`: no import/config/package-script usage found; remove in a narrow follow-up after install/build verification.
+1. `pubsub-js` and `@types/pubsub-js`: no import/config/package-script usage found in the corrected scan. Safe enough for the first small PR because removal is declaration-only; verify with install, typecheck, and WebUI/shared UI tests that consume shared package surfaces.
+2. `buffer` and `stream-browserify`: no package import/config/package-script usage found; raw `Buffer`, `ArrayBuffer`, and local `buffer` variable hits are not package evidence. Safe enough for the next small PR because the audit found no direct package contract; verify install/build plus WebUI and extension smoke coverage for any hidden polyfill assumptions.
+3. `@hookform/resolvers` and `react-hook-form`: no import/config/package-script usage found; keep as a follow-up quick cleanup only if install/build verification confirms neither package is pulled by local declarations or scripts.
 
 ### Replacement Candidates
 
 1. `axios`: replace later with fetch-backed helpers; keep current transport behavior until a dedicated PR preserves auth, CSRF, credential, timeout, request-history, redirect, and error-normalization behavior.
-2. `clsx`: replace later unless compatibility remains mechanical; current usage is only `apps/tldw-frontend/lib/utils.ts`, but the local shared helper accepts a narrower input shape.
+2. `clsx`: replace later as its own compatibility slice unless the change proves mechanical; current usage is only `apps/tldw-frontend/lib/utils.ts`, but the local shared helper accepts a narrower input shape.
 
 ### Deferred Design Candidates
 
 - Icon-stack consolidation: `lucide-react`, `@heroicons/react`, `@ant-design/icons`, and `react-icons` are active visible UI dependencies and should be handled with a visual/design pass.
-- Document, rendering, parser, editor, graph, schema, OCR, Monaco, Mermaid, KaTeX, Tiptap, PDF, ePub, archive, and markdown packages are kept or deferred rather than replaced with hand-rolled browser code.
+- PDF, ePub, document rendering, rich text editor, Mermaid, KaTeX, markdown, parser, graph/layout, OCR, tokenizer, schema, Monaco, Tiptap, and archive packages are kept or deferred rather than replaced with hand-rolled browser code.
 - DnD package declarations with no direct import evidence, such as `@dnd-kit/abstract` and `@dnd-kit/dom`, should be checked against the DnD package graph before manifest edits.
 
 ### Explicit Keeps
 
 - Core app/runtime: `next`, `react`, `react-dom`, `antd`, `@ant-design/cssinjs`, `@tldw/ui`, `@tanstack/react-query`, `react-router-dom`, `zustand`, `dexie`, and `@plasmohq/storage` have active import/config evidence.
 - Tooling/dev dependencies such as Playwright, Vitest, Testing Library, ESLint, TypeScript, PostCSS, Tailwind, and Prettier are classified as `tooling/dev` or `styling/build`; zero source-import counts are not treated as runtime removability by themselves.
-- `dompurify`, `ajv`, document/rendering, parser/conversion, and schema packages are not quick-cleanup targets without a separate design or lockfile investigation.
+- `dompurify`, `ajv`, PDF/ePub/document packages, rich text editor packages, Mermaid/KaTeX/markdown rendering, graph/layout, OCR/tokenizer/schema, and parser/conversion packages are not quick-cleanup targets without a separate design or lockfile investigation.
 
 ## Verification
 
@@ -247,4 +247,3 @@ This audit does not remove packages or rewrite runtime code.
 - The usage JSON is a source/config/package-script signal, not a bundler trace. It does not prove transitive dependency ownership or tree-shaken bundle impact.
 - The extension is included as an impact-check surface because it consumes `@tldw/ui`; extension-only packages remain outside the primary table unless they overlap WebUI/shared UI declarations.
 - Decisions marked `investigate-lockfile` should not be removed until a follow-up confirms direct-vs-transitive ownership in `apps/bun.lock` and validates install/build behavior.
-- Task 4/final reviewer closeout remains pending after this correction; TASK-101 is left In Progress for that follow-up review step.
