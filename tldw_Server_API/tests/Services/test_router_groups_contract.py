@@ -8266,7 +8266,10 @@ def test_iter_minimal_optional_router_specs_defers_guardian_safety_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (Exception,)
+        assert spec.skip_exceptions == (
+            OptionalRouterMissingModule,
+            OptionalRouterMissingAttribute,
+        )
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -8279,10 +8282,10 @@ def test_iter_minimal_optional_router_specs_defers_guardian_safety_attr_lookup(
     }
 
 
-def test_iter_minimal_optional_router_specs_skips_guardian_safety_runtime_import_failures(
+def test_iter_minimal_optional_router_specs_skips_guardian_safety_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal guardian/safety specs preserve broad import failure skipping."""
+    """Verify minimal guardian/safety specs skip missing optional router modules."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -8290,9 +8293,9 @@ def test_iter_minimal_optional_router_specs_skips_guardian_safety_runtime_import
     )
 
     guardian_modules = {
-        "tldw_Server_API.app.api.v1.endpoints.guardian_controls",
-        "tldw_Server_API.app.api.v1.endpoints.family_wizard",
-        "tldw_Server_API.app.api.v1.endpoints.self_monitoring",
+        "guardian_controls": "tldw_Server_API.app.api.v1.endpoints.guardian_controls",
+        "family_wizard": "tldw_Server_API.app.api.v1.endpoints.family_wizard",
+        "self_monitoring": "tldw_Server_API.app.api.v1.endpoints.self_monitoring",
     }
 
     specs = list(iter_minimal_optional_router_specs())
@@ -8306,9 +8309,12 @@ def test_iter_minimal_optional_router_specs_skips_guardian_safety_runtime_import
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Crash only the selected guardian/safety router imports at registration."""
-        if module_name in guardian_modules:
-            raise RuntimeError(f"{module_name} exploded during import")
+        """Fail only the selected guardian/safety router imports at registration."""
+        if module_name in guardian_modules.values():
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -8320,14 +8326,54 @@ def test_iter_minimal_optional_router_specs_skips_guardian_safety_runtime_import
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
-    assert debug_messages == [
-        "Skipping guardian_controls router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.guardian_controls exploded during import",
-        "Skipping family_wizard router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.family_wizard exploded during import",
-        "Skipping self_monitoring router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.self_monitoring exploded during import",
-    ]
+    assert len(debug_messages) == len(guardian_modules)
+    for router_name, module_name in guardian_modules.items():
+        assert any(
+            f"Skipping {router_name} router" in message
+            and "in minimal test app" in message
+            and module_name in message
+            for message in debug_messages
+        )
+
+
+@pytest.mark.parametrize(
+    ("router_name", "module_name"),
+    (
+        ("guardian_controls", "tldw_Server_API.app.api.v1.endpoints.guardian_controls"),
+        ("family_wizard", "tldw_Server_API.app.api.v1.endpoints.family_wizard"),
+        ("self_monitoring", "tldw_Server_API.app.api.v1.endpoints.self_monitoring"),
+    ),
+)
+def test_iter_minimal_optional_router_specs_propagates_guardian_safety_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    router_name: str,
+    module_name: str,
+) -> None:
+    """Verify minimal guardian/safety runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == router_name)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected guardian/safety router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
