@@ -861,49 +861,37 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, acp_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router
-
-        specs.append(RouterSpec(
-            router=orch_router,
+    for tail_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.agent_orchestration",
+            log_name="agent_orchestration",
             prefix=f"{API_V1_PREFIX}",
             tags=("agent-orchestration",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping orchestration router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
-
-        specs.append(RouterSpec(
-            router=setup_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.setup",
+            log_name="setup",
             prefix=f"{API_V1_PREFIX}",
             tags=("setup",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping setup router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router
-
-        specs.append(RouterSpec(
-            router=metrics_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.metrics",
+            log_name="metrics",
             prefix=f"{API_V1_PREFIX}",
             tags=("metrics",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping metrics router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.authnz_debug import router as authnz_debug_router
-
-        specs.append(RouterSpec(
-            router=authnz_debug_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.authnz_debug",
+            log_name="authnz_debug",
             prefix=f"{API_V1_PREFIX}",
             tags=("authnz-debug",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping authnz_debug router in tests: {e}")
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, tail_spec)
 
     append_imported_router_spec(
         specs,
