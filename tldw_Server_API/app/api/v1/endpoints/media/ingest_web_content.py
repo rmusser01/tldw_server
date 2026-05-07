@@ -91,16 +91,7 @@ async def ingest_web_content(
     scrape_method = request.scrape_method
     logger.info("Selected scrape method: {}", scrape_method)
 
-    # Scrape method validation / logging.
-    scrape_method = request.scrape_method
-    logger.info("Selected scrape method: {}", scrape_method)
-
     if not raw_results:
-        return {
-            "status": "warning",
-            "message": "No articles were successfully scraped for this request.",
-            "results": [],
-        }
         return {
             "status": "warning",
             "message": "No articles were successfully scraped for this request.",

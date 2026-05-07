@@ -7,6 +7,9 @@ from fastapi import Form, HTTPException, status
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.form_coercion import (
+    chunking_contract_kwargs,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     TRANSCRIPTION_MODEL_ENUM,
     AddMediaForm,
@@ -47,60 +50,6 @@ def _resolve_transcription_model_or_default(
         )
         return default_model
     return model or default_model
-
-
-def _coerce_form_bool(value: Any) -> bool:
-    if hasattr(value, "default"):
-        value = value.default
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "on"}
-    return bool(value)
-
-
-def _coerce_form_string(value: Any) -> str | None:
-    if hasattr(value, "default"):
-        value = value.default
-    if value is None:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    return str(value)
-
-
-def _coerce_hierarchical_template(value: Any) -> dict[str, Any] | None:
-    if hasattr(value, "default"):
-        value = value.default
-    if value is None or value == "":
-        return None
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=HTTP_422_UNPROCESSABLE,
-                detail=[
-                    {
-                        "loc": ["body", "hierarchical_template"],
-                        "msg": "hierarchical_template must be a JSON object",
-                        "type": "value_error.jsondecode",
-                    }
-                ],
-            ) from exc
-        if isinstance(parsed, dict):
-            return parsed
-    raise HTTPException(
-        status_code=HTTP_422_UNPROCESSABLE,
-        detail=[
-            {
-                "loc": ["body", "hierarchical_template"],
-                "msg": "hierarchical_template must be a JSON object",
-                "type": "type_error.dict",
-            }
-        ],
-    )
 
 
 async def get_add_media_form(
@@ -145,23 +94,15 @@ async def get_add_media_form(
     ),
     perform_claims_extraction: bool | None = Form(
         None,
-        description=(
-            "Extract factual claims during analysis "
-            "(defaults to server configuration)."
-        ),
+        description=("Extract factual claims during analysis " "(defaults to server configuration)."),
     ),
     claims_extractor_mode: str | None = Form(
         None,
-        description=(
-            "Override claims extractor mode (heuristic|ner|provider id)."
-        ),
+        description=("Override claims extractor mode (heuristic|ner|provider id)."),
     ),
     claims_max_per_chunk: int | None = Form(
         None,
-        description=(
-            "Maximum number of claims to extract per chunk "
-            "(uses config default when unset)."
-        ),
+        description=("Maximum number of claims to extract per chunk " "(uses config default when unset)."),
     ),
     api_name: str | None = Form(
         None,
@@ -297,16 +238,11 @@ async def get_add_media_form(
     # Email options
     ingest_attachments: bool = Form(
         False,
-        description=(
-            "For emails: parse nested .eml attachments and ingest as "
-            "separate items"
-        ),
+        description=("For emails: parse nested .eml attachments and ingest as " "separate items"),
     ),
     max_depth: int = Form(
         2,
-        description=(
-            "Max depth for nested email parsing when ingest_attachments is true"
-        ),
+        description=("Max depth for nested email parsing when ingest_attachments is true"),
     ),
     accept_archives: bool = Form(
         False,
@@ -318,10 +254,7 @@ async def get_add_media_form(
     ),
     accept_pst: bool = Form(
         False,
-        description=(
-            "Accept .pst/.ost containers (feature-flag; parsing may require "
-            "external tools)"
-        ),
+        description=("Accept .pst/.ost containers (feature-flag; parsing may require " "external tools)"),
     ),
     # Contextual chunking options
     enable_contextual_chunking: bool = Form(
@@ -392,36 +325,26 @@ async def get_add_media_form(
                     parsed = json.loads(first)
                     urls = parsed if isinstance(parsed, list) else [parsed]
                 except Exception:
-                    logger.debug(
-                        "Failed to parse JSON list for 'urls' form field; using raw fallback"
-                    )
+                    logger.debug("Failed to parse JSON list for 'urls' form field; using raw fallback")
 
         # Normalize common boolean/integer coercions for robust form handling
         if isinstance(enable_contextual_chunking, str):
-            enable_contextual_chunking = (
-                enable_contextual_chunking.strip().lower()
-                in {"true", "1", "yes", "on"}
-            )
+            enable_contextual_chunking = enable_contextual_chunking.strip().lower() in {"true", "1", "yes", "on"}
         if isinstance(use_adaptive_chunking, str):
-            use_adaptive_chunking = (
-                use_adaptive_chunking.strip().lower()
-                in {"true", "1", "yes", "on"}
-            )
+            use_adaptive_chunking = use_adaptive_chunking.strip().lower() in {"true", "1", "yes", "on"}
         if isinstance(use_multi_level_chunking, str):
-            use_multi_level_chunking = (
-                use_multi_level_chunking.strip().lower()
-                in {"true", "1", "yes", "on"}
-            )
+            use_multi_level_chunking = use_multi_level_chunking.strip().lower() in {"true", "1", "yes", "on"}
         if isinstance(perform_chunking, str):
-            perform_chunking = (
-                perform_chunking.strip().lower() in {"true", "1", "yes", "on"}
-            )
-        chunking_mode = _coerce_form_string(chunking_mode)
-        auto_chunking_goal = _coerce_form_string(auto_chunking_goal) or "balanced"
-        auto_chunking_use_llm = _coerce_form_bool(auto_chunking_use_llm)
-        auto_apply_template = _coerce_form_bool(auto_apply_template)
-        hierarchical_chunking = _coerce_form_bool(hierarchical_chunking)
-        hierarchical_template = _coerce_hierarchical_template(hierarchical_template)
+            perform_chunking = perform_chunking.strip().lower() in {"true", "1", "yes", "on"}
+        chunking_contract = chunking_contract_kwargs(
+            chunking_mode=chunking_mode,
+            auto_chunking_goal=auto_chunking_goal,
+            auto_chunking_use_llm=auto_chunking_use_llm,
+            auto_apply_template=auto_apply_template,
+            chunking_template_name=chunking_template_name,
+            hierarchical_chunking=hierarchical_chunking,
+            hierarchical_template=hierarchical_template,
+        )
         try:
             if isinstance(context_window_size, str):
                 context_window_size = int(context_window_size)
@@ -459,9 +382,7 @@ async def get_add_media_form(
             diarize=diarize,
             timestamp_option=timestamp_option,
             vad_use=vad_use,
-            perform_confabulation_check_of_analysis=(
-                perform_confabulation_check_of_analysis
-            ),
+            perform_confabulation_check_of_analysis=(perform_confabulation_check_of_analysis),
             pdf_parsing_engine=pdf_parsing_engine,
             enable_ocr=enable_ocr,
             ocr_backend=ocr_backend,
@@ -472,9 +393,9 @@ async def get_add_media_form(
             ocr_output_format=ocr_output_format,
             ocr_prompt_preset=ocr_prompt_preset,
             perform_chunking=perform_chunking,
-            chunking_mode=chunking_mode,
-            auto_chunking_goal=auto_chunking_goal,
-            auto_chunking_use_llm=auto_chunking_use_llm,
+            chunking_mode=chunking_contract["chunking_mode"],
+            auto_chunking_goal=chunking_contract["auto_chunking_goal"],
+            auto_chunking_use_llm=chunking_contract["auto_chunking_use_llm"],
             chunk_method=chunk_method,
             use_adaptive_chunking=use_adaptive_chunking,
             use_multi_level_chunking=use_multi_level_chunking,
@@ -482,10 +403,10 @@ async def get_add_media_form(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             custom_chapter_pattern=custom_chapter_pattern,
-            auto_apply_template=auto_apply_template,
-            chunking_template_name=chunking_template_name,
-            hierarchical_chunking=hierarchical_chunking,
-            hierarchical_template=hierarchical_template,
+            auto_apply_template=chunking_contract["auto_apply_template"],
+            chunking_template_name=chunking_contract["chunking_template_name"],
+            hierarchical_chunking=chunking_contract["hierarchical_chunking"],
+            hierarchical_template=chunking_contract["hierarchical_template"],
             perform_rolling_summarization=perform_rolling_summarization,
             summarize_recursively=summarize_recursively,
             enable_contextual_chunking=enable_contextual_chunking,

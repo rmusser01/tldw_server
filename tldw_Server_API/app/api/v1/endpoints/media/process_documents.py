@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
     resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -105,8 +106,7 @@ async def process_documents_endpoint(
         # Usage logging is best-effort; never fail the request.
         logger.debug("Document process endpoint usage logging failed")
     logger.debug(
-        "Form data for /process-documents: has_urls={}, has_files={}, "
-        "perform_analysis={}, perform_chunking={}",
+        "Form data for /process-documents: has_urls={}, has_files={}, " "perform_analysis={}, perform_chunking={}",
         bool(form_data.urls),
         bool(files),
         form_data.perform_analysis,
@@ -114,9 +114,7 @@ async def process_documents_endpoint(
     )
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
-        logger.info(
-            "Received urls=[''], treating as no URLs provided for document processing."
-        )
+        logger.info("Received urls=[''], treating as no URLs provided for document processing.")
     form_data.urls = normalize_urls_field(form_data.urls)
     legacy_signal = (
         build_media_legacy_signal(
@@ -175,10 +173,7 @@ async def process_documents_endpoint(
             saved_files_info = list(saved_files)
             # Add file saving/validation errors to batch_result
             for err_info in upload_errors:
-                original_filename = (
-                    err_info.get("input")
-                    or err_info.get("original_filename", "Unknown Upload")
-                )
+                original_filename = err_info.get("input") or err_info.get("original_filename", "Unknown Upload")
                 err_detail = f"Upload error: {err_info['error']}"
                 batch_result["results"].append(
                     {
@@ -300,9 +295,7 @@ async def process_documents_endpoint(
                             type(result),
                             original_url,
                         )
-                        err_detail = (
-                            f"Unexpected download result type: {type(result).__name__}"
-                        )
+                        err_detail = f"Unexpected download result type: {type(result).__name__}"
                         batch_result["results"].append(
                             {
                                 "status": "Error",
@@ -326,15 +319,11 @@ async def process_documents_endpoint(
 
         # --- Check if any files are ready for processing ---
         if not local_paths_to_process:
-            logger.warning(
-                "No valid document sources found or prepared after handling uploads/URLs."
-            )
+            logger.warning("No valid document sources found or prepared after handling uploads/URLs.")
             # When uploads/URLs were rejected, surface counts like other process-* endpoints.
             if batch_result["results"]:
                 batch_result["errors_count"] = sum(
-                    1
-                    for r in batch_result["results"]
-                    if str(r.get("status", "")).lower() == "error"
+                    1 for r in batch_result["results"] if str(r.get("status", "")).lower() == "error"
                 )
                 batch_result["processed_count"] = 0
                 status_code = status.HTTP_207_MULTI_STATUS
@@ -349,9 +338,7 @@ async def process_documents_endpoint(
             propagate_billing_headers(injected_response, response)
             return response
 
-        logger.info(
-            "Starting processing for {} document(s).", len(local_paths_to_process)
-        )
+        logger.info("Starting processing for {} document(s).", len(local_paths_to_process))
 
         # --- Prepare options for the worker ---
         chunking_plan: dict[str, Any] | None = None
@@ -510,23 +497,16 @@ async def process_documents_endpoint(
         final_status_code = status.HTTP_200_OK
     elif batch_result.get("errors_count", 0) > 0:
         final_status_code = status.HTTP_207_MULTI_STATUS
-    elif (
-        batch_result.get("processed_count", 0) == 0
-        and batch_result.get("errors_count", 0) == 0
-    ):
+    elif batch_result.get("processed_count", 0) == 0 and batch_result.get("errors_count", 0) == 0:
         final_status_code = status.HTTP_207_MULTI_STATUS if batch_result["results"] else status.HTTP_400_BAD_REQUEST
     else:
-        logger.warning(
-            "Reached unexpected state for final status code determination "
-            "in /process-documents."
-        )
+        logger.warning("Reached unexpected state for final status code determination " "in /process-documents.")
         final_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-documents request finished with status {}. "
-        "Processed: {}, Errors: {}",
+        "/process-documents request finished with status {}. " "Processed: {}, Errors: {}",
         final_status_code,
         batch_result.get("processed_count", 0),
         batch_result.get("errors_count", 0),
@@ -542,11 +522,7 @@ async def process_documents_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
 
             for res in batch_result.get("results", []):
                 if not isinstance(res, dict):
@@ -570,18 +546,19 @@ async def process_documents_endpoint(
                 if not result_chunk_options:
                     continue
 
-                if use_hier and ck is not None:
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
                         method=result_chunk_options.get("method") or "sentences",
                         max_size=result_chunk_options.get("max_size") or 500,
                         overlap=result_chunk_options.get("overlap") or 200,
                         language=result_chunk_options.get("language"),
-                        template=result_chunk_options.get("hierarchical_template")
-                        if isinstance(
-                            result_chunk_options.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
                     chunks = _improved_chunking_process(text, result_chunk_options)

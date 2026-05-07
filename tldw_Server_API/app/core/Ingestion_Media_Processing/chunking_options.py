@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.Chunking.auto_planner import (
+    AutoChunkingProfile,
     merge_profiles,
     plan_auto_chunking,
     profile_from_source,
@@ -66,17 +67,31 @@ _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _get_raw_form_value(form_data: Any, key: str) -> Any:
+def _get_raw_form_value(form_data: Any, key: str, default: Any = None) -> Any:
     if isinstance(form_data, Mapping):
-        return form_data.get(key)
+        return form_data.get(key, default)
     if hasattr(form_data, "model_dump"):
         try:
             dumped = form_data.model_dump()
         except _CHUNKING_OPTIONS_COERCE_EXCEPTIONS:
             dumped = {}
         if isinstance(dumped, Mapping):
-            return dumped.get(key)
-    return getattr(form_data, key, None)
+            return dumped.get(key, default)
+    return getattr(form_data, key, default)
+
+
+def _coerce_raw_bool(value: Any) -> bool:
+    if hasattr(value, "default"):
+        value = value.default
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(value)
+
+
+def uses_hierarchical_chunking(chunk_options: Mapping[str, Any] | None) -> bool:
+    if not chunk_options:
+        return False
+    return bool(chunk_options.get("hierarchical") or isinstance(chunk_options.get("hierarchical_template"), dict))
 
 
 def _find_unsupported_chunking_keys(form_data: Any) -> list[str]:
@@ -99,8 +114,7 @@ def _validate_media_chunking_options(form_data: Any) -> None:
         return
     allowed = ", ".join(_ALLOWED_MEDIA_CHUNKING_KEYS)
     raise ValueError(
-        "Unsupported chunking options for media processing: "
-        f"{', '.join(unsupported)}. Supported options: {allowed}."
+        "Unsupported chunking options for media processing: " f"{', '.join(unsupported)}. Supported options: {allowed}."
     )
 
 
@@ -111,24 +125,24 @@ def prepare_chunking_options_dict(form_data: Any) -> dict[str, Any] | None:
     This is extracted from the former endpoint-local chunking helper so it
     can be reused by core ingestion helpers and modular endpoints.
     """
-    if not getattr(form_data, "perform_chunking", False):
+    if not _coerce_raw_bool(_get_raw_form_value(form_data, "perform_chunking", False)):
         logging.info("Chunking disabled.")
         return None
 
     _validate_media_chunking_options(form_data)
 
     default_chunk_method = "sentences"
-    media_type = str(getattr(form_data, "media_type", "") or "")
+    media_type = str(_get_raw_form_value(form_data, "media_type", "") or "")
     if media_type == "ebook":
         default_chunk_method = "ebook_chapters"
         logging.info("Setting chunk method to 'ebook_chapters' for ebook type.")
     elif media_type in ["video", "audio"]:
         default_chunk_method = "sentences"
 
-    final_chunk_method = getattr(form_data, "chunk_method", None) or default_chunk_method
+    final_chunk_method = _get_raw_form_value(form_data, "chunk_method") or default_chunk_method
 
-    chunk_size_used = getattr(form_data, "chunk_size", None)
-    chunk_overlap_used = getattr(form_data, "chunk_overlap", None)
+    chunk_size_used = _get_raw_form_value(form_data, "chunk_size")
+    chunk_overlap_used = _get_raw_form_value(form_data, "chunk_overlap")
 
     if media_type in ["document", "email"]:
         try:
@@ -148,53 +162,52 @@ def prepare_chunking_options_dict(form_data: Any) -> dict[str, Any] | None:
         final_chunk_method = "ebook_chapters"
 
     inferred_enable_contextual = bool(
-        getattr(form_data, "contextual_llm_model", None)
-        or getattr(form_data, "context_window_size", None)
+        _get_raw_form_value(form_data, "contextual_llm_model") or _get_raw_form_value(form_data, "context_window_size")
     )
 
     language: str | None
     if media_type in ["audio", "video"]:
-        language = getattr(form_data, "chunk_language", None) or getattr(
-            form_data, "transcription_language", None
+        language = _get_raw_form_value(form_data, "chunk_language") or _get_raw_form_value(
+            form_data, "transcription_language"
         )
     else:
-        language = getattr(form_data, "chunk_language", None)
+        language = _get_raw_form_value(form_data, "chunk_language")
 
     chunk_options: dict[str, Any] = {
         "method": final_chunk_method,
         "max_size": chunk_size_used,
         "overlap": chunk_overlap_used,
-        "adaptive": getattr(form_data, "use_adaptive_chunking", False),
-        "multi_level": getattr(form_data, "use_multi_level_chunking", False),
+        "adaptive": _coerce_raw_bool(_get_raw_form_value(form_data, "use_adaptive_chunking", False)),
+        "multi_level": _coerce_raw_bool(_get_raw_form_value(form_data, "use_multi_level_chunking", False)),
         "language": language,
-        "custom_chapter_pattern": getattr(form_data, "custom_chapter_pattern", None),
+        "custom_chapter_pattern": _get_raw_form_value(form_data, "custom_chapter_pattern"),
         "enable_contextual_chunking": bool(
-            getattr(form_data, "enable_contextual_chunking", False)
+            _coerce_raw_bool(_get_raw_form_value(form_data, "enable_contextual_chunking", False))
             or inferred_enable_contextual
         ),
-        "contextual_llm_model": getattr(form_data, "contextual_llm_model", None),
-        "context_window_size": getattr(form_data, "context_window_size", None),
-        "context_strategy": getattr(form_data, "context_strategy", None),
-        "context_token_budget": getattr(form_data, "context_token_budget", None),
+        "contextual_llm_model": _get_raw_form_value(form_data, "contextual_llm_model"),
+        "context_window_size": _get_raw_form_value(form_data, "context_window_size"),
+        "context_strategy": _get_raw_form_value(form_data, "context_strategy"),
+        "context_token_budget": _get_raw_form_value(form_data, "context_token_budget"),
     }
 
-    proposition_engine = getattr(form_data, "proposition_engine", None)
+    proposition_engine = _get_raw_form_value(form_data, "proposition_engine")
     if proposition_engine:
         chunk_options["proposition_engine"] = proposition_engine
-    proposition_aggressiveness = getattr(form_data, "proposition_aggressiveness", None)
+    proposition_aggressiveness = _get_raw_form_value(form_data, "proposition_aggressiveness")
     if proposition_aggressiveness is not None:
         chunk_options["proposition_aggressiveness"] = proposition_aggressiveness
-    proposition_min_len = getattr(form_data, "proposition_min_proposition_length", None)
+    proposition_min_len = _get_raw_form_value(form_data, "proposition_min_proposition_length")
     if proposition_min_len is not None:
         chunk_options["proposition_min_proposition_length"] = proposition_min_len
-    proposition_prompt_profile = getattr(form_data, "proposition_prompt_profile", None)
+    proposition_prompt_profile = _get_raw_form_value(form_data, "proposition_prompt_profile")
     if proposition_prompt_profile:
         chunk_options["proposition_prompt_profile"] = proposition_prompt_profile
 
     try:
-        hier_flag = getattr(form_data, "hierarchical_chunking", None)
-        hier_template = getattr(form_data, "hierarchical_template", None)
-        if hier_flag is True or (hier_template and isinstance(hier_template, dict)):
+        hier_flag = _get_raw_form_value(form_data, "hierarchical_chunking")
+        hier_template = _get_raw_form_value(form_data, "hierarchical_template")
+        if _coerce_raw_bool(hier_flag) or (hier_template and isinstance(hier_template, dict)):
             chunk_options["hierarchical"] = True
             if isinstance(hier_template, dict):
                 chunk_options["hierarchical_template"] = hier_template
@@ -209,19 +222,12 @@ def prepare_chunking_options_dict(form_data: Any) -> dict[str, Any] | None:
             c = cfg_dict.get("chunking_config", {}) if isinstance(cfg_dict, dict) else {}
             if "proposition_engine" in c and "proposition_engine" not in chunk_options:
                 chunk_options["proposition_engine"] = c.get("proposition_engine")
-            if (
-                "proposition_prompt_profile" in c
-                and "proposition_prompt_profile" not in chunk_options
-            ):
-                chunk_options["proposition_prompt_profile"] = c.get(
-                    "proposition_prompt_profile"
-                )
+            if "proposition_prompt_profile" in c and "proposition_prompt_profile" not in chunk_options:
+                chunk_options["proposition_prompt_profile"] = c.get("proposition_prompt_profile")
             if "proposition_aggressiveness" in c:
                 try:
                     if "proposition_aggressiveness" not in chunk_options:
-                        chunk_options["proposition_aggressiveness"] = int(
-                            c.get("proposition_aggressiveness")
-                        )
+                        chunk_options["proposition_aggressiveness"] = int(c.get("proposition_aggressiveness"))
                 except _CHUNKING_OPTIONS_COERCE_EXCEPTIONS:
                     pass
             if "proposition_min_proposition_length" in c:
@@ -258,14 +264,14 @@ def resolve_chunking_options_and_plan(
     keep the existing ``prepare_chunking_options_dict`` behavior. Auto requests
     intentionally ignore stale manual fields and use the deterministic planner.
     """
-    if not getattr(form_data, "perform_chunking", False):
+    if not _coerce_raw_bool(_get_raw_form_value(form_data, "perform_chunking", False)):
         logging.info("Chunking disabled.")
         return None, None
 
-    if getattr(form_data, "chunking_mode", None) != "auto":
+    if _get_raw_form_value(form_data, "chunking_mode") != "auto":
         return prepare_chunking_options_dict(form_data), None
 
-    effective_media_type = media_type or getattr(form_data, "media_type", None)
+    effective_media_type = media_type or _get_raw_form_value(form_data, "media_type")
     source_profile = _profile_from_form_source(
         form_data,
         media_type=effective_media_type,
@@ -278,12 +284,12 @@ def resolve_chunking_options_and_plan(
         perform_chunking=True,
         chunking_mode="auto",
         media_type=effective_media_type,
-        goal=getattr(form_data, "auto_chunking_goal", "balanced"),
+        goal=_get_raw_form_value(form_data, "auto_chunking_goal", "balanced"),
         profile=profile,
-        template_name=template_name or getattr(form_data, "chunking_template_name", None),
+        template_name=template_name or _get_raw_form_value(form_data, "chunking_template_name"),
         template_status=template_status,
         template_error=template_error,
-        requested_llm=bool(getattr(form_data, "auto_chunking_use_llm", False)),
+        requested_llm=_coerce_raw_bool(_get_raw_form_value(form_data, "auto_chunking_use_llm", False)),
         llm_available=llm_available,
         semantic_available=semantic_available,
     )
@@ -318,7 +324,7 @@ def resolve_chunking_for_result(
     Auto requests can use extracted content signals here, while legacy/manual
     paths keep the options prepared before processor dispatch.
     """
-    if getattr(form_data, "chunking_mode", None) != "auto":
+    if _get_raw_form_value(form_data, "chunking_mode") != "auto":
         return default_chunk_options, default_chunking_plan
 
     extracted_text = result.get("content")
@@ -345,7 +351,7 @@ def _profile_from_form_source(
     *,
     media_type: str | None,
     source_name: str | None,
-):
+) -> AutoChunkingProfile:
     source = source_name or _first_form_source_name(form_data)
     filename: str | None = None
     url: str | None = None
@@ -356,27 +362,27 @@ def _profile_from_form_source(
         else:
             filename = source_text
 
-    language = getattr(form_data, "chunk_language", None)
+    language = _get_raw_form_value(form_data, "chunk_language")
     if not language:
-        language = getattr(form_data, "transcription_language", None)
+        language = _get_raw_form_value(form_data, "transcription_language")
 
     return profile_from_source(
         media_type=media_type,
         filename=filename,
         url=url,
-        title=getattr(form_data, "title", None),
+        title=_get_raw_form_value(form_data, "title"),
         language=language,
     )
 
 
 def _first_form_source_name(form_data: Any) -> str | None:
-    urls = getattr(form_data, "urls", None)
+    urls = _get_raw_form_value(form_data, "urls")
     if isinstance(urls, list) and urls:
         first = urls[0]
         if first:
             return str(first)
     for attr_name in ("original_filename", "filename", "source_name"):
-        value = getattr(form_data, attr_name, None)
+        value = _get_raw_form_value(form_data, attr_name)
         if value:
             return str(value)
     return None
@@ -495,7 +501,7 @@ def apply_chunking_template_if_any(
                 if score <= 0:
                     continue
 
-                priority = ((cfg.get("classifier") or {}).get("priority") or 0)  # type: ignore[assignment]
+                priority = (cfg.get("classifier") or {}).get("priority") or 0  # type: ignore[assignment]
                 key = (float(score), int(priority))
 
                 if best_cfg is None or best_key is None or key > best_key:
@@ -547,8 +553,6 @@ def prepare_common_options(
         "api_provider": getattr(form_data, "api_provider", None),
         "model_name": getattr(form_data, "model_name", None),
         "store_in_db": True,
-        "summarize_recursively": bool(
-            getattr(form_data, "summarize_recursively", False)
-        ),
+        "summarize_recursively": bool(getattr(form_data, "summarize_recursively", False)),
         "author": getattr(form_data, "author", None),
     }

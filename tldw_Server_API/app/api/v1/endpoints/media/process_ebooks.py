@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
     resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -110,7 +111,7 @@ def _process_single_ebook(
         return result_dict
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.error(
-            '_process_single_ebook error for {} ({}): {}',
+            "_process_single_ebook error for {} ({}): {}",
             original_ref,
             ebook_path,
             exc,
@@ -146,9 +147,7 @@ async def process_ebooks_endpoint(
     injected_response: Response,
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessEbooksForm = Depends(get_process_ebooks_form),
-    files: list[UploadFile] | None = File(
-        None, description="EPUB file uploads (.epub)"
-    ),
+    files: list[UploadFile] | None = File(None, description="EPUB file uploads (.epub)"),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
 ):
     """
@@ -173,9 +172,7 @@ async def process_ebooks_endpoint(
     # Legacy endpoint treats urls=[""] as "no URLs".
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
-        logger.info(
-            "Received urls=[''], treating as no URLs provided for ebook processing."
-        )
+        logger.info("Received urls=[''], treating as no URLs provided for ebook processing.")
     form_data.urls = normalize_urls_field(form_data.urls)
     legacy_signal = (
         build_media_legacy_signal(
@@ -223,11 +220,7 @@ async def process_ebooks_endpoint(
             saved_files_info = list(saved_files)
 
             for err_info in upload_errors:
-                original_filename = (
-                    err_info.get("original_filename")
-                    or err_info.get("input")
-                    or "Unknown Upload"
-                )
+                original_filename = err_info.get("original_filename") or err_info.get("input") or "Unknown Upload"
                 error_detail = str(err_info.get("error") or "Upload error")
                 batch["results"].append(
                     {
@@ -264,7 +257,7 @@ async def process_ebooks_endpoint(
         # ---- Handle URL inputs via shared downloader ----
         if form_data.urls:
             logger.info(
-                'Attempting to download {} EPUB URL(s) asynchronously...',
+                "Attempting to download {} EPUB URL(s) asynchronously...",
                 len(form_data.urls),
             )
             download_url_async = core_download_url_async
@@ -318,6 +311,7 @@ async def process_ebooks_endpoint(
         # - 207 when we have result entries (all errors)
         # - 400 when no inputs at all (handled by _validate_inputs above)
         if not items:
+
             async def _noop_processor(_: list[ProcessItem]) -> list[dict[str, Any]]:
                 return []
 
@@ -326,11 +320,7 @@ async def process_ebooks_endpoint(
                 processor=_noop_processor,
                 base_batch=batch,
             )
-            status_code = (
-                status.HTTP_207_MULTI_STATUS
-                if batch.get("results")
-                else status.HTTP_400_BAD_REQUEST
-            )
+            status_code = status.HTTP_207_MULTI_STATUS if batch.get("results") else status.HTTP_400_BAD_REQUEST
             response = JSONResponse(status_code=status_code, content=batch)
             if legacy_signal is not None:
                 apply_media_legacy_headers(response, legacy_signal)
@@ -400,7 +390,7 @@ async def process_ebooks_endpoint(
                     res = await loop.run_in_executor(None, partial_func)
                 except Exception as exc:  # pragma: no cover - defensive fallback
                     logger.error(
-                        'Task execution failed for {}: {}',
+                        "Task execution failed for {}: {}",
                         original_ref,
                         exc,
                         exc_info=True,
@@ -443,10 +433,7 @@ async def process_ebooks_endpoint(
                         msg = f"{res.get('input_ref', 'Unknown')}: [Warning] {warn}"
                         batch["errors"].append(msg)
                 elif status_value == "error":
-                    error_msg = (
-                        f"{res.get('input_ref', 'Unknown')}: "
-                        f"{res.get('error', 'Unknown processing error')}"
-                    )
+                    error_msg = f"{res.get('input_ref', 'Unknown')}: " f"{res.get('error', 'Unknown processing error')}"
                     if error_msg not in batch["errors"]:
                         batch["errors"].append(error_msg)
 
@@ -473,8 +460,7 @@ async def process_ebooks_endpoint(
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-ebooks request finished with status {}. Results: {}, "
-        "Processed: {}, Errors: {}",
+        "/process-ebooks request finished with status {}. Results: {}, " "Processed: {}, Errors: {}",
         final_status_code,
         len(batch.get("results", [])),
         processed_count,
@@ -491,11 +477,7 @@ async def process_ebooks_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
 
             for res in batch.get("results", []):
                 if not isinstance(res, dict):
@@ -519,18 +501,19 @@ async def process_ebooks_endpoint(
                 if not result_chunk_options:
                     continue
 
-                if use_hier and ck is not None:
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
                         method=result_chunk_options.get("method") or "sentences",
                         max_size=result_chunk_options.get("max_size") or 1000,
                         overlap=result_chunk_options.get("overlap") or 200,
                         language=result_chunk_options.get("language"),
-                        template=result_chunk_options.get("hierarchical_template")
-                        if isinstance(
-                            result_chunk_options.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
                     chunks = _improved_chunking_process(text, result_chunk_options)

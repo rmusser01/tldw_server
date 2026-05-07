@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.API_Deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     AddMediaForm,
+    ChunkingOptions,
     IngestWebContentRequest,
     WebScrapingRequest,
 )
@@ -67,6 +68,24 @@ async def test_add_media_form_dependency_parses_auto_chunking_and_template_field
     assert form.chunking_template_name == "article-defaults"
     assert form.hierarchical_chunking is True
     assert form.hierarchical_template == _valid_hierarchical_template()
+
+
+@pytest.mark.asyncio
+async def test_add_media_form_dependency_normalizes_empty_template_name():
+    form = await media_add_deps.get_add_media_form(
+        **_dependency_kwargs(
+            media_add_deps.get_add_media_form,
+            media_type="document",
+            urls=["https://example.test/article.md"],
+            transcription_model=None,
+            chunking_mode="manual",
+            chunking_template_name="",
+            hierarchical_template="",
+        )
+    )
+
+    assert form.chunking_template_name is None
+    assert form.hierarchical_template is None
 
 
 @pytest.mark.asyncio
@@ -198,6 +217,12 @@ def test_auto_chunking_schema_validates_unknown_modes_and_allows_disabled_chunki
     rendered_errors = str(excinfo.value)
     assert "chunking_mode" in rendered_errors
     assert "auto_chunking_goal" in rendered_errors
+
+
+def test_chunking_options_schema_allows_internal_structure_aware_method():
+    options = ChunkingOptions(chunk_method="structure_aware")
+
+    assert options.chunk_method == "structure_aware"
 
 
 def test_web_article_request_models_accept_auto_chunking_fields():

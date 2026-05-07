@@ -75,6 +75,7 @@ const normalizeCommonOptions = (common?: {
   const chunkingMode: "auto" | "manual" =
     common?.chunking_mode === "manual" ? "manual" : "auto"
   return {
+    ...(common ?? {}),
     perform_analysis: common?.perform_analysis ?? true,
     perform_chunking: common?.perform_chunking ?? true,
     overwrite_existing: common?.overwrite_existing ?? false,

@@ -1,3 +1,5 @@
+"""Deterministic Auto Chunking planner for ingestion request defaults."""
+
 from __future__ import annotations
 
 import re
@@ -9,6 +11,8 @@ AutoChunkingGoal = Literal["balanced", "qa_search", "navigation_summary"]
 
 @dataclass(frozen=True)
 class AutoChunkingProfile:
+    """Signals the planner uses to choose a chunking strategy."""
+
     media_type: str | None = None
     source_name: str | None = None
     title: str | None = None
@@ -26,6 +30,8 @@ class AutoChunkingProfile:
 
 @dataclass(frozen=True)
 class AutoChunkingRequest:
+    """Normalized inputs for a single Auto Chunking planning decision."""
+
     perform_chunking: bool
     chunking_mode: str | None
     media_type: str | None
@@ -41,6 +47,8 @@ class AutoChunkingRequest:
 
 @dataclass(frozen=True)
 class AutoChunkingPlan:
+    """Serializable explanation of the selected Auto Chunking behavior."""
+
     mode: Literal["auto"]
     goal: AutoChunkingGoal
     used_llm: bool
@@ -54,6 +62,7 @@ class AutoChunkingPlan:
     profile: dict[str, Any]
 
     def to_metadata(self) -> dict[str, Any]:
+        """Return a JSON-safe metadata representation of the plan."""
         return {
             "mode": self.mode,
             "goal": self.goal,
@@ -70,6 +79,7 @@ class AutoChunkingPlan:
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any]) -> "AutoChunkingPlan":
+        """Rebuild a plan from previously stored metadata."""
         return cls(
             mode="auto",
             goal=_normalize_goal(metadata.get("goal")),
@@ -87,6 +97,8 @@ class AutoChunkingPlan:
 
 @dataclass(frozen=True)
 class AutoChunkingDecision:
+    """Resolved chunking options plus optional metadata plan."""
+
     chunk_options: dict[str, Any] | None
     chunking_plan: dict[str, Any] | None
 
@@ -117,6 +129,7 @@ def profile_from_source(
     mime_type: str | None = None,
     language: str | None = None,
 ) -> AutoChunkingProfile:
+    """Build planner signals from request source metadata."""
     source_name = filename or url
     extension = None
     if filename and "." in filename:
@@ -133,6 +146,7 @@ def profile_from_source(
 
 
 def profile_from_text(text: str | None, *, max_scan_chars: int = _TEXT_SCAN_CHARS) -> AutoChunkingProfile:
+    """Build planner signals by scanning extracted text."""
     sample = (text or "")[: max(0, int(max_scan_chars))]
     return AutoChunkingProfile(
         text_length=len(text or ""),
@@ -146,6 +160,7 @@ def profile_from_text(text: str | None, *, max_scan_chars: int = _TEXT_SCAN_CHAR
 
 
 def merge_profiles(*profiles: AutoChunkingProfile | None) -> AutoChunkingProfile:
+    """Merge source and content profiles without losing positive signals."""
     merged = AutoChunkingProfile()
     for profile in profiles:
         if profile is None:
@@ -182,6 +197,7 @@ def plan_auto_chunking(
     llm_available: bool = False,
     semantic_available: bool = True,
 ) -> AutoChunkingDecision:
+    """Choose effective chunking options and metadata for an Auto request."""
     if not perform_chunking or chunking_mode != "auto":
         return AutoChunkingDecision(chunk_options=None, chunking_plan=None)
 
@@ -236,6 +252,7 @@ def plan_auto_chunking(
 
 
 def plan_auto_chunking_request(request: AutoChunkingRequest) -> AutoChunkingDecision:
+    """Plan Auto Chunking from a normalized request object."""
     return plan_auto_chunking(
         perform_chunking=request.perform_chunking,
         chunking_mode=request.chunking_mode,

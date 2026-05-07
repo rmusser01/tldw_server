@@ -982,7 +982,30 @@ describe("QuickIngestWizardModal — real configure step", () => {
     expect(screen.queryByLabelText("Chunk size")).not.toBeInTheDocument()
     expect(screen.queryByLabelText("Chunk overlap")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Auto chunking goal")).toHaveValue("balanced")
-    expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBe(900)
+    expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBeUndefined()
+  })
+
+  it("clamps Manual chunking numbers before storing advanced values", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(await screen.findByRole("button", { name: "Manual" }))
+
+    await user.clear(screen.getByLabelText("Chunk size"))
+    await user.type(screen.getByLabelText("Chunk size"), "0")
+    await user.clear(screen.getByLabelText("Chunk overlap"))
+    await user.type(screen.getByLabelText("Chunk overlap"), "-5")
+
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBe(1)
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_overlap).toBe(0)
+    })
   })
 
   it("keeps review mode anchored to remote storage and leaves audio defaults available for video-only batches", async () => {

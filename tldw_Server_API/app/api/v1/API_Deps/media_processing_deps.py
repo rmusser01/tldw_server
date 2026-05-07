@@ -7,6 +7,9 @@ from fastapi import Form, status
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.form_coercion import (
+    chunking_contract_kwargs,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     TRANSCRIPTION_MODEL_ENUM,
     ProcessAudiosForm,
@@ -97,92 +100,12 @@ def _raise_422(exc: ValidationError) -> None:
             loc = ["body"]
         err["loc"] = loc
         if isinstance(ctx, dict):
-            err["ctx"] = {
-                k: (str(v) if isinstance(v, Exception) else v)
-                for k, v in ctx.items()
-            }
+            err["ctx"] = {k: (str(v) if isinstance(v, Exception) else v) for k, v in ctx.items()}
         serializable_errors.append(err)
     raise APIValidationError(
         detail=serializable_errors,
         status_code=HTTP_422_UNPROCESSABLE,
     ) from exc
-
-
-def _coerce_form_bool(value: Any) -> bool:
-    if hasattr(value, "default"):
-        value = value.default
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "on"}
-    return bool(value)
-
-
-def _coerce_form_string(value: Any) -> str | None:
-    if hasattr(value, "default"):
-        value = value.default
-    if value is None:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    return str(value)
-
-
-def _coerce_hierarchical_template(value: Any) -> dict[str, Any] | None:
-    if hasattr(value, "default"):
-        value = value.default
-    if value is None or value == "":
-        return None
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise APIValidationError(
-                detail=[
-                    {
-                        "loc": ["body", "hierarchical_template"],
-                        "msg": "hierarchical_template must be a JSON object",
-                        "type": "value_error.jsondecode",
-                    }
-                ],
-                status_code=HTTP_422_UNPROCESSABLE,
-            ) from exc
-        if isinstance(parsed, dict):
-            return parsed
-    raise APIValidationError(
-        detail=[
-            {
-                "loc": ["body", "hierarchical_template"],
-                "msg": "hierarchical_template must be a JSON object",
-                "type": "type_error.dict",
-            }
-        ],
-        status_code=HTTP_422_UNPROCESSABLE,
-    )
-
-
-def _chunking_contract_kwargs(
-    *,
-    chunking_mode: Any,
-    auto_chunking_goal: Any,
-    auto_chunking_use_llm: Any,
-    auto_apply_template: Any,
-    chunking_template_name: Any,
-    hierarchical_chunking: Any,
-    hierarchical_template: Any,
-) -> dict[str, Any]:
-    return {
-        "chunking_mode": _coerce_form_string(chunking_mode),
-        "auto_chunking_goal": _coerce_form_string(auto_chunking_goal) or "balanced",
-        "auto_chunking_use_llm": _coerce_form_bool(auto_chunking_use_llm),
-        "auto_apply_template": _coerce_form_bool(auto_apply_template),
-        "chunking_template_name": _coerce_form_string(chunking_template_name),
-        "hierarchical_chunking": _coerce_form_bool(hierarchical_chunking),
-        "hierarchical_template": _coerce_hierarchical_template(
-            hierarchical_template
-        ),
-    }
 
 
 async def get_process_documents_form(
@@ -221,9 +144,7 @@ async def get_process_documents_form(
     """
     try:
         urls_norm = _coerce_urls(urls)
-        keywords_value = (
-            keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
-        )
+        keywords_value = keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
         title_val = title or titles
         return ProcessDocumentsForm(
             urls=urls_norm,
@@ -239,7 +160,7 @@ async def get_process_documents_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            **_chunking_contract_kwargs(
+            **chunking_contract_kwargs(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
@@ -336,7 +257,7 @@ async def get_process_videos_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            **_chunking_contract_kwargs(
+            **chunking_contract_kwargs(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
@@ -428,7 +349,7 @@ async def get_process_audios_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            **_chunking_contract_kwargs(
+            **chunking_contract_kwargs(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
@@ -499,7 +420,7 @@ async def get_process_pdfs_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            **_chunking_contract_kwargs(
+            **chunking_contract_kwargs(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
@@ -563,9 +484,7 @@ async def get_process_ebooks_form(
     """
     try:
         urls_norm = _coerce_urls(urls)
-        keywords_value = (
-            keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
-        )
+        keywords_value = keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
         return ProcessEbooksForm(
             urls=urls_norm,
             title=title,
@@ -581,7 +500,7 @@ async def get_process_ebooks_form(
             chunk_overlap=chunk_overlap,
             chunk_language=chunk_language,
             custom_chapter_pattern=custom_chapter_pattern,
-            **_chunking_contract_kwargs(
+            **chunking_contract_kwargs(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
@@ -658,7 +577,7 @@ async def get_process_emails_form(
             custom_chapter_pattern=custom_chapter_pattern,
             use_adaptive_chunking=use_adaptive_chunking,
             use_multi_level_chunking=use_multi_level_chunking,
-            **_chunking_contract_kwargs(
+            **chunking_contract_kwargs(
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,

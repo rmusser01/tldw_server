@@ -37,12 +37,16 @@ const MANUAL_CHUNKING_FIELDS = new Set([
   "contextual_llm_model",
   "custom_chapter_pattern",
   "enable_contextual_chunking",
+  "hierarchical_chunking",
+  "hierarchical_template",
   "use_adaptive_chunking",
   "use_multi_level_chunking",
 ])
 
 const CONTROLLED_COMMON_FIELDS = new Set([
+  "perform_analysis",
   "perform_chunking",
+  "overwrite_existing",
 ])
 
 const fieldNameParts = (fieldName: string): string[] =>

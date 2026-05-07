@@ -1951,7 +1951,11 @@ export default defineBackground({
           summarize_checkbox: Boolean(common.perform_analysis),
           ...normalizedBody,
         };
-        applyQuickIngestChunkingFields(body, { common });
+        applyQuickIngestChunkingFields(body, {
+          common,
+          chunkingTemplateName,
+          autoApplyTemplate,
+        });
         if (typeof entry?.keywords === "string") {
           const trimmed = entry.keywords.trim();
           if (trimmed) {

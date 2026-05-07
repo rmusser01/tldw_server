@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
     resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -168,9 +169,7 @@ async def process_pdfs_endpoint(
             saved_files_info = list(saved_files)
 
             for err_info in upload_errors:
-                original_filename = (
-                    err_info.get("original_filename") or err_info.get("input") or "Unknown Upload"
-                )
+                original_filename = err_info.get("original_filename") or err_info.get("input") or "Unknown Upload"
                 error_detail = str(err_info.get("error") or "Upload error")
                 normalized_err = normalise_pdf_result(
                     {
@@ -240,6 +239,7 @@ async def process_pdfs_endpoint(
         # - 207 when we have result entries (all errors)
         # - 400 when no inputs at all (handled by _validate_inputs above)
         if not items:
+
             async def _noop_processor(_: list[ProcessItem]) -> list[dict[str, Any]]:
                 return []
 
@@ -248,11 +248,7 @@ async def process_pdfs_endpoint(
                 processor=_noop_processor,
                 base_batch=batch,
             )
-            status_code = (
-                status.HTTP_207_MULTI_STATUS
-                if batch.get("results")
-                else status.HTTP_400_BAD_REQUEST
-            )
+            status_code = status.HTTP_207_MULTI_STATUS if batch.get("results") else status.HTTP_400_BAD_REQUEST
             response = JSONResponse(status_code=status_code, content=batch)
             if legacy_signal is not None:
                 apply_media_legacy_headers(response, legacy_signal)
@@ -301,7 +297,7 @@ async def process_pdfs_endpoint(
                     file_bytes = item.local_path.read_bytes()
                 except Exception as read_err:
                     logger.error(
-                        'Failed to read prepared PDF file {} from {}: {}',
+                        "Failed to read prepared PDF file {} from {}: {}",
                         original_ref,
                         item.local_path,
                         read_err,
@@ -327,20 +323,12 @@ async def process_pdfs_endpoint(
                         author_override=form_data.author,
                         keywords=form_data.keywords,
                         perform_chunking=form_data.perform_chunking or None,
-                        chunk_method=(
-                            (chunk_options_dict or {}).get("method")
-                            if form_data.perform_chunking
-                            else None
-                        ),
+                        chunk_method=((chunk_options_dict or {}).get("method") if form_data.perform_chunking else None),
                         max_chunk_size=(
-                            (chunk_options_dict or {}).get("max_size")
-                            if form_data.perform_chunking
-                            else None
+                            (chunk_options_dict or {}).get("max_size") if form_data.perform_chunking else None
                         ),
                         chunk_overlap=(
-                            (chunk_options_dict or {}).get("overlap")
-                            if form_data.perform_chunking
-                            else None
+                            (chunk_options_dict or {}).get("overlap") if form_data.perform_chunking else None
                         ),
                         perform_analysis=form_data.perform_analysis,
                         api_name=form_data.api_name,
@@ -378,7 +366,7 @@ async def process_pdfs_endpoint(
                     results.append(normalized_res)
                 except Exception as exc:
                     logger.error(
-                        'PDF processing failed for {}: {}',
+                        "PDF processing failed for {}: {}",
                         original_ref,
                         exc,
                         exc_info=True,
@@ -436,11 +424,7 @@ async def process_pdfs_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
 
             for res in batch.get("results", []):
                 if not isinstance(res, dict):
@@ -464,18 +448,19 @@ async def process_pdfs_endpoint(
                 if not result_chunk_options:
                     continue
 
-                if use_hier and ck is not None:
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
                         method=result_chunk_options.get("method") or "sentences",
                         max_size=result_chunk_options.get("max_size") or 500,
                         overlap=result_chunk_options.get("overlap") or 200,
                         language=result_chunk_options.get("language"),
-                        template=result_chunk_options.get("hierarchical_template")
-                        if isinstance(
-                            result_chunk_options.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
                     chunks = _improved_chunking_process(text, result_chunk_options)

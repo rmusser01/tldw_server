@@ -120,3 +120,32 @@ def test_resolver_auto_records_template_fallback_status():
     assert chunk_options["method"] == "sentences"
     assert "semantic_unavailable" in chunking_plan["fallback_reason"]
     assert "template_no_match" in chunking_plan["fallback_reason"]
+
+
+def test_resolver_accepts_mapping_backed_auto_payload():
+    chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+        {
+            "perform_chunking": True,
+            "media_type": "document",
+            "chunking_mode": "auto",
+            "auto_chunking_goal": "navigation_summary",
+            "auto_chunking_use_llm": True,
+            "chunk_language": "en",
+            "title": "Planning Notes",
+            "urls": ["https://example.test/planning.md"],
+            "chunk_method": "words",
+            "chunk_size": 333,
+            "chunk_overlap": 1,
+        },
+        media_type=None,
+        extracted_text="# Overview\n\n- first\n- second\n",
+    )
+
+    assert chunk_options["method"] == "structure_aware"
+    assert chunk_options["max_size"] == 1400
+    assert chunk_options["language"] == "en"
+    assert chunking_plan["mode"] == "auto"
+    assert chunking_plan["goal"] == "navigation_summary"
+    assert chunking_plan["profile"]["title"] == "Planning Notes"
+    assert chunking_plan["profile"]["source_name"] == "https://example.test/planning.md"
+    assert "outline" in chunking_plan["derived_views"]

@@ -1,4 +1,5 @@
 import type { IngestPreset, PresetConfig, CommonOptions, TypeDefaults } from "./types"
+import { shouldSubmitQuickIngestAdvancedField } from "@/services/tldw/quick-ingest-chunking"
 
 /**
  * Preset configurations for Quick Ingest.
@@ -167,6 +168,16 @@ const serializeAdvancedValues = (values?: Record<string, unknown>) => {
   return JSON.stringify(normalizeAdvancedValue(values ?? {}))
 }
 
+const filterApplicableAdvancedValues = (
+  values: Record<string, unknown> | undefined,
+  common: CommonOptions,
+) =>
+  Object.fromEntries(
+    Object.entries(values ?? {}).filter(([fieldName]) =>
+      shouldSubmitQuickIngestAdvancedField(fieldName, common)
+    )
+  )
+
 /**
  * Check if current configuration matches a specific preset.
  */
@@ -232,8 +243,12 @@ export function configMatchesPreset(
   }
 
   if (
-    serializeAdvancedValues(config.advancedValues) !==
-    serializeAdvancedValues(preset.advancedValues)
+    serializeAdvancedValues(
+      filterApplicableAdvancedValues(config.advancedValues, config.common)
+    ) !==
+    serializeAdvancedValues(
+      filterApplicableAdvancedValues(preset.advancedValues, preset.common)
+    )
   ) {
     return false
   }

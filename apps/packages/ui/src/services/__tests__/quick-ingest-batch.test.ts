@@ -261,10 +261,14 @@ describe("submitQuickIngestBatch", () => {
         auto_chunking_use_llm: true
       },
       advancedValues: {
+        perform_analysis: false,
+        overwrite_existing: true,
         chunk_method: "tokens",
         chunk_size: 1200,
         chunk_overlap: 200,
         use_adaptive_chunking: true,
+        hierarchical_chunking: true,
+        hierarchical_template: { boundaries: [{ kind: "heading" }] },
         transcription_model: "parakeet-standard"
       },
       chunkingTemplateName: "manual-template",
@@ -277,6 +281,8 @@ describe("submitQuickIngestBatch", () => {
         method: "POST",
         fields: expect.objectContaining({
           perform_chunking: true,
+          perform_analysis: true,
+          overwrite_existing: false,
           chunking_mode: "auto",
           auto_chunking_goal: "qa_search",
           auto_chunking_use_llm: true,
@@ -289,6 +295,8 @@ describe("submitQuickIngestBatch", () => {
     expect(fields).not.toHaveProperty("chunk_size")
     expect(fields).not.toHaveProperty("chunk_overlap")
     expect(fields).not.toHaveProperty("use_adaptive_chunking")
+    expect(fields).not.toHaveProperty("hierarchical_chunking")
+    expect(fields).not.toHaveProperty("hierarchical_template")
     expect(fields).not.toHaveProperty("chunking_template_name")
     expect(fields).not.toHaveProperty("auto_apply_template")
   })
@@ -977,6 +985,48 @@ describe("submitQuickIngestBatch", () => {
     expect(body).not.toHaveProperty("auto_chunking_use_llm")
     expect(body).not.toHaveProperty("chunk_size")
     expect(body).not.toHaveProperty("chunk_overlap")
+  })
+
+  it("passes manual chunking templates to process-web-scraping JSON requests", async () => {
+    mocks.bgRequest.mockResolvedValue({ content: "processed" })
+
+    await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "entry-html-manual",
+          url: "https://example.com/manual-page",
+          type: "html"
+        }
+      ],
+      files: [],
+      storeRemote: false,
+      processOnly: true,
+      common: {
+        perform_analysis: true,
+        perform_chunking: true,
+        overwrite_existing: false,
+        chunking_mode: "manual",
+        auto_chunking_goal: "balanced",
+        auto_chunking_use_llm: false
+      },
+      advancedValues: {
+        chunk_method: "sentences",
+        chunk_size: 900
+      },
+      chunkingTemplateName: "article-template",
+      autoApplyTemplate: true
+    } as any)
+
+    const body = mocks.bgRequest.mock.calls[0][0].body
+    expect(body).toMatchObject({
+      url_input: "https://example.com/manual-page",
+      chunking_mode: "manual",
+      chunk_method: "sentences",
+      chunk_size: 900,
+      chunking_template_name: "article-template",
+      auto_apply_template: true
+    })
+    expect(body).not.toHaveProperty("auto_chunking_goal")
   })
 
   it("routes local files through direct process endpoints in web runtime", async () => {

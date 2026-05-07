@@ -184,9 +184,7 @@ async def _schedule_embeddings(
             or "sentence-transformers/all-MiniLM-L6-v2"
         )
         embedding_provider = (
-            form_data.embedding_provider
-            or embedding_settings.get("embedding_provider")
-            or "huggingface"
+            form_data.embedding_provider or embedding_settings.get("embedding_provider") or "huggingface"
         )
 
         result = await generate_embeddings_for_media(
@@ -346,6 +344,13 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
         if isinstance(result_item, dict):
+            final_chunking_plan = chunking_plan
+            result_metadata = result_item.get("metadata")
+            if isinstance(result_metadata, dict) and isinstance(
+                result_metadata.get("chunking_plan"),
+                dict,
+            ):
+                final_chunking_plan = result_metadata["chunking_plan"]
             job_result = {
                 "status": result_item.get("status"),
                 "media_id": result_item.get("db_id"),
@@ -354,8 +359,8 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
                 "warnings": result_item.get("warnings"),
                 "db_message": result_item.get("db_message"),
             }
-            if chunking_plan is not None:
-                job_result["chunking_plan"] = chunking_plan
+            if final_chunking_plan is not None:
+                job_result["chunking_plan"] = final_chunking_plan
             return job_result
         return {"status": "Error", "error": "No result produced"}
 
@@ -374,17 +379,13 @@ async def run_media_ingest_jobs_worker(
     worker_id: str | None = None,
 ) -> None:
     if JobManager._ACQUIRE_GATE_ENABLED:
-        logger.warning(
-            "Media Ingest Jobs worker starting with acquire gate enabled; clearing stale gate state"
-        )
+        logger.warning("Media Ingest Jobs worker starting with acquire gate enabled; clearing stale gate state")
     JobManager.set_acquire_gate(False)
 
     jm = _jobs_manager()
     queue_name = _resolve_worker_queue(queue)
     resolved_worker_id = (
-        str(worker_id).strip()
-        if worker_id and str(worker_id).strip()
-        else f"media-ingest-worker-{queue_name}"
+        str(worker_id).strip() if worker_id and str(worker_id).strip() else f"media-ingest-worker-{queue_name}"
     )
     cfg = _build_worker_config(worker_id=resolved_worker_id, queue=queue_name)
     sdk = WorkerSDK(jm, cfg)
@@ -424,10 +425,7 @@ async def run_media_ingest_jobs_worker(
 
 
 async def run_media_ingest_heavy_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
-    heavy_queue = (
-        (os.getenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE") or "").strip()
-        or "low"
-    )
+    heavy_queue = (os.getenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE") or "").strip() or "low"
     await run_media_ingest_jobs_worker(
         stop_event,
         queue=heavy_queue,

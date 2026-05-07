@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
     resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -87,9 +88,7 @@ async def process_audios_endpoint(
     handling and batch orchestration.
     """
 
-    logger.info(
-        "Request received for /process-audios. Form data validated via dependency."
-    )
+    logger.info("Request received for /process-audios. Form data validated via dependency.")
     try:
         usage_log.log_event(
             "media.process.audio",
@@ -103,9 +102,7 @@ async def process_audios_endpoint(
     # Normalize the "urls=['']" sentinel used by some clients.
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
-        logger.info(
-            "Received urls=[''], treating as no URLs provided for audio processing."
-        )
+        logger.info("Received urls=[''], treating as no URLs provided for audio processing.")
     form_data.urls = normalize_urls_field(form_data.urls)
     legacy_signal = (
         build_media_legacy_signal(
@@ -150,9 +147,7 @@ async def process_audios_endpoint(
 
     with TempDirManager(cleanup=True, prefix="process_audio_") as temp_dir:
         temp_dir_path = Path(temp_dir)
-        logger.info(
-            "Using temporary directory for /process-audios: {}", temp_dir_path.as_posix()
-        )
+        logger.info("Using temporary directory for /process-audios: {}", temp_dir_path.as_posix())
 
         # Preserve test-time monkeypatching of `media.file_validator_instance`
         # by resolving the validator from the media module export.
@@ -254,9 +249,7 @@ async def process_audios_endpoint(
 
     if total_items == 0:
         final_status_code = status.HTTP_400_BAD_REQUEST
-        logger.error(
-            "No results generated for /process-audios despite processing attempt."
-        )
+        logger.error("No results generated for /process-audios despite processing attempt.")
     elif final_error_count == 0 and final_processed_count > 0:
         final_status_code = status.HTTP_200_OK
         logger.info(
@@ -280,16 +273,10 @@ async def process_audios_endpoint(
         # environment-induced skips can be distinguished from real regressions.
         if is_test_mode():
             try:
-                errors_joined = " | ".join(
-                    str(e) for e in batch_result.get("errors", []) if e
-                )
-                if (
-                    "Download failed" in errors_joined
-                    or "Host could not be resolved" in errors_joined
-                ):
+                errors_joined = " | ".join(str(e) for e in batch_result.get("errors", []) if e)
+                if "Download failed" in errors_joined or "Host could not be resolved" in errors_joined:
                     logger.debug(
-                        "TEST_MODE: /process-audios returned 207 due to audio "
-                        "download/egress error: {}",
+                        "TEST_MODE: /process-audios returned 207 due to audio " "download/egress error: {}",
                         errors_joined,
                     )
             except Exception:
@@ -306,11 +293,12 @@ async def process_audios_endpoint(
                     first_filename = saved_files[0].get("original_filename")
             except Exception:
                 first_filename = None
+            first_input_source = str(all_inputs[0]) if all_inputs else first_url or first_filename
 
             chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
                 form_data,
                 media_type="audio",
-                source_name=first_filename or first_url,
+                source_name=first_input_source,
             )
             try:
                 TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
@@ -335,11 +323,7 @@ async def process_audios_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
 
             for res in batch_result.get("results", []):
                 if not isinstance(res, dict):
@@ -364,27 +348,26 @@ async def process_audios_endpoint(
                 if not result_chunk_options:
                     continue
 
-                if use_hier and ck is not None:
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
                         method=result_chunk_options.get("method") or "sentences",
                         max_size=result_chunk_options.get("max_size") or 500,
                         overlap=result_chunk_options.get("overlap") or 200,
                         language=result_chunk_options.get("language"),
-                        template=result_chunk_options.get("hierarchical_template")
-                        if isinstance(
-                            result_chunk_options.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
                     chunks = _improved_chunking_process(text, result_chunk_options)
 
                 res["chunks"] = chunks
     except Exception:
-        logger.warning(
-            "Best-effort audio chunking post-processing failed; leaving results unchunked"
-        )
+        logger.warning("Best-effort audio chunking post-processing failed; leaving results unchunked")
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
     if legacy_signal is not None:

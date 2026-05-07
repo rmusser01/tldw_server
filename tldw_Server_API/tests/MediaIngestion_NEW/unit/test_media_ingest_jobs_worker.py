@@ -140,6 +140,19 @@ async def test_media_ingest_worker_returns_auto_chunking_plan(monkeypatch, tmp_p
             "warnings": None,
             "db_message": "Media added to database.",
             "content": "# Intro\n\nChunkable body.",
+            "metadata": {
+                "chunking_plan": {
+                    "mode": "auto",
+                    "goal": "navigation_summary",
+                    "used_llm": False,
+                    "method": "structure_aware",
+                    "max_size": 1400,
+                    "overlap": 100,
+                    "fallback_reason": None,
+                    "derived_views": ["section_titles", "outline"],
+                    "profile": {"media_type": "document"},
+                }
+            },
         }
 
     monkeypatch.setattr(worker, "_create_db", _fake_create_db, raising=True)
@@ -183,9 +196,11 @@ async def test_media_ingest_worker_returns_auto_chunking_plan(monkeypatch, tmp_p
     assert seen["chunk_options"]["method"] == "semantic"
     assert seen["chunk_options"]["max_size"] == 700
     assert result["chunking_plan"]["mode"] == "auto"
-    assert result["chunking_plan"]["goal"] == "qa_search"
+    assert result["chunking_plan"]["goal"] == "navigation_summary"
+    assert result["chunking_plan"]["method"] == "structure_aware"
+    assert result["chunking_plan"]["max_size"] == 1400
     assert result["chunking_plan"]["used_llm"] is False
-    assert "ai_assist_unavailable" in result["chunking_plan"]["fallback_reason"]
+    assert "ai_assist_unavailable" not in str(result["chunking_plan"]["fallback_reason"])
 
 
 @pytest.mark.asyncio

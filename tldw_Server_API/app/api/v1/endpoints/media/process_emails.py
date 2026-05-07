@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
     resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -156,31 +157,19 @@ async def process_emails_endpoint(
                 try:
                     path = Path(pf["path"]).resolve()
                     # Read bytes
-                    async with media_mod.aiofiles.open(
-                        path, "rb"
-                    ) as f:
+                    async with media_mod.aiofiles.open(path, "rb") as f:
                         file_bytes = await f.read()
 
                     if form_data.perform_chunking and chunk_options_dict:
                         chunk_opts = {
                             "method": chunk_options_dict.get("method")
-                            or (
-                                form_data.chunk_method
-                                if form_data.chunk_method
-                                else "sentences"
-                            ),
-                            "max_size": chunk_options_dict.get("max_size")
-                            or form_data.chunk_size,
-                            "overlap": chunk_options_dict.get("overlap")
-                            or form_data.chunk_overlap,
+                            or (form_data.chunk_method if form_data.chunk_method else "sentences"),
+                            "max_size": chunk_options_dict.get("max_size") or form_data.chunk_size,
+                            "overlap": chunk_options_dict.get("overlap") or form_data.chunk_overlap,
                         }
                     else:
                         chunk_opts = {
-                            "method": (
-                                form_data.chunk_method
-                                if form_data.chunk_method
-                                else "sentences"
-                            ),
+                            "method": (form_data.chunk_method if form_data.chunk_method else "sentences"),
                             "max_size": form_data.chunk_size,
                             "overlap": form_data.chunk_overlap,
                         }
@@ -210,9 +199,7 @@ async def process_emails_endpoint(
                         res_list = await loop.run_in_executor(None, processor)
                         for r_item in res_list:
                             r_item.setdefault("media_type", "email")
-                            r_item.setdefault(
-                                "processing_source", f"archive:{str(path)}"
-                            )
+                            r_item.setdefault("processing_source", f"archive:{str(path)}")
                             r_item.setdefault(
                                 "input_ref",
                                 r_item.get("input_ref") or arch_name,
@@ -224,9 +211,7 @@ async def process_emails_endpoint(
                                 }
                             )
                             results.append(r_item)
-                    elif name_lower.endswith(".mbox") and getattr(
-                        form_data, "accept_mbox", False
-                    ):
+                    elif name_lower.endswith(".mbox") and getattr(form_data, "accept_mbox", False):
                         mbox_name = pf.get("original_filename") or path.name
                         processor = functools.partial(
                             email_lib.process_mbox_bytes,
@@ -261,9 +246,9 @@ async def process_emails_endpoint(
                                 }
                             )
                             results.append(r_item)
-                    elif (
-                        name_lower.endswith(".pst") or name_lower.endswith(".ost")
-                    ) and getattr(form_data, "accept_pst", False):
+                    elif (name_lower.endswith(".pst") or name_lower.endswith(".ost")) and getattr(
+                        form_data, "accept_pst", False
+                    ):
                         pst_name = pf.get("original_filename") or path.name
                         processor = functools.partial(
                             email_lib.process_pst_bytes,
@@ -409,11 +394,7 @@ async def process_emails_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
 
             for res in batch.get("results", []):
                 if not isinstance(res, dict):
@@ -437,18 +418,19 @@ async def process_emails_endpoint(
                 if not result_chunk_options:
                     continue
 
-                if use_hier and ck is not None:
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
                         method=result_chunk_options.get("method") or "sentences",
                         max_size=result_chunk_options.get("max_size") or 1000,
                         overlap=result_chunk_options.get("overlap") or 200,
                         language=result_chunk_options.get("language"),
-                        template=result_chunk_options.get("hierarchical_template")
-                        if isinstance(
-                            result_chunk_options.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
                     chunks = _improved_chunking_process(text, result_chunk_options)

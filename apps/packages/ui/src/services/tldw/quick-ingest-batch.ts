@@ -470,11 +470,15 @@ const processWebScrape = async ({
   entry,
   common,
   advancedValues,
+  chunkingTemplateName,
+  autoApplyTemplate,
 }: {
   url: string;
   entry?: QuickIngestEntry;
   common?: QuickIngestBatchInput["common"];
   advancedValues?: Record<string, any>;
+  chunkingTemplateName?: string;
+  autoApplyTemplate?: boolean;
 }): Promise<any> => {
   const nestedBody: Record<string, any> = {};
   for (const [key, value] of Object.entries(advancedValues || {})) {
@@ -497,7 +501,11 @@ const processWebScrape = async ({
     summarize_checkbox: Boolean(common?.perform_analysis),
     ...normalizedBody,
   };
-  applyQuickIngestChunkingFields(body, { common });
+  applyQuickIngestChunkingFields(body, {
+    common,
+    chunkingTemplateName,
+    autoApplyTemplate,
+  });
 
   if (typeof entry?.keywords === "string") {
     const trimmed = entry.keywords.trim();
@@ -650,6 +658,8 @@ const runDirectQuickIngestBatch = async (
             entry,
             common: input.common,
             advancedValues: input.advancedValues,
+            chunkingTemplateName: input.chunkingTemplateName,
+            autoApplyTemplate: input.autoApplyTemplate,
           });
         } else {
           const fields = buildFields({

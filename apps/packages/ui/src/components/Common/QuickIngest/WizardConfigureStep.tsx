@@ -482,9 +482,13 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
           return
         }
         const numericValue = Number.parseInt(rawValue, 10)
+        const clampedValue =
+          name === "chunk_size"
+            ? Math.max(1, numericValue)
+            : Math.max(0, numericValue)
         setAdvancedValue(
           name,
-          Number.isFinite(numericValue) ? numericValue : undefined
+          Number.isFinite(numericValue) ? clampedValue : undefined
         )
       },
     [setAdvancedValue]
