@@ -30,18 +30,22 @@ redirects, and error normalization.
 - Frontend app manifest: `apps/tldw-frontend/package.json`
 - Shared UI manifest: `apps/packages/ui/package.json`
 - WebUI lockfile: `apps/bun.lock`
+- Extension manifest for shared-package impact checks:
+  `apps/extension/package.json`
 
 ## Goals
 
 1. Produce a dependency inventory for the WebUI package surfaces.
 2. Classify each direct dependency as `keep`, `remove-now`, `replace-later`,
    `defer-design`, or `investigate-lockfile`.
-3. Remove only low-risk packages whose usage is absent or trivially replaceable.
-4. Replace `axios` only after preserving the current public WebUI client
+3. Record whether each package is used by the web app, shared UI package,
+   extension app, or only the lockfile.
+4. Remove only low-risk packages whose usage is absent or trivially replaceable.
+5. Replace `axios` only after preserving the current public WebUI client
    contract and behavioral edge cases.
-5. Record measurable impact where practical: dependency count, lockfile delta,
+6. Record measurable impact where practical: dependency count, lockfile delta,
    install size, or bundle/build output.
-6. Split implementation into small PRs that are easy to review and verify.
+7. Split implementation into small PRs that are easy to review and verify.
 
 ## Non-Goals
 
@@ -82,6 +86,10 @@ Initial read-only scans found:
   `@heroicons/react`, `@ant-design/icons`, and `react-icons`. This may be a
   valuable later cleanup, but it is not part of the platform-native replacement
   work.
+- `@tldw/ui` is consumed by both `apps/tldw-frontend` and `apps/extension`.
+  Removing a shared UI dependency or peer dependency needs an extension impact
+  check even when the primary GitHub issue is scoped to WebUI dependency
+  trimming.
 
 These findings are not a complete audit. The first implementation slice should
 make the inventory reproducible and reviewable.
@@ -99,12 +107,19 @@ The audit should cover:
 - `apps/packages/ui/package.json`
 - `apps/bun.lock`
 
+Because `@tldw/ui` also feeds the browser extension, the audit should also check
+`apps/extension/package.json` when a candidate package appears in the shared UI
+package or lockfile. The extension manifest is an impact-check surface, not a
+new primary target for issue #1346.
+
 The audit table should include:
 
 - package name
 - declared package locations
 - import count
 - representative import sites
+- consumer surface: web app, shared UI, extension, config/script, or lockfile
+  only
 - category
 - decision
 - risk
@@ -130,8 +145,8 @@ code.
 The second PR should remove only packages that meet at least one of these
 criteria:
 
-- No source imports in `apps/tldw-frontend` or `apps/packages/ui`, excluding
-  lockfiles and generated/vendor artifacts.
+- No source, test, script, or config imports in `apps/tldw-frontend` or
+  `apps/packages/ui`, excluding lockfiles and generated/vendor artifacts.
 - The package is used only through a tiny local wrapper and the repo already has
   an equivalent helper.
 - Removal is validated by install/build/test behavior, not just text search.
@@ -146,7 +161,13 @@ Likely candidates from the initial scan:
 `clsx` should not be removed by simply swapping to the existing shared `cn`
 helper unless the accepted input shapes remain sufficient for WebUI call sites.
 If compatibility needs to expand, add focused tests for class-name joining and
-Tailwind conflict merging.
+Tailwind conflict merging. If that compatibility work grows beyond a mechanical
+helper replacement, split `clsx` into its own cleanup PR instead of bundling it
+with unused declaration removals.
+
+If a cleanup removes or changes a package declared by `apps/packages/ui`, also
+check whether `apps/extension/package.json` still needs that package for direct
+extension code or for shared UI entrypoints.
 
 ### 3. `axios` Replacement
 
@@ -166,7 +187,17 @@ current public surface:
 - `hasEnvAuthConfigured`
 - `hasExplicitAuthHeaders`
 - `ApiError`
+- either the current default `api` export with `api.defaults.baseURL` semantics,
+  or an explicit replacement setter/getter with all current callers migrated in
+  the same PR
 - mutable base URL behavior used by `apps/tldw-frontend/hooks/useConfig.tsx`
+
+Do not keep `AxiosRequestConfig` or `InternalAxiosRequestConfig` as public types
+after `axios` is removed. Define a small local request config type that supports
+the options current call sites use, including per-request `headers`,
+`withCredentials`, `signal`, and timeout behavior. If additional axios config
+keys are discovered during implementation, either support them deliberately or
+remove/migrate the call site in the same PR.
 
 The replacement should preserve these behaviors:
 
@@ -174,6 +205,9 @@ The replacement should preserve these behaviors:
 - `FormData` support without forcing `Content-Type`.
 - timeouts through `AbortController`.
 - browser credentials based on the current auth mode.
+- per-request credential overrides such as notification calls that pass
+  `withCredentials`.
+- per-request header overrides from current callers.
 - session header creation and response-header capture.
 - bearer token, API bearer, and `X-API-KEY` header behavior.
 - CSRF header injection for mutating requests when API-key auth is absent.
@@ -239,17 +273,25 @@ misclassifying them as server responses.
 ### Quick Cleanup PR
 
 - Run source import guards for each removed package.
+- Run config/script/test import guards for each removed package.
+- Confirm direct-vs-transitive ownership through the package manager or lockfile
+  before removing direct declarations.
 - Run `bun install` from `apps/` to update `apps/bun.lock`.
 - Run focused tests for any changed helper behavior.
 - Run a targeted frontend lint/build command if the current baseline allows it.
+- If `apps/packages/ui` dependencies change, run at least one targeted
+  extension compile or unit-test command that exercises shared UI imports, or
+  record the current blocker.
 - Run `git diff --check`.
 - Record Bandit skip if no Python code is touched.
 
 ### `axios` Replacement PR
 
 - Add or update tests for:
+  - default `api` export compatibility or the replacement base-URL setter
   - auth header construction
   - CSRF header behavior
+  - per-request headers and credential overrides
   - timeout and abort handling
   - request-history logging
   - base URL mutation through `useConfig`

@@ -4,7 +4,7 @@ title: Design WebUI dependency trimming sequence for issue 1346
 status: In Progress
 assignee: []
 created_date: '2026-05-07 01:05'
-updated_date: '2026-05-07 01:08'
+updated_date: '2026-05-07 01:33'
 labels:
   - webui
   - dependencies
@@ -40,6 +40,8 @@ Wrote approved design spec for issue #1346 at Docs/superpowers/specs/2026-05-07-
 Spec review loop result: Approved. Reviewer confirmed the spec preserves audit -> quick cleanup -> axios replacement order, splits work into reviewable units, names target package surfaces and issue/task references, and includes guardrails plus verification expectations.
 
 Verification for design slice: git diff --check passed. Bandit skipped because this slice changes docs/backlog task metadata only and touches no Python code.
+
+Manual design review before implementation planning found and fixed three risks: default api/baseURL compatibility for axios replacement, per-request config compatibility, and extension impact checks for shared @tldw/ui dependency changes. Also clarified that clsx should split into its own PR if compatibility work is non-mechanical.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
