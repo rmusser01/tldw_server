@@ -4202,17 +4202,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/shared/WatchlistsEmptyState.tsx:Empty",
-    "path": "src/components/Option/Watchlists/shared/WatchlistsEmptyState.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/Option/Watchlists/shared/WatchlistsEmptyState.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx:Tag#antd-tag-watchlistshealthbar-color-error-line-307-tfw62m",
     "path": "src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx",
     "rule": "antd-product-state-import",
@@ -5540,17 +5529,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing local SearchEmptyState empty-state wrapper before the guard.",
-    "replacement": "EmptyState",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "local-empty-state:src/components/Option/Watchlists/shared/WatchlistsEmptyState.tsx:WatchlistsEmptyState",
-    "path": "src/components/Option/Watchlists/shared/WatchlistsEmptyState.tsx",
-    "rule": "local-empty-state",
-    "subject": "WatchlistsEmptyState",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local WatchlistsEmptyState empty-state wrapper before the guard.",
     "replacement": "EmptyState",
     "migrationQueue": "shared-product-state"
   },
