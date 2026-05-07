@@ -10,6 +10,10 @@ import pytest
 from fastapi import APIRouter, FastAPI
 
 from tldw_Server_API.app.api.v1.router_groups.admin import iter_admin_router_specs
+from tldw_Server_API.app.api.v1.router_groups.conditional import (
+    OptionalRouterMissingAttribute,
+    OptionalRouterMissingModule,
+)
 from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router_specs
 from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
@@ -7967,7 +7971,10 @@ def test_iter_minimal_optional_router_specs_defers_experience_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is definition["default_stable"]
-        assert spec.skip_exceptions == (Exception,)
+        assert spec.skip_exceptions == (
+            OptionalRouterMissingModule,
+            OptionalRouterMissingAttribute,
+        )
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -7980,10 +7987,10 @@ def test_iter_minimal_optional_router_specs_defers_experience_attr_lookup(
     }
 
 
-def test_iter_minimal_optional_router_specs_skips_experience_runtime_import_failures(
+def test_iter_minimal_optional_router_specs_skips_experience_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal experience specs preserve broad import failure skipping."""
+    """Verify minimal experience specs skip missing optional router modules."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
@@ -7991,9 +7998,9 @@ def test_iter_minimal_optional_router_specs_skips_experience_runtime_import_fail
     )
 
     experience_modules = {
-        "tldw_Server_API.app.api.v1.endpoints.sharing",
-        "tldw_Server_API.app.api.v1.endpoints.personalization",
-        "tldw_Server_API.app.api.v1.endpoints.companion",
+        "sharing": "tldw_Server_API.app.api.v1.endpoints.sharing",
+        "personalization": "tldw_Server_API.app.api.v1.endpoints.personalization",
+        "companion": "tldw_Server_API.app.api.v1.endpoints.companion",
     }
 
     specs = list(iter_minimal_optional_router_specs())
@@ -8007,9 +8014,12 @@ def test_iter_minimal_optional_router_specs_skips_experience_runtime_import_fail
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Crash only the selected experience router imports at registration."""
-        if module_name in experience_modules:
-            raise RuntimeError(f"{module_name} exploded during import")
+        """Fail only the selected experience router imports at registration."""
+        if module_name in experience_modules.values():
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -8021,14 +8031,54 @@ def test_iter_minimal_optional_router_specs_skips_experience_runtime_import_fail
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
-    assert debug_messages == [
-        "Skipping sharing router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.sharing exploded during import",
-        "Skipping personalization router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.personalization exploded during import",
-        "Skipping companion router in minimal test app: "
-        "tldw_Server_API.app.api.v1.endpoints.companion exploded during import",
-    ]
+    assert len(debug_messages) == len(experience_modules)
+    for router_name, module_name in experience_modules.items():
+        assert any(
+            f"Skipping {router_name} router" in message
+            and "in minimal test app" in message
+            and module_name in message
+            for message in debug_messages
+        )
+
+
+@pytest.mark.parametrize(
+    ("router_name", "module_name"),
+    (
+        ("sharing", "tldw_Server_API.app.api.v1.endpoints.sharing"),
+        ("personalization", "tldw_Server_API.app.api.v1.endpoints.personalization"),
+        ("companion", "tldw_Server_API.app.api.v1.endpoints.companion"),
+    ),
+)
+def test_iter_minimal_optional_router_specs_propagates_experience_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    router_name: str,
+    module_name: str,
+) -> None:
+    """Verify minimal experience runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == router_name)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only one selected experience router import at registration."""
+        if import_name == module_name:
+            raise RuntimeError(f"{module_name} exploded during import")
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(RuntimeError, match="exploded during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_guardian_safety_attr_lookup(
