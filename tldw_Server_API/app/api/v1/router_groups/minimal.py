@@ -180,17 +180,17 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     else:
         logger.info("Skipping audio routers in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
 
-    def _media_router_factory():
-        from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
-
-        return media_router
-
-    specs.append(RouterSpec(
-        router=_media_router_factory,
-        prefix=f"{API_V1_PREFIX}/media",
-        tags=("media",),
-        route_key="media",
-    ))
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media",
+            log_name="media",
+            prefix=f"{API_V1_PREFIX}/media",
+            tags=("media",),
+            route_key="media",
+            skip_context=minimal_skip_context,
+        ),
+    )
 
     if _audio_jobs_imports_enabled_for_runtime():
         def _audio_jobs_router_factory():
