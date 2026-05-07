@@ -19,9 +19,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
     prepare_chunking_options_dict,
-    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_batch_media,
@@ -254,7 +254,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
         def cancel_check():
             return _should_cancel(jm, job_id)
 
-        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
             form_data,
             media_type=str(form_data.media_type) if form_data.media_type else None,
             source_name=str(input_ref or source),

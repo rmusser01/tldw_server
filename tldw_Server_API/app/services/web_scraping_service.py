@@ -25,8 +25,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
-    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
@@ -437,7 +437,7 @@ async def process_web_scraping_task(
                         if not isinstance(article, dict):
                             continue
                         content_text = article.get("content")
-                        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
                             chunking_form,
                             media_type="web",
                             source_name=str(article.get("url") or ""),
@@ -479,7 +479,7 @@ async def process_web_scraping_task(
                         chunk_options = None
                         chunking_plan = None
                         if perform_chunking:
-                            chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                            chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
                                 chunking_form,
                                 media_type="web",
                                 source_name=str(article.get("url") or ""),

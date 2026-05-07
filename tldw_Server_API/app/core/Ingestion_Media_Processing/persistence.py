@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     prepare_chunking_options_dict,
     prepare_common_options,
     resolve_chunking_options_and_plan,
@@ -3396,7 +3397,7 @@ async def persist_primary_av_item(
     resolved_chunk_options = chunk_options
     if getattr(form_data, "chunking_mode", None) == "auto":
         with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
-            auto_chunking_options, auto_chunking_plan = resolve_chunking_options_and_plan(
+            auto_chunking_options, auto_chunking_plan = await async_resolve_chunking_options_and_plan(
                 form_data,
                 media_type=media_type,
                 source_name=str(original_input_ref or ""),
@@ -5327,7 +5328,7 @@ async def persist_doc_item_and_children(
     resolved_chunk_options = chunk_options
     if getattr(form_data, "chunking_mode", None) == "auto":
         with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
-            auto_chunking_options, auto_chunking_plan = resolve_chunking_options_and_plan(
+            auto_chunking_options, auto_chunking_plan = await async_resolve_chunking_options_and_plan(
                 form_data,
                 media_type=media_type,
                 source_name=str(item_input_ref or processing_filename or ""),

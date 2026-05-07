@@ -21,8 +21,8 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
-    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
@@ -795,7 +795,7 @@ class WebScrapingService:
                     chunk_options = None
                     chunking_plan = None
                     if perform_chunking:
-                        chunk_options, chunking_plan = resolve_chunking_options_and_plan(
+                        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
                             chunking_form,
                             media_type="web",
                             source_name=str(article.get("url") or ""),

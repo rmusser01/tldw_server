@@ -26,8 +26,8 @@ from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessDocumentsForm
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
+    async_resolve_chunking_for_result,
     attach_chunking_plan_to_result,
-    resolve_chunking_for_result,
     resolve_chunking_options_and_plan,
     uses_hierarchical_chunking,
 )
@@ -535,7 +535,7 @@ async def process_documents_endpoint(
                     attach_chunking_plan_to_result(res, chunking_plan)
                     continue
 
-                result_chunk_options, result_chunking_plan = resolve_chunking_for_result(
+                result_chunk_options, result_chunking_plan = await async_resolve_chunking_for_result(
                     form_data,
                     res,
                     media_type="document",
