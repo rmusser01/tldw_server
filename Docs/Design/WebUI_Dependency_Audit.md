@@ -165,7 +165,7 @@ This audit does not remove packages or rewrite runtime code.
 | `vite` | `web:devDependencies`, `extension:devDependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | `vitest` | `web:devDependencies`, `shared-ui:devDependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | `wxt` | `shared-ui:peerDependencies`, `extension:devDependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| `xterm` | `web:dependencies`, `shared-ui:peerDependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| `xterm` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | `zod` | `web:dependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | `zustand` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
