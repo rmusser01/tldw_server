@@ -1,10 +1,10 @@
 ---
 id: TASK-101
 title: Create WebUI dependency audit for issue 1346
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-05-07 01:36'
-updated_date: '2026-05-07 02:11'
+updated_date: '2026-05-07 02:26'
 labels:
   - webui
   - dependencies
@@ -39,7 +39,7 @@ Implement the first approved work unit from the WebUI dependency trimming design
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Task 3 docs-only classification plan: regenerate declaration and usage JSON, inspect pubsub-js/buffer/stream-browserify/clsx/axios with import-aware evidence, fill every audit table classification cell, update ranked follow-up and verification notes, run git diff --check and git status --short, then commit only Docs/Design/WebUI_Dependency_Audit.md and TASK-101.
+Task 3 review-correction plan: rebuild /tmp/tldw-webui-dependency-usage.json with a strict import/config-aware matcher, including static/side-effect/export imports, dynamic imports, require, require.resolve, vi.mock/jest.mock, CSS @import, true config plugin keys, and explicit package-script evidence; regenerate the whole audit table from that corrected signal; update verification and TASK-101 notes; run table validation, git diff --check, and git status --short; commit only the audit doc and TASK-101.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -58,12 +58,16 @@ Task 2 progress generated the temporary declaration JSON from the three manifest
 Task 3 started in worktree branch codex/webui-dependency-trim-1346. Scope remains docs-only: audit document and TASK-101 updates only.
 
 Task 3 progress generated /tmp/tldw-webui-dependency-usage.json from 4605 scanned files across apps/tldw-frontend, apps/packages/ui, and apps/extension. Classified all 125 audited WebUI/shared UI rows, ranked quick cleanup and replacement candidates, and recorded quick-candidate precision caveats and Bandit docs-only skip in the audit.
+
+Review correction started: spec review found false-positive package counts from broad text/config-key matching, especially generic names like next. Reopening task status while the import/config-aware table correction is applied.
+
+Review correction progress regenerated the table from strict import/config/package-script evidence. Corrected generic-name false positives across the table; next now has WebUI-only evidence and no shared UI local-variable matches. Quick candidates remain pubsub-js/buffer/stream-browserify remove-now, clsx and axios remain replace-later.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the docs-only WebUI dependency audit classification for issue #1346. The audit now classifies all 125 WebUI/shared UI package rows with import counts, representative sites, consumer surface, category, decision, risk, expected impact, and follow-up slice. It ranks quick cleanup candidates, keeps axios and clsx as dedicated replacement work, defers icon-stack and complex rendering/parser/editor/security/schema packages, and records the usage scan, 4605 scanned file count, quick-candidate inspection, precision caveats, and Bandit docs-only skip. Verification run: table shape/no-TBD check and git diff --check.
+Task 3 classification has been corrected after spec review. The audit now uses strict import/config/package-script evidence rather than broad text/config-key substring signals, including corrected generic-name handling for next. Quick candidates remain conservative: pubsub-js, buffer, and stream-browserify have no package evidence; clsx and axios remain replace-later. TASK-101 is back In Progress because Task 4/final review closeout remains pending.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
