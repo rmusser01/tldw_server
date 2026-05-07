@@ -456,17 +456,17 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         route_key="evaluations",
     ))
 
-    def _monitoring_router_factory():
-        from tldw_Server_API.app.api.v1.endpoints.monitoring import router as monitoring_router
-
-        return monitoring_router
-
-    specs.append(RouterSpec(
-        router=_monitoring_router_factory,
-        prefix=f"{API_V1_PREFIX}",
-        tags=("monitoring",),
-        route_key="monitoring",
-    ))
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.monitoring",
+            log_name="monitoring",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("monitoring",),
+            route_key="monitoring",
+            skip_context=minimal_skip_context,
+        ),
+    )
 
     for experience_spec in (
         ImportedRouterSpec(
