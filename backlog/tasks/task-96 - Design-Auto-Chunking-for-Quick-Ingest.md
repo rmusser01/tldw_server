@@ -1,11 +1,11 @@
 ---
 id: TASK-96
 title: Design Auto Chunking for Quick Ingest
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-06 16:13'
-updated_date: '2026-05-06 16:29'
+updated_date: '2026-05-07 04:45'
 labels:
   - design
   - chunking
@@ -48,14 +48,24 @@ Write the approved design spec for novice-facing Auto Chunking in tldw_server. T
 2026-05-06: Independent design review found planning risks and patched the spec: structure_aware/schema handling, async job result exposure via chunking_plan, Auto-vs-Manual precedence for saved advanced settings, both Quick Ingest submission paths, and V1 derived views as metadata only.
 
 2026-05-06: Second spec-review pass approved the updated spec with no blocking issues. Applied its advisory wording change so rollout says Mode defaults to Auto when Chunking is enabled, avoiding any implication that the global Chunking toggle default changes.
+
+2026-05-07: Finalized the parent Auto Chunking design task after verifying on origin/dev that TASK-96.1 through TASK-96.9 are all Done. This parent closeout only updates Backlog bookkeeping; no product code changed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Auto Chunking design and implementation series completed. The design spec established the novice-facing Quick Ingest contract: enabling Chunking uses Auto by default, Manual exposes advanced settings, deterministic media-aware planning is the default, and LLM boundary assistance is explicit opt-in with deterministic fallback metadata.
+
+Follow-on subtasks TASK-96.1 through TASK-96.9 delivered the implementation plan, backend request parsing and resolver wiring, deterministic planner, Quick Ingest payload/UI controls, AI-assist fallback documentation, real boundary assistant adapter, and PR review fixes. Verification was recorded on each subtask; this parent task is a design/backlog finalization update with no code changes, so Bandit is not applicable for this final bookkeeping change.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
