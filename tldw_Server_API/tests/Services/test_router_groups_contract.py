@@ -10186,6 +10186,241 @@ def test_iter_minimal_optional_router_specs_includes_media_audio_when_opted_in(
     assert by_first_path["/stream/transcribe"].route_key == "audio-websocket"
 
 
+def test_iter_minimal_optional_router_specs_defers_audio_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal audio specs keep router attr lookup lazy."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio"
+    routers_by_attr: dict[str, APIRouter] = {
+        "router": APIRouter(),
+        "ws_router": APIRouter(),
+    }
+    routers_by_attr["router"].get("/transcriptions")(lambda: {"status": "ok"})
+    routers_by_attr["ws_router"].get("/stream/transcribe")(lambda: {"status": "ok"})
+    fake_module = ModuleType(module_name)
+    access_count = {
+        f"{module_name}.router": 0,
+        f"{module_name}.ws_router": 0,
+    }
+    import_calls: list[str] = []
+
+    class TrackingAudioModule(ModuleType):
+        """Fake audio module that tracks lazy router attribute resolution."""
+
+        def __getattr__(self, name: str) -> APIRouter:
+            if name not in routers_by_attr:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers_by_attr[name]
+
+    fake_module = TrackingAudioModule(module_name)
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy audio router module imports."""
+        if import_name == module_name:
+            import_calls.append(import_name)
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_minimal_optional_router_specs())
+    assert import_calls == []
+    assert access_count == {
+        f"{module_name}.router": 0,
+        f"{module_name}.ws_router": 0,
+    }
+
+    selected_specs = {
+        spec.route_key: spec
+        for spec in specs
+        if spec.route_key in {"audio", "audio-websocket"}
+    }
+    assert set(selected_specs) == {"audio", "audio-websocket"}
+
+    audio_spec = selected_specs["audio"]
+    assert audio_spec.name == "audio"
+    assert audio_spec.prefix == "/api/v1/audio"
+    assert audio_spec.tags == ("audio",)
+    assert audio_spec.skip_context == "in minimal test app"
+    assert audio_spec.default_stable is True
+    assert audio_spec.skip_exceptions == (
+        OptionalRouterMissingModule,
+        OptionalRouterMissingAttribute,
+    )
+    assert _first_router_path(audio_spec.router) == "/transcriptions"
+
+    audio_ws_spec = selected_specs["audio-websocket"]
+    assert audio_ws_spec.name == "audio-websocket"
+    assert audio_ws_spec.prefix == "/api/v1/audio"
+    assert audio_ws_spec.tags == ("audio-ws",)
+    assert audio_ws_spec.skip_context == "in minimal test app"
+    assert audio_ws_spec.default_stable is True
+    assert audio_ws_spec.skip_exceptions == (
+        OptionalRouterMissingModule,
+        OptionalRouterMissingAttribute,
+    )
+    assert _first_router_path(audio_ws_spec.router) == "/stream/transcribe"
+
+    assert import_calls == [module_name, module_name]
+    assert access_count == {
+        f"{module_name}.router": 1,
+        f"{module_name}.ws_router": 1,
+    }
+
+
+def test_iter_minimal_optional_router_specs_skips_audio_router_missing_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal audio specs skip missing optional router module."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_specs = [
+        spec for spec in specs if spec.route_key in {"audio", "audio-websocket"}
+    ]
+    assert {spec.route_key for spec in selected_specs} == {"audio", "audio-websocket"}
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Fail only the selected missing audio router import."""
+        if import_name == module_name:
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), selected_specs) == 0
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
+    ]
+    assert len(skip_debug_messages) == 2
+    assert any(
+        message.startswith("Skipping audio router in minimal test app:")
+        and module_name in message
+        and "missing during import" in message
+        for message in skip_debug_messages
+    )
+    assert any(
+        message.startswith("Skipping audio-websocket router in minimal test app:")
+        and module_name in message
+        and "missing during import" in message
+        for message in skip_debug_messages
+    )
+
+
+def test_iter_minimal_optional_router_specs_skips_audio_router_missing_attribute_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal audio specs skip missing optional router attributes."""
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio"
+    monkeypatch.setitem(sys.modules, module_name, ModuleType(module_name))
+
+    specs = list(iter_minimal_optional_router_specs())
+    selected_specs = [
+        spec for spec in specs if spec.route_key in {"audio", "audio-websocket"}
+    ]
+    assert {spec.route_key for spec in selected_specs} == {"audio", "audio-websocket"}
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), selected_specs) == 0
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
+    ]
+    assert len(skip_debug_messages) == 2
+    assert any(
+        message.startswith("Skipping audio router in minimal test app:")
+        and f"{module_name}.router" in message
+        for message in skip_debug_messages
+    )
+    assert any(
+        message.startswith("Skipping audio-websocket router in minimal test app:")
+        and f"{module_name}.ws_router" in message
+        for message in skip_debug_messages
+    )
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "message"),
+    (
+        (RuntimeError, "audio exploded during import"),
+        (ImportError, "audio dependency failed during import"),
+        (AttributeError, "audio attribute failed during import"),
+    ),
+)
+def test_iter_minimal_optional_router_specs_propagates_audio_router_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[Exception],
+    message: str,
+) -> None:
+    """Verify minimal audio runtime import defects are not silently skipped."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    module_name = "tldw_Server_API.app.api.v1.endpoints.audio.audio"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.route_key == "audio")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only the selected audio router import at registration."""
+        if import_name == module_name:
+            raise exception_type(message)
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(exception_type, match=message):
+        register_router_specs(FastAPI(), (selected_spec,))
+
+
 def test_iter_minimal_optional_router_specs_skips_audio_during_pytest_without_opt_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
