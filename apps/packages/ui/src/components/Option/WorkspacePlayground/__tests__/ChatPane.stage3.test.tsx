@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
@@ -261,6 +262,14 @@ vi.mock("antd", async () => {
   }
 })
 
+function renderChatPane() {
+  return render(
+    <MemoryRouter>
+      <ChatPane />
+    </MemoryRouter>
+  )
+}
+
 describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -300,6 +309,15 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     mockGetWorkspaceChatSession.mockReturnValue(null)
   })
 
+  it("renders the empty chat shell through the canonical EmptyState primitive", () => {
+    const { container } = renderChatPane()
+
+    expect(
+      container.querySelector('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
+    expect(screen.getByText("Start your research")).toBeInTheDocument()
+  })
+
   it("adapts empty-state examples based on selected source types", () => {
     workspaceStoreState.selectedSourceIds = ["source-video-1"]
     workspaceStoreState.getSelectedSources = () => [
@@ -312,7 +330,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ]
     workspaceStoreState.getSelectedMediaIds = () => [10]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(
       screen.getByText("What was discussed around minute 12?")
@@ -331,7 +349,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ]
     workspaceStoreState.getSelectedMediaIds = () => [10]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const prompt = "What was discussed around minute 12?"
     fireEvent.click(screen.getByRole("button", { name: prompt }))
@@ -366,7 +384,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const toolbar = screen.getByTestId("workspace-chat-controls-toolbar")
     expect(toolbar).toBeInTheDocument()
@@ -390,7 +408,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     await waitFor(() => {
       expect(mockSetRagMediaIds).toHaveBeenCalledWith([101])
@@ -425,7 +443,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     fireEvent.click(
       screen.getByRole("button", { name: "Advanced RAG settings" })
@@ -484,7 +502,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       }
     })
 
-    render(<ChatPane />)
+    renderChatPane()
 
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Include full source contents" })
@@ -514,7 +532,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   })
 
   it("shows keyboard shortcut hint below the composer", () => {
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(
       screen.getByText("Enter or Cmd/Ctrl+Enter to send, Shift+Enter for new line")
@@ -522,7 +540,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   })
 
   it("submits discuss-artifact payloads from Studio into chat", async () => {
-    render(<ChatPane />)
+    renderChatPane()
 
     window.dispatchEvent(
       new CustomEvent("workspace-playground:discuss-artifact", {
@@ -567,7 +585,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getAllByRole("button", { name: "Save to Notes" })).toHaveLength(2)
   })
@@ -583,7 +601,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
 

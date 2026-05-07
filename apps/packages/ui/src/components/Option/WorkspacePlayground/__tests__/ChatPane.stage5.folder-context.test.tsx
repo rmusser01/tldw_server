@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
@@ -234,6 +235,14 @@ vi.mock("antd", async () => {
   }
 })
 
+function renderChatPane() {
+  return render(
+    <MemoryRouter>
+      <ChatPane />
+    </MemoryRouter>
+  )
+}
+
 describe("ChatPane Stage 5 folder-derived context", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -266,7 +275,7 @@ describe("ChatPane Stage 5 folder-derived context", () => {
   })
 
   it("shows folder-derived sources in the context indicator and syncs RAG scope", async () => {
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(await screen.findByText("Folder Source")).toBeTruthy()
 

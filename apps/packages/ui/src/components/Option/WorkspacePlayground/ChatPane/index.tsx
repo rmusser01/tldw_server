@@ -43,7 +43,7 @@ import {
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { Link } from "react-router-dom"
-import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { buildChatLorebookDebugPath } from "@/routes/route-paths"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
@@ -852,7 +852,7 @@ const WorkspaceChatEmpty: React.FC<{
 
   return (
     <div className={`mx-auto w-full ${emptyStateMaxWidthClass} px-4 pb-2 pt-3`}>
-      <FeatureEmptyState
+      <EmptyState
         className="max-w-none"
         icon={MessageSquarePlus}
         title={t("playground:chat.emptyTitle", "Start your research")}
@@ -875,6 +875,8 @@ const WorkspaceChatEmpty: React.FC<{
             </p>
           </div>
         }
+        size="lg"
+        variant="card"
         examples={examples.map((example, index) => (
           <button
             key={example}
