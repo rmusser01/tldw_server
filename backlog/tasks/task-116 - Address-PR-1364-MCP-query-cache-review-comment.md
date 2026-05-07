@@ -1,7 +1,7 @@
 ---
 id: TASK-116
 title: Address PR 1364 MCP query cache review comment
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-07 19:29'
 labels:
@@ -28,12 +28,12 @@ Resolve the PR #1364 review finding that MCP React Query keys are not scoped by 
 <!-- AC:BEGIN -->
 - [x] #1 MCP React Query keys include a stable active connection scope for health tools catalogs and modules queries
 - [x] #2 Focused tests assert cache keys change when the connection scope changes
-- [ ] #3 PR #1364 review surface is rechecked after pushing the fix
+- [x] #3 PR #1364 review surface is rechecked after pushing the fix
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
