@@ -66,7 +66,12 @@ const generationStatuses = new Set<ArtifactStatus>([
 ])
 
 const reviewStatuses = new Set<ArtifactReviewStatus>([
-  "draft"
+  "draft",
+  "reviewing",
+  "accepted",
+  "needs_revision",
+  "exported",
+  "assigned"
 ])
 
 const normalizeWorkspaceSourceType = (
@@ -81,10 +86,19 @@ const normalizeArtifactType = (artifactType: string): ArtifactType =>
     ? (artifactType as ArtifactType)
     : "report"
 
-const mapServerGenerationStatus = (status: string): ArtifactStatus =>
-  generationStatuses.has(status as ArtifactStatus)
-    ? (status as ArtifactStatus)
-    : "pending"
+const mapServerGenerationStatus = (
+  artifact: WorkspaceArtifactApiResponse
+): ArtifactStatus => {
+  if (generationStatuses.has(artifact.status as ArtifactStatus)) {
+    return artifact.status as ArtifactStatus
+  }
+
+  if (artifact.completed_at || (artifact.content?.trim().length ?? 0) > 0) {
+    return "completed"
+  }
+
+  return "pending"
+}
 
 const mapServerReviewStatus = (
   status: string
@@ -111,7 +125,7 @@ const mapServerArtifactToLocal = (
   id: artifact.id,
   type: normalizeArtifactType(artifact.artifact_type),
   title: artifact.title,
-  status: mapServerGenerationStatus(artifact.status),
+  status: mapServerGenerationStatus(artifact),
   reviewStatus: mapServerReviewStatus(artifact.status),
   serverId: artifact.id,
   content: artifact.content || undefined,

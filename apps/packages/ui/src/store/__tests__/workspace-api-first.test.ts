@@ -82,12 +82,58 @@ describe("workspace store API-first mutations", () => {
       id: "art-1",
       type: "report",
       title: "Executive Brief",
+      status: "completed",
       reviewStatus: "draft",
       content: "Brief body",
       totalTokens: 120,
       totalCostUsd: 0.02
     })
   })
+
+  it.each([
+    "draft",
+    "reviewing",
+    "accepted",
+    "needs_revision",
+    "exported",
+    "assigned"
+  ])(
+    "preserves server review status %s while deriving completed generation state",
+    async (reviewStatus) => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        id: `ws-${reviewStatus}`,
+        name: "Review WS",
+        version: 1,
+        sources: [],
+        artifacts: [
+          {
+            id: `art-${reviewStatus}`,
+            workspace_id: `ws-${reviewStatus}`,
+            artifact_type: "report",
+            title: "Review Artifact",
+            status: reviewStatus,
+            content: "Completed artifact body",
+            total_tokens: null,
+            total_cost_usd: null,
+            created_at: "2026-05-06T12:05:00Z",
+            completed_at: null,
+            version: 1
+          }
+        ],
+        notes: []
+      })
+
+      const state = await hydrateWorkspaceFromServer(`ws-${reviewStatus}`, {
+        fetch: mockFetch
+      })
+
+      expect(state.artifacts[0]).toMatchObject({
+        id: `art-${reviewStatus}`,
+        status: "completed",
+        reviewStatus
+      })
+    }
+  )
 
   it("does not mark unknown backend artifact statuses as completed", async () => {
     const mockFetch = vi.fn().mockResolvedValue({

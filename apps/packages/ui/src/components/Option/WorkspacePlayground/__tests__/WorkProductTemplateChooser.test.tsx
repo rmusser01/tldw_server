@@ -9,12 +9,14 @@ const renderChooser = (options?: {
   selectedTemplateId?: WorkProductTemplateId
   selectedSourceCount?: number
   onSelectTemplate?: (templateId: WorkProductTemplateId) => void
+  disabled?: boolean
 }) =>
   render(
     <WorkProductTemplateChooser
       selectedTemplateId={options?.selectedTemplateId ?? "executive_brief"}
       selectedSourceCount={options?.selectedSourceCount ?? 1}
       onSelectTemplate={options?.onSelectTemplate ?? vi.fn()}
+      disabled={options?.disabled}
     />
   )
 
@@ -52,6 +54,7 @@ describe("WorkProductTemplateChooser", () => {
     })
 
     expect(executiveBrief).toHaveAttribute("aria-disabled", "true")
+    expect(executiveBrief).toBeDisabled()
   })
 
   it("keeps other roadmap templates visible but unavailable in this slice", async () => {
@@ -66,9 +69,29 @@ describe("WorkProductTemplateChooser", () => {
     ]) {
       const templateButton = screen.getByRole("button", { name })
       expect(templateButton).toHaveAttribute("aria-disabled", "true")
+      expect(templateButton).toBeDisabled()
       await user.click(templateButton)
     }
 
+    expect(onSelectTemplate).not.toHaveBeenCalled()
+  })
+
+  it("uses native disabled behavior while output generation is in flight", async () => {
+    const user = userEvent.setup()
+    const onSelectTemplate = vi.fn()
+    renderChooser({
+      selectedSourceCount: 1,
+      disabled: true,
+      onSelectTemplate
+    })
+
+    const executiveBrief = screen.getByRole("button", {
+      name: /executive brief/i
+    })
+
+    expect(executiveBrief).toHaveAttribute("aria-disabled", "true")
+    expect(executiveBrief).toBeDisabled()
+    await user.click(executiveBrief)
     expect(onSelectTemplate).not.toHaveBeenCalled()
   })
 })
