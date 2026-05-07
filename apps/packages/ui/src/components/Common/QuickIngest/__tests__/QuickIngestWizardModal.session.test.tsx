@@ -305,6 +305,12 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.submitQuickIngestBatch).toHaveBeenCalledWith(
       expect.objectContaining({
         __quickIngestSessionId: "qi-direct-test",
+        common: expect.objectContaining({
+          perform_chunking: true,
+          chunking_mode: "auto",
+          auto_chunking_goal: "balanced",
+          auto_chunking_use_llm: false,
+        }),
         entries: [
           expect.objectContaining({
             id: "queued-url-1",

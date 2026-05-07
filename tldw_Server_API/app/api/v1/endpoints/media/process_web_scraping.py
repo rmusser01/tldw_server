@@ -108,6 +108,10 @@ async def process_web_scraping_endpoint(
             crawl_strategy=payload.crawl_strategy,
             include_external=payload.include_external,
             score_threshold=payload.score_threshold,
+            perform_chunking=payload.perform_chunking,
+            chunking_mode=payload.chunking_mode,
+            auto_chunking_goal=payload.auto_chunking_goal,
+            auto_chunking_use_llm=payload.auto_chunking_use_llm,
         )
         return result
     except HTTPException:

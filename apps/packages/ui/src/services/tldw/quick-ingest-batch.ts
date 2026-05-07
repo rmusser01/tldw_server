@@ -7,7 +7,12 @@ import {
   normalizeMediaType,
   shouldKeepOriginalFile,
 } from "@/services/tldw/media-routing";
-import { resolvePerformChunking } from "@/services/tldw/ingest-defaults";
+import {
+  applyQuickIngestChunkingFields,
+  shouldSubmitQuickIngestAdvancedField,
+  type QuickIngestAutoChunkingGoal,
+  type QuickIngestChunkingMode,
+} from "@/services/tldw/quick-ingest-chunking";
 import {
   createIngestJobsTracker,
   extractIngestJobIds,
@@ -57,6 +62,9 @@ type QuickIngestBatchInput = {
     perform_analysis?: boolean;
     perform_chunking?: boolean;
     overwrite_existing?: boolean;
+    chunking_mode?: QuickIngestChunkingMode;
+    auto_chunking_goal?: QuickIngestAutoChunkingGoal;
+    auto_chunking_use_llm?: boolean;
   };
   advancedValues?: Record<string, any>;
   fileDefaults?: TypeDefaults;
@@ -391,13 +399,13 @@ const buildFields = ({
   const fields: Record<string, any> = {
     media_type: mediaType,
     perform_analysis: Boolean(common?.perform_analysis),
-    perform_chunking: resolvePerformChunking(common?.perform_chunking),
     overwrite_existing: Boolean(common?.overwrite_existing),
     keep_original_file: persist && shouldKeepOriginalFile(rawType),
   };
 
   const nested: Record<string, any> = {};
   for (const [key, value] of Object.entries(advancedValues || {})) {
+    if (!shouldSubmitQuickIngestAdvancedField(key, common)) continue;
     if (key.includes(".")) assignPath(nested, key.split("."), value);
     else fields[key] = value;
   }
@@ -448,12 +456,11 @@ const buildFields = ({
     fields.pdf_parsing_engine = document.ocr ? "pymupdf4llm" : "";
   }
 
-  if (chunkingTemplateName) {
-    fields.chunking_template_name = chunkingTemplateName;
-  }
-  if (autoApplyTemplate) {
-    fields.auto_apply_template = true;
-  }
+  applyQuickIngestChunkingFields(fields, {
+    common,
+    chunkingTemplateName,
+    autoApplyTemplate,
+  });
 
   return fields;
 };
@@ -463,14 +470,19 @@ const processWebScrape = async ({
   entry,
   common,
   advancedValues,
+  chunkingTemplateName,
+  autoApplyTemplate,
 }: {
   url: string;
   entry?: QuickIngestEntry;
   common?: QuickIngestBatchInput["common"];
   advancedValues?: Record<string, any>;
+  chunkingTemplateName?: string;
+  autoApplyTemplate?: boolean;
 }): Promise<any> => {
   const nestedBody: Record<string, any> = {};
   for (const [key, value] of Object.entries(advancedValues || {})) {
+    if (!shouldSubmitQuickIngestAdvancedField(key, common)) continue;
     if (key.includes(".")) assignPath(nestedBody, key.split("."), value);
     else nestedBody[key] = value;
   }
@@ -489,6 +501,11 @@ const processWebScrape = async ({
     summarize_checkbox: Boolean(common?.perform_analysis),
     ...normalizedBody,
   };
+  applyQuickIngestChunkingFields(body, {
+    common,
+    chunkingTemplateName,
+    autoApplyTemplate,
+  });
 
   if (typeof entry?.keywords === "string") {
     const trimmed = entry.keywords.trim();
@@ -641,6 +658,8 @@ const runDirectQuickIngestBatch = async (
             entry,
             common: input.common,
             advancedValues: input.advancedValues,
+            chunkingTemplateName: input.chunkingTemplateName,
+            autoApplyTemplate: input.autoApplyTemplate,
           });
         } else {
           const fields = buildFields({

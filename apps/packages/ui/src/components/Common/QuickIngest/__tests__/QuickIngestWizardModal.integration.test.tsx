@@ -103,6 +103,25 @@ vi.mock("antd", () => ({
       </React.Fragment>
     )
   },
+  Segmented: ({ options, value, onChange, ...props }: any) => (
+    <div role="group" {...props}>
+      {options?.map((option: any) => {
+        const optionValue =
+          typeof option === "object" ? option.value : option
+        const label = typeof option === "object" ? option.label : option
+        return (
+          <button
+            key={optionValue}
+            type="button"
+            aria-pressed={value === optionValue}
+            onClick={() => onChange?.(optionValue)}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  ),
   Radio: Object.assign(
     ({ children, value, ...props }: any) => (
       <label>
@@ -901,6 +920,94 @@ describe("QuickIngestWizardModal — real configure step", () => {
     expect(screen.getByText(/using custom settings/i)).toBeInTheDocument()
   })
 
+  it("shows Auto chunking controls by default when chunking is enabled", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("group", { name: /chunking mode/i })
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByLabelText("Auto chunking goal")).toHaveValue("balanced")
+    expect(
+      screen.getByLabelText("Use AI to improve chunk boundaries")
+    ).not.toBeChecked()
+  })
+
+  it("reveals Manual chunking controls and hides them when switching back to Auto", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+
+    await user.click(await screen.findByRole("button", { name: "Manual" }))
+
+    expect(screen.getByLabelText("Chunk method")).toBeInTheDocument()
+    expect(screen.getByLabelText("Chunk size")).toBeInTheDocument()
+    expect(screen.getByLabelText("Chunk overlap")).toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText("Chunk size"))
+    await user.type(screen.getByLabelText("Chunk size"), "900")
+
+    expect(ctxRef).not.toBeNull()
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.common.chunking_mode).toBe("manual")
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBe(900)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Auto" }))
+
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.common.chunking_mode).toBe("auto")
+    })
+    expect(screen.queryByLabelText("Chunk method")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Chunk size")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Chunk overlap")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Auto chunking goal")).toHaveValue("balanced")
+    expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBeUndefined()
+  })
+
+  it("clamps Manual chunking numbers before storing advanced values", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(await screen.findByRole("button", { name: "Manual" }))
+
+    await user.clear(screen.getByLabelText("Chunk size"))
+    await user.type(screen.getByLabelText("Chunk size"), "0")
+    await user.clear(screen.getByLabelText("Chunk overlap"))
+    await user.type(screen.getByLabelText("Chunk overlap"), "-5")
+
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBe(1)
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_overlap).toBe(0)
+    })
+  })
+
   it("keeps review mode anchored to remote storage and leaves audio defaults available for video-only batches", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={vi.fn()} />)
@@ -1148,6 +1255,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
       common: {
+        ...ctxRef!.state.presetConfig.common,
         perform_analysis: false,
       },
       typeDefaults: {

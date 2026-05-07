@@ -38,6 +38,7 @@ import {
 } from "@/store/quick-ingest-session"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import type {
+  CommonOptions,
   DetectedMediaType,
   ItemProgress,
   ItemProgressStatus,
@@ -81,11 +82,7 @@ type QuickIngestRequestPayload = {
   }>
   storeRemote: boolean
   processOnly: boolean
-  common: {
-    perform_analysis: boolean
-    perform_chunking: boolean
-    overwrite_existing: boolean
-  }
+  common: CommonOptions
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
   __quickIngestSessionId?: string
@@ -756,6 +753,9 @@ const buildQuickIngestPayload = async (
       perform_analysis: options.perform_analysis,
       perform_chunking: options.perform_chunking,
       overwrite_existing: options.overwrite_existing,
+      chunking_mode: options.chunking_mode,
+      auto_chunking_goal: options.auto_chunking_goal,
+      auto_chunking_use_llm: options.auto_chunking_use_llm,
     },
     advancedValues: options.advancedValues ?? {},
     fileDefaults: options.typeDefaults,

@@ -36,7 +36,10 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    attach_chunking_plan_to_result,
+    resolve_chunking_for_result,
+    resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -87,14 +90,13 @@ async def process_videos_endpoint(
     """
 
     # --- Validation and Logging ---
-    logger.info(
-        "Request received for /process-videos. Form data validated via dependency."
-    )
+    logger.info("Request received for /process-videos. Form data validated via dependency.")
 
     # Lazy import to avoid import-time hard failures from optional transcriber backends.
     from tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch import (
         run_video_batch,
     )
+
     try:
         usage_log.log_event(
             "media.process.video",
@@ -107,9 +109,7 @@ async def process_videos_endpoint(
 
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
-        logger.info(
-            "Received urls=[''], treating as no URLs provided for video processing."
-        )
+        logger.info("Received urls=[''], treating as no URLs provided for video processing.")
     form_data.urls = normalize_urls_field(form_data.urls)
     legacy_signal = (
         build_media_legacy_signal(
@@ -140,6 +140,7 @@ async def process_videos_endpoint(
     # Map temporary path -> original filename
     temp_path_to_original_name: dict[str, str] = {}
     chunk_options_dict: dict[str, Any] | None = None
+    chunking_plan: dict[str, Any] | None = None
 
     # --- Use TempDirManager for reliable cleanup ---
     with TempDirManager(cleanup=True, prefix="process_video_") as temp_dir:
@@ -166,26 +167,16 @@ async def process_videos_endpoint(
             if sf.get("path") and sf.get("original_filename"):
                 temp_path_to_original_name[str(sf["path"])] = sf["original_filename"]
             else:
-                logger.warning(
-                    f"Missing path or original_filename in saved_files_info item: {sf}"
-                )
+                logger.warning(f"Missing path or original_filename in saved_files_info item: {sf}")
 
         # Process file-handling errors into the response structure.
         if file_handling_errors_raw:
             batch_result["errors_count"] += len(file_handling_errors_raw)
             batch_result["errors"].extend(
-                [
-                    err.get("error", "Unknown file save error")
-                    for err in file_handling_errors_raw
-                ]
+                [err.get("error", "Unknown file save error") for err in file_handling_errors_raw]
             )
             for err in file_handling_errors_raw:
-                input_ref = (
-                    err.get("input_ref")
-                    or err.get("original_filename")
-                    or err.get("input")
-                    or "Unknown Upload"
-                )
+                input_ref = err.get("input_ref") or err.get("original_filename") or err.get("input") or "Unknown Upload"
                 file_handling_errors_structured.append(
                     {
                         "status": "Error",
@@ -198,9 +189,7 @@ async def process_videos_endpoint(
                         "chunks": None,
                         "analysis": None,
                         "analysis_details": {},
-                        "error": err.get(
-                            "error", "Failed to save uploaded file."
-                        ),
+                        "error": err.get("error", "Failed to save uploaded file."),
                         "warnings": None,
                         "db_id": None,
                         "db_message": "Processing only endpoint.",
@@ -217,9 +206,7 @@ async def process_videos_endpoint(
         # Check if there's anything left to process.
         if not all_inputs_to_process:
             if file_handling_errors_raw:
-                logger.warning(
-                    "No valid video sources to process after file saving errors."
-                )
+                logger.warning("No valid video sources to process after file saving errors.")
                 # Return 207 with the structured file errors.
                 response = JSONResponse(
                     status_code=status.HTTP_207_MULTI_STATUS,
@@ -250,9 +237,7 @@ async def process_videos_endpoint(
     final_error_count = batch_result.get("errors_count", 0)
     final_success_count = batch_result.get("processed_count", 0)
     total_items = len(batch_result.get("results", []))
-    has_warnings = any(
-        r.get("status") == "Warning" for r in batch_result.get("results", [])
-    )
+    has_warnings = any(r.get("status") == "Warning" for r in batch_result.get("results", []))
     # NOTE: `has_warnings` is currently unused but kept for parity/debugging.
     _ = has_warnings, final_success_count
 
@@ -272,8 +257,7 @@ async def process_videos_endpoint(
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-videos request finished with status {}. Results count: {}, "
-        "Errors: {}",
+        "/process-videos request finished with status {}. Results count: {}, " "Errors: {}",
         final_status_code,
         total_items,
         final_error_count,
@@ -284,9 +268,9 @@ async def process_videos_endpoint(
         logger.debug("Final batch_result before JSONResponse:")
         logged_result = batch_result.copy()
         if len(logged_result.get("results", [])) > 5:
-            logged_result["results"] = logged_result["results"][
-                :5
-            ] + [{"message": "... remaining results truncated for logging ..."}]
+            logged_result["results"] = logged_result["results"][:5] + [
+                {"message": "... remaining results truncated for logging ..."}
+            ]
         logger.debug(
             "{}",
             logged_result,
@@ -309,21 +293,25 @@ async def process_videos_endpoint(
     # Optional template/hierarchical re-chunking of video transcripts (best-effort).
     try:
         if form_data.perform_chunking:
-            chunk_options_dict = prepare_chunking_options_dict(form_data)
+            first_url = (form_data.urls or [None])[0]
+            first_filename = None
+            try:
+                if saved_files_info:
+                    first_filename = saved_files_info[0].get("original_filename")
+            except Exception:
+                first_filename = None
+
+            chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type="video",
+                source_name=first_filename or first_url,
+            )
             try:
                 TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
             except Exception:
                 TemplateClassifier = None
 
-            if chunk_options_dict is not None:
-                first_url = (form_data.urls or [None])[0]
-                first_filename = None
-                try:
-                    if saved_files_info:
-                        first_filename = saved_files_info[0].get("original_filename")
-                except Exception:
-                    first_filename = None
-
+            if chunk_options_dict is not None and chunking_plan is None:
                 chunk_options_dict = apply_chunking_template_if_any(
                     form_data=form_data,
                     db=db,
@@ -341,11 +329,7 @@ async def process_videos_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
 
             for res in batch_result.get("results", []):
                 if not isinstance(res, dict):
@@ -355,23 +339,36 @@ async def process_videos_endpoint(
                     continue
                 text = res.get("content")
                 if not isinstance(text, str) or not text.strip():
+                    attach_chunking_plan_to_result(res, chunking_plan)
                     continue
 
-                if use_hier and ck is not None:
+                result_chunk_options, result_chunking_plan = resolve_chunking_for_result(
+                    form_data,
+                    res,
+                    media_type="video",
+                    default_chunk_options=chunk_options_dict,
+                    default_chunking_plan=chunking_plan,
+                )
+                attach_chunking_plan_to_result(res, result_chunking_plan)
+                if not result_chunk_options:
+                    continue
+
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
-                        method=chunk_options_dict.get("method") or "sentences",
-                        max_size=chunk_options_dict.get("max_size") or 500,
-                        overlap=chunk_options_dict.get("overlap") or 200,
-                        language=chunk_options_dict.get("language"),
-                        template=chunk_options_dict.get("hierarchical_template")
-                        if isinstance(
-                            chunk_options_dict.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        method=result_chunk_options.get("method") or "sentences",
+                        max_size=result_chunk_options.get("max_size") or 500,
+                        overlap=result_chunk_options.get("overlap") or 200,
+                        language=result_chunk_options.get("language"),
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
-                    chunks = _improved_chunking_process(text, chunk_options_dict)
+                    chunks = _improved_chunking_process(text, result_chunk_options)
 
                 res["chunks"] = chunks
     except Exception:

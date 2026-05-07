@@ -6,6 +6,7 @@ import {
   IngestWizardProvider,
   useIngestWizard,
 } from "../IngestWizardContext"
+import { configMatchesPreset } from "../presets"
 import type { WizardQueueItem } from "../types"
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,15 @@ function TestHarness() {
       <span data-testid="isMinimized">{String(state.isMinimized)}</span>
       <span data-testid="presetAnalysis">
         {String(state.presetConfig.common.perform_analysis)}
+      </span>
+      <span data-testid="presetChunkingMode">
+        {state.presetConfig.common.chunking_mode || ""}
+      </span>
+      <span data-testid="presetAutoChunkingGoal">
+        {state.presetConfig.common.auto_chunking_goal || ""}
+      </span>
+      <span data-testid="presetAutoChunkingUseLlm">
+        {String(Boolean(state.presetConfig.common.auto_chunking_use_llm))}
       </span>
       <span data-testid="presetAudioLanguage">
         {state.presetConfig.typeDefaults.audio?.language || ""}
@@ -317,6 +327,47 @@ describe("IngestWizardContext", () => {
         await userEvent.click(screen.getByText("setDeep"))
       })
       expect(screen.getByTestId("preset").textContent).toBe("deep")
+    })
+
+    it("defaults chunking-enabled presets to auto chunking", () => {
+      renderWithProvider()
+
+      expect(screen.getByTestId("preset").textContent).toBe("standard")
+      expect(screen.getByTestId("presetChunkingMode").textContent).toBe("auto")
+      expect(screen.getByTestId("presetAutoChunkingGoal").textContent).toBe("balanced")
+      expect(screen.getByTestId("presetAutoChunkingUseLlm").textContent).toBe("false")
+    })
+
+    it("ignores inactive manual chunking fields when matching auto presets", () => {
+      const matchesStandard = configMatchesPreset(
+        {
+          common: {
+            perform_analysis: true,
+            perform_chunking: true,
+            overwrite_existing: false,
+            chunking_mode: "auto",
+            auto_chunking_goal: "balanced",
+            auto_chunking_use_llm: false,
+          },
+          storeRemote: true,
+          reviewBeforeStorage: false,
+          typeDefaults: {
+            audio: { diarize: false },
+            document: { ocr: true },
+            video: { captions: true },
+          },
+          advancedValues: {
+            chunk_method: "tokens",
+            chunk_size: 0,
+            chunk_overlap: -5,
+            hierarchical_chunking: true,
+            hierarchical_template: { boundaries: [{ kind: "heading" }] },
+          },
+        },
+        "standard"
+      )
+
+      expect(matchesStandard).toBe(true)
     })
 
     it("setCustomOptions merges custom options into presetConfig", async () => {
