@@ -5544,17 +5544,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-empty-state:src/components/Option/WorldBooks/WorldBookEmptyState.tsx:WorldBookEmptyState",
-    "path": "src/components/Option/WorldBooks/WorldBookEmptyState.tsx",
-    "rule": "local-empty-state",
-    "subject": "WorldBookEmptyState",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local WorldBookEmptyState empty-state wrapper before the guard.",
-    "replacement": "EmptyState",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-loading-state:src/components/Common/UnifiedLoadingState.tsx:UnifiedLoadingState",
     "path": "src/components/Common/UnifiedLoadingState.tsx",
     "rule": "local-loading-state",
