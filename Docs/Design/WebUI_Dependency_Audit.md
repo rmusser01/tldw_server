@@ -7,6 +7,7 @@ Status: Draft audit for issue #1346
 
 - GitHub issue: https://github.com/rmusser01/tldw_server/issues/1346
 - Design spec: ../superpowers/specs/2026-05-07-webui-dependency-trimming-design.md
+- Parent design task: TASK-100
 - Backlog task: TASK-101
 
 ## Scope
