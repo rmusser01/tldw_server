@@ -595,7 +595,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
                 tags=("kanban",),
                 route_key="kanban",
                 skip_context=minimal_skip_context,
-                skip_exceptions=(ImportError, AttributeError),
             ),
         )
 
@@ -606,7 +605,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("flashcards",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(ImportError, AttributeError),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.quizzes",
@@ -614,7 +612,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("quizzes",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(ImportError, AttributeError),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.study_suggestions",
@@ -622,7 +619,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("study-suggestions",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(ImportError, AttributeError),
         ),
     ):
         append_imported_router_spec(specs, study_spec)
@@ -634,7 +630,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/writing",
             tags=("writing",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(ImportError, AttributeError),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.writing_manuscripts",
@@ -642,7 +637,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/writing/manuscripts",
             tags=("manuscripts",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(ImportError, AttributeError),
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.email",
@@ -650,7 +644,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/email",
             tags=("email",),
             skip_context=minimal_skip_context,
-            skip_exceptions=(ImportError, AttributeError),
         ),
     ):
         append_imported_router_spec(specs, writing_email_spec)

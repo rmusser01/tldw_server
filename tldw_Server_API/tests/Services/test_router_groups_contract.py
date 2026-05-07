@@ -5716,7 +5716,10 @@ def test_iter_minimal_optional_router_specs_defers_kanban_attr_lookup(
         assert spec.route_key == "kanban"
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (ImportError, AttributeError)
+        assert spec.skip_exceptions == (
+            OptionalRouterMissingModule,
+            OptionalRouterMissingAttribute,
+        )
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -5760,9 +5763,12 @@ def test_iter_minimal_optional_router_specs_skips_kanban_missing_import_failures
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Crash only the selected Kanban router imports at registration."""
+        """Fail only the selected missing Kanban router imports at registration."""
         if module_name in kanban_modules:
-            raise ImportError(f"{module_name} missing during import")
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -5774,15 +5780,31 @@ def test_iter_minimal_optional_router_specs_skips_kanban_missing_import_failures
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
-    assert debug_messages == [
-        f"Skipping {name} router in minimal test app: "
-        f"tldw_Server_API.app.api.v1.endpoints.kanban.{name} missing during import"
-        for name in kanban_module_suffixes
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
     ]
+    assert len(skip_debug_messages) == len(kanban_module_suffixes)
+    for name in kanban_module_suffixes:
+        module_name = f"tldw_Server_API.app.api.v1.endpoints.kanban.{name}"
+        assert any(
+            message.startswith(f"Skipping {name} router in minimal test app: ")
+            and f"{module_name} missing during import" in message
+            for message in skip_debug_messages
+        )
 
 
+@pytest.mark.parametrize(
+    ("exception_type", "message"),
+    (
+        (RuntimeError, "kanban_boards exploded during import"),
+        (ImportError, "kanban_boards dependency failed during import"),
+        (AttributeError, "kanban_boards attribute failed during import"),
+    ),
+)
 def test_iter_minimal_optional_router_specs_propagates_kanban_runtime_import_failures(
     monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[Exception],
+    message: str,
 ) -> None:
     """Verify minimal Kanban runtime import defects are not silently skipped."""
     import importlib
@@ -5800,7 +5822,7 @@ def test_iter_minimal_optional_router_specs_propagates_kanban_runtime_import_fai
     def _import_module(import_name: str, package: str | None = None) -> ModuleType:
         """Crash only one selected Kanban router import at registration."""
         if import_name == module_name:
-            raise RuntimeError(f"{module_name} exploded during import")
+            raise exception_type(message)
         return real_import_module(import_name, package)
 
     monkeypatch.setattr(
@@ -5808,7 +5830,7 @@ def test_iter_minimal_optional_router_specs_propagates_kanban_runtime_import_fai
         _import_module,
     )
 
-    with pytest.raises(RuntimeError, match="kanban_boards exploded during import"):
+    with pytest.raises(exception_type, match=message):
         register_router_specs(FastAPI(), (selected_spec,))
 
 
@@ -5946,7 +5968,10 @@ def test_iter_minimal_optional_router_specs_defers_study_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (ImportError, AttributeError)
+        assert spec.skip_exceptions == (
+            OptionalRouterMissingModule,
+            OptionalRouterMissingAttribute,
+        )
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -5989,9 +6014,12 @@ def test_iter_minimal_optional_router_specs_skips_study_missing_import_failures(
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Fail only the selected study router imports at registration."""
+        """Fail only the selected missing study router imports at registration."""
         if module_name in study_modules:
-            raise ImportError(f"{module_name} missing during import")
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -6003,15 +6031,30 @@ def test_iter_minimal_optional_router_specs_skips_study_missing_import_failures(
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
-    assert debug_messages == [
-        f"Skipping {expected_name} router in minimal test app: "
-        f"{module_name} missing during import"
-        for module_name, expected_name, _prefix, _tags, _path in STUDY_ROUTER_DEFINITION_DATA
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
     ]
+    assert len(skip_debug_messages) == len(STUDY_ROUTER_DEFINITION_DATA)
+    for module_name, expected_name, _prefix, _tags, _path in STUDY_ROUTER_DEFINITION_DATA:
+        assert any(
+            message.startswith(f"Skipping {expected_name} router in minimal test app: ")
+            and f"{module_name} missing during import" in message
+            for message in skip_debug_messages
+        )
 
 
+@pytest.mark.parametrize(
+    ("exception_type", "message"),
+    (
+        (RuntimeError, "flashcards exploded during import"),
+        (ImportError, "flashcards dependency failed during import"),
+        (AttributeError, "flashcards attribute failed during import"),
+    ),
+)
 def test_iter_minimal_optional_router_specs_propagates_study_runtime_import_failures(
     monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[Exception],
+    message: str,
 ) -> None:
     """Verify minimal study runtime import defects are not silently skipped."""
     import importlib
@@ -6029,7 +6072,7 @@ def test_iter_minimal_optional_router_specs_propagates_study_runtime_import_fail
     def _import_module(import_name: str, package: str | None = None) -> ModuleType:
         """Crash only one selected study router import at registration."""
         if import_name == module_name:
-            raise RuntimeError(f"{module_name} exploded during import")
+            raise exception_type(message)
         return real_import_module(import_name, package)
 
     monkeypatch.setattr(
@@ -6037,7 +6080,7 @@ def test_iter_minimal_optional_router_specs_propagates_study_runtime_import_fail
         _import_module,
     )
 
-    with pytest.raises(RuntimeError, match="flashcards exploded during import"):
+    with pytest.raises(exception_type, match=message):
         register_router_specs(FastAPI(), (selected_spec,))
 
 
@@ -6175,7 +6218,10 @@ def test_iter_minimal_optional_router_specs_defers_writing_email_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (ImportError, AttributeError)
+        assert spec.skip_exceptions == (
+            OptionalRouterMissingModule,
+            OptionalRouterMissingAttribute,
+        )
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -6218,9 +6264,12 @@ def test_iter_minimal_optional_router_specs_skips_writing_email_missing_import_f
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
-        """Fail only the selected writing/email router imports at registration."""
+        """Fail only the selected missing writing/email router imports at registration."""
         if module_name in writing_email_modules:
-            raise ImportError(f"{module_name} missing during import")
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -6232,15 +6281,30 @@ def test_iter_minimal_optional_router_specs_skips_writing_email_missing_import_f
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
-    assert debug_messages == [
-        f"Skipping {expected_name} router in minimal test app: "
-        f"{module_name} missing during import"
-        for module_name, expected_name, _prefix, _tags, _path in WRITING_EMAIL_ROUTER_DEFINITION_DATA
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
     ]
+    assert len(skip_debug_messages) == len(WRITING_EMAIL_ROUTER_DEFINITION_DATA)
+    for module_name, expected_name, _prefix, _tags, _path in WRITING_EMAIL_ROUTER_DEFINITION_DATA:
+        assert any(
+            message.startswith(f"Skipping {expected_name} router in minimal test app: ")
+            and f"{module_name} missing during import" in message
+            for message in skip_debug_messages
+        )
 
 
+@pytest.mark.parametrize(
+    ("exception_type", "message"),
+    (
+        (RuntimeError, "writing exploded during import"),
+        (ImportError, "writing dependency failed during import"),
+        (AttributeError, "writing attribute failed during import"),
+    ),
+)
 def test_iter_minimal_optional_router_specs_propagates_writing_email_runtime_import_failures(
     monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[Exception],
+    message: str,
 ) -> None:
     """Verify minimal writing/email runtime import defects are not silently skipped."""
     import importlib
@@ -6258,7 +6322,7 @@ def test_iter_minimal_optional_router_specs_propagates_writing_email_runtime_imp
     def _import_module(import_name: str, package: str | None = None) -> ModuleType:
         """Crash only one selected writing/email router import at registration."""
         if import_name == module_name:
-            raise RuntimeError(f"{module_name} exploded during import")
+            raise exception_type(message)
         return real_import_module(import_name, package)
 
     monkeypatch.setattr(
@@ -6266,7 +6330,7 @@ def test_iter_minimal_optional_router_specs_propagates_writing_email_runtime_imp
         _import_module,
     )
 
-    with pytest.raises(RuntimeError, match="writing exploded during import"):
+    with pytest.raises(exception_type, match=message):
         register_router_specs(FastAPI(), (selected_spec,))
 
 
