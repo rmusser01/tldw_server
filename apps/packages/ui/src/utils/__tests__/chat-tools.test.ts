@@ -119,6 +119,33 @@ describe("chat tool normalization", () => {
 
     expect(normalizeChatToolsForRequest([])).toBeUndefined()
   })
+
+  it("normalizes already resolved chat tools for request construction", () => {
+    const resolved = buildChatToolFilterState({
+      tools: [
+        {
+          name: "notes.search",
+          description: "Search notes",
+          parameters: { type: "object", properties: { q: { type: "string" } } },
+          canExecute: true
+        }
+      ]
+    })
+
+    expect(normalizeChatToolsForRequest(resolved.chatTools)).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "notes_search",
+          description: "Search notes",
+          parameters: {
+            type: "object",
+            properties: { q: { type: "string" } }
+          }
+        }
+      }
+    ])
+  })
 })
 
 describe("MCP tool grouping", () => {

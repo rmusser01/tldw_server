@@ -33,6 +33,18 @@ const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
 const isRecord = (value: unknown): value is ChatToolRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
+const unwrapToolCandidate = (tool: unknown): unknown => {
+  if (!isRecord(tool)) return tool
+  if (
+    isRecord(tool.tool) &&
+    typeof tool.rawName === "string" &&
+    typeof tool.chatName === "string"
+  ) {
+    return tool.tool
+  }
+  return tool
+}
+
 export const normalizeChatToolName = (name: unknown): string | null => {
   if (typeof name !== "string") return null
   const trimmed = name.trim()
@@ -130,6 +142,7 @@ export const buildChatToolFilterState = ({
 }): ChatToolFilterState => {
   const disabledSet = normalizeDisabledSet(disabledToolNames)
   const discoveredBase = (Array.isArray(tools) ? tools : [])
+    .map(unwrapToolCandidate)
     .map(resolveMcpToolIdentity)
     .filter(Boolean) as Array<Omit<ResolvedMcpTool, "disabled" | "colliding">>
 

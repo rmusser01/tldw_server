@@ -11,6 +11,7 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 import { parseJsonObject } from "./utils"
 import { formatPinnedResults } from "@/utils/rag-format"
+import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -85,6 +86,11 @@ export interface UsePlaygroundRawPreviewDeps {
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
+
+const omitUndefinedFields = <T extends Record<string, unknown>>(payload: T): T =>
+  Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  ) as T
 
 export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
   const {
@@ -227,20 +233,21 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         hasMcp &&
         mcpHealthState !== "unavailable" &&
         mcpHealthState !== "unhealthy"
-      const executableTools = Array.isArray(mcpTools)
-        ? mcpTools.filter((tool) => {
-            if (!tool || typeof tool !== "object") return false
-            if (!("canExecute" in tool)) return true
-            return Boolean((tool as Record<string, unknown>).canExecute)
-          })
-        : []
+      const normalizedTools = normalizeChatToolsForRequest(mcpTools)
       const effectiveTools =
         toolsAllowed &&
         toolChoice !== "none" &&
-        executableTools.length > 0
-          ? executableTools
+        normalizedTools &&
+        normalizedTools.length > 0
+          ? normalizedTools
           : undefined
-      const request: ChatCompletionRequest = {
+      const rawPreviewToolChoice =
+        toolChoice === "auto" ||
+        toolChoice === "none" ||
+        toolChoice === "required"
+          ? toolChoice
+          : undefined
+      const request = omitUndefinedFields({
         messages: toPreviewHistoryMessages(normalizedModel, draftMessage, draftImage),
         model: normalizedModel,
         stream: true,
@@ -255,14 +262,14 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           currentChatModelSettings.reasoningEffort === "high"
             ? currentChatModelSettings.reasoningEffort
             : undefined,
-        tool_choice:
-          effectiveTools &&
-          (toolChoice === "auto" ||
-            toolChoice === "none" ||
-            toolChoice === "required")
-            ? toolChoice
-            : undefined,
-        tools: effectiveTools,
+        ...(effectiveTools
+          ? {
+              tools: effectiveTools,
+              ...(rawPreviewToolChoice
+                ? { tool_choice: rawPreviewToolChoice }
+                : {})
+            }
+          : {}),
         save_to_db: !temporaryChat && Boolean(serverChatId),
         conversation_id: !temporaryChat && serverChatId ? serverChatId : undefined,
         history_message_limit: currentChatModelSettings.historyMessageLimit,
@@ -286,7 +293,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           ? { type: "json_object" }
           : undefined,
         research_context: compareModeActive ? undefined : researchContext
-      }
+      } satisfies Record<string, unknown>) as ChatCompletionRequest
       return request
     },
     [

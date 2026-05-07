@@ -86,15 +86,15 @@
 
 **Tests:** `bunx vitest run apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Write failing request tests showing disabled tools are excluded and no-tools requests omit both fields.
-- [ ] Write failing raw-preview parity tests for the same behavior.
-- [ ] Run the request/raw-preview tests and verify expected failures.
-- [ ] Refactor `ChatTldw` to import the shared normalization helper.
-- [ ] Update `pageAssistModel` to use `chatTools` from the MCP store by default.
-- [ ] Update raw preview dependencies and request building to use `chatTools` and shared no-tools behavior.
-- [ ] Run request/raw-preview tests until green.
+- [x] Write failing request tests showing disabled tools are excluded and no-tools requests omit both fields.
+- [x] Write failing raw-preview parity tests for the same behavior.
+- [x] Run the request/raw-preview tests and verify expected failures.
+- [x] Refactor `ChatTldw` to import the shared normalization helper.
+- [x] Update `pageAssistModel` to use `chatTools` from the MCP store by default.
+- [x] Update raw preview dependencies and request building to use `chatTools` and shared no-tools behavior.
+- [x] Run request/raw-preview tests until green.
 
 ## Stage 4: Shared Selector UI In Playground And Sidepanel
 
