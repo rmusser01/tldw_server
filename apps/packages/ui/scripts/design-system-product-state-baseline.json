@@ -5522,17 +5522,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-empty-state:src/components/Knowledge/SearchTab/SearchEmptyState.tsx:SearchEmptyState",
-    "path": "src/components/Knowledge/SearchTab/SearchEmptyState.tsx",
-    "rule": "local-empty-state",
-    "subject": "SearchEmptyState",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local SearchEmptyState empty-state wrapper before the guard.",
-    "replacement": "EmptyState",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-empty-state:src/components/Option/WorkspacePlayground/ChatPane/index.tsx:WorkspaceChatEmpty",
     "path": "src/components/Option/WorkspacePlayground/ChatPane/index.tsx",
     "rule": "local-empty-state",
