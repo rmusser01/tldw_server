@@ -3364,6 +3364,26 @@ async def add_media_persist(
     )
 
 
+async def _resolve_auto_chunking_options_for_persistence(
+    form_data: Any,
+    *,
+    media_type: Any,
+    source_name: str,
+    extracted_text: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        return await async_resolve_chunking_options_and_plan(
+            form_data,
+            media_type=media_type,
+            source_name=source_name,
+            extracted_text=extracted_text,
+        )
+    except asyncio.CancelledError:
+        raise
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+        return None, None
+
+
 async def persist_primary_av_item(
     *,
     process_result: dict[str, Any],
@@ -3396,19 +3416,18 @@ async def persist_primary_av_item(
         metadata_for_db = {}
     resolved_chunk_options = chunk_options
     if getattr(form_data, "chunking_mode", None) == "auto":
-        with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
-            auto_chunking_options, auto_chunking_plan = await async_resolve_chunking_options_and_plan(
-                form_data,
-                media_type=media_type,
-                source_name=str(original_input_ref or ""),
-                extracted_text=content_for_db if isinstance(content_for_db, str) else None,
-            )
-            if auto_chunking_options is not None:
-                resolved_chunk_options = auto_chunking_options
-            if auto_chunking_plan:
-                metadata_for_db = dict(metadata_for_db)
-                metadata_for_db["chunking_plan"] = auto_chunking_plan
-                process_result["metadata"] = metadata_for_db
+        auto_chunking_options, auto_chunking_plan = await _resolve_auto_chunking_options_for_persistence(
+            form_data,
+            media_type=media_type,
+            source_name=str(original_input_ref or ""),
+            extracted_text=content_for_db if isinstance(content_for_db, str) else None,
+        )
+        if auto_chunking_options is not None:
+            resolved_chunk_options = auto_chunking_options
+        if auto_chunking_plan:
+            metadata_for_db = dict(metadata_for_db)
+            metadata_for_db["chunking_plan"] = auto_chunking_plan
+            process_result["metadata"] = metadata_for_db
 
     # Use the model reported by the processor if available, else fall back.
     transcription_model_used = metadata_for_db.get(
@@ -5327,19 +5346,18 @@ async def persist_doc_item_and_children(
         metadata_for_db = {}
     resolved_chunk_options = chunk_options
     if getattr(form_data, "chunking_mode", None) == "auto":
-        with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
-            auto_chunking_options, auto_chunking_plan = await async_resolve_chunking_options_and_plan(
-                form_data,
-                media_type=media_type,
-                source_name=str(item_input_ref or processing_filename or ""),
-                extracted_text=content_for_db if isinstance(content_for_db, str) else None,
-            )
-            if auto_chunking_options is not None:
-                resolved_chunk_options = auto_chunking_options
-            if auto_chunking_plan:
-                metadata_for_db = dict(metadata_for_db)
-                metadata_for_db["chunking_plan"] = auto_chunking_plan
-                final_result["metadata"] = metadata_for_db
+        auto_chunking_options, auto_chunking_plan = await _resolve_auto_chunking_options_for_persistence(
+            form_data,
+            media_type=media_type,
+            source_name=str(item_input_ref or processing_filename or ""),
+            extracted_text=content_for_db if isinstance(content_for_db, str) else None,
+        )
+        if auto_chunking_options is not None:
+            resolved_chunk_options = auto_chunking_options
+        if auto_chunking_plan:
+            metadata_for_db = dict(metadata_for_db)
+            metadata_for_db["chunking_plan"] = auto_chunking_plan
+            final_result["metadata"] = metadata_for_db
 
     extracted_keywords = final_result.get("keywords", [])
     combined_keywords = set(getattr(form_data, "keywords", None) or [])

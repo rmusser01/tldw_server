@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,3 +50,28 @@ def test_safe_metadata_subset_preserves_json_safe_chunking_plan():
     assert "pmid" not in safe_meta
     assert "callable" not in safe_meta["chunking_plan"]
     assert "unsafe_object" not in safe_meta
+
+
+@pytest.mark.asyncio
+async def test_persistence_auto_chunking_resolution_propagates_cancellation(monkeypatch):
+    import asyncio
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+
+    async def _cancelled_resolver(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        persistence,
+        "async_resolve_chunking_options_and_plan",
+        _cancelled_resolver,
+        raising=True,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await persistence._resolve_auto_chunking_options_for_persistence(
+            SimpleNamespace(chunking_mode="auto"),
+            media_type="document",
+            source_name="doc.md",
+            extracted_text="content",
+        )

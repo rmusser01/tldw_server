@@ -261,6 +261,7 @@ def resolve_chunking_options_and_plan(
     template_status: str | None = None,
     template_error: str | None = None,
     llm_available: bool = False,
+    llm_requested_override: bool | None = None,
     semantic_available: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """
@@ -285,6 +286,11 @@ def resolve_chunking_options_and_plan(
     )
     text_profile = profile_from_text(extracted_text)
     profile = merge_profiles(source_profile, text_profile)
+    requested_llm = (
+        _coerce_raw_bool(_get_raw_form_value(form_data, "auto_chunking_use_llm", False))
+        if llm_requested_override is None
+        else bool(llm_requested_override)
+    )
 
     decision = plan_auto_chunking(
         perform_chunking=True,
@@ -295,7 +301,7 @@ def resolve_chunking_options_and_plan(
         template_name=template_name or _get_raw_form_value(form_data, "chunking_template_name"),
         template_status=template_status,
         template_error=template_error,
-        requested_llm=_coerce_raw_bool(_get_raw_form_value(form_data, "auto_chunking_use_llm", False)),
+        requested_llm=requested_llm,
         llm_available=llm_available,
         semantic_available=semantic_available,
     )
@@ -325,7 +331,8 @@ async def async_resolve_chunking_options_and_plan(
         template_name=template_name,
         template_status=template_status,
         template_error=template_error,
-        llm_available=llm_requested,
+        llm_available=False,
+        llm_requested_override=False,
         semantic_available=semantic_available,
     )
     if not chunk_options or not chunking_plan:
@@ -419,9 +426,12 @@ async def async_resolve_chunking_for_result(
     default_chunk_options: dict[str, Any] | None = None,
     default_chunking_plan: dict[str, Any] | None = None,
     boundary_assistant: AutoChunkBoundaryAssistant | None = None,
+    allow_llm_assist: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Async final chunking resolver for completed process results."""
     if _get_raw_form_value(form_data, "chunking_mode") != "auto":
+        return default_chunk_options, default_chunking_plan
+    if not allow_llm_assist:
         return default_chunk_options, default_chunking_plan
 
     extracted_text = result.get("content")
@@ -490,14 +500,15 @@ def _resolve_boundary_assistant_provider_model(form_data: Any) -> tuple[str | No
     provider = _get_raw_form_value(form_data, "api_provider")
     model = _get_raw_form_value(form_data, "model_name")
     api_name = _get_raw_form_value(form_data, "api_name")
-    if not provider and api_name:
+    if api_name:
         api_name_text = str(api_name).strip()
         if "/" in api_name_text:
             provider_part, model_part = api_name_text.split("/", 1)
-            provider = provider_part.strip() or None
+            if not provider:
+                provider = provider_part.strip() or None
             if not model:
                 model = model_part.strip() or None
-        else:
+        elif not provider:
             provider = api_name_text or None
     return (
         str(provider).strip() if provider else None,

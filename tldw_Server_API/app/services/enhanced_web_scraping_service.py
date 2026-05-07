@@ -65,6 +65,9 @@ def _web_chunking_form(
     chunking_mode: str | None,
     auto_chunking_goal: str,
     auto_chunking_use_llm: bool,
+    api_name: str | None = None,
+    api_provider: str | None = None,
+    model_name: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         media_type="web",
@@ -72,6 +75,9 @@ def _web_chunking_form(
         chunking_mode=chunking_mode,
         auto_chunking_goal=auto_chunking_goal,
         auto_chunking_use_llm=auto_chunking_use_llm,
+        api_name=api_name,
+        api_provider=api_provider,
+        model_name=model_name,
         chunk_method=None,
         chunk_size=500,
         chunk_overlap=200,
@@ -729,6 +735,7 @@ class WebScrapingService:
                 chunking_mode=chunking_mode,
                 auto_chunking_goal=auto_chunking_goal,
                 auto_chunking_use_llm=auto_chunking_use_llm,
+                api_name=api_name,
             )
             _batch_t0 = time.perf_counter()
             for article in result.get("articles", []):

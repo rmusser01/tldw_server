@@ -161,7 +161,14 @@ class ChatAutoChunkBoundaryAssistant:
         self._max_tokens = max(1, int(max_tokens))
 
     async def refine(self, request: AutoChunkBoundaryAssistantRequest) -> AutoChunkBoundaryAssistantResult:
-        availability = self._check_availability(request)
+        try:
+            availability = await asyncio.to_thread(self._check_availability, request)
+        except Exception as exc:
+            logger.debug("Auto Chunking boundary assistant availability check failed: {}", type(exc).__name__)
+            return AutoChunkBoundaryAssistantResult.fallback(
+                reason="ai_assist_provider_error",
+                rationale=f"{type(exc).__name__}: availability check failed.",
+            )
         if not availability.available:
             return AutoChunkBoundaryAssistantResult.fallback(
                 reason="ai_assist_unavailable",
@@ -211,7 +218,12 @@ class ChatAutoChunkBoundaryAssistant:
 
         api_key = self._resolve_api_key(provider, app_config)
         if self._provider_requires_key(provider) and not api_key:
-            return _Availability(False, provider=provider, model=model, reason=f"API key is not configured for provider '{provider}'.")
+            return _Availability(
+                False,
+                provider=provider,
+                model=model,
+                reason=f"API key is not configured for provider '{provider}'.",
+            )
 
         return _Availability(True, provider=provider, model=model, api_key=api_key, app_config=app_config)
 
@@ -223,12 +235,9 @@ class ChatAutoChunkBoundaryAssistant:
         return loaded if isinstance(loaded, dict) else {}
 
     def _resolve_api_key(self, provider: str, app_config: dict[str, Any]) -> str | None:
-        try:
+        if _callable_accepts_positional_args(self._api_key_resolver, 2):
             return self._api_key_resolver(provider, app_config)
-        except TypeError:
-            return self._api_key_resolver(provider)
-        except Exception:
-            return None
+        return self._api_key_resolver(provider)
 
     async def _call_chat(self, request: AutoChunkBoundaryAssistantRequest, availability: _Availability) -> Any:
         chat_call = self._chat_call
@@ -355,6 +364,17 @@ def _validate_suggestion(
     method = str(payload.get("method") or base_options.get("method") or "").strip()
     if method not in _ALLOWED_ASSISTANT_METHODS:
         raise ValueError(f"Assistant response method '{method}' is not allowed.")
+    media_type = str(
+        request.media_type
+        or (
+            request.chunking_plan.get("profile", {}).get("media_type")
+            if isinstance(request.chunking_plan.get("profile"), dict)
+            else ""
+        )
+        or ""
+    ).strip().lower()
+    if method == "ebook_chapters" and media_type != "ebook":
+        raise ValueError("Assistant response method 'ebook_chapters' is only allowed for ebook media.")
 
     max_size = _coerce_int(payload.get("max_size", base_options.get("max_size")), "max_size")
     if max_size < _MIN_ASSISTANT_MAX_SIZE or max_size > _MAX_ASSISTANT_MAX_SIZE:
@@ -452,6 +472,23 @@ def _canonical_provider_from_adapter(adapter: Any, *, fallback: str) -> str:
     if isinstance(adapter_name, str) and adapter_name.strip():
         return normalize_provider(adapter_name)
     return fallback
+
+
+def _callable_accepts_positional_args(func: Callable[..., Any], count: int) -> bool:
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return True
+    positional_count = 0
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional_count += 1
+    return positional_count >= count
 
 
 def _configured_default_provider(app_config: dict[str, Any]) -> str | None:

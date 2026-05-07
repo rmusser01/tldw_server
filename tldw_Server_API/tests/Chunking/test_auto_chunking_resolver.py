@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_for_result,
     async_resolve_chunking_options_and_plan,
     resolve_chunking_options_and_plan,
 )
@@ -180,6 +181,7 @@ async def test_async_resolver_applies_valid_opt_in_assistant_result():
         async def refine(self, request):
             assert request.media_type == "document"
             assert request.chunking_plan["used_llm"] is False
+            assert request.chunking_plan["fallback_reason"] is None
             from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
                 AutoChunkBoundaryAssistantResult,
             )
@@ -248,3 +250,65 @@ async def test_async_resolver_preserves_deterministic_plan_on_assistant_fallback
     assert chunking_plan["used_llm"] is False
     assert chunking_plan["fallback_reason"] == "ai_assist_timeout"
     assert "Timed out after 0.5 seconds." in chunking_plan["rationale"]
+
+
+@pytest.mark.asyncio
+async def test_async_resolver_preserves_api_name_model_when_provider_is_present():
+    seen = {}
+
+    class Assistant:
+        async def refine(self, request):
+            seen["provider"] = request.provider
+            seen["model"] = request.model
+            from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
+                AutoChunkBoundaryAssistantResult,
+            )
+
+            return AutoChunkBoundaryAssistantResult.fallback(
+                reason="ai_assist_unavailable",
+                rationale="test fallback",
+            )
+
+    await async_resolve_chunking_options_and_plan(
+        _form(
+            chunking_mode="auto",
+            auto_chunking_use_llm=True,
+            api_provider="openai",
+            api_name="openai/gpt-4o",
+            model_name=None,
+        ),
+        media_type="document",
+        extracted_text="# Intro\n\nBody",
+        boundary_assistant=Assistant(),
+    )
+
+    assert seen == {"provider": "openai", "model": "gpt-4o"}
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_chunking_for_result_can_reuse_batch_llm_resolution():
+    class Assistant:
+        async def refine(self, request):
+            raise AssertionError("assistant should not be called when reusing batch resolution")
+
+    default_options = {"method": "semantic", "max_size": 820, "overlap": 82}
+    default_plan = {
+        "mode": "auto",
+        "used_llm": True,
+        "method": "semantic",
+        "max_size": 820,
+        "overlap": 82,
+    }
+
+    chunk_options, chunking_plan = await async_resolve_chunking_for_result(
+        _form(chunking_mode="auto", auto_chunking_use_llm=True),
+        {"content": "# Intro\n\nBody"},
+        media_type="document",
+        default_chunk_options=default_options,
+        default_chunking_plan=default_plan,
+        boundary_assistant=Assistant(),
+        allow_llm_assist=False,
+    )
+
+    assert chunk_options == default_options
+    assert chunking_plan == default_plan

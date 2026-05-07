@@ -324,6 +324,9 @@ async def process_audios_endpoint(
             )
 
             ck: _Chunker | None = None
+            batch_auto_chunk_options = chunk_options_dict
+            batch_auto_chunking_plan = chunking_plan
+            batch_llm_chunking_resolved = False
 
             for res in batch_result.get("results", []):
                 if not isinstance(res, dict):
@@ -341,10 +344,15 @@ async def process_audios_endpoint(
                     form_data,
                     res,
                     media_type="audio",
-                    default_chunk_options=chunk_options_dict,
-                    default_chunking_plan=chunking_plan,
+                    default_chunk_options=batch_auto_chunk_options,
+                    default_chunking_plan=batch_auto_chunking_plan,
+                    allow_llm_assist=not batch_llm_chunking_resolved,
                 )
                 attach_chunking_plan_to_result(res, result_chunking_plan)
+                if getattr(form_data, "auto_chunking_use_llm", False) and result_chunking_plan:
+                    batch_auto_chunk_options = result_chunk_options
+                    batch_auto_chunking_plan = result_chunking_plan
+                    batch_llm_chunking_resolved = True
                 if not result_chunk_options:
                     continue
 

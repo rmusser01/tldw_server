@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -115,6 +116,7 @@ def test_parse_boundary_assistant_response_accepts_strict_bounded_json():
         ('{"method":"semantic","max_size":10,"overlap":1}', "max_size"),
         ('{"method":"semantic","max_size":840,"overlap":840}', "overlap"),
         ('{"method":"semantic","max_size":840,"overlap":84,"derived_views":["bad view"]}', "derived_views"),
+        ('{"method":"ebook_chapters","max_size":840,"overlap":84}', "ebook_chapters"),
     ],
 )
 def test_parse_boundary_assistant_response_rejects_invalid_suggestions(response_text, reason_fragment):
@@ -209,6 +211,46 @@ async def test_chat_assistant_calls_provider_when_available_and_valid():
 
 
 @pytest.mark.asyncio
+async def test_chat_assistant_runs_availability_checks_off_event_loop_thread():
+    main_thread = threading.get_ident()
+    loader_threads = []
+
+    async def chat_call(**_kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"method":"semantic","max_size":820,"overlap":82,'
+                            '"derived_views":["topic_sections"],'
+                            '"rationale":"Clear topic transitions."}'
+                        )
+                    }
+                }
+            ]
+        }
+
+    def config_loader():
+        loader_threads.append(threading.get_ident())
+        return {"openai_api": {"model": "gpt-config"}}
+
+    assistant = ChatAutoChunkBoundaryAssistant(
+        chat_call=chat_call,
+        config_loader=config_loader,
+        registry_getter=lambda: SimpleNamespace(get_adapter=lambda _provider: object()),
+        api_key_resolver=lambda _provider, _config=None: "key",
+        provider_requires_key=lambda _provider: True,
+        default_provider="openai",
+    )
+
+    result = await assistant.refine(_request(provider=None, model=None))
+
+    assert result.used_llm is True
+    assert loader_threads
+    assert loader_threads[0] != main_thread
+
+
+@pytest.mark.asyncio
 async def test_chat_assistant_uses_adapter_canonical_provider_for_alias_availability():
     calls = []
 
@@ -244,6 +286,27 @@ async def test_chat_assistant_uses_adapter_canonical_provider_for_alias_availabi
     assert calls[0]["api_provider"] == "local-llm"
     assert calls[0]["model"] == "local-model"
     assert seen_requires_key == ["local-llm"]
+
+
+@pytest.mark.asyncio
+async def test_chat_assistant_does_not_retry_typeerror_from_api_key_resolver_body():
+    def api_key_resolver(_provider, _config=None):
+        raise TypeError("inner resolver failure")
+
+    assistant = ChatAutoChunkBoundaryAssistant(
+        chat_call=lambda **_: pytest.fail("chat call should not run"),
+        config_loader=lambda: {"openai_api": {"model": "gpt-config"}},
+        registry_getter=lambda: SimpleNamespace(get_adapter=lambda _provider: object()),
+        api_key_resolver=api_key_resolver,
+        provider_requires_key=lambda _provider: True,
+        default_provider="openai",
+    )
+
+    result = await assistant.refine(_request(provider=None, model=None))
+
+    assert result.used_llm is False
+    assert result.fallback_reason == "ai_assist_provider_error"
+    assert "TypeError" in result.rationale
 
 
 @pytest.mark.asyncio
