@@ -1,10 +1,10 @@
 ---
 id: TASK-100
 title: Design WebUI dependency trimming sequence for issue 1346
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-07 01:05'
-updated_date: '2026-05-07 01:33'
+updated_date: '2026-05-07 02:49'
 labels:
   - webui
   - dependencies
@@ -44,12 +44,18 @@ Verification for design slice: git diff --check passed. Bandit skipped because t
 Manual design review before implementation planning found and fixed three risks: default api/baseURL compatibility for axios replacement, per-request config compatibility, and extension impact checks for shared @tldw/ui dependency changes. Also clarified that clsx should split into its own PR if compatibility work is non-mechanical.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the WebUI dependency trimming design for issue #1346. The spec documents the approved audit -> quick cleanup -> axios replacement sequence, identifies the WebUI/shared UI package surfaces and extension impact checks, records guardrails for complex/security-sensitive packages, and defines verification expectations for follow-up slices. Verification was docs-scope git diff --check; Bandit skipped because no Python/runtime code changed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
