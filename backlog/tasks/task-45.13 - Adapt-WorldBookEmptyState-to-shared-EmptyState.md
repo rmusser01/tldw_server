@@ -4,7 +4,7 @@ title: Adapt WorldBookEmptyState to shared EmptyState
 status: Done
 assignee: []
 created_date: '2026-05-07 01:35'
-updated_date: '2026-05-07 01:45'
+updated_date: '2026-05-07 01:46'
 labels:
   - design-system
   - frontend
@@ -46,6 +46,8 @@ Baseline before implementation: after installing apps/packages/ui dependencies i
 TDD red/green: added a canonical EmptyState marker assertion to WorldBookEmptyState.test.tsx, then verified it failed against the local wrapper with received null for data-ds-component=EmptyState. Adapted WorldBookEmptyState to render components/ui/feedback/EmptyState and shared Button actions while preserving current title, description, steps, example copy, template quick starts, create callback, import callback, and translation fallbacks.
 
 Verification after implementation: focused bunx vitest run src/components/Option/WorldBooks/__tests__/WorldBookEmptyState.test.tsx passed 6/6; combined focused run for WorldBookEmptyState, FeatureEmptyState, and product-state-guard passed 47/47; bun run verify:design-system-state exited 0 with baseline exceptions reduced from 523 to 522 and local-empty-state reduced from 3 to 2; git diff --check exited 0 before task-finalization edits. Broader bun run test:worldbooks passed 62 test files, 192 tests passed, 6 skipped, with existing jsdom CSS parse warnings. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1349
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
