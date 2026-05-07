@@ -244,7 +244,7 @@ export const useMcpTools = (
     toolCatalogStrict
   })
   const healthQuery = useQuery({
-    queryKey: ["mcp-health"],
+    queryKey: ["mcp-health", activeToolPreferenceScope],
     queryFn: async () => apiSend({ path: "/api/v1/mcp/health", method: "GET" }),
     enabled: hasMcp && probeEnabled,
     staleTime: 60_000,
@@ -270,6 +270,7 @@ export const useMcpTools = (
   const toolsQuery = useQuery({
     queryKey: [
       "mcp-tools",
+      activeToolPreferenceScope,
       toolCatalog,
       toolCatalogId,
       normalizedToolModules,
@@ -310,7 +311,7 @@ export const useMcpTools = (
   })
 
   const catalogsQuery = useQuery({
-    queryKey: ["mcp-tool-catalogs"],
+    queryKey: ["mcp-tool-catalogs", activeToolPreferenceScope],
     queryFn: async () => {
       try {
         return await fetchMcpToolCatalogsViaDiscovery("all")
@@ -325,7 +326,7 @@ export const useMcpTools = (
   })
 
   const moduleOptionsQuery = useQuery({
-    queryKey: ["mcp-tool-modules"],
+    queryKey: ["mcp-tool-modules", activeToolPreferenceScope],
     queryFn: async () => {
       try {
         return await fetchMcpModulesViaDiscovery()

@@ -85,6 +85,11 @@ vi.mock("@/services/tldw/mcp", () => ({
 }))
 
 const buildWrapper = () => {
+  const { wrapper } = buildWrapperWithClient()
+  return wrapper
+}
+
+const buildWrapperWithClient = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -92,9 +97,10 @@ const buildWrapper = () => {
       }
     }
   })
-  return ({ children }: { children: React.ReactNode }) => (
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
+  return { queryClient, wrapper }
 }
 
 describe("useMcpTools gating", () => {
@@ -276,6 +282,63 @@ describe("useMcpTools gating", () => {
     )
     expect(result.current.disabledToolNames).toEqual([])
     expect(result.current.chatTools[0]?.rawName).toBe("notes.search")
+  })
+
+  it("scopes MCP query caches by the active connection identity", async () => {
+    const firstScope =
+      "server:http://127.0.0.1:8000|auth:single-user|org:none|principal:anonymous"
+    const secondScope =
+      "server:http://127.0.0.1:9000|auth:single-user|org:none|principal:anonymous"
+    state.apiSend.mockResolvedValue({ ok: true })
+    state.fetchMcpToolCatalogsViaDiscovery.mockResolvedValue([])
+    state.fetchMcpModulesViaDiscovery.mockResolvedValue([])
+    state.fetchMcpToolsViaDiscovery.mockImplementation(async () =>
+      state.connectionConfig.serverUrl === "http://127.0.0.1:9000"
+        ? [{ name: "slides.list", canExecute: true }]
+        : [{ name: "notes.search", canExecute: true }]
+    )
+    const { queryClient, wrapper } = buildWrapperWithClient()
+
+    const { result, rerender } = renderHook(() => useMcpTools(), {
+      wrapper
+    })
+
+    await waitFor(() => {
+      expect(result.current.chatTools.map((tool) => tool.rawName)).toEqual([
+        "notes.search"
+      ])
+    })
+
+    state.connectionConfig = {
+      serverUrl: "http://127.0.0.1:9000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    }
+    rerender()
+
+    await waitFor(() => {
+      expect(result.current.chatTools.map((tool) => tool.rawName)).toEqual([
+        "slides.list"
+      ])
+    })
+
+    expect(state.fetchMcpToolsViaDiscovery).toHaveBeenCalledTimes(2)
+    const queryKeys = queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.queryKey)
+    expect(queryKeys).toEqual(
+      expect.arrayContaining([
+        ["mcp-health", firstScope],
+        ["mcp-health", secondScope],
+        ["mcp-tools", firstScope, "", null, [], false],
+        ["mcp-tools", secondScope, "", null, [], false],
+        ["mcp-tool-catalogs", firstScope],
+        ["mcp-tool-catalogs", secondScope],
+        ["mcp-tool-modules", firstScope],
+        ["mcp-tool-modules", secondScope]
+      ])
+    )
   })
 
   it("defaults newly discovered executable tools to enabled in an existing scope", async () => {
