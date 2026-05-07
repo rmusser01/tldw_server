@@ -4,7 +4,7 @@ title: Adapt WorkspaceChatEmpty to shared EmptyState
 status: Done
 assignee: []
 created_date: '2026-05-07 02:10'
-updated_date: '2026-05-07 02:21'
+updated_date: '2026-05-07 15:01'
 labels:
   - design-system
   - ui
@@ -50,13 +50,17 @@ Implementation: WorkspaceChatEmpty now imports and renders the canonical EmptySt
 
 Verification: bunx vitest run src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage1.test.tsx src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage2.test.tsx src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage3.test.tsx src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage4.lorebook-activity.test.tsx src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage5.folder-context.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed with 6 files and 79 tests. bun run verify:design-system-state passed with 520 baseline exceptions and no local-empty-state bucket. git diff --check passed. Bandit skipped because touched code is frontend TypeScript/JSON and a Backlog task file, not Python.
 
-Broader check: bunx vitest run src/components/Option/WorkspacePlayground --maxWorkers=1 --reporter=dot was attempted and failed in unrelated existing WorkspacePlayground suites outside this slice: AddSourceModal tab ordering, StudioPane stage 3 output/audio expectations, and WorkspacePlayground tests whose workspace-store mocks lack createWorkspaceStorage. The touched ChatPane and guard tests passed after the scoped fix.
+Broader check on PR branch: bunx vitest run src/components/Option/WorkspacePlayground --maxWorkers=1 --reporter=dot was attempted and failed in WorkspacePlayground suites outside this slice: AddSourceModal tab ordering, StudioPane stage 3 output/audio expectations, and WorkspacePlayground tests whose workspace-store mocks lack createWorkspaceStorage. The touched ChatPane and guard tests passed after the scoped fix.
+
+Qodo review follow-up: verified the same broader WorkspacePlayground folder command against origin/dev at afe6990ee before applying PR #1351 changes. The base branch also failed that command, with 8 failed files, 23 failed tests, and 278 passed tests. Base failures included existing ChatPane Link router-context errors that this PR's MemoryRouter test harness update removes, plus WorkspacePlayground failures outside the touched ChatPane slice. This shows the broad folder command is already red on dev and the remaining PR-branch broad-run failures are not introduced by the WorkspaceChatEmpty design-system migration.
+
+Review-fix verification: focused ChatPane plus product-state guard Vitest command passed with 6 files and 79 tests after the Qodo evidence update. bun run verify:design-system-state passed with 520 baseline exceptions. git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Adapted WorkspaceChatEmpty to render the canonical EmptyState primitive directly while preserving its existing research-start copy, source-aware prompt chips, Knowledge QA link, source guidance, add-source CTA, and template actions. Removed the WorkspaceChatEmpty local-empty-state baseline exception so the product-state guard now has no local-empty-state bucket and 520 total baseline exceptions. Updated ChatPane stage 2, stage 3, and stage 5 tests to render with MemoryRouter now that the real empty shell path includes the existing Knowledge QA Link. Opened PR #1351 against dev. Verification passed for the full ChatPane focused suite plus the product-state guard test, the design-system guard CLI, and git diff --check. The broader WorkspacePlayground folder run was attempted and failed in unrelated existing suites outside this slice, documented in implementation notes.
+Adapted WorkspaceChatEmpty to render the canonical EmptyState primitive directly while preserving its existing research-start copy, source-aware prompt chips, Knowledge QA link, source guidance, add-source CTA, and template actions. Removed the WorkspaceChatEmpty local-empty-state baseline exception so the product-state guard now has no local-empty-state bucket and 520 total baseline exceptions. Updated ChatPane stage 2, stage 3, and stage 5 tests to render with MemoryRouter now that the real empty shell path includes the existing Knowledge QA Link. Opened PR #1351 against dev. Verification passed for the full ChatPane focused suite plus the product-state guard test, the design-system guard CLI, and git diff --check. The broader WorkspacePlayground folder run remains red on current origin/dev before this PR, and the PR task now records that base evidence plus the remaining unrelated PR-branch broad-run failures outside the touched slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
