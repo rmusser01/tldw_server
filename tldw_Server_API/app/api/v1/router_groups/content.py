@@ -96,17 +96,16 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         route_key="evaluations",
     ))
 
-    def _ocr_router_factory():
-        from tldw_Server_API.app.api.v1.endpoints.ocr import router as ocr_router
-
-        return ocr_router
-
-    specs.append(RouterSpec(
-        router=_ocr_router_factory,
-        prefix=f"{API_V1_PREFIX}",
-        tags=("ocr",),
-        route_key="ocr",
-    ))
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.ocr",
+            log_name="ocr",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("ocr",),
+            route_key="ocr",
+        ),
+    )
 
     # Media endpoints
     append_imported_router_spec(

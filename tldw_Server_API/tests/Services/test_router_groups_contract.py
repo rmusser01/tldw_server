@@ -1863,6 +1863,164 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_ocr_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify content OCR spec keeps router attr lookup lazy."""
+    import importlib
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.ocr"
+    fake_module = ModuleType(module_name)
+    router = APIRouter()
+    access_count = {f"{module_name}.router": 0}
+    import_calls: list[str] = []
+
+    @router.get("/ocr/process")
+    def _endpoint() -> dict[str, str]:
+        """Return a deterministic response for the fake OCR router."""
+        return {"status": "ok"}
+
+    def _module_getattr(name: str) -> APIRouter:
+        """Track lazy router attribute resolution for the fake module."""
+        if name != "router":
+            raise AttributeError(name)
+        access_count[f"{module_name}.router"] += 1
+        return router
+
+    fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy OCR router module import."""
+        if import_name == module_name:
+            import_calls.append(import_name)
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert import_calls == []
+    assert access_count == {f"{module_name}.router": 0}
+
+    selected_spec = next(spec for spec in specs if spec.name == "ocr")
+    assert selected_spec.prefix == "/api/v1"
+    assert selected_spec.tags == ("ocr",)
+    assert selected_spec.route_key == "ocr"
+    assert selected_spec.default_stable is True
+    assert selected_spec.skip_exceptions == (
+        OptionalRouterMissingModule,
+        OptionalRouterMissingAttribute,
+    )
+    assert _first_router_path(selected_spec.router) == "/ocr/process"
+    assert import_calls == [module_name]
+    assert access_count == {f"{module_name}.router": 1}
+
+
+def test_iter_content_router_specs_skips_ocr_missing_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify content OCR spec skips missing optional router module."""
+    import importlib
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.ocr"
+    specs = list(iter_content_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "ocr")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Fail only the selected missing OCR router import."""
+        if import_name == module_name:
+            raise ModuleNotFoundError(
+                f"{module_name} missing during import",
+                name=module_name,
+            )
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), (selected_spec,)) == 0
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
+    ]
+    assert len(skip_debug_messages) == 1
+    skip_message = skip_debug_messages[0]
+    assert skip_message.startswith("Skipping ocr router:")
+    assert module_name in skip_message
+    assert "missing during import" in skip_message
+
+
+def test_iter_content_router_specs_skips_ocr_missing_attribute_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify content OCR spec skips missing optional router attribute."""
+    module_name = "tldw_Server_API.app.api.v1.endpoints.ocr"
+    monkeypatch.setitem(sys.modules, module_name, ModuleType(module_name))
+
+    specs = list(iter_content_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "ocr")
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert register_router_specs(FastAPI(), (selected_spec,)) == 0
+    skip_debug_messages = [
+        message for message in debug_messages if message.startswith("Skipping ")
+    ]
+    assert len(skip_debug_messages) == 1
+    skip_message = skip_debug_messages[0]
+    assert skip_message.startswith("Skipping ocr router:")
+    assert f"{module_name}.router" in skip_message
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "message"),
+    (
+        (RuntimeError, "ocr exploded during import"),
+        (ImportError, "ocr dependency failed during import"),
+        (AttributeError, "ocr attribute failed during import"),
+    ),
+)
+def test_iter_content_router_specs_propagates_ocr_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[Exception],
+    message: str,
+) -> None:
+    """Verify content OCR runtime import defects are not silently skipped."""
+    import importlib
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.ocr"
+    specs = list(iter_content_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "ocr")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Crash only the selected OCR router import at registration."""
+        if import_name == module_name:
+            raise exception_type(message)
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(exception_type, match=message):
+        register_router_specs(FastAPI(), (selected_spec,))
+
+
 def test_iter_content_router_specs_defers_ingestion_adapter_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
