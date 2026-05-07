@@ -804,27 +804,23 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, mcp_spec)
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.privileges import router as privileges_router
-
-        specs.append(RouterSpec(
-            router=privileges_router,
+    for privileges_tools_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.privileges",
+            log_name="privileges",
             prefix=f"{API_V1_PREFIX}",
             tags=("privileges",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping privileges router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router
-
-        specs.append(RouterSpec(
-            router=tools_router,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.tools",
+            log_name="tools",
             prefix=f"{API_V1_PREFIX}",
             tags=("tools",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping tools router in minimal test app: {e}")
+            skip_context=minimal_skip_context,
+        ),
+    ):
+        append_imported_router_spec(specs, privileges_tools_spec)
 
     for acp_spec in (
         ImportedRouterSpec(
