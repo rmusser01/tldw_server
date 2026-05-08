@@ -5544,17 +5544,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-loading-state:src/components/Option/Watchlists/TemplatesTab/TemplateCodeEditor.tsx:MonacoLoading",
-    "path": "src/components/Option/Watchlists/TemplatesTab/TemplateCodeEditor.tsx",
-    "rule": "local-loading-state",
-    "subject": "MonacoLoading",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local MonacoLoading loading-state wrapper before the guard.",
-    "replacement": "LoadingState or StatePanel",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-recovery-banner:src/components/Common/ConnectionProblemBanner.tsx:ConnectionProblemBanner",
     "path": "src/components/Common/ConnectionProblemBanner.tsx",
     "rule": "local-recovery-banner",
