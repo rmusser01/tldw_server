@@ -3,9 +3,13 @@ import { render } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { TemplateCodeEditor } from "../TemplateCodeEditor"
 
-vi.mock("@monaco-editor/react", () => ({
-  default: () => <div data-testid="monaco-editor" />
-}))
+vi.mock("@monaco-editor/react", () => {
+  const PendingMonaco = () => {
+    throw new Promise(() => {})
+  }
+
+  return { default: PendingMonaco }
+})
 
 describe("TemplateCodeEditor loading state", () => {
   it("renders the Suspense fallback through the canonical LoadingState primitive", () => {
