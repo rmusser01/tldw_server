@@ -4145,9 +4145,10 @@ def test_iter_minimal_test_router_specs_propagates_runtime_import_failures(
 
     specs = list(iter_minimal_test_router_specs())
     auth_spec = next(spec for spec in specs if spec.name == "auth")
+    assert auth_spec.skip_exceptions == ()
 
     with pytest.raises(RuntimeError, match="auth router crashed during import"):
-        auth_spec.resolve_router()
+        register_router_specs(FastAPI(), (auth_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup(
