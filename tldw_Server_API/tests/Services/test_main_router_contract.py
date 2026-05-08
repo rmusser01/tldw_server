@@ -75,7 +75,7 @@ def test_minimal_app_uses_router_registry(client_user_only) -> None:
 
 
 @pytest.mark.unit
-def test_minimal_app_import_survives_setup_router_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_minimal_app_import_does_not_probe_setup_router_directly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
@@ -85,8 +85,15 @@ def test_minimal_app_import_survives_setup_router_import_error(monkeypatch: pyte
     clear_app_main()
 
     def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "tldw_Server_API.app.api.v1.endpoints.setup":
-            raise ImportError("setup router unavailable")
+        setup_module = "tldw_Server_API.app.api.v1.endpoints.setup"
+        endpoints_module = "tldw_Server_API.app.api.v1.endpoints"
+        requested_attrs = {fromlist} if isinstance(fromlist, str) else set(fromlist or ())
+        if (
+            name == setup_module
+            or name.startswith(f"{setup_module}.")
+            or (name == endpoints_module and "setup" in requested_attrs)
+        ):
+            raise AssertionError("setup router should be registered through router groups")
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _guarded_import)

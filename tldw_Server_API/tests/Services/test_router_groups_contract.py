@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import builtins
 import sys
 from collections import Counter
@@ -23,6 +24,8 @@ from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 
 pytestmark = pytest.mark.unit
 
+SETUP_ENDPOINT_MODULE = "tldw_Server_API.app.api.v1.endpoints.setup"
+SETUP_ENDPOINT_PACKAGE = "tldw_Server_API.app.api.v1.endpoints"
 KANBAN_ROUTER_MODULE_PREFIX = "tldw_Server_API.app.api.v1.endpoints.kanban."
 KANBAN_ROUTER_DEFINITION_DATA = (
     ("kanban_boards", "/boards"),
@@ -256,6 +259,58 @@ MINIMAL_TAIL_ROUTER_DEFINITION_DATA = (
 def _main_source_text() -> str:
     main_path = Path(__file__).resolve().parents[2] / "app" / "main.py"
     return main_path.read_text(encoding="utf-8")
+
+
+def _main_setup_endpoint_import_violations(source: str) -> list[str]:
+    """Return direct setup endpoint imports found in app/main.py source."""
+    tree = ast.parse(source)
+    violations: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if (
+                    alias.name == SETUP_ENDPOINT_MODULE
+                    or alias.name.startswith(f"{SETUP_ENDPOINT_MODULE}.")
+                ):
+                    violations.append(f"import {alias.name}")
+
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if (
+                module == SETUP_ENDPOINT_MODULE
+                or module.startswith(f"{SETUP_ENDPOINT_MODULE}.")
+            ):
+                violations.append(f"from {module} import ...")
+            elif module == SETUP_ENDPOINT_PACKAGE and any(
+                alias.name == "setup" for alias in node.names
+            ):
+                violations.append(f"from {module} import setup")
+
+        elif isinstance(node, ast.Call) and _imports_setup_endpoint_by_name(node):
+            violations.append("dynamic import of setup endpoint")
+
+    return violations
+
+
+def _imports_setup_endpoint_by_name(node: ast.Call) -> bool:
+    if not node.args:
+        return False
+
+    module_arg = node.args[0]
+    if not isinstance(module_arg, ast.Constant) or module_arg.value != SETUP_ENDPOINT_MODULE:
+        return False
+
+    func = node.func
+    return (
+        (
+            isinstance(func, ast.Attribute)
+            and func.attr == "import_module"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "importlib"
+        )
+        or (isinstance(func, ast.Name) and func.id in {"import_module", "__import__"})
+    )
 
 
 def _minimal_group_source_text() -> str:
@@ -11522,6 +11577,7 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.acp_permissions import router as acp_permissions_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router" not in source
+    assert not _main_setup_endpoint_import_violations(source)
     assert "from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.authnz_debug import router as authnz_debug_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router" not in source
