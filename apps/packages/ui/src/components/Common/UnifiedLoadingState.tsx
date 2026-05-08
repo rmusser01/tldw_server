@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo } from "react"
-import { Skeleton } from "antd"
 import { useTranslation } from "react-i18next"
-import { cn } from "@/libs/utils"
 import { translateMessage } from "@/i18n/translateMessage"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
 
 export interface LoadingSource {
   key: string
@@ -53,7 +52,6 @@ export function UnifiedLoadingState({
     () => sources.filter((source) => source.loading),
     [sources]
   )
-  const isAnyLoading = loadingSources.length > 0
 
   useEffect(() => {
     if (!showLabels) return
@@ -70,38 +68,41 @@ export function UnifiedLoadingState({
     }
   }, [loadingSources, showLabels])
 
-  if (!isAnyLoading) {
+  const translatedLoadingSources = useMemo(
+    () =>
+      loadingSources.map((source) => {
+        const label = showLabels
+          ? source.label
+            ? translateMessage(t, source.label, source.label)
+            : translateMessage(
+                t,
+                `common:loadingSource.${source.key}`,
+                `Loading: ${source.key}`
+              )
+          : source.label
+
+        return {
+          ...source,
+          label
+        }
+      }),
+    [loadingSources, showLabels, t]
+  )
+
+  if (loadingSources.length === 0) {
     return <>{children}</>
   }
 
-  const getSourceLabel = (source: LoadingSource) => {
-    if (source.label) {
-      return translateMessage(t, source.label, source.label)
-    }
-    return translateMessage(
-      t,
-      `common:loadingSource.${source.key}`,
-      `Loading: ${source.key}`
-    )
-  }
-
   return (
-    <div className={cn("flex flex-col items-center py-4 px-2", className)}>
-      {showLabels && loadingSources.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-3 text-xs text-text-subtle">
-          {loadingSources.map((source) => (
-            <span
-              key={source.key}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface2"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {getSourceLabel(source)}
-            </span>
-          ))}
-        </div>
-      )}
-      <Skeleton active paragraph={{ rows }} className="w-full" />
-    </div>
+    <LoadingState
+      mode="skeleton"
+      rows={rows}
+      sources={translatedLoadingSources}
+      showLabels={showLabels}
+      className={className}
+    >
+      {children}
+    </LoadingState>
   )
 }
 

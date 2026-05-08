@@ -222,6 +222,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
             className
           )}
           data-testid={dataTestId}
+          data-ds-component="LoadingState"
         >
           {renderSourceLabels()}
           {renderContent()}
@@ -232,7 +233,11 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
     // Overlay loading
     if (overlay) {
       return (
-        <div ref={ref} className={cn("relative", className)}>
+        <div
+          ref={ref}
+          className={cn("relative", className)}
+          data-ds-component="LoadingState"
+        >
           {children}
           <div
             className="absolute inset-0 flex items-center justify-center bg-bg/60 backdrop-blur-[2px]"
@@ -251,6 +256,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
         ref={ref}
         className={cn("flex flex-col items-center px-2 py-4", className)}
         data-testid={dataTestId}
+        data-ds-component="LoadingState"
       >
         {renderSourceLabels()}
         {renderContent()}
