@@ -1125,14 +1125,7 @@ if _ULTRA_MINIMAL_APP:
     # endpoint imports beyond control-plane health handling.
     pass
 elif _MINIMAL_TEST_APP:
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
-    except _IMPORT_EXCEPTIONS as _setup_min_import_err:
-        logger.debug(
-            "Skipping setup router import in minimal test app: {}",
-            _setup_min_import_err,
-        )
-        setup_router = None  # type: ignore[assignment]
+    _startup_trace("Minimal test app router imports delegated to router groups.")
 else:
     _startup_trace("Full app router imports delegated to router groups.")
 

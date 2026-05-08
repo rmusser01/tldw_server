@@ -11522,6 +11522,7 @@ def test_main_source_delegates_minimal_optional_llm_routers_to_group() -> None:
     assert "from tldw_Server_API.app.api.v1.endpoints.acp_permissions import router as acp_permissions_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.authnz_debug import router as authnz_debug_router" not in source
     assert "from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router" not in source
