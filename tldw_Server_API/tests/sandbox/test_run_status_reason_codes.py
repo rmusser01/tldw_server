@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import get_args
+
+import pytest
 
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminRunSummary,
     SandboxRunStatus,
 )
+from tldw_Server_API.app.core.Sandbox import run_status_taxonomy
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
 from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import (
     RUN_STATUS_REASON_METADATA,
     RunStatusReasonCode,
+    _validate_run_status_reason_metadata,
     normalize_run_status_reason,
     run_status_reason_details,
 )
@@ -192,6 +197,28 @@ def test_run_status_reason_metadata_covers_every_reason_code() -> None:
     """Ensure every public reason code has structured metadata."""
 
     assert set(RUN_STATUS_REASON_METADATA) == set(get_args(RunStatusReasonCode))
+    for key, metadata in RUN_STATUS_REASON_METADATA.items():
+        assert metadata.code == key
+
+
+def test_run_status_reason_metadata_validation_rejects_code_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject metadata entries whose internal code does not match their key."""
+
+    mismatched_metadata = dict(RUN_STATUS_REASON_METADATA)
+    mismatched_metadata["queued"] = replace(
+        RUN_STATUS_REASON_METADATA["queued"],
+        code="running",
+    )
+    monkeypatch.setattr(
+        run_status_taxonomy,
+        "RUN_STATUS_REASON_METADATA",
+        mismatched_metadata,
+    )
+
+    with pytest.raises(RuntimeError, match="code mismatch"):
+        _validate_run_status_reason_metadata()
 
 
 def test_run_status_reason_details_exposes_stable_metadata() -> None:

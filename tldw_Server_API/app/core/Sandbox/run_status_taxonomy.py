@@ -252,6 +252,16 @@ def _validate_run_status_reason_metadata() -> None:
             "Run status reason metadata map is incomplete: "
             f"missing={missing}, extra={extra}"
         )
+    mismatched = sorted(
+        (key, metadata.code)
+        for key, metadata in RUN_STATUS_REASON_METADATA.items()
+        if metadata.code != key
+    )
+    if mismatched:
+        raise RuntimeError(
+            "Run status reason metadata code mismatch: "
+            f"mismatched={mismatched}"
+        )
 
 
 _validate_run_status_reason_metadata()

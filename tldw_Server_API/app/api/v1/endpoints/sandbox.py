@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
 
 from fastapi import (
@@ -189,12 +190,22 @@ def _status_reason_code(
     )
 
 
+@lru_cache(maxsize=32)
+def _cached_status_reason_details(
+    code: str,
+) -> SandboxRunStatusReasonDetails:
+    """Cache schema metadata for the finite normalized status reason vocabulary."""
+
+    return SandboxRunStatusReasonDetails.model_validate(run_status_reason_details(code))
+
+
 def _status_reason_details(
     code: str | None,
 ) -> SandboxRunStatusReasonDetails:
     """Build the public schema metadata for a normalized status reason code."""
 
-    return SandboxRunStatusReasonDetails.model_validate(run_status_reason_details(code))
+    return _cached_status_reason_details(str(code or "unknown").strip())
+
 
 
 @router.on_event("startup")

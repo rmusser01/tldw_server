@@ -70,6 +70,8 @@ Verification recorded:
 - Whitespace: `git diff --check` passed.
 
 Known limitation: grouping the four TestClient endpoint checks in one pytest process hung in the existing TestClient shutdown path after the first test. The same endpoint checks passed as isolated pytest processes, so this slice records the grouped run as an existing lifecycle limitation rather than a status metadata failure.
+
+PR review follow-up: addressed two Gemini Code Assist threads by adding bounded caching for status reason detail schema objects and strengthening taxonomy validation so each metadata key must match its internal `code`. Added a focused mismatch regression test.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
