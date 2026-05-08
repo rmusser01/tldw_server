@@ -22,47 +22,106 @@ from tldw_Server_API.app.core.testing import (
 )
 
 API_V1_PREFIX = "/api/v1"
+REQUIRED_ROUTER_SKIP_EXCEPTIONS: tuple[type[Exception], ...] = ()
+
+
 def iter_minimal_test_router_specs() -> Iterable[RouterSpec]:
     """Yield the always-included minimal-test router specs."""
-    from tldw_Server_API.app.api.v1.endpoints.auth import router as auth_router
-    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import (
-        router as character_chat_sessions_router,
-    )
-    from tldw_Server_API.app.api.v1.endpoints.character_memory import (
-        router as character_memory_router,
-    )
-    from tldw_Server_API.app.api.v1.endpoints.character_messages import (
-        router as character_messages_router,
-    )
-    from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import router as character_router
-    from tldw_Server_API.app.api.v1.endpoints.chat import conversations_alias_router
-    from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
-    from tldw_Server_API.app.api.v1.endpoints.chat_loop import router as chat_loop_router
-    from tldw_Server_API.app.api.v1.endpoints.health import router as health_router
-    from tldw_Server_API.app.api.v1.endpoints.paper_search import router as paper_search_router
-    from tldw_Server_API.app.api.v1.endpoints.research import router as research_router
-    from tldw_Server_API.app.api.v1.endpoints.research_runs import router as research_runs_router
-    from tldw_Server_API.app.api.v1.endpoints.workspaces import router as workspaces_router
-
-    return [
-        RouterSpec(router=health_router, prefix=f"{API_V1_PREFIX}", tags=("health",)),
-        RouterSpec(router=auth_router, prefix=f"{API_V1_PREFIX}", tags=("authentication",)),
-        RouterSpec(router=research_router, prefix=f"{API_V1_PREFIX}/research", tags=("research",)),
-        RouterSpec(router=research_runs_router, prefix=f"{API_V1_PREFIX}", tags=("research-runs",)),
-        RouterSpec(router=paper_search_router, prefix=f"{API_V1_PREFIX}/paper-search", tags=("paper-search",)),
-        RouterSpec(router=chat_router, prefix=f"{API_V1_PREFIX}/chat"),
-        RouterSpec(router=chat_loop_router, prefix=f"{API_V1_PREFIX}"),
-        RouterSpec(router=conversations_alias_router, prefix=f"{API_V1_PREFIX}/chats", tags=("chat",)),
-        RouterSpec(router=character_router, prefix=f"{API_V1_PREFIX}/characters", tags=("characters",)),
-        RouterSpec(router=character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=("character-memory",)),
-        RouterSpec(
-            router=character_chat_sessions_router,
+    specs: list[RouterSpec] = []
+    for definition in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.health",
+            log_name="health",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("health",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.auth",
+            log_name="auth",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("authentication",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.research",
+            log_name="research",
+            prefix=f"{API_V1_PREFIX}/research",
+            tags=("research",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.research_runs",
+            log_name="research_runs",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("research-runs",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.paper_search",
+            log_name="paper_search",
+            prefix=f"{API_V1_PREFIX}/paper-search",
+            tags=("paper-search",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
+            log_name="chat",
+            prefix=f"{API_V1_PREFIX}/chat",
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat_loop",
+            log_name="chat_loop",
+            prefix=f"{API_V1_PREFIX}",
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
+            log_name="conversations_alias",
+            prefix=f"{API_V1_PREFIX}/chats",
+            tags=("chat",),
+            attr_name="conversations_alias_router",
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.characters_endpoint",
+            log_name="characters",
+            prefix=f"{API_V1_PREFIX}/characters",
+            tags=("characters",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.character_memory",
+            log_name="character_memory",
+            prefix=f"{API_V1_PREFIX}/characters",
+            tags=("character-memory",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
+            log_name="character_chat_sessions",
             prefix=f"{API_V1_PREFIX}/chats",
             tags=("character-chat-sessions",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
         ),
-        RouterSpec(router=character_messages_router, prefix=f"{API_V1_PREFIX}", tags=("character-messages",)),
-        RouterSpec(router=workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=("workspaces",)),
-    ]
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.character_messages",
+            log_name="character_messages",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("character-messages",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workspaces",
+            log_name="workspaces",
+            prefix=f"{API_V1_PREFIX}/workspaces",
+            tags=("workspaces",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+    ):
+        append_imported_router_spec(specs, definition)
+    return specs
 
 
 def _audio_jobs_imports_enabled_for_runtime() -> bool:
