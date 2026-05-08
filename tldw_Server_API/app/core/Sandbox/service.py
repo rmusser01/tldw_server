@@ -64,6 +64,7 @@ from .runtime_capabilities import (
     runtime_implementation_state,
     runtime_network_policy_effective_support,
     runtime_network_policy_metadata,
+    runtime_reason_details_for_codes,
     runtime_session_contract_metadata,
 )
 from .snapshots import SnapshotManager
@@ -890,6 +891,7 @@ class SandboxService:
         ) -> dict[str, object]:
             enforcement_ready = dict((preflight.enforcement_ready if preflight else {}) or {})
             reasons = list((preflight.reasons if preflight else []) or [])
+            normalized_reasons = normalize_runtime_reasons(reasons)
             isolation = runtime_isolation_metadata(runtime)
             network_contract = runtime_network_policy_metadata(runtime)
             session_contract = runtime_session_contract_metadata(runtime)
@@ -900,7 +902,10 @@ class SandboxService:
             return {
                 "available": bool(preflight.available) if preflight is not None else False,
                 "reasons": reasons,
-                "normalized_reasons": normalize_runtime_reasons(reasons),
+                "normalized_reasons": normalized_reasons,
+                "normalized_reason_details": SandboxService._runtime_reason_details_payload(
+                    [str(reason) for reason in normalized_reasons]
+                ),
                 "supported_trust_levels": list((preflight.supported_trust_levels if preflight else []) or []),
                 "strict_deny_all_supported": effective_network_support["deny_all"],
                 "strict_allowlist_supported": effective_network_support["allowlist"],
@@ -1136,6 +1141,9 @@ class SandboxService:
 
         session_contract = dict(row.get("session_contract") or {})
         normalized_reasons = [str(reason) for reason in row.get("normalized_reasons") or []]
+        normalized_reason_details = SandboxService._runtime_reason_details_payload(
+            normalized_reasons
+        )
         readiness = SandboxService._runtime_readiness(row)
         repair_state = str(session_contract.get("repair_state") or "").strip().lower()
         return {
@@ -1145,6 +1153,7 @@ class SandboxService:
             "readiness": readiness,
             "reasons": [str(reason) for reason in row.get("reasons") or []],
             "normalized_reasons": normalized_reasons,
+            "normalized_reason_details": normalized_reason_details,
             "boundary_class": row.get("boundary_class"),
             "vm_grade_isolation": bool(row.get("vm_grade_isolation")),
             "untrusted_eligible": bool(row.get("untrusted_eligible")),
@@ -1156,7 +1165,7 @@ class SandboxService:
             "repair_supported": repair_state in {"supported", "host_gated"},
             "recommended_action": SandboxService._runtime_recommended_action(
                 readiness,
-                normalized_reasons,
+                normalized_reason_details,
             ),
         }
 
@@ -1172,25 +1181,29 @@ class SandboxService:
         return "unavailable"
 
     @staticmethod
-    def _runtime_recommended_action(readiness: str, normalized_reasons: list[str]) -> str:
-        """Map normalized readiness reasons to an operator next action."""
+    def _runtime_reason_details_payload(
+        normalized_reasons: list[str],
+    ) -> list[dict[str, str | bool]]:
+        """Return serialized runtime reason details for normalized reason codes."""
 
-        reasons = set(normalized_reasons)
+        return [
+            details.as_dict()
+            for details in runtime_reason_details_for_codes(normalized_reasons)
+        ]
+
+    @staticmethod
+    def _runtime_recommended_action(
+        readiness: str,
+        normalized_reason_details: list[dict[str, str | bool]],
+    ) -> str:
+        """Map runtime reason metadata to an operator next action."""
+
         if readiness == "ready":
             return "none"
-        if reasons & {"helper_unavailable", "helper_missing", "helper_protocol_mismatch"}:
-            return "check_helper"
-        if reasons & {"template_missing", "template_unconfigured"}:
-            return "configure_template"
-        if reasons & {
-            "host_prerequisite_missing",
-            "host_permission_denied",
-            "unsupported_os",
-            "unsupported_arch",
-        }:
-            return "prepare_host"
-        if reasons & {"network_policy_unsupported", "trust_policy_denied"}:
-            return "adjust_request_policy"
+        for detail in normalized_reason_details:
+            action = str(detail.get("operator_action") or "").strip()
+            if action and action != "none":
+                return action
         if readiness in {"scaffold", "unsupported", "not_applicable"}:
             return "use_different_runtime"
         return "inspect_reasons"

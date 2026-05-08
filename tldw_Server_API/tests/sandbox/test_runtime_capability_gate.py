@@ -103,6 +103,19 @@ def _status_reason_details_contract_is_documented(text: str) -> bool:
     )
 
 
+def _runtime_reason_details_contract_is_documented(text: str) -> bool:
+    """Return whether the inventory documents structured runtime reason details."""
+
+    section = _markdown_section(text, "Normalized Reason Codes")
+    return (
+        "normalized_reason_details" in section
+        and "normalized_reasons" in section
+        and "category" in section
+        and "operator_action" in section
+        and "availability_blocking" in section
+    )
+
+
 def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -139,6 +152,10 @@ def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
         assert row.network_policy_contract is not None
         assert row.session_contract is not None
         assert row.normalized_reasons
+        assert row.normalized_reason_details
+        assert [details.code for details in row.normalized_reason_details] == list(
+            row.normalized_reasons
+        )
         assert "unknown" not in row.normalized_reasons
 
     for runtime in (RuntimeType.seatbelt, RuntimeType.worktree):
@@ -199,7 +216,7 @@ def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_miss
 def test_inventory_documents_status_reason_details_metadata(
     pytestconfig: pytest.Config,
 ) -> None:
-    """Guard the docs contract for structured status reason details."""
+    """Guard the docs contract for structured reason details."""
 
     repo_root = Path(pytestconfig.rootpath)
     inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
@@ -207,7 +224,8 @@ def test_inventory_documents_status_reason_details_metadata(
     current_gaps = _markdown_section(text, "Current Gaps")
 
     assert _status_reason_details_contract_is_documented(text)
-    assert "runtime discovery `normalized_reasons` still lack equivalent rich details" in current_gaps
+    assert _runtime_reason_details_contract_is_documented(text)
+    assert "runtime discovery `normalized_reasons` still lack equivalent rich details" not in current_gaps
 
 
 def test_inventory_no_longer_lists_host_local_warning_ui_as_missing(

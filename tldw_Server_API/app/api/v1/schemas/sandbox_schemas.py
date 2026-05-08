@@ -23,7 +23,10 @@ from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeIsolationWarningCode,
     RuntimeNetworkPolicyReadinessSource,
     RuntimeNetworkPolicySupportState,
+    RuntimeReasonCategory,
     RuntimeReasonCode,
+    RuntimeReasonOperatorAction,
+    RuntimeReasonSeverity,
     RuntimeSessionReuseModel,
 )
 
@@ -106,6 +109,19 @@ class SandboxRuntimeSessionContract(BaseModel):
     )
 
 
+class SandboxRuntimeReasonDetails(BaseModel):
+    """Structured metadata for a normalized sandbox runtime discovery reason."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: RuntimeReasonCode
+    category: RuntimeReasonCategory
+    severity: RuntimeReasonSeverity
+    availability_blocking: bool
+    operator_action: RuntimeReasonOperatorAction
+    user_message_key: str
+
+
 def _default_offset_pagination_aliases(response):
     if response.next_offset is None:
         response.next_offset = response.pagination.next_offset
@@ -128,6 +144,13 @@ class SandboxRuntimeInfo(BaseModel):
         description=(
             "Stable, client-facing reason codes derived from raw runtime preflight reasons; "
             "raw reasons are preserved for operator diagnostics"
+        ),
+    )
+    normalized_reason_details: list[SandboxRuntimeReasonDetails] | None = Field(
+        default=None,
+        description=(
+            "Structured metadata derived from normalized_reasons for client and "
+            "operator presentation. Existing raw reasons remain authoritative."
         ),
     )
     supported_trust_levels: list[TrustLevelType] | None = Field(default=None, description="Trust levels supported by this runtime under current host policy")
@@ -523,6 +546,7 @@ class SandboxAdminRuntimeDiagnosticsItem(BaseModel):
     readiness: RuntimeDiagnosticsReadiness
     reasons: list[str] = Field(default_factory=list)
     normalized_reasons: list[RuntimeReasonCode] = Field(default_factory=list)
+    normalized_reason_details: list[SandboxRuntimeReasonDetails] = Field(default_factory=list)
     boundary_class: RuntimeBoundaryClass | None = None
     vm_grade_isolation: bool = False
     untrusted_eligible: bool = False

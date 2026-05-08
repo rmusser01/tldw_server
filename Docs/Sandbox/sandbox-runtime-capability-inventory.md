@@ -124,6 +124,13 @@ Runtime discovery preserves raw `reasons` for operator diagnostics and exposes
 additive `normalized_reasons` for client logic. The normalized vocabulary is
 centralized in `runtime_capabilities.py`.
 
+Runtime discovery also exposes additive `normalized_reason_details` derived
+from `normalized_reasons`. Details include `category`, `severity`,
+`availability_blocking`, `operator_action`, and `user_message_key`; they are
+presentation and triage metadata, not a replacement for raw runtime preflight
+facts. Admin runtime diagnostics reuse the same metadata for recommended
+actions so clients do not need to duplicate raw reason matching.
+
 | Normalized reason | Meaning |
 | --- | --- |
 | `runtime_unavailable` | The runtime itself is not available on the current host. |
@@ -288,7 +295,6 @@ for `untrusted` workloads.
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
-| Run status responses expose structured `status_reason_details`, but runtime discovery `normalized_reasons` still lack equivalent rich details. | all | Phase 3 |
 | Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | No single CI job proves real execution for every runtime; the portable capability gate covers capability contracts only. | all | Phase 5 |
@@ -303,6 +309,8 @@ for `untrusted` workloads.
   current `enforcement_ready` host/preflight truth.
 - Add session contract metadata for every runtime and keep it separate from
   current host availability and admin diagnostics.
+- Add runtime reason metadata for every `RuntimeReasonCode` and keep it derived
+  from `normalized_reasons`, not raw runtime-specific reason strings.
 - Prefer `unsupported` over ambiguous wording when a guarantee cannot be
   proven.
 - Update this document before expanding `vz_macos`, Apple `containerization`,

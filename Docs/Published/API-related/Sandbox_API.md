@@ -21,8 +21,9 @@ Current runtime identities are `docker`, `firecracker`, `lima`, `vz_linux`,
 guarantee:
 - Runtime discovery includes machine-readable `boundary_class`,
   `vm_grade_isolation`, `untrusted_eligible`, `isolation_warnings`, and
-  `network_policy_contract` fields, plus a `session_contract` object. Use
-  those fields for client decisions instead of parsing prose notes.
+  `network_policy_contract` fields, plus `normalized_reason_details` and a
+  `session_contract` object. Use those fields for client decisions instead of
+  parsing prose notes.
 - `isolation_warnings` are advisory metadata for client UX and operator
   context. They are not admission rejection reasons by themselves.
 - `seatbelt` is host-local. `seatbelt` is not `untrusted`-eligible.
@@ -127,6 +128,9 @@ Response (example):
     {
       "name": "docker",
       "available": true,
+      "reasons": [],
+      "normalized_reasons": [],
+      "normalized_reason_details": [],
       "default_images": ["python:3.11-slim", "node:20-alpine"],
       "max_cpu": 4.0,
       "max_mem_mb": 8192,
@@ -168,6 +172,11 @@ Response (example):
 }
 ```
 Runtime isolation fields mean:
+- `reasons`: raw runtime preflight facts for operator diagnostics.
+- `normalized_reasons`: stable reason codes derived from raw preflight facts.
+- `normalized_reason_details`: structured metadata derived from
+  `normalized_reasons`, including category, severity, availability-blocking
+  posture, operator action, and message key.
 - `boundary_class`: `container`, `host_local`, `vm_grade`, or
   `vm_grade_scaffold`.
 - `vm_grade_isolation`: whether the runtime boundary is VM-grade for isolation
