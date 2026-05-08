@@ -64,6 +64,7 @@ def test_public_sandbox_api_docs_do_not_overclaim_runtime_support(doc_path: Path
         "vm_grade_isolation",
         "untrusted_eligible",
         "network_policy_contract",
+        "normalized_reason_details",
         "session_contract",
     ):
         _require(
@@ -154,4 +155,18 @@ def test_sandbox_runtime_session_contract_schema_field_is_required() -> None:
     _require(
         "'type': 'null'" not in serialized,
         "SandboxRuntimeInfo field session_contract should not be nullable",
+    )
+
+
+def test_sandbox_runtime_schema_exposes_reason_details() -> None:
+    schema = SandboxRuntimeInfo.model_json_schema()
+
+    _require(
+        "normalized_reason_details" in schema["properties"],
+        "SandboxRuntimeInfo should expose normalized_reason_details",
+    )
+    serialized = str(schema["properties"]["normalized_reason_details"])
+    _require(
+        "'type': 'null'" not in serialized,
+        "SandboxRuntimeInfo field normalized_reason_details should not be nullable",
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, get_args
 
 from loguru import logger
 
@@ -64,6 +64,28 @@ RuntimeReasonCode = Literal[
     "feature_not_implemented",
     "image_store_unavailable",
     "unknown",
+]
+RuntimeReasonCategory = Literal[
+    "runtime",
+    "platform",
+    "helper",
+    "template",
+    "network",
+    "policy",
+    "host",
+    "implementation",
+    "image_store",
+    "unknown",
+]
+RuntimeReasonSeverity = Literal["info", "warning", "error"]
+RuntimeReasonOperatorAction = Literal[
+    "none",
+    "check_helper",
+    "configure_template",
+    "prepare_host",
+    "adjust_request_policy",
+    "use_different_runtime",
+    "inspect_reasons",
 ]
 
 RUNTIME_IMPLEMENTATION_STATES: Mapping[RuntimeType, RuntimeImplementationState] = {
@@ -133,6 +155,28 @@ class RuntimeSessionContractMetadata:
             "requires_live_health_check": self.requires_live_health_check,
             "recovery_state": self.recovery_state,
             "repair_state": self.repair_state,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeReasonDetails:
+    """Structured client/operator metadata for a normalized runtime reason."""
+
+    code: RuntimeReasonCode
+    category: RuntimeReasonCategory
+    severity: RuntimeReasonSeverity
+    availability_blocking: bool
+    operator_action: RuntimeReasonOperatorAction
+    user_message_key: str
+
+    def as_dict(self) -> dict[str, str | bool]:
+        return {
+            "code": self.code,
+            "category": self.category,
+            "severity": self.severity,
+            "availability_blocking": self.availability_blocking,
+            "operator_action": self.operator_action,
+            "user_message_key": self.user_message_key,
         }
 
 
@@ -322,6 +366,130 @@ RUNTIME_NETWORK_POLICY_METADATA: Mapping[
 }
 
 
+RUNTIME_REASON_METADATA: Mapping[str, RuntimeReasonDetails] = {
+    "runtime_unavailable": RuntimeReasonDetails(
+        code="runtime_unavailable",
+        category="runtime",
+        severity="error",
+        availability_blocking=True,
+        operator_action="use_different_runtime",
+        user_message_key="sandbox.runtime.reason.runtime_unavailable",
+    ),
+    "unsupported_os": RuntimeReasonDetails(
+        code="unsupported_os",
+        category="platform",
+        severity="error",
+        availability_blocking=True,
+        operator_action="prepare_host",
+        user_message_key="sandbox.runtime.reason.unsupported_os",
+    ),
+    "unsupported_arch": RuntimeReasonDetails(
+        code="unsupported_arch",
+        category="platform",
+        severity="error",
+        availability_blocking=True,
+        operator_action="prepare_host",
+        user_message_key="sandbox.runtime.reason.unsupported_arch",
+    ),
+    "helper_unavailable": RuntimeReasonDetails(
+        code="helper_unavailable",
+        category="helper",
+        severity="error",
+        availability_blocking=True,
+        operator_action="check_helper",
+        user_message_key="sandbox.runtime.reason.helper_unavailable",
+    ),
+    "helper_protocol_mismatch": RuntimeReasonDetails(
+        code="helper_protocol_mismatch",
+        category="helper",
+        severity="error",
+        availability_blocking=True,
+        operator_action="check_helper",
+        user_message_key="sandbox.runtime.reason.helper_protocol_mismatch",
+    ),
+    "helper_missing": RuntimeReasonDetails(
+        code="helper_missing",
+        category="helper",
+        severity="error",
+        availability_blocking=True,
+        operator_action="check_helper",
+        user_message_key="sandbox.runtime.reason.helper_missing",
+    ),
+    "template_missing": RuntimeReasonDetails(
+        code="template_missing",
+        category="template",
+        severity="error",
+        availability_blocking=True,
+        operator_action="configure_template",
+        user_message_key="sandbox.runtime.reason.template_missing",
+    ),
+    "template_unconfigured": RuntimeReasonDetails(
+        code="template_unconfigured",
+        category="template",
+        severity="error",
+        availability_blocking=True,
+        operator_action="configure_template",
+        user_message_key="sandbox.runtime.reason.template_unconfigured",
+    ),
+    "network_policy_unsupported": RuntimeReasonDetails(
+        code="network_policy_unsupported",
+        category="network",
+        severity="error",
+        availability_blocking=True,
+        operator_action="adjust_request_policy",
+        user_message_key="sandbox.runtime.reason.network_policy_unsupported",
+    ),
+    "trust_policy_denied": RuntimeReasonDetails(
+        code="trust_policy_denied",
+        category="policy",
+        severity="error",
+        availability_blocking=True,
+        operator_action="adjust_request_policy",
+        user_message_key="sandbox.runtime.reason.trust_policy_denied",
+    ),
+    "host_prerequisite_missing": RuntimeReasonDetails(
+        code="host_prerequisite_missing",
+        category="host",
+        severity="error",
+        availability_blocking=True,
+        operator_action="prepare_host",
+        user_message_key="sandbox.runtime.reason.host_prerequisite_missing",
+    ),
+    "host_permission_denied": RuntimeReasonDetails(
+        code="host_permission_denied",
+        category="host",
+        severity="error",
+        availability_blocking=True,
+        operator_action="prepare_host",
+        user_message_key="sandbox.runtime.reason.host_permission_denied",
+    ),
+    "feature_not_implemented": RuntimeReasonDetails(
+        code="feature_not_implemented",
+        category="implementation",
+        severity="error",
+        availability_blocking=True,
+        operator_action="use_different_runtime",
+        user_message_key="sandbox.runtime.reason.feature_not_implemented",
+    ),
+    "image_store_unavailable": RuntimeReasonDetails(
+        code="image_store_unavailable",
+        category="image_store",
+        severity="error",
+        availability_blocking=True,
+        operator_action="prepare_host",
+        user_message_key="sandbox.runtime.reason.image_store_unavailable",
+    ),
+    "unknown": RuntimeReasonDetails(
+        code="unknown",
+        category="unknown",
+        severity="warning",
+        availability_blocking=True,
+        operator_action="inspect_reasons",
+        user_message_key="sandbox.runtime.reason.unknown",
+    ),
+}
+
+
 def _validate_runtime_isolation_metadata_map() -> None:
     expected = set(RuntimeType)
     actual = set(RUNTIME_ISOLATION_METADATA)
@@ -358,9 +526,32 @@ def _validate_runtime_session_contract_metadata_map() -> None:
         )
 
 
+def _validate_runtime_reason_metadata_map() -> None:
+    expected = set(get_args(RuntimeReasonCode))
+    actual = set(RUNTIME_REASON_METADATA)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        raise RuntimeError(
+            "Runtime reason metadata map is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+    mismatched = sorted(
+        (key, metadata.code)
+        for key, metadata in RUNTIME_REASON_METADATA.items()
+        if metadata.code != key
+    )
+    if mismatched:
+        raise RuntimeError(
+            "Runtime reason metadata code mismatch: "
+            f"mismatched={mismatched}"
+        )
+
+
 _validate_runtime_isolation_metadata_map()
 _validate_runtime_session_contract_metadata_map()
 _validate_runtime_network_policy_metadata_map()
+_validate_runtime_reason_metadata_map()
 
 
 _RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
@@ -558,6 +749,26 @@ def normalize_runtime_reasons(
         seen.add(code)
         normalized.append(code)
     return normalized
+
+
+def runtime_reason_details(code: RuntimeReasonCode | str | None) -> RuntimeReasonDetails:
+    """Return structured metadata for a normalized runtime reason code."""
+
+    code_value = str(code or "unknown").strip()
+    metadata = RUNTIME_REASON_METADATA.get(code_value)
+    if metadata is None:
+        return RUNTIME_REASON_METADATA["unknown"]
+    return metadata
+
+
+def runtime_reason_details_for_codes(
+    codes: list[RuntimeReasonCode | str] | tuple[RuntimeReasonCode | str, ...] | None,
+) -> list[RuntimeReasonDetails]:
+    """Return reason metadata while preserving normalized reason order."""
+
+    if codes is None:
+        return []
+    return [runtime_reason_details(code) for code in codes]
 
 
 @dataclass

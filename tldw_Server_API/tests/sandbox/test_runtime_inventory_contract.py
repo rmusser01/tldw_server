@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
@@ -349,6 +351,28 @@ def test_runtime_info_schema_exposes_session_contract() -> None:
     assert "session_contract" in schema["properties"]
 
 
+def test_runtime_info_schema_exposes_reason_details() -> None:
+    schema = SandboxRuntimeInfo.model_json_schema()
+
+    assert "normalized_reason_details" in schema["properties"]
+
+
+def test_runtime_reason_metadata_contract_covers_reason_codes() -> None:
+    expected = set(get_args(runtime_caps.RuntimeReasonCode))
+
+    assert set(runtime_caps.RUNTIME_REASON_METADATA) == expected
+    for code, details in runtime_caps.RUNTIME_REASON_METADATA.items():
+        assert details.code == code
+        assert details.user_message_key == f"sandbox.runtime.reason.{code}"
+
+
+def test_runtime_reason_details_unknown_code_falls_back_to_unknown() -> None:
+    unknown = runtime_caps.runtime_reason_details("not-a-real-code")
+
+    assert unknown.code == "unknown"
+    assert unknown.operator_action == "inspect_reasons"
+
+
 def test_feature_discovery_validates_against_runtime_response_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -384,6 +408,29 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
                 "session_contract": {
                     "support_state": "supported",
                     "reuse_model": "workspace_only",
+                    "requires_live_health_check": False,
+                    "recovery_state": "unsupported",
+                    "repair_state": "unsupported",
+                },
+            },
+            {
+                "name": "firecracker",
+                "available": False,
+                "implementation_state": "host_gated",
+                "reasons": ["firecracker_unavailable", "/dev/kvm_missing"],
+                "normalized_reasons": [
+                    "runtime_unavailable",
+                    "host_prerequisite_missing",
+                ],
+                "boundary_class": "vm_grade",
+                "vm_grade_isolation": True,
+                "untrusted_eligible": True,
+                "isolation_warnings": [],
+                "strict_deny_all_supported": False,
+                "strict_allowlist_supported": False,
+                "session_contract": {
+                    "support_state": "scaffold",
+                    "reuse_model": "scaffold",
                     "requires_live_health_check": False,
                     "recovery_state": "unsupported",
                     "repair_state": "unsupported",
@@ -460,10 +507,10 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
 
     assert summary["source"] == "feature_discovery"
     assert summary["summary"] == {
-        "total": 4,
+        "total": 5,
         "ready": 2,
         "unavailable": 1,
-        "host_gated": 1,
+        "host_gated": 2,
         "scaffold": 0,
         "host_local_warning_runtimes": ["worktree"],
         "repair_supported_runtimes": ["vz_linux", "vz_macos"],
@@ -471,7 +518,19 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
     rows = {row["name"]: row for row in summary["runtimes"]}
     assert rows["docker"]["readiness"] == "ready"
     assert rows["docker"]["recommended_action"] == "none"
+    assert rows["firecracker"]["readiness"] == "host_gated"
+    assert rows["firecracker"]["recommended_action"] == "prepare_host"
     assert rows["vz_linux"]["readiness"] == "host_gated"
+    assert rows["vz_linux"]["normalized_reason_details"] == [
+        {
+            "code": "helper_unavailable",
+            "category": "helper",
+            "severity": "error",
+            "availability_blocking": True,
+            "operator_action": "check_helper",
+            "user_message_key": "sandbox.runtime.reason.helper_unavailable",
+        }
+    ]
     assert rows["vz_linux"]["recommended_action"] == "check_helper"
     assert rows["vz_linux"]["repair_supported"] is True
     assert rows["vz_macos"]["readiness"] == "ready"
@@ -633,6 +692,24 @@ def test_feature_discovery_preserves_raw_reasons_and_adds_normalized_codes(
     assert discovery["vz_linux"]["normalized_reasons"] == [
         "helper_unavailable",
         "template_missing",
+    ]
+    assert discovery["vz_linux"]["normalized_reason_details"] == [
+        {
+            "code": "helper_unavailable",
+            "category": "helper",
+            "severity": "error",
+            "availability_blocking": True,
+            "operator_action": "check_helper",
+            "user_message_key": "sandbox.runtime.reason.helper_unavailable",
+        },
+        {
+            "code": "template_missing",
+            "category": "template",
+            "severity": "error",
+            "availability_blocking": True,
+            "operator_action": "configure_template",
+            "user_message_key": "sandbox.runtime.reason.template_missing",
+        },
     ]
     assert discovery["seatbelt"]["normalized_reasons"] == [
         "unsupported_os",
