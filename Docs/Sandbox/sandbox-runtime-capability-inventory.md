@@ -271,11 +271,17 @@ image-store correlation, reconciliation, read-only recovery-summary projection,
 dry-run repair, and host-gated real VM smoke. Those details are intentionally
 not generalized until other runtimes have an equally clear ownership model.
 
+Host-local isolation warnings are now carried through public discovery,
+cross-runtime admin diagnostics, and the admin Monitoring page's
+`Sandbox Runtime Isolation` card. This covers the operator-visible warning
+surface for `seatbelt` and `worktree` while preserving the core policy rule:
+host-local runtimes remain weaker than VM-grade isolation and are not eligible
+for `untrusted` workloads.
+
 ## Current Gaps
 
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
-| Host-local runtime warnings need to be carried into future UI/operator dashboards, not just docs and API metadata. | `seatbelt`, `worktree` | Phase 2 |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
 | Rich structured error metadata beyond the first normalized alias pass remains incomplete. | all | Phase 3 |
 | Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
