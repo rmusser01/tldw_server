@@ -146,8 +146,8 @@ class SandboxRuntimeInfo(BaseModel):
             "raw reasons are preserved for operator diagnostics"
         ),
     )
-    normalized_reason_details: list[SandboxRuntimeReasonDetails] | None = Field(
-        default=None,
+    normalized_reason_details: list[SandboxRuntimeReasonDetails] = Field(
+        default_factory=list,
         description=(
             "Structured metadata derived from normalized_reasons for client and "
             "operator presentation. Existing raw reasons remain authoritative."

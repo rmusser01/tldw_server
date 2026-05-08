@@ -112,6 +112,14 @@ except Exception:
 
 _SANDBOX_WORKSPACE_FALLBACK_LOCKS: dict[str, threading.Lock] = {}
 _SANDBOX_WORKSPACE_FALLBACK_LOCKS_GUARD = threading.Lock()
+_RUNTIME_OPERATOR_ACTION_PRIORITY = {
+    "check_helper": 0,
+    "configure_template": 1,
+    "prepare_host": 2,
+    "adjust_request_policy": 3,
+    "inspect_reasons": 4,
+    "use_different_runtime": 5,
+}
 
 
 class SandboxReconciliationRepairError(RuntimeError):
@@ -1200,10 +1208,16 @@ class SandboxService:
 
         if readiness == "ready":
             return "none"
+        best_action = ""
+        best_rank = len(_RUNTIME_OPERATOR_ACTION_PRIORITY) + 1
         for detail in normalized_reason_details:
             action = str(detail.get("operator_action") or "").strip()
-            if action and action != "none":
-                return action
+            rank = _RUNTIME_OPERATOR_ACTION_PRIORITY.get(action)
+            if rank is not None and rank < best_rank:
+                best_action = action
+                best_rank = rank
+        if best_action:
+            return best_action
         if readiness in {"scaffold", "unsupported", "not_applicable"}:
             return "use_different_runtime"
         return "inspect_reasons"

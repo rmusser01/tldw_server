@@ -414,6 +414,29 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
                 },
             },
             {
+                "name": "firecracker",
+                "available": False,
+                "implementation_state": "host_gated",
+                "reasons": ["firecracker_unavailable", "/dev/kvm_missing"],
+                "normalized_reasons": [
+                    "runtime_unavailable",
+                    "host_prerequisite_missing",
+                ],
+                "boundary_class": "vm_grade",
+                "vm_grade_isolation": True,
+                "untrusted_eligible": True,
+                "isolation_warnings": [],
+                "strict_deny_all_supported": False,
+                "strict_allowlist_supported": False,
+                "session_contract": {
+                    "support_state": "scaffold",
+                    "reuse_model": "scaffold",
+                    "requires_live_health_check": False,
+                    "recovery_state": "unsupported",
+                    "repair_state": "unsupported",
+                },
+            },
+            {
                 "name": "vz_linux",
                 "available": False,
                 "implementation_state": "host_gated",
@@ -484,10 +507,10 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
 
     assert summary["source"] == "feature_discovery"
     assert summary["summary"] == {
-        "total": 4,
+        "total": 5,
         "ready": 2,
         "unavailable": 1,
-        "host_gated": 1,
+        "host_gated": 2,
         "scaffold": 0,
         "host_local_warning_runtimes": ["worktree"],
         "repair_supported_runtimes": ["vz_linux", "vz_macos"],
@@ -495,6 +518,8 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
     rows = {row["name"]: row for row in summary["runtimes"]}
     assert rows["docker"]["readiness"] == "ready"
     assert rows["docker"]["recommended_action"] == "none"
+    assert rows["firecracker"]["readiness"] == "host_gated"
+    assert rows["firecracker"]["recommended_action"] == "prepare_host"
     assert rows["vz_linux"]["readiness"] == "host_gated"
     assert rows["vz_linux"]["normalized_reason_details"] == [
         {

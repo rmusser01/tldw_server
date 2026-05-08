@@ -165,3 +165,8 @@ def test_sandbox_runtime_schema_exposes_reason_details() -> None:
         "normalized_reason_details" in schema["properties"],
         "SandboxRuntimeInfo should expose normalized_reason_details",
     )
+    serialized = str(schema["properties"]["normalized_reason_details"])
+    _require(
+        "'type': 'null'" not in serialized,
+        "SandboxRuntimeInfo field normalized_reason_details should not be nullable",
+    )

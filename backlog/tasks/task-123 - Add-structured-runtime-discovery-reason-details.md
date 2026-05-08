@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-05-08 13:41'
-updated_date: '2026-05-08 13:47'
+updated_date: '2026-05-08 13:59'
 labels:
   - api
   - sandbox
@@ -57,12 +57,25 @@ Verification:
 - git diff --check -> passed.
 
 Known skips/blockers: full repository test suite was not run; focused sandbox runtime/docs contract tests covered the changed surface.
+
+Reopened for PR #1378 review follow-up. Actionable findings verified from Qodo/Gemini: recommended_action should not depend on raw normalized reason order when multiple reason details exist, and SandboxRuntimeInfo.normalized_reason_details should be non-nullable because runtime discovery always emits a list.
+
+PR #1378 review follow-up implemented. Verified two findings: recommended_action was order-dependent, and normalized_reason_details was nullable in the public schema despite runtime discovery always emitting a list. Added failing regression checks for both, then fixed with explicit operator-action priority and a non-nullable list schema field.
+
+Review follow-up verification:
+- Red regression run: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py::test_runtime_diagnostics_summary_projects_feature_discovery_rows tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py::test_sandbox_runtime_schema_exposes_reason_details -q -> 2 failed as expected.
+- Green regression run for same targets -> 2 passed, 2 warnings.
+- Focused sandbox/docs contract suite -> 43 passed, 2 warnings.
+- py_compile on touched Python files -> passed.
+- Bandit production touched Python scan -> 0 results in /tmp/bandit_runtime_reason_details_prod.json.
+- Bandit touched tests with B101 skipped -> 0 results in /tmp/bandit_runtime_reason_details_tests.json.
+- git diff --check -> passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added centralized runtime reason metadata and additive normalized_reason_details on runtime discovery/admin diagnostics, with docs and focused contract tests covering schema exposure, metadata completeness, feature discovery population, diagnostics projection, and the closed inventory gap.
+Added centralized runtime reason metadata and additive normalized_reason_details on runtime discovery/admin diagnostics. PR review follow-up made normalized_reason_details non-nullable and made recommended_action selection priority-based rather than reason-order-dependent.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
