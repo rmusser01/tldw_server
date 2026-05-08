@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import sys
 from collections import Counter
 from pathlib import Path
@@ -4059,6 +4060,95 @@ def test_iter_minimal_test_router_specs_includes_health_and_auth(
     assert by_first_path["/auth/login"].prefix == "/api/v1"
     assert by_first_path["/auth/login"].tags == ("authentication",)
     assert by_first_path["/auth/login"].route_key == ""
+
+
+def test_iter_minimal_test_router_specs_defers_endpoint_imports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal always-included router specs do not import endpoints during construction."""
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
+
+    endpoint_modules = {
+        "tldw_Server_API.app.api.v1.endpoints.auth",
+        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
+        "tldw_Server_API.app.api.v1.endpoints.character_memory",
+        "tldw_Server_API.app.api.v1.endpoints.character_messages",
+        "tldw_Server_API.app.api.v1.endpoints.characters_endpoint",
+        "tldw_Server_API.app.api.v1.endpoints.chat",
+        "tldw_Server_API.app.api.v1.endpoints.chat_loop",
+        "tldw_Server_API.app.api.v1.endpoints.health",
+        "tldw_Server_API.app.api.v1.endpoints.paper_search",
+        "tldw_Server_API.app.api.v1.endpoints.research",
+        "tldw_Server_API.app.api.v1.endpoints.research_runs",
+        "tldw_Server_API.app.api.v1.endpoints.workspaces",
+    }
+    real_import = builtins.__import__
+
+    def fail_on_minimal_endpoint_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name in endpoint_modules:
+            raise AssertionError(f"unexpected eager minimal endpoint import: {name}")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_on_minimal_endpoint_import)
+
+    specs = list(iter_minimal_test_router_specs())
+
+    assert len(specs) == 13
+    assert all(not isinstance(spec.router, APIRouter) for spec in specs)
+
+
+def test_minimal_source_delegates_always_included_routers_to_imported_specs() -> None:
+    """Verify minimal always-included router specs no longer direct-import endpoints."""
+    source = _minimal_group_source_text()
+
+    assert "from tldw_Server_API.app.api.v1.endpoints.auth import router as auth_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.character_memory import" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.character_messages import" not in source
+    assert (
+        "from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import router as character_router"
+        not in source
+    )
+    assert "from tldw_Server_API.app.api.v1.endpoints.chat import conversations_alias_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.chat_loop import router as chat_loop_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.health import router as health_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.paper_search import router as paper_search_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.research import router as research_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.research_runs import router as research_runs_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.workspaces import router as workspaces_router" not in source
+
+
+def test_iter_minimal_test_router_specs_propagates_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify required minimal routers propagate runtime import defects at resolution."""
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
+
+    auth_module_name = "tldw_Server_API.app.api.v1.endpoints.auth"
+
+    class CrashingAuthModule(ModuleType):
+        """Fake auth module whose router lookup fails like a runtime defect."""
+
+        def __getattr__(self, name: str) -> APIRouter:
+            if name == "router":
+                raise RuntimeError("auth router crashed during import")
+            raise AttributeError(name)
+
+    monkeypatch.setitem(sys.modules, auth_module_name, CrashingAuthModule(auth_module_name))
+
+    specs = list(iter_minimal_test_router_specs())
+    auth_spec = next(spec for spec in specs if spec.name == "auth")
+    assert auth_spec.skip_exceptions == ()
+
+    with pytest.raises(RuntimeError, match="auth router crashed during import"):
+        register_router_specs(FastAPI(), (auth_spec,))
 
 
 def test_iter_minimal_optional_router_specs_defers_llamacpp_messages_attr_lookup(
