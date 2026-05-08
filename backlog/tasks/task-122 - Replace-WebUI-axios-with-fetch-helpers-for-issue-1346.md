@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-05-08 03:19'
-updated_date: '2026-05-08 03:21'
+updated_date: '2026-05-08 03:25'
 labels:
   - webui
   - dependencies
@@ -15,6 +15,7 @@ dependencies:
   - TASK-117
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
+  - 'https://github.com/rmusser01/tldw_server/pull/1375'
 documentation:
   - Docs/Design/WebUI_Dependency_Audit.md
   - Docs/superpowers/specs/2026-05-07-webui-dependency-trimming-design.md
@@ -60,6 +61,8 @@ Verification: bun install --frozen-lockfile passed; direct axios import/type/dec
 Changed-test sweep note: NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bunx vitest run --changed=origin/dev failed 82 tests across unrelated UI suites. Representative failures reproduced with this patch stashed on clean dev ancestry: ReviewTab.queue-state.test.tsx fails on RecentStudySessions undefined query data, and FlashcardsWorkspace.connection-state.test.tsx fails on missing old demo heading text. Treated as baseline failures, not introduced by this slice.
 
 Bandit skipped because this slice touches TypeScript, package manifests, lockfile, Backlog task metadata, and plan documentation only; no Python files changed.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1375.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
