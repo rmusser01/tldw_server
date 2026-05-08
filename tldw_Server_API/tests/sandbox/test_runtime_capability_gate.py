@@ -187,10 +187,17 @@ def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_miss
 def test_inventory_no_longer_lists_host_local_warning_ui_as_missing(
     pytestconfig: pytest.Config,
 ) -> None:
+    """Guard against re-listing delivered host-local warning UI work as a gap."""
     repo_root = Path(pytestconfig.rootpath)
     inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
     text = inventory.read_text(encoding="utf-8")
+    current_gaps = _markdown_section(text, "Current Gaps")
+    diagnostics_section = _markdown_section(text, "Recovery And Diagnostics Support")
 
-    assert "future UI/operator dashboards" not in text
-    assert "Sandbox Runtime Isolation" in text
-    assert "host-local isolation warnings" in text
+    assert "future UI/operator dashboards" not in current_gaps
+    assert "Sandbox Runtime Isolation" in diagnostics_section
+    assert re.search(
+        r"\bhost-local isolation warnings\b",
+        diagnostics_section,
+        flags=re.IGNORECASE,
+    )
