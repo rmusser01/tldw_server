@@ -370,19 +370,30 @@ Response (scaffold example):
   "base_image": "python:3.11-slim",
   "phase": "completed",
   "status_reason_code": "completed",
+  "status_reason_details": {
+    "code": "completed",
+    "category": "success",
+    "severity": "info",
+    "terminal": true,
+    "retryable": false,
+    "operator_action": "none",
+    "user_message_key": "sandbox.status.completed"
+  },
   "exit_code": 0,
   "policy_hash": "<hash>",
   "log_stream_url": "ws://host/api/v1/sandbox/runs/<run_id>/stream?from_seq=100"
 }
 ```
 
-`status_reason_code` is additive and derived from existing status data. Clients
-should use the exact returned literals for stable grouping: `queued`,
-`starting`, `running`, `completed`, `limits_applied`, `nonzero_exit`,
-`policy_failed`, `runtime_unavailable`, `startup_timeout`,
+`status_reason_code` and `status_reason_details` are additive and derived from
+existing status data. Clients should use the exact returned literals for stable
+grouping: `queued`, `starting`, `running`, `completed`, `limits_applied`,
+`nonzero_exit`, `policy_failed`, `runtime_unavailable`, `startup_timeout`,
 `execution_timeout`, `canceled_by_user`, `killed`, `queue_ttl_expired`,
-`runtime_error`, and `unknown`. Raw `phase`, `message`, and `exit_code` remain
-available for display and operator diagnostics.
+`runtime_error`, and `unknown`. Details add stable grouping metadata such as
+`category`, `severity`, `terminal`, `retryable`, `operator_action`, and
+`user_message_key`. Raw `phase`, `message`, and `exit_code` remain available
+for display and operator diagnostics.
 
 ## Stream logs (WebSocket)
 WS `/api/v1/sandbox/runs/{id}/stream`

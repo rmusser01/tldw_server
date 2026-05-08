@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -40,7 +40,7 @@ def test_admin_details_includes_resource_usage(monkeypatch) -> None:
 
     with _client(monkeypatch) as client:
         client.app.dependency_overrides[get_request_user] = _admin_user_dep
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "spec_version": "1.0",
             "runtime": "docker",
             "base_image": "python:3.11-slim",
@@ -56,6 +56,9 @@ def test_admin_details_includes_resource_usage(monkeypatch) -> None:
         assert rd.status_code == 200
         j = rd.json()
         assert j.get("id") == run_id
+        assert j.get("status_reason_code") == "completed"
+        assert j.get("status_reason_details", {}).get("code") == "completed"
+        assert j.get("status_reason_details", {}).get("category") == "success"
         ru = j.get("resource_usage")
         assert isinstance(ru, dict)
         # Expect keys; values are ints (may be 0 in fake exec)

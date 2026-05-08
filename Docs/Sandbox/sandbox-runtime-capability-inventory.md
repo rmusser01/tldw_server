@@ -173,6 +173,11 @@ limit signals. Raw runner messages remain available for operator diagnostics;
 clients should group by `status_reason_code` instead of matching runtime
 message strings.
 
+Run status responses also expose additive `status_reason_details` derived from
+the same code. Details include `category`, `severity`, `terminal`, `retryable`,
+`operator_action`, and `user_message_key`; they are response metadata, not
+additional persisted run state.
+
 ## Trust-Level Support
 
 | Runtime | `trusted` | `standard` | `untrusted` | Notes |
@@ -283,7 +288,7 @@ for `untrusted` workloads.
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
-| Rich structured error metadata beyond the first normalized alias pass remains incomplete. | all | Phase 3 |
+| Run status responses expose structured `status_reason_details`, but runtime discovery `normalized_reasons` still lack equivalent rich details. | all | Phase 3 |
 | Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | No single CI job proves real execution for every runtime; the portable capability gate covers capability contracts only. | all | Phase 5 |

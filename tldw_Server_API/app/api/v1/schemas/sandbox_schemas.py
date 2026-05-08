@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 try:
     from pydantic import model_validator
@@ -11,7 +11,12 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
-from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import RunStatusReasonCode
+from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import (
+    RunStatusOperatorAction,
+    RunStatusReasonCategory,
+    RunStatusReasonCode,
+    RunStatusReasonSeverity,
+)
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeBoundaryClass,
     RuntimeImplementationState,
@@ -298,6 +303,20 @@ class SandboxRun(BaseModel):
     created_at: datetime
 
 
+class SandboxRunStatusReasonDetails(BaseModel):
+    """Structured metadata for a normalized sandbox run status reason."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: RunStatusReasonCode
+    category: RunStatusReasonCategory
+    severity: RunStatusReasonSeverity
+    terminal: bool
+    retryable: bool
+    operator_action: RunStatusOperatorAction
+    user_message_key: str
+
+
 class SandboxRunStatus(BaseModel):
     id: str
     spec_version: str | None = None
@@ -320,6 +339,13 @@ class SandboxRunStatus(BaseModel):
         description=(
             "Stable client-facing reason code derived from phase, message, exit_code, "
             "and aggregate limit counters. Existing phase/message fields remain raw."
+        ),
+    )
+    status_reason_details: SandboxRunStatusReasonDetails | None = Field(
+        default=None,
+        description=(
+            "Structured metadata derived from status_reason_code for client and "
+            "operator presentation. Existing raw status fields remain authoritative."
         ),
     )
     exit_code: int | None = None
@@ -374,6 +400,13 @@ class SandboxAdminRunSummary(BaseModel):
     status_reason_code: RunStatusReasonCode | None = Field(
         default=None,
         description="Stable client-facing reason code derived from the run status summary",
+    )
+    status_reason_details: SandboxRunStatusReasonDetails | None = Field(
+        default=None,
+        description=(
+            "Structured metadata derived from status_reason_code for admin/operator "
+            "presentation."
+        ),
     )
     exit_code: int | None = None
     started_at: datetime | None = None
