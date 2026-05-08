@@ -257,6 +257,19 @@ def _main_source_text() -> str:
     return main_path.read_text(encoding="utf-8")
 
 
+def _minimal_group_source_text() -> str:
+    """Return the minimal router group source for source-level contracts."""
+    minimal_path = (
+        Path(__file__).resolve().parents[2]
+        / "app"
+        / "api"
+        / "v1"
+        / "router_groups"
+        / "minimal.py"
+    )
+    return minimal_path.read_text(encoding="utf-8")
+
+
 def _install_fake_router_module(
     monkeypatch: pytest.MonkeyPatch,
     module_name: str,
@@ -9856,6 +9869,7 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/admin/status"].prefix == "/api/v1"
     assert by_first_path["/admin/status"].tags == ("admin",)
     assert by_first_path["/admin/status"].route_key == ""
+    assert "/keys/shared" not in by_first_path
     assert by_first_path["/orgs"].prefix == "/api/v1"
     assert by_first_path["/orgs"].tags == ("organizations",)
     assert by_first_path["/orgs"].route_key == ""
@@ -9942,6 +9956,46 @@ def test_iter_minimal_optional_router_specs_falls_back_to_admin_byok_when_admin_
     assert by_first_path["/keys/shared"].prefix == "/api/v1/admin"
     assert by_first_path["/keys/shared"].tags == ("admin",)
     assert by_first_path["/keys/shared"].route_key == ""
+
+
+def test_iter_minimal_optional_router_specs_propagates_admin_runtime_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify admin fallback does not swallow runtime router import defects."""
+    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+
+    admin_module_name = "tldw_Server_API.app.api.v1.endpoints.admin"
+
+    class CrashingAdminModule(ModuleType):
+        """Fake admin module whose router lookup fails like a runtime defect."""
+
+        def __getattr__(self, name: str) -> APIRouter:
+            if name == "router":
+                raise RuntimeError("admin router crashed during import")
+            raise AttributeError(name)
+
+    admin_module = CrashingAdminModule(admin_module_name)
+    admin_module.__path__ = []  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, admin_module_name, admin_module)
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.admin.admin_byok",
+        path="/keys/shared",
+    )
+
+    with pytest.raises(RuntimeError, match="admin router crashed during import"):
+        list(iter_minimal_optional_router_specs())
+
+
+def test_minimal_source_delegates_admin_fallback_to_narrow_optional_semantics() -> None:
+    """Verify minimal admin fallback no longer uses broad import exception handling."""
+    source = _minimal_group_source_text()
+
+    assert "from tldw_Server_API.app.api.v1.endpoints.admin import router as admin_router" not in source
+    assert "from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import router as admin_byok_router" not in source
+    assert "except Exception as e" not in source
+    assert "except Exception as admin_byok_error" not in source
+    assert "Skipping admin_byok router in minimal test app" not in source
 
 
 def test_iter_minimal_optional_router_specs_includes_audio_jobs_when_opted_in(

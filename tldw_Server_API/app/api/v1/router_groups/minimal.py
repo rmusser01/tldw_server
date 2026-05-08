@@ -69,6 +69,28 @@ def _audio_jobs_imports_enabled_for_runtime() -> bool:
     return not _is_explicit_pytest_runtime() or _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO_JOBS")
 
 
+def _append_first_available_imported_router_spec(
+    specs: list[RouterSpec],
+    definitions: tuple[ImportedRouterSpec, ...],
+) -> None:
+    """Append the first imported router whose optional target is available."""
+    for definition in definitions:
+        candidate_specs: list[RouterSpec] = []
+        append_imported_router_spec(candidate_specs, definition)
+        if not candidate_specs:
+            continue
+        candidate_spec = candidate_specs[0]
+        try:
+            candidate_spec.resolve_router()
+        except candidate_spec.skip_exceptions as e:
+            spec_name = candidate_spec.name or candidate_spec.route_key or "unnamed"
+            context = f" {candidate_spec.skip_context}" if candidate_spec.skip_context else ""
+            logger.debug(f"Skipping {spec_name} router{context}: {e}")
+            continue
+        specs.append(candidate_spec)
+        return
+
+
 def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     """Yield optional minimal-test router specs, skipping unavailable imports."""
     specs: list[RouterSpec] = []
@@ -677,30 +699,25 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, ops_spec)
 
-    admin_router_added = False
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.admin import router as admin_router
-
-        specs.append(RouterSpec(
-            router=admin_router,
-            prefix=f"{API_V1_PREFIX}",
-            tags=("admin",),
-        ))
-        admin_router_added = True
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping admin router in minimal test app: {e}")
-
-    if not admin_router_added:
-        try:
-            from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import router as admin_byok_router
-
-            specs.append(RouterSpec(
-                router=admin_byok_router,
+    _append_first_available_imported_router_spec(
+        specs,
+        (
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.admin",
+                log_name="admin",
+                prefix=f"{API_V1_PREFIX}",
+                tags=("admin",),
+                skip_context=minimal_skip_context,
+            ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.admin.admin_byok",
+                log_name="admin_byok",
                 prefix=f"{API_V1_PREFIX}/admin",
                 tags=("admin",),
-            ))
-        except Exception as admin_byok_error:  # noqa: BLE001
-            logger.debug(f"Skipping admin_byok router in minimal test app: {admin_byok_error}")
+                skip_context=minimal_skip_context,
+            ),
+        ),
+    )
 
     for org_spec in (
         ImportedRouterSpec(
