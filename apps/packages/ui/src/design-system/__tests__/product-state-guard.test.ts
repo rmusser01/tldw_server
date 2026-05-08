@@ -131,6 +131,58 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("allows compatibility loading-state adapters that conditionally return LoadingState", () => {
+    const findings = analyze(
+      "src/components/Common/FeatureLoadingState.tsx",
+      `
+        import { LoadingState } from "@/components/ui/feedback/LoadingState"
+
+        export function FeatureLoadingState({ loading, children }) {
+          if (!loading) {
+            return <>{children}</>
+          }
+
+          return loading ? <LoadingState mode="skeleton" /> : null
+        }
+      `
+    )
+
+    expect(findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-loading-state",
+          subject: "FeatureLoadingState"
+        })
+      ])
+    )
+  })
+
+  it("flags local loading wrappers that only nest the canonical LoadingState", () => {
+    const findings = analyze(
+      "src/components/Common/FeatureLoadingState.tsx",
+      `
+        import { LoadingState } from "@/components/ui/feedback/LoadingState"
+
+        export function FeatureLoadingState() {
+          return (
+            <div className="legacy-loading-shell">
+              <LoadingState mode="skeleton" />
+            </div>
+          )
+        }
+      `
+    )
+
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rule: "local-loading-state",
+          subject: "FeatureLoadingState"
+        })
+      ])
+    )
+  })
+
   it("still flags sibling empty-state components that do not render canonical EmptyState", () => {
     const findings = analyze(
       "src/components/Common/FeatureEmptyState.tsx",

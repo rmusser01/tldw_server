@@ -445,7 +445,7 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
       imports.emptyState,
       fileSubject
     ),
-    loadingStateOwners: collectJsxTagOwners(
+    loadingStateOwners: collectReturnedJsxTagOwners(
       sourceFile,
       imports.loadingState,
       fileSubject
@@ -573,6 +573,173 @@ function collectJsxTagOwners(sourceFile, localNames, fallbackOwner) {
   })
 
   return owners
+}
+
+function collectReturnedJsxTagOwners(sourceFile, localNames, fallbackOwner) {
+  const owners = new Set()
+
+  if (!localNames || localNames.size === 0) {
+    return owners
+  }
+
+  walk(sourceFile, (node) => {
+    if (!isFunctionLikeNode(node)) {
+      return
+    }
+
+    const ownerName = returnedJsxOwnerName(node, fallbackOwner)
+    if (!ownerName) {
+      return
+    }
+
+    const returnsMatchingTag = collectOwnReturnExpressions(node).some(
+      (expression) => expressionDirectlyReturnsJsxTag(expression, localNames)
+    )
+    if (returnsMatchingTag) {
+      owners.add(ownerName)
+    }
+  })
+
+  return owners
+}
+
+function returnedJsxOwnerName(functionNode, fallbackOwner) {
+  if (functionNode.name && ts.isIdentifier(functionNode.name)) {
+    return functionNode.name.text
+  }
+
+  if (
+    ts.isArrowFunction(functionNode) ||
+    ts.isFunctionExpression(functionNode)
+  ) {
+    const variable = findVariableDeclarationOwner(functionNode)
+    if (
+      variable &&
+      ts.isIdentifier(variable.name) &&
+      isLikelyComponentName(variable.name.text)
+    ) {
+      return variable.name.text
+    }
+  }
+
+  if (isDefaultExportFunction(functionNode)) {
+    return fallbackOwner
+  }
+
+  return undefined
+}
+
+function isDefaultExportFunction(functionNode) {
+  return (
+    Boolean(
+      functionNode.modifiers?.some(
+        (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword
+      )
+    ) ||
+    Boolean(functionNode.parent && ts.isExportAssignment(functionNode.parent))
+  )
+}
+
+function collectOwnReturnExpressions(functionNode) {
+  if (!functionNode.body) {
+    return []
+  }
+
+  if (!ts.isBlock(functionNode.body)) {
+    return [functionNode.body]
+  }
+
+  const expressions = []
+  walkOwnReturnStatements(functionNode.body, (returnStatement) => {
+    if (returnStatement.expression) {
+      expressions.push(returnStatement.expression)
+    }
+  })
+
+  return expressions
+}
+
+function walkOwnReturnStatements(node, visitor) {
+  const visit = (child) => {
+    if (
+      child !== node &&
+      (isFunctionLikeNode(child) ||
+        ts.isClassDeclaration(child) ||
+        ts.isClassExpression(child))
+    ) {
+      return
+    }
+
+    if (ts.isReturnStatement(child)) {
+      visitor(child)
+      return
+    }
+
+    ts.forEachChild(child, visit)
+  }
+
+  visit(node)
+}
+
+function expressionDirectlyReturnsJsxTag(expression, localNames) {
+  const unwrapped = unwrapReturnedExpression(expression)
+
+  if (ts.isJsxSelfClosingElement(unwrapped)) {
+    const localName = jsxTagName(unwrapped.tagName)
+    return Boolean(localName && localNames.has(localName))
+  }
+
+  if (ts.isJsxElement(unwrapped)) {
+    const localName = jsxTagName(unwrapped.openingElement.tagName)
+    return Boolean(localName && localNames.has(localName))
+  }
+
+  if (ts.isConditionalExpression(unwrapped)) {
+    return (
+      expressionDirectlyReturnsJsxTag(unwrapped.whenTrue, localNames) ||
+      expressionDirectlyReturnsJsxTag(unwrapped.whenFalse, localNames)
+    )
+  }
+
+  return false
+}
+
+function unwrapReturnedExpression(expression) {
+  let current = expression
+
+  while (true) {
+    if (
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) ||
+      ts.isNonNullExpression(current)
+    ) {
+      current = current.expression
+      continue
+    }
+
+    if (
+      typeof ts.isSatisfiesExpression === "function" &&
+      ts.isSatisfiesExpression(current)
+    ) {
+      current = current.expression
+      continue
+    }
+
+    return current
+  }
+}
+
+function isFunctionLikeNode(node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
+  )
 }
 
 function pushCanonicalLabelFindings(findings, relativePath, sourceFile) {
