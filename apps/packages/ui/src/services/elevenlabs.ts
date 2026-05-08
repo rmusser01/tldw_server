@@ -1,4 +1,3 @@
-import axios from 'axios';
 export interface Voice {
   voice_id: string;
   name: string;
@@ -16,26 +15,83 @@ type ElevenLabsRequestOptions = {
   timeoutMs?: number;
 };
 
+function createTimeoutSignal(timeoutMs: number): {
+  signal: AbortSignal;
+  cleanup: () => void;
+  didTimeout: () => boolean;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId),
+    didTimeout: () => timedOut,
+  };
+}
+
+async function fetchElevenLabs<T>(
+  path: string,
+  apiKey: string,
+  init: RequestInit = {},
+  options?: ElevenLabsRequestOptions
+): Promise<T> {
+  const timeout = createTimeoutSignal(
+    options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
+  );
+  const headers = new Headers(init.headers);
+  headers.set('xi-api-key', apiKey);
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      headers,
+      signal: timeout.signal,
+    });
+  } catch (error) {
+    timeout.cleanup();
+    if (error instanceof DOMException && error.name === 'AbortError' && timeout.didTimeout()) {
+      throw new Error('ElevenLabs request timed out');
+    }
+    throw error;
+  }
+  timeout.cleanup();
+
+  if (!response.ok) {
+    throw new Error(`ElevenLabs request failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export const getVoices = async (
   apiKey: string,
   options?: ElevenLabsRequestOptions
 ): Promise<Voice[]> => {
-  const response = await axios.get(`${BASE_URL}/voices`, {
-    headers: { 'xi-api-key': apiKey },
-    timeout: options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
-  });
-  return response.data.voices;
+  const response = await fetchElevenLabs<{ voices: Voice[] }>(
+    '/voices',
+    apiKey,
+    { method: 'GET' },
+    options
+  );
+  return response.voices;
 };
 
 export const getModels = async (
   apiKey: string,
   options?: ElevenLabsRequestOptions
 ): Promise<Model[]> => {
-  const response = await axios.get(`${BASE_URL}/models`, {
-    headers: { 'xi-api-key': apiKey },
-    timeout: options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
-  });
-  return response.data;
+  return fetchElevenLabs<Model[]>(
+    '/models',
+    apiKey,
+    { method: 'GET' },
+    options
+  );
 };
 
 export const generateSpeech = async (
@@ -45,7 +101,7 @@ export const generateSpeech = async (
   modelId: string,
   speed?: number
 ): Promise<ArrayBuffer> => {
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     text,
     model_id: modelId
   }
@@ -54,16 +110,30 @@ export const generateSpeech = async (
     payload.voice_settings = { speed }
   }
 
-  const response = await axios.post(
-    `${BASE_URL}/text-to-speech/${voiceId}`,
-    payload,
-    {
+  const timeout = createTimeoutSignal(DEFAULT_ELEVENLABS_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/text-to-speech/${voiceId}`, {
+      method: 'POST',
       headers: {
         'xi-api-key': apiKey,
         'Content-Type': 'application/json',
       },
-      responseType: 'arraybuffer',
+      body: JSON.stringify(payload),
+      signal: timeout.signal,
+    });
+  } catch (error) {
+    timeout.cleanup();
+    if (error instanceof DOMException && error.name === 'AbortError' && timeout.didTimeout()) {
+      throw new Error('ElevenLabs request timed out');
     }
-  );
-  return response.data;
+    throw error;
+  }
+  timeout.cleanup();
+
+  if (!response.ok) {
+    throw new Error(`ElevenLabs request failed with status ${response.status}`);
+  }
+
+  return response.arrayBuffer();
 };

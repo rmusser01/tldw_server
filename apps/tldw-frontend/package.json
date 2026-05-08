@@ -87,7 +87,6 @@
     "@xterm/addon-fit": "^0.11.0",
     "ajv": "^8.17.1",
     "antd": "^6.2.0",
-    "axios": "^1.7.2",
     "cheerio": "^1.1.2",
     "cytoscape": "^3.33.1",
     "cytoscape-dagre": "^2.5.0",

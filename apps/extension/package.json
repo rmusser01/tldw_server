@@ -74,7 +74,6 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.10.0",
     "antd": "^6.2.0",
-    "axios": "^1.13.2",
     "caniuse-lite": "^1.0.30001765",
     "cheerio": "^1.1.2",
     "cytoscape": "^3.33.1",
