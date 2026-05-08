@@ -40,6 +40,8 @@ export interface LoadingStateProps {
   loading?: boolean
   /** Additional CSS classes */
   className?: string
+  /** Inline style for surface-specific sizing */
+  style?: React.CSSProperties
   /** Test ID */
   "data-testid"?: string
 }
@@ -105,6 +107,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       children,
       loading: forcedLoading,
       className,
+      style,
       "data-testid": dataTestId,
     },
     ref
@@ -221,6 +224,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
             "fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm",
             className
           )}
+          style={style}
           data-testid={dataTestId}
           data-ds-component="LoadingState"
         >
@@ -236,6 +240,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
         <div
           ref={ref}
           className={cn("relative", className)}
+          style={style}
           data-ds-component="LoadingState"
         >
           {children}
@@ -255,6 +260,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       <div
         ref={ref}
         className={cn("flex flex-col items-center px-2 py-4", className)}
+        style={style}
         data-testid={dataTestId}
         data-ds-component="LoadingState"
       >

@@ -10,15 +10,18 @@ import React, {
 } from "react"
 import type { ReactNode } from "react"
 import type { Monaco, OnMount } from "@monaco-editor/react"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
 
 const Monaco = React.lazy(() => import("@monaco-editor/react"))
 
 const MonacoLoading = ({ height }: { height: number | string }) => (
-  <div
-    className="flex items-center justify-center rounded border border-border bg-bg p-4 text-xs text-text-muted"
-    style={{ height }}>
-    Loading editor…
-  </div>
+  <LoadingState
+    mode="spinner"
+    size="sm"
+    label="Loading editor…"
+    className="justify-center rounded border border-border bg-bg p-4 text-xs text-text-muted"
+    style={{ height }}
+  />
 )
 
 /** Error boundary that catches Monaco load/render failures and triggers fallback. */
