@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
 
 from fastapi import (
@@ -45,15 +46,16 @@ from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminMacOSImageStoreCleanupResponse,
     SandboxAdminMacOSReconciliationRepairRequest,
     SandboxAdminMacOSReconciliationRepairResponse,
-    SandboxAdminRuntimeDiagnosticsResponse,
     SandboxAdminRunDetails,
     SandboxAdminRunListResponse,
     SandboxAdminRunSummary,
+    SandboxAdminRuntimeDiagnosticsResponse,
     SandboxAdminUsageItem,
     SandboxAdminUsageResponse,
     SandboxFileUploadResponse,
     SandboxRunCreateRequest,
     SandboxRunStatus,
+    SandboxRunStatusReasonDetails,
     SandboxRuntimesResponse,
     SandboxSession,
     SandboxSessionCreateRequest,
@@ -86,7 +88,10 @@ from tldw_Server_API.app.core.Sandbox.orchestrator import (
     SessionActiveRunsConflict,
 )
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy
-from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import normalize_run_status_reason
+from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import (
+    normalize_run_status_reason,
+    run_status_reason_details,
+)
 from tldw_Server_API.app.core.Sandbox.service import (
     SandboxImageStoreCleanupError,
     SandboxReconciliationRepairError,
@@ -185,6 +190,24 @@ def _status_reason_code(
     )
 
 
+@lru_cache(maxsize=32)
+def _cached_status_reason_details(
+    code: str,
+) -> SandboxRunStatusReasonDetails:
+    """Cache schema metadata for the finite normalized status reason vocabulary."""
+
+    return SandboxRunStatusReasonDetails.model_validate(run_status_reason_details(code))
+
+
+def _status_reason_details(
+    code: str | None,
+) -> SandboxRunStatusReasonDetails:
+    """Build the public schema metadata for a normalized status reason code."""
+
+    return _cached_status_reason_details(str(code or "unknown").strip())
+
+
+
 @router.on_event("startup")
 async def _sandbox_startup() -> None:
     with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
@@ -250,7 +273,7 @@ def _sandbox_ws_try_acquire_quota(
     run_key = str(run_id).strip() if run_id else None
 
     with _SANDBOX_WS_QUOTA_LOCK:
-        if total_limit > 0 and _SANDBOX_WS_ACTIVE_TOTAL >= total_limit:
+        if total_limit > 0 and total_limit <= _SANDBOX_WS_ACTIVE_TOTAL:
             return None, "total_connections_quota_exceeded"
         if per_user_limit > 0 and int(_SANDBOX_WS_ACTIVE_BY_USER.get(user_key, 0)) >= per_user_limit:
             return None, "user_connections_quota_exceeded"
@@ -1586,6 +1609,12 @@ async def start_run(
         # Fail open: omit URL on error
         log_stream_url = None
 
+    status_reason_code = _status_reason_code(
+        phase=status.phase,
+        message=status.message,
+        exit_code=status.exit_code,
+        resource_usage=status.resource_usage,
+    )
     return SandboxRunStatus(
         id=status.id,
         spec_version=payload.spec_version,
@@ -1595,12 +1624,8 @@ async def start_run(
         image_digest=status.image_digest,
         policy_hash=status.policy_hash,
         phase=status.phase.value,
-        status_reason_code=_status_reason_code(
-            phase=status.phase,
-            message=status.message,
-            exit_code=status.exit_code,
-            resource_usage=status.resource_usage,
-        ),
+        status_reason_code=status_reason_code,
+        status_reason_details=_status_reason_details(status_reason_code),
         exit_code=status.exit_code,
         started_at=status.started_at,
         finished_at=status.finished_at,
@@ -1625,6 +1650,12 @@ async def get_run_status(
     st = _service.get_run(run_id)
     if not st:
         raise HTTPException(status_code=404, detail="run_not_found")
+    status_reason_code = _status_reason_code(
+        phase=st.phase,
+        message=st.message,
+        exit_code=st.exit_code,
+        resource_usage=st.resource_usage,
+    )
     return SandboxRunStatus(
         id=st.id,
         spec_version=st.spec_version,
@@ -1634,12 +1665,8 @@ async def get_run_status(
         image_digest=st.image_digest,
         policy_hash=st.policy_hash,
         phase=st.phase.value,
-        status_reason_code=_status_reason_code(
-            phase=st.phase,
-            message=st.message,
-            exit_code=st.exit_code,
-            resource_usage=st.resource_usage,
-        ),
+        status_reason_code=status_reason_code,
+        status_reason_details=_status_reason_details(status_reason_code),
         exit_code=st.exit_code,
         started_at=st.started_at,
         finished_at=st.finished_at,
@@ -2402,6 +2429,12 @@ async def admin_list_runs(
     )
     items: list[SandboxAdminRunSummary] = []
     for r in items_raw:
+        status_reason_code = _status_reason_code(
+            phase=r.get("phase"),
+            message=r.get("message"),
+            exit_code=r.get("exit_code"),
+            resource_usage=r.get("resource_usage"),
+        )
         items.append(
             SandboxAdminRunSummary(
                 id=str(r.get("id")),
@@ -2413,12 +2446,8 @@ async def admin_list_runs(
                 image_digest=r.get("image_digest"),
                 policy_hash=r.get("policy_hash"),
                 phase=r.get("phase"),
-                status_reason_code=_status_reason_code(
-                    phase=r.get("phase"),
-                    message=r.get("message"),
-                    exit_code=r.get("exit_code"),
-                    resource_usage=r.get("resource_usage"),
-                ),
+                status_reason_code=status_reason_code,
+                status_reason_details=_status_reason_details(status_reason_code),
                 exit_code=r.get("exit_code"),
                 started_at=(r.get("started_at") if isinstance(r.get("started_at"), str) else r.get("started_at")),
                 finished_at=(r.get("finished_at") if isinstance(r.get("finished_at"), str) else r.get("finished_at")),
@@ -2464,6 +2493,12 @@ async def admin_get_run_details(
         owner = _service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         owner = None
+    status_reason_code = _status_reason_code(
+        phase=st.phase,
+        message=st.message,
+        exit_code=st.exit_code,
+        resource_usage=st.resource_usage,
+    )
     return SandboxAdminRunDetails(
         id=st.id,
         user_id=(owner if owner is not None else None),
@@ -2474,6 +2509,8 @@ async def admin_get_run_details(
         image_digest=st.image_digest,
         policy_hash=st.policy_hash,
         phase=st.phase.value,
+        status_reason_code=status_reason_code,
+        status_reason_details=_status_reason_details(status_reason_code),
         exit_code=st.exit_code,
         started_at=st.started_at,
         finished_at=st.finished_at,

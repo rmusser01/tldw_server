@@ -91,6 +91,18 @@ def _portable_gate_scope_is_documented(text: str) -> bool:
     return bool(has_host_gated_real_execution and has_portable_capability_contract)
 
 
+def _status_reason_details_contract_is_documented(text: str) -> bool:
+    """Return whether the inventory documents structured status details."""
+
+    section = _markdown_section(text, "Normalized Run Status Reason Codes")
+    return (
+        "status_reason_details" in section
+        and "status_reason_code" in section
+        and "category" in section
+        and "operator_action" in section
+    )
+
+
 def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -182,6 +194,20 @@ def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_miss
 
     assert "CI has no single cross-runtime capability gate" not in text
     assert _portable_gate_scope_is_documented(text)
+
+
+def test_inventory_documents_status_reason_details_metadata(
+    pytestconfig: pytest.Config,
+) -> None:
+    """Guard the docs contract for structured status reason details."""
+
+    repo_root = Path(pytestconfig.rootpath)
+    inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
+    text = inventory.read_text(encoding="utf-8")
+    current_gaps = _markdown_section(text, "Current Gaps")
+
+    assert _status_reason_details_contract_is_documented(text)
+    assert "runtime discovery `normalized_reasons` still lack equivalent rich details" in current_gaps
 
 
 def test_inventory_no_longer_lists_host_local_warning_ui_as_missing(

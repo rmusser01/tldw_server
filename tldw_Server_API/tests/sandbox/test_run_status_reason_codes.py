@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
+from typing import get_args
+
+import pytest
 
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminRunSummary,
     SandboxRunStatus,
 )
+from tldw_Server_API.app.core.Sandbox import run_status_taxonomy
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
 from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import (
+    RUN_STATUS_REASON_METADATA,
+    RunStatusReasonCode,
+    _validate_run_status_reason_metadata,
     normalize_run_status_reason,
+    run_status_reason_details,
 )
 from tldw_Server_API.app.core.Sandbox.store import SQLiteStore
 
@@ -184,12 +193,90 @@ def test_run_status_reason_taxonomy_accepts_string_phase_values() -> None:
     ) == "runtime_error"
 
 
+def test_run_status_reason_metadata_covers_every_reason_code() -> None:
+    """Ensure every public reason code has structured metadata."""
+
+    assert set(RUN_STATUS_REASON_METADATA) == set(get_args(RunStatusReasonCode))
+    for key, metadata in RUN_STATUS_REASON_METADATA.items():
+        assert metadata.code == key
+
+
+def test_run_status_reason_metadata_validation_rejects_code_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject metadata entries whose internal code does not match their key."""
+
+    mismatched_metadata = dict(RUN_STATUS_REASON_METADATA)
+    mismatched_metadata["queued"] = replace(
+        RUN_STATUS_REASON_METADATA["queued"],
+        code="running",
+    )
+    monkeypatch.setattr(
+        run_status_taxonomy,
+        "RUN_STATUS_REASON_METADATA",
+        mismatched_metadata,
+    )
+
+    with pytest.raises(RuntimeError, match="code mismatch"):
+        _validate_run_status_reason_metadata()
+
+
+def test_run_status_reason_details_exposes_stable_metadata() -> None:
+    """Verify representative status reason details are stable and complete."""
+
+    runtime_unavailable = run_status_reason_details("runtime_unavailable")
+    assert runtime_unavailable.category == "runtime"
+    assert runtime_unavailable.severity == "error"
+    assert runtime_unavailable.retryable is True
+    assert runtime_unavailable.operator_action == "check_runtime_readiness"
+    assert runtime_unavailable.terminal is True
+    assert runtime_unavailable.user_message_key == "sandbox.status.runtime_unavailable"
+
+    assert run_status_reason_details("policy_failed").operator_action == "review_policy"
+    assert run_status_reason_details("limits_applied").severity == "warning"
+    assert run_status_reason_details("unknown").category == "unknown"
+    assert run_status_reason_details("not-a-real-code").code == "unknown"
+
+
 def test_public_and_admin_status_schemas_expose_reason_code() -> None:
     public_schema = SandboxRunStatus.model_json_schema()
     admin_schema = SandboxAdminRunSummary.model_json_schema()
 
     assert "status_reason_code" in public_schema["properties"]
     assert "status_reason_code" in admin_schema["properties"]
+    assert "status_reason_details" in public_schema["properties"]
+    assert "status_reason_details" in admin_schema["properties"]
+
+
+def test_public_and_admin_status_models_preserve_reason_details() -> None:
+    """Ensure public and admin status models serialize structured details."""
+
+    details = run_status_reason_details("limits_applied")
+    public_status = SandboxRunStatus(
+        id="run-1",
+        runtime="docker",
+        phase="completed",
+        status_reason_code=details.code,
+        status_reason_details=details,
+    )
+    admin_status = SandboxAdminRunSummary(
+        id="run-1",
+        runtime="docker",
+        phase="completed",
+        status_reason_code=details.code,
+        status_reason_details=details,
+    )
+
+    assert public_status.model_dump()["status_reason_details"] == {
+        "code": "limits_applied",
+        "category": "limits",
+        "severity": "warning",
+        "terminal": True,
+        "retryable": False,
+        "operator_action": "review_limits",
+        "user_message_key": "sandbox.status.limits_applied",
+    }
+    assert admin_status.model_dump()["status_reason_details"]["code"] == "limits_applied"
 
 
 def test_sqlite_run_listing_preserves_resource_usage_for_admin_reason_codes(tmp_path) -> None:
