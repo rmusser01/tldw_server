@@ -236,7 +236,6 @@
         "antd": "^6.2.0",
         "axios": "^1.7.2",
         "cheerio": "^1.1.2",
-        "clsx": "^2.1.1",
         "cytoscape": "^3.33.1",
         "cytoscape-dagre": "^2.5.0",
         "d3-dsv": "^3.0.1",
