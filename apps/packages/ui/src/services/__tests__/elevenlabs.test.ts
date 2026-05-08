@@ -116,4 +116,13 @@ describe("ElevenLabs fetch service", () => {
 
     await requestAssertion
   })
+
+  it("normalizes browser fetch timeout failures for retry UX", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(getVoices("eleven-key")).rejects.toThrow(
+      "ElevenLabs request timed out"
+    )
+  })
 })

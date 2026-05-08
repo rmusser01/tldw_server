@@ -34,6 +34,31 @@ function createTimeoutSignal(timeoutMs: number): {
   };
 }
 
+function isTimeoutLikeFetchFailure(
+  error: unknown,
+  didTimeout: boolean,
+  includeBrowserTransportFailure = false
+): boolean {
+  if (error instanceof DOMException) {
+    return (
+      (error.name === 'AbortError' && didTimeout) ||
+      error.name === 'TimeoutError'
+    );
+  }
+
+  if (error instanceof Error) {
+    const message = `${error.name} ${error.message}`.toLowerCase();
+    return (
+      message.includes('timeout') ||
+      message.includes('timed out') ||
+      message.includes('err_timed_out') ||
+      (includeBrowserTransportFailure && message.includes('failed to fetch'))
+    );
+  }
+
+  return false;
+}
+
 async function fetchElevenLabs<T>(
   path: string,
   apiKey: string,
@@ -55,7 +80,7 @@ async function fetchElevenLabs<T>(
     });
   } catch (error) {
     timeout.cleanup();
-    if (error instanceof DOMException && error.name === 'AbortError' && timeout.didTimeout()) {
+    if (isTimeoutLikeFetchFailure(error, timeout.didTimeout(), true)) {
       throw new Error('ElevenLabs request timed out');
     }
     throw error;
@@ -124,7 +149,7 @@ export const generateSpeech = async (
     });
   } catch (error) {
     timeout.cleanup();
-    if (error instanceof DOMException && error.name === 'AbortError' && timeout.didTimeout()) {
+    if (isTimeoutLikeFetchFailure(error, timeout.didTimeout())) {
       throw new Error('ElevenLabs request timed out');
     }
     throw error;

@@ -527,6 +527,7 @@ def test_list_notes(client: TestClient):
                                 expected_db_client_id)
     ]
     mock_chacha_db_instance.list_notes.return_value = mock_notes_data
+    mock_chacha_db_instance.count_notes.return_value = len(mock_notes_data)
     response = client.get("/api/v1/notes/?limit=10&offset=0")
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -1139,6 +1140,7 @@ def test_list_keyword_collections_with_keywords(client: TestClient):
         expected_db_client_id,
     )
     mock_chacha_db_instance.list_keyword_collections.return_value = [collection_row]
+    mock_chacha_db_instance.count_keyword_collections.return_value = 1
     mock_chacha_db_instance.get_keywords_for_collection.return_value = [keyword_row]
 
     response = client.get("/api/v1/notes/collections?include_keywords=true")
