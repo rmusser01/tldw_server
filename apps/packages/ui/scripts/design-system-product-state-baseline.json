@@ -5522,17 +5522,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-loading-state:src/components/Common/UnifiedLoadingState.tsx:UnifiedLoadingState",
-    "path": "src/components/Common/UnifiedLoadingState.tsx",
-    "rule": "local-loading-state",
-    "subject": "UnifiedLoadingState",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local UnifiedLoadingState loading-state wrapper before the guard.",
-    "replacement": "LoadingState or StatePanel",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-loading-state:src/components/DocumentWorkspace/LeftSidebar/QuickInsightsTab.tsx:LoadingState",
     "path": "src/components/DocumentWorkspace/LeftSidebar/QuickInsightsTab.tsx",
     "rule": "local-loading-state",

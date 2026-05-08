@@ -397,7 +397,8 @@ function collectAntdProductStateImports(sourceFile) {
 
 function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
   const imports = {
-    emptyState: new Set()
+    emptyState: new Set(),
+    loadingState: new Set()
   }
 
   for (const statement of sourceFile.statements) {
@@ -424,11 +425,17 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
         if (importedName === "EmptyState") {
           imports.emptyState.add(element.name.text)
         }
+        if (importedName === "LoadingState") {
+          imports.loadingState.add(element.name.text)
+        }
       }
     }
 
     if (importClause?.name && /\/EmptyState$/.test(importPath)) {
       imports.emptyState.add(importClause.name.text)
+    }
+    if (importClause?.name && /\/LoadingState$/.test(importPath)) {
+      imports.loadingState.add(importClause.name.text)
     }
   }
 
@@ -436,6 +443,11 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
     emptyStateOwners: collectJsxTagOwners(
       sourceFile,
       imports.emptyState,
+      fileSubject
+    ),
+    loadingStateOwners: collectJsxTagOwners(
+      sourceFile,
+      imports.loadingState,
       fileSubject
     )
   }
@@ -515,7 +527,10 @@ function pushLocalComponentFinding(
     })
   }
 
-  if (LOADING_COMPONENT_PATTERN.test(subject)) {
+  if (
+    LOADING_COMPONENT_PATTERN.test(subject) &&
+    !canonicalUsage.loadingStateOwners?.has(subject)
+  ) {
     pushFinding(findings, {
       relativePath,
       rule: "local-loading-state",
