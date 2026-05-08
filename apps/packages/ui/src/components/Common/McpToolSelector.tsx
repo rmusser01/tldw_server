@@ -1,6 +1,7 @@
 import React from "react"
 import { Button, Input, Switch } from "antd"
 
+import { getDesignSystemState } from "@/design-system"
 import type { ChatToolFilterCounts, ResolvedMcpTool } from "@/utils/chat-tools"
 
 type TranslateFn = (
@@ -29,13 +30,15 @@ const defaultT: TranslateFn = (_key, fallback, options) => {
   )
 }
 
+const unavailableState = getDesignSystemState("unavailable")
+
 const getToolStatus = (
   tool: ResolvedMcpTool,
   t: TranslateFn
 ): { label: string; muted?: boolean } => {
   if (!tool.canExecute) {
     return {
-      label: t("mcpToolSelector.statusUnavailable", "Unavailable"),
+      label: t("mcpToolSelector.statusUnavailable", unavailableState.label),
       muted: true
     }
   }
