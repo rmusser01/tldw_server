@@ -182,3 +182,15 @@ def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_miss
 
     assert "CI has no single cross-runtime capability gate" not in text
     assert _portable_gate_scope_is_documented(text)
+
+
+def test_inventory_no_longer_lists_host_local_warning_ui_as_missing(
+    pytestconfig: pytest.Config,
+) -> None:
+    repo_root = Path(pytestconfig.rootpath)
+    inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
+    text = inventory.read_text(encoding="utf-8")
+
+    assert "future UI/operator dashboards" not in text
+    assert "Sandbox Runtime Isolation" in text
+    assert "host-local isolation warnings" in text
