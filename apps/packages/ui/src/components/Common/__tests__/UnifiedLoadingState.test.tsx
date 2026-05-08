@@ -3,9 +3,9 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { UnifiedLoadingState } from "../UnifiedLoadingState"
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
+const { tSpy } = vi.hoisted(() => ({
+  tSpy: vi.fn(
+    (
       key: string,
       fallbackOrOptions?: string | { defaultValue?: string }
     ) => {
@@ -15,10 +15,17 @@ vi.mock("react-i18next", () => ({
       }
       return key
     }
+  )
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: tSpy
   })
 }))
 
 afterEach(() => {
+  tSpy.mockClear()
   vi.restoreAllMocks()
 })
 
@@ -48,7 +55,7 @@ describe("UnifiedLoadingState", () => {
   })
 
   it("renders children once all sources finish loading", () => {
-    render(
+    const { container } = render(
       <UnifiedLoadingState
         sources={[
           { key: "local", loading: false, label: "Local data" },
@@ -61,7 +68,22 @@ describe("UnifiedLoadingState", () => {
     )
 
     expect(screen.getByText("Loaded content")).toBeInTheDocument()
+    expect(
+      container.querySelector('[data-ds-component="LoadingState"]')
+    ).not.toBeInTheDocument()
     expect(screen.queryByText("Local data")).not.toBeInTheDocument()
+  })
+
+  it("does not translate source labels when labels are hidden", () => {
+    render(
+      <UnifiedLoadingState
+        sources={[{ key: "folders", loading: true }]}
+        showLabels={false}
+      />
+    )
+
+    expect(tSpy).not.toHaveBeenCalled()
+    expect(screen.queryByText("Loading: folders")).not.toBeInTheDocument()
   })
 
   it("keeps the development warning for active sources without labels", () => {

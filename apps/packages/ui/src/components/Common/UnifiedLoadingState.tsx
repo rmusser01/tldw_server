@@ -71,21 +71,27 @@ export function UnifiedLoadingState({
   const translatedLoadingSources = useMemo(
     () =>
       loadingSources.map((source) => {
-        const label = source.label
-          ? translateMessage(t, source.label, source.label)
-          : translateMessage(
-              t,
-              `common:loadingSource.${source.key}`,
-              `Loading: ${source.key}`
-            )
+        const label = showLabels
+          ? source.label
+            ? translateMessage(t, source.label, source.label)
+            : translateMessage(
+                t,
+                `common:loadingSource.${source.key}`,
+                `Loading: ${source.key}`
+              )
+          : source.label
 
         return {
           ...source,
           label
         }
       }),
-    [loadingSources, t]
+    [loadingSources, showLabels, t]
   )
+
+  if (loadingSources.length === 0) {
+    return <>{children}</>
+  }
 
   return (
     <LoadingState
