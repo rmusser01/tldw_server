@@ -4,7 +4,7 @@ title: Adapt TemplateCodeEditor MonacoLoading to shared LoadingState
 status: Done
 assignee: []
 created_date: '2026-05-08 05:54'
-updated_date: '2026-05-08 05:59'
+updated_date: '2026-05-08 06:16'
 labels:
   - design-system
   - webui
@@ -54,12 +54,16 @@ Verification: focused TemplateCodeEditor tests passed (2 files, 2 tests); produc
 Known wider check: bunx tsc --noEmit --pretty false still fails on existing repo-wide type errors in unrelated tests/services such as audio capture tests, Chat composer mocks, Flashcards deck fixtures, Playground tests, and service tests. The visible errors did not target this loading-state slice.
 
 Bandit: skipped because touched implementation files are TypeScript/JSON/Backlog records only.
+
+PR #1377 review fix pass: Gemini flagged that applying the new LoadingState style prop to the fullscreen fixed/inset container can conflict with the fullscreen layout. Reopening to add a focused contract test and adjust fullscreen handling.
+
+Review fix verification: added LoadingState.style.test.tsx. RED run failed because fullscreen mode received height: 240px from the style prop. After removing style from the fullscreen fixed container and documenting fullscreen behavior, the focused LoadingState style test passed. Full focused verification also passed: TemplateCodeEditor plus LoadingState tests (3 files, 4 tests), product-state guard tests (42 tests), bun run verify:design-system-state (518 baseline exceptions, local-loading-state 2), and git diff --check.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Adapted TemplateCodeEditor's Monaco Suspense loading fallback to render through the shared LoadingState primitive while preserving its editor-height layout. LoadingState now accepts an inline style prop for surface-specific sizing, and the obsolete TemplateCodeEditor MonacoLoading local-loading-state baseline exception was removed. Focused tests and the design-system verifier passed; the package-wide TypeScript check remains blocked by unrelated existing baseline errors.
+Adapted TemplateCodeEditor's Monaco Suspense loading fallback to render through the shared LoadingState primitive while preserving its editor-height layout. LoadingState now accepts an inline style prop for non-fullscreen surface sizing and explicitly keeps fullscreen sizing controlled by the fixed inset layout. The obsolete TemplateCodeEditor MonacoLoading local-loading-state baseline exception was removed. Focused tests and the design-system verifier passed; the package-wide TypeScript check remains blocked by unrelated existing baseline errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

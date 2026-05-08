@@ -40,7 +40,7 @@ export interface LoadingStateProps {
   loading?: boolean
   /** Additional CSS classes */
   className?: string
-  /** Inline style for surface-specific sizing */
+  /** Inline style for surface-specific sizing; ignored for fullscreen mode */
   style?: React.CSSProperties
   /** Test ID */
   "data-testid"?: string
@@ -224,7 +224,6 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
             "fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm",
             className
           )}
-          style={style}
           data-testid={dataTestId}
           data-ds-component="LoadingState"
         >
