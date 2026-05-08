@@ -50,6 +50,12 @@ except Exception as dotenv_error:
 
 # Use load_and_log_configs which returns a proper dict
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_provider_number,
+    custom_openai_section_name,
+    iter_custom_openai_provider_names,
+)
 
 _config = load_and_log_configs() or {}
 
@@ -106,7 +112,7 @@ def _get_setting(env_var, section, key, default=""):
     return default
 
 
-ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
+_BASE_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
     "bedrock",
     "anthropic",
     "cohere",
@@ -129,10 +135,13 @@ ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
     "vllm",
     "local-llm",
     "aphrodite",
-    "custom-openai-api",
-    "custom-openai-api-2",
     "moonshot",
     "zai",
+]
+
+ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
+    *_BASE_SUPPORTED_PROVIDER_NAMES_LIST,
+    *iter_custom_openai_provider_names(),
 ]
 
 
@@ -145,11 +154,21 @@ def get_api_keys() -> dict[str, Optional[str]]:
     # Reload config to get latest values
     current_config = load_and_log_configs() or {}
 
-    def _get_dynamic_setting(env_var, section, key, default=""):
+    def _get_dynamic_setting(env_vars, section, key, default=""):
         # First check environment variable
-        env_value = os.getenv(env_var)
-        if env_value is not None:
-            return env_value
+        env_candidates = (env_vars,) if isinstance(env_vars, str) else tuple(env_vars or ())
+        for env_var in env_candidates:
+            env_value = os.getenv(env_var)
+            if env_value is not None:
+                return env_value
+
+        custom_number = custom_openai_provider_number(key)
+        if section == "api_keys" and custom_number is not None:
+            custom_section = current_config.get(custom_openai_section_name(custom_number))
+            if isinstance(custom_section, dict):
+                api_key = custom_section.get("api_key")
+                if api_key:
+                    return api_key
 
         # Check for API key in the config dict
         if section == "api_keys":
@@ -171,14 +190,17 @@ def get_api_keys() -> dict[str, Optional[str]]:
 
         return default
 
-    def _provider_env_key(provider_name: str) -> str:
+    def _provider_env_keys(provider_name: str) -> tuple[str, ...]:
+        custom_number = custom_openai_provider_number(provider_name)
+        if custom_number is not None:
+            return custom_openai_api_key_env_keys(custom_number)
         normalized = provider_name.upper().replace('.', '_').replace('-', '_')
         if normalized.endswith("_API"):
             normalized = normalized[: -len("_API")]
-        return f"{normalized}_API_KEY"
+        return (f"{normalized}_API_KEY",)
 
     return {
-        name: _get_dynamic_setting(_provider_env_key(name), "api_keys", name)
+        name: _get_dynamic_setting(_provider_env_keys(name), "api_keys", name)
         for name in ALL_SUPPORTED_PROVIDER_NAMES_LIST
     }
 
@@ -189,34 +211,7 @@ def get_api_keys() -> dict[str, Optional[str]]:
 API_KEYS = get_api_keys()
 
 # For type hinting - define explicitly
-SUPPORTED_API_ENDPOINTS = Literal[
-    "bedrock",
-    "anthropic",
-    "cohere",
-    "deepseek",
-    "google",
-    "groq",
-    "qwen",
-    "huggingface",
-    "mistral",
-    "openai",
-    "openrouter",
-    "novita",
-    "poe",
-    "together",
-    "llama.cpp",
-    "kobold",
-    "ollama",
-    "ooba",
-    "tabbyapi",
-    "vllm",
-    "local-llm",
-    "aphrodite",
-    "custom-openai-api",
-    "custom-openai-api-2",
-    "moonshot",
-    "zai",
-]
+SUPPORTED_API_ENDPOINTS = Literal[*tuple(ALL_SUPPORTED_PROVIDER_NAMES_LIST)]
 
 
 # --- Tool Definitions ---

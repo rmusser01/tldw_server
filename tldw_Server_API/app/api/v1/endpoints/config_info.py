@@ -20,6 +20,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_provider_number,
+    iter_custom_openai_provider_names,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 router = APIRouter()
@@ -636,7 +641,7 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         "llama.cpp", "kobold", "ooba", "tabbyapi", "vllm",
         "local-llm", "ollama", "aphrodite", "mlx",
     ]
-    custom_providers = ["custom-openai-api", "custom-openai-api-2"]
+    custom_providers = list(iter_custom_openai_provider_names())
 
     items: list[ProviderStatusItem] = []
     any_configured = False
@@ -652,7 +657,15 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         key_source: Optional[str] = None
         if api_key:
             env_var = _PROVIDER_ENV_KEY_MAP.get(name)
-            if env_var and os.environ.get(env_var, "").strip():
+            custom_number = custom_openai_provider_number(name)
+            has_custom_env_key = (
+                custom_number is not None
+                and any(
+                    os.environ.get(env_key, "").strip()
+                    for env_key in custom_openai_api_key_env_keys(custom_number)
+                )
+            )
+            if (env_var and os.environ.get(env_var, "").strip()) or has_custom_env_key:
                 key_source = "env"
             else:
                 key_source = "config"

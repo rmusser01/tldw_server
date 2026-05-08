@@ -38,11 +38,13 @@ def test_unknown_provider_returns_safe_fallback():
 def test_provider_aliases_resolve_to_catalog_entries():
     custom_openai = get_provider_extra_body_compat("custom-openai-api")
     custom_openai2 = get_provider_extra_body_compat("custom_openai_api_2")
+    custom_openai99 = get_provider_extra_body_compat("custom-openai-api-99")
     llama_cpp = get_provider_extra_body_compat("llama.cpp")
     openai = get_provider_extra_body_compat("openai")
 
     assert custom_openai["supported"] is True
     assert custom_openai2["supported"] is True
+    assert custom_openai99["supported"] is True
     assert llama_cpp["supported"] is True
     assert "logit_bias" in llama_cpp["known_params"]
     assert "post_sampling_probs" in llama_cpp["known_params"]

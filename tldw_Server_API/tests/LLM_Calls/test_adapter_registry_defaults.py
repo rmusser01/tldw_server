@@ -21,6 +21,8 @@ def test_registry_default_adapters_initialize():
         "bedrock",
         "custom-openai-api",
         "custom-openai-api-2",
+        "custom-openai-api-37",
+        "custom-openai-api-99",
         "novita",
         "poe",
         "together",

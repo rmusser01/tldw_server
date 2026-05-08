@@ -107,6 +107,17 @@ def test_chat_completion_request_valid_api_provider():
 
 
 @pytest.mark.unit
+def test_chat_completion_request_accepts_numbered_custom_openai_provider():
+    req = ChatCompletionRequest(
+        model="test-m",
+        messages=[ChatCompletionUserMessageParam(role="user", content="hi")],
+        api_provider="custom-openai-api-99",
+    )
+
+    assert req.api_provider == "custom-openai-api-99"
+
+
+@pytest.mark.unit
 def test_chat_completion_request_invalid_api_provider():
     with pytest.raises(ValidationError):
         ChatCompletionRequest(

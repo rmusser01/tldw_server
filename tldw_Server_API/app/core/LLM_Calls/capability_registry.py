@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
 
 SCHEMA_VERSION = 1
 _VALIDATION_METRICS_REGISTERED = False
@@ -192,7 +193,10 @@ def normalize_payload(provider: str, payload: Mapping[str, Any]) -> dict[str, An
 
 def get_allowed_fields(provider: str) -> set[str]:
     provider_key = _normalize_provider(provider)
-    return set(BASE_FIELDS) | set(PROVIDER_EXTENSIONS.get(provider_key, set()))
+    provider_extensions = PROVIDER_EXTENSIONS.get(provider_key, set())
+    if not provider_extensions and custom_openai_provider_number(provider_key) is not None:
+        provider_extensions = PROVIDER_EXTENSIONS.get("custom-openai-api", set())
+    return set(BASE_FIELDS) | set(provider_extensions)
 
 
 def _raise_nested_error(provider_key: str, field: str, message: str) -> None:
