@@ -383,8 +383,10 @@ ownership checks, or complex-domain packages that should stay on the
   kanban code.
 - 2026-05-09 TASK-153 verification: `bunx vitest run
   src/components/Option/Models/__tests__/modelsDisplayUtils.test.ts` from
-  `apps/packages/ui` passed after first failing on the missing native helper
-  and then failing on the dependency guard before implementation.
+  `apps/packages/ui` passed after first failing on the missing native helper.
+  The PR review follow-up removed the filesystem-based source guard from the
+  Vitest unit test; dependency regression coverage for this slice is recorded
+  through the exact Models-tree package-import scan instead.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,

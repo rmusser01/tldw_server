@@ -24,7 +24,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Continue issue #1346 by replacing the display-only dayjs usage in apps/packages/ui/src/components/Option/Models/index.tsx with native Date/Intl formatting. Keep dayjs declared for remaining Flashcards display formatting and Ant Design Dayjs value-contract surfaces, and update the dependency audit with the reduced import count.
+Continue issue #1346 by replacing the display-only dayjs usage in apps/packages/ui/src/components/Option/Models/index.tsx with native Date formatting. Keep dayjs declared for remaining Flashcards display formatting and Ant Design Dayjs value-contract surfaces, and update the dependency audit with the reduced import count.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -37,8 +37,8 @@ Continue issue #1346 by replacing the display-only dayjs usage in apps/packages/
 
 ## Implementation Plan
 <!-- SECTION:PLAN:BEGIN -->
-1. Add a focused Models test/source guard that fails while index.tsx imports dayjs.
-2. Replace the last-refreshed formatter with a native Date/Intl helper.
+1. Add focused Models formatting coverage and verify dependency removal with an explicit import scan.
+2. Replace the last-refreshed formatter with a native Date helper.
 3. Update the dependency audit import count and completed follow-up notes.
 4. Run focused Vitest, import scans, lint/diff checks, and record Bandit rationale before commit/PR.
 <!-- SECTION:PLAN:END -->
@@ -55,9 +55,9 @@ Continue issue #1346 by replacing the display-only dayjs usage in apps/packages/
 
 ## Implementation Notes
 <!-- SECTION:NOTES:BEGIN -->
-TDD red checks: the focused Models display utility test first failed because modelsDisplayUtils did not exist, then failed on the dayjs import guard while Models/index.tsx still imported dayjs and dayjs/plugin/relativeTime.
+TDD red check: the focused Models display utility test first failed because modelsDisplayUtils did not exist. Dependency removal was verified separately with an exact package-import scan rather than a filesystem-reading unit-test guard.
 
-Implemented a native Intl.DateTimeFormat helper for the Models last-refreshed HH:mm label and wired Models/index.tsx to use it instead of dayjs.
+Implemented a native Date/getHours/getMinutes helper for the Models last-refreshed HH:mm label and wired Models/index.tsx to use it instead of dayjs.
 
 Updated the WebUI dependency audit to record the dayjs import count dropping from 17 to 15 and to keep remaining Flashcards display formatting plus Ant Design Dayjs value contracts explicit.
 
@@ -68,5 +68,5 @@ Opened PR #1405 against dev for this Models dayjs cleanup slice: https://github.
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Removed dayjs from the Models last-refreshed display label by replacing dayjs formatting with a native Intl helper, added focused formatting and no-dayjs guard tests, and updated the dependency audit to show the remaining dayjs import count dropping from 17 to 15 while preserving the remaining Flashcards and Ant Design Dayjs blockers.
+Removed dayjs from the Models last-refreshed display label by replacing dayjs formatting with a native Date helper, added focused formatting tests, and updated the dependency audit to show the remaining dayjs import count dropping from 17 to 15 while preserving the remaining Flashcards and Ant Design Dayjs blockers.
 <!-- SECTION:FINAL_SUMMARY:END -->

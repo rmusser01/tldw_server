@@ -1,8 +1,6 @@
-const LAST_REFRESHED_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
-  hour: "2-digit",
-  hourCycle: "h23",
-  minute: "2-digit"
-})
-
-export const formatModelsLastRefreshedTime = (timestamp: number): string =>
-  LAST_REFRESHED_TIME_FORMATTER.format(new Date(timestamp))
+export const formatModelsLastRefreshedTime = (timestamp: number): string => {
+  const date = new Date(timestamp)
+  const hours = date.getHours().toString().padStart(2, "0")
+  const minutes = date.getMinutes().toString().padStart(2, "0")
+  return `${hours}:${minutes}`
+}
