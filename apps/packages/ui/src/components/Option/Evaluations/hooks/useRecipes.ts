@@ -8,10 +8,13 @@ import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { ApiSendResponse } from "@/services/api-send"
 import {
+  applyRecipeRecommendation,
   createRecipeRun,
+  getEmbeddingRecipeCandidates,
   getRecipeLaunchReadiness,
   getRecipeRunReport,
   listRecipeManifests,
+  previewRecipeRecommendationApply,
   validateRecipeDataset,
   type DatasetSample
 } from "@/services/evaluations"
@@ -143,5 +146,50 @@ export function useRecipeRunReport(runId: string | null) {
       const status = String((query.state.data as any)?.data?.run?.status || "").toLowerCase()
       return ["pending", "running"].includes(status) ? 3000 : false
     }
+  })
+}
+
+export function useEmbeddingRecipeCandidates(enabled: boolean) {
+  return useQuery({
+    queryKey: ["evaluations", "recipes", "embeddings_model_selection", "candidates"],
+    queryFn: async () => ensureOk(await getEmbeddingRecipeCandidates()),
+    enabled,
+    staleTime: 60 * 1000
+  })
+}
+
+export function usePreviewRecipeRecommendationApply() {
+  return useMutation({
+    mutationFn: async (params: {
+      runId: string
+      slotName: string
+      candidateRunId?: string | null
+    }) =>
+      ensureOk(
+        await previewRecipeRecommendationApply(params.runId, {
+          slot_name: params.slotName,
+          candidate_run_id: params.candidateRunId ?? null
+        })
+      )
+  })
+}
+
+export function useApplyRecipeRecommendation() {
+  return useMutation({
+    mutationFn: async (params: {
+      runId: string
+      slotName: string
+      candidateRunId?: string | null
+      confirmedProvider: string
+      confirmedModel: string
+    }) =>
+      ensureOk(
+        await applyRecipeRecommendation(params.runId, {
+          slot_name: params.slotName,
+          candidate_run_id: params.candidateRunId ?? null,
+          confirmed_provider: params.confirmedProvider,
+          confirmed_model: params.confirmedModel
+        })
+      )
   })
 }

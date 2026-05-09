@@ -13,6 +13,7 @@ import {
   Empty,
   Input,
   InputNumber,
+  Modal,
   Select,
   Space,
   Spin,
@@ -23,13 +24,16 @@ import { useTranslation } from "react-i18next"
 import { useDatasetsList } from "../hooks/useDatasets"
 import {
   getRecipeRunUserErrorMessage,
+  useApplyRecipeRecommendation,
   useCreateRecipeRun,
   useRecipeLaunchReadiness,
   useRecipeManifests,
+  usePreviewRecipeRecommendationApply,
   useRecipeRunReport,
   useValidateRecipeDataset
 } from "../hooks/useRecipes"
 import { JsonEditor } from "../components"
+import { EmbeddingsModelSelectionConfig } from "./recipe-configs/EmbeddingsModelSelectionConfig"
 import { RagAnswerQualityConfig } from "./recipe-configs/RagAnswerQualityConfig"
 import { RagRetrievalTuningConfig } from "./recipe-configs/RagRetrievalTuningConfig"
 import type {
@@ -188,6 +192,29 @@ const prettifySlotName = (slotName: string): string =>
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ")
 
+const prettifySentenceSlotName = (slotName: string): string => {
+  const label = slotName.replace(/_/g, " ")
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+const prettifyMetricName = (metricName: string): string =>
+  metricName
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+
+const formatMetricValue = (value: unknown): string =>
+  typeof value === "number"
+    ? value.toFixed(value >= 1 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")
+    : String(value)
+
+const formatProviderModel = (value: unknown): string => {
+  if (!value || typeof value !== "object") return ""
+  const record = value as Record<string, any>
+  const provider = String(record.provider || "").trim()
+  const model = String(record.model || "").trim()
+  return [provider, model].filter(Boolean).join(" / ")
+}
+
 const parseJsonObject = (text: string, label: string): Record<string, any> => {
   try {
     const parsed = JSON.parse(text)
@@ -284,6 +311,8 @@ export const RecipesTab: React.FC = () => {
     React.useState<RecipeDatasetValidation | null>(null)
   const [localError, setLocalError] = React.useState<string | null>(null)
   const [currentRunId, setCurrentRunId] = React.useState<string | null>(null)
+  const [previewApplyData, setPreviewApplyData] = React.useState<Record<string, any> | null>(null)
+  const [previewApplyError, setPreviewApplyError] = React.useState<string | null>(null)
   const setActiveTab = useEvaluationsStore((s) => s.setActiveTab)
   const syntheticReviewRecipeKind = useEvaluationsStore(
     (s) => s.syntheticReviewRecipeKind
@@ -305,6 +334,8 @@ export const RecipesTab: React.FC = () => {
   const { data: datasetsResp } = useDatasetsList({ limit: 100, offset: 0 })
   const validateMutation = useValidateRecipeDataset()
   const createRunMutation = useCreateRecipeRun()
+  const previewApplyMutation = usePreviewRecipeRecommendationApply()
+  const applyRecommendationMutation = useApplyRecipeRecommendation()
   const { data: readinessResp, isLoading: readinessLoading } =
     useRecipeLaunchReadiness(selectedRecipeId)
   const {
@@ -327,6 +358,8 @@ export const RecipesTab: React.FC = () => {
   const reportFailureExamples = Array.isArray(reportPayload?.failure_examples)
     ? reportPayload.failure_examples
     : []
+  const isEmbeddingsRecipeReport =
+    report?.run?.recipe_id === "embeddings_model_selection"
   const parsedInlineDataset =
     datasetSource === "inline" ? parseJsonDatasetSafe(inlineDatasetText) : null
   const parsedRunConfig = parseJsonObjectSafe(runConfigText)
@@ -359,6 +392,8 @@ export const RecipesTab: React.FC = () => {
     setValidationResult(null)
     setLocalError(null)
     setCurrentRunId(null)
+    setPreviewApplyData(null)
+    setPreviewApplyError(null)
     setForceRerun(false)
   }, [selectedRecipeId])
 
@@ -464,6 +499,8 @@ export const RecipesTab: React.FC = () => {
     if (!selectedManifest) return
     try {
       setLocalError(null)
+      setPreviewApplyData(null)
+      setPreviewApplyError(null)
       const datasetPayload = buildDatasetPayload()
       const runConfig = parseJsonObject(runConfigText, "Run config")
       const resp = await createRunMutation.mutateAsync({
@@ -476,6 +513,57 @@ export const RecipesTab: React.FC = () => {
       setCurrentRunId((resp as any)?.data?.run_id || (resp as any)?.run_id || null)
     } catch (error: any) {
       setLocalError(getRecipeRunUserErrorMessage(error))
+    }
+  }
+
+  const handlePreviewApply = async (
+    slotName: string,
+    candidateRunId?: string | null
+  ) => {
+    const runId = String(report?.run?.run_id || currentRunId || "").trim()
+    if (!runId) return
+    try {
+      setPreviewApplyError(null)
+      const response = await previewApplyMutation.mutateAsync({
+        runId,
+        slotName,
+        candidateRunId: candidateRunId || null
+      })
+      setPreviewApplyData((response as any)?.data || response || null)
+    } catch (error: any) {
+      setPreviewApplyData(null)
+      setPreviewApplyError(error?.message || "Unable to preview the config change.")
+    }
+  }
+
+  const handleCopyConfigChange = () => {
+    if (!previewApplyData?.copy_config) return
+    const serialized = JSON.stringify(previewApplyData.copy_config, null, 2)
+    void navigator?.clipboard?.writeText?.(serialized)
+  }
+
+  const handleApplyRecommendation = async () => {
+    if (!previewApplyData) return
+    const runId = String(previewApplyData.run_id || report?.run?.run_id || currentRunId || "").trim()
+    const proposed = (previewApplyData.proposed || {}) as Record<string, any>
+    const confirmedProvider = String(proposed.provider || "").trim()
+    const confirmedModel = String(proposed.model || "").trim()
+    if (!runId || !confirmedProvider || !confirmedModel) {
+      setPreviewApplyError("Recommendation preview is missing provider/model confirmation.")
+      return
+    }
+    try {
+      setPreviewApplyError(null)
+      const response = await applyRecommendationMutation.mutateAsync({
+        runId,
+        slotName: String(previewApplyData.slot_name || "best_overall"),
+        candidateRunId: previewApplyData.candidate_run_id || null,
+        confirmedProvider,
+        confirmedModel
+      })
+      setPreviewApplyData((response as any)?.data || response || null)
+    } catch (error: any) {
+      setPreviewApplyError(error?.message || "Unable to apply the config change.")
     }
   }
 
@@ -1105,6 +1193,283 @@ export const RecipesTab: React.FC = () => {
     return renderSummarizationRunConfigEditor()
   }
 
+  const renderEmbeddingsRecommendationCards = () => {
+    const recommendationSlots = report?.recommendation_slots || {}
+    const candidateById = new Map<string, any>()
+    reportCandidates.forEach((candidate: any) => {
+      const keys = [
+        candidate.candidate_run_id,
+        candidate.candidate_id,
+        candidate.model ? `${candidate.provider || ""}:${candidate.model}` : null
+      ]
+      keys
+        .map((key) => (key == null ? "" : String(key).trim()))
+        .filter(Boolean)
+        .forEach((key) => candidateById.set(key, candidate))
+    })
+    const reportWarnings = [
+      ...(Array.isArray(reportPayload?.warnings) ? reportPayload.warnings : []),
+      ...(Array.isArray(reportPayload?.confidence_warnings)
+        ? reportPayload.confidence_warnings
+        : [])
+    ]
+
+    return (
+      <div className="space-y-3">
+        {reportWarnings.map((warning: unknown, index: number) => (
+          <Alert
+            key={`embeddings-warning-${index}`}
+            type="warning"
+            showIcon
+            title={String(warning)}
+          />
+        ))}
+        <div className="grid gap-3 md:grid-cols-3">
+          {["best_overall", "best_local", "best_cheap"].map((slotName) => {
+            const slot = (recommendationSlots as Record<string, any>)[slotName] || {}
+            const slotMetadata =
+              slot.metadata && typeof slot.metadata === "object" && !Array.isArray(slot.metadata)
+                ? slot.metadata
+                : {}
+            const candidateId = String(
+              slotMetadata.candidate_run_id || slot.candidate_run_id || ""
+            ).trim()
+            const candidate = candidateById.get(candidateId)
+            const metrics =
+              candidate && typeof candidate.metrics === "object" && candidate.metrics
+                ? candidate.metrics
+                : {}
+            const applyWarnings = Array.isArray(slotMetadata.apply_warnings)
+              ? slotMetadata.apply_warnings.map((warning: unknown) => String(warning)).filter(Boolean)
+              : []
+            const blockedReason =
+              applyWarnings.length > 0
+                ? applyWarnings.join(" ")
+                : slotMetadata.apply_blocked_reason ||
+                  slotMetadata.blocked_reason ||
+                  slotMetadata.apply_ineligible_reason ||
+                  slotMetadata.ineligible_reason
+            const modelName = candidate?.model || slotMetadata.model || candidateId
+            const providerName = candidate?.provider || slotMetadata.provider
+
+            return (
+              <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
+                <div className="space-y-2">
+                  <Text strong>{prettifySentenceSlotName(slotName)}</Text>
+                  <div>
+                    <div className="font-medium">
+                      {modelName || t("evaluations:recipeNoWinner", {
+                        defaultValue: "No winner yet"
+                      })}
+                    </div>
+                    {providerName && (
+                      <div className="text-xs text-text-muted">{providerName}</div>
+                    )}
+                  </div>
+                  {slot.explanation && (
+                    <Paragraph className="mb-0 text-xs">{slot.explanation}</Paragraph>
+                  )}
+                  {Object.entries(metrics).length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {Object.entries(metrics).map(([key, value]) => (
+                        <Tag key={`${slotName}-${key}`}>
+                          {prettifyMetricName(key)}: {formatMetricValue(value)}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                  {slotMetadata.apply_eligible === true ? (
+                    <Button
+                      size="small"
+                      loading={previewApplyMutation.isPending}
+                      onClick={() =>
+                        handlePreviewApply(
+                          slotName,
+                          slotMetadata.candidate_run_id || slot.candidate_run_id || null
+                        )
+                      }
+                    >
+                      {t("evaluations:recipePreviewRagConfigChange", {
+                        defaultValue: "Preview RAG config change"
+                      })}
+                    </Button>
+                  ) : blockedReason ? (
+                    <div className="text-xs text-text-muted">{String(blockedReason)}</div>
+                  ) : null}
+                </div>
+              </Card>
+            )
+          })}
+        </div>
+        <Collapse
+          ghost
+          destroyOnHidden
+          items={[
+            {
+              key: "embeddings-raw-report",
+              label: t("evaluations:recipeRawReportDetailsLabel", {
+                defaultValue: "Raw report details"
+              }),
+              children: (
+                <pre className="max-h-80 overflow-auto rounded border border-border-subtle bg-surface-subtle p-3 text-xs">
+                  {JSON.stringify(report, null, 2)}
+                </pre>
+              )
+            }
+          ]}
+        />
+      </div>
+    )
+  }
+
+  const renderPreviewApplyModal = () => {
+    const affectedConfig =
+      previewApplyData?.affected_config &&
+      typeof previewApplyData.affected_config === "object"
+        ? previewApplyData.affected_config
+        : null
+    const warnings = Array.isArray(previewApplyData?.warnings)
+      ? previewApplyData.warnings
+      : []
+    const copyConfig = previewApplyData?.copy_config
+    const hasCopyConfig =
+      copyConfig && typeof copyConfig === "object" && !Array.isArray(copyConfig)
+    const applyAvailable = previewApplyData?.apply_available === true
+    const isApplied = previewApplyData?.applied === true
+
+    return (
+      <Modal
+        title={t("evaluations:recipeApplyPreviewTitle", {
+          defaultValue: "RAG config change preview"
+        })}
+        open={Boolean(previewApplyData || previewApplyError)}
+        onCancel={() => {
+          setPreviewApplyData(null)
+          setPreviewApplyError(null)
+        }}
+        footer={
+          <Space>
+            <Button
+              onClick={() => {
+                setPreviewApplyData(null)
+                setPreviewApplyError(null)
+              }}
+            >
+              {t("common:close", { defaultValue: "Close" })}
+            </Button>
+            {previewApplyData && applyAvailable && !isApplied ? (
+              <Button
+                type="primary"
+                loading={applyRecommendationMutation.isPending}
+                onClick={handleApplyRecommendation}
+              >
+                {t("evaluations:recipeApplyToRagConfig", {
+                  defaultValue: "Apply to RAG config"
+                })}
+              </Button>
+            ) : previewApplyData && !applyAvailable && hasCopyConfig ? (
+              <Button type="primary" onClick={handleCopyConfigChange}>
+                {t("evaluations:recipeCopyConfigChange", {
+                  defaultValue: "Copy config change"
+                })}
+              </Button>
+            ) : null}
+          </Space>
+        }
+      >
+        {previewApplyError ? (
+          <Alert type="error" showIcon title={previewApplyError} />
+        ) : previewApplyData ? (
+          <div className="space-y-4">
+            {isApplied && (
+              <Alert
+                type="success"
+                showIcon
+                title={t("evaluations:recipeRagConfigUpdated", {
+                  defaultValue: "RAG config updated"
+                })}
+              />
+            )}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Text strong>Current embedding model</Text>
+                <div className="mt-1 text-sm">
+                  {formatProviderModel(previewApplyData.current) || "None"}
+                </div>
+              </div>
+              <div>
+                <Text strong>Proposed embedding model</Text>
+                <div className="mt-1 text-sm">
+                  {formatProviderModel(previewApplyData.proposed) || "None"}
+                </div>
+              </div>
+            </div>
+            <div className="text-xs text-text-muted">
+              Run ID: {String(previewApplyData.run_id || "")}
+            </div>
+            {isApplied && (
+              <div className="grid gap-2 text-xs md:grid-cols-2">
+                {previewApplyData.backup_path && (
+                  <div>
+                    <Text strong>Backup path</Text>
+                    <div className="mt-1 break-all">
+                      {String(previewApplyData.backup_path)}
+                    </div>
+                  </div>
+                )}
+                {previewApplyData.audit_ref && (
+                  <div>
+                    <Text strong>Audit reference</Text>
+                    <div className="mt-1 break-all">
+                      {String(previewApplyData.audit_ref)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {affectedConfig && (
+              <div className="space-y-2">
+                <Text strong>Affected config keys</Text>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(affectedConfig).map(([key, value]) => (
+                    <Tag key={key}>
+                      {key}: {String(value)}
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            )}
+            {warnings.length > 0 && (
+              <div className="space-y-2">
+                {warnings.map((warning: unknown, index: number) => (
+                  <Alert
+                    key={`apply-preview-warning-${index}`}
+                    type="warning"
+                    showIcon
+                    title={String(warning)}
+                  />
+                ))}
+              </div>
+            )}
+            <Tag color={previewApplyData.reindex_required ? "orange" : "green"}>
+              {previewApplyData.reindex_required
+                ? "Reindex required"
+                : "Reindex not required"}
+            </Tag>
+            {hasCopyConfig && (
+              <div className="space-y-2">
+                <Text strong>Copy config</Text>
+                <pre className="max-h-72 overflow-auto rounded border border-border-subtle bg-surface-subtle p-3 text-xs">
+                  {JSON.stringify(copyConfig, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </Modal>
+    )
+  }
+
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
       <Card
@@ -1296,7 +1661,16 @@ export const RecipesTab: React.FC = () => {
                   )}
 
                   <div>
-                    {selectedManifest.recipe_id === "rag_retrieval_tuning" ? (
+                    {selectedManifest.recipe_id === "embeddings_model_selection" ? (
+                      <EmbeddingsModelSelectionConfig
+                        datasetSource="inline"
+                        dataset={parsedInlineDataset || defaultInlineDatasetForRecipe(selectedRecipeId)}
+                        runConfig={parsedRunConfig || defaultRunConfigForRecipe(selectedRecipeId)}
+                        manifest={selectedManifest}
+                        onDatasetChange={replaceInlineDataset}
+                        onRunConfigChange={replaceRunConfig}
+                      />
+                    ) : selectedManifest.recipe_id === "rag_retrieval_tuning" ? (
                       <RagRetrievalTuningConfig
                         datasetSource="inline"
                         dataset={parsedInlineDataset || defaultInlineDatasetForRecipe(selectedRecipeId)}
@@ -1398,6 +1772,15 @@ export const RecipesTab: React.FC = () => {
                       datasetSource="saved"
                       dataset={[]}
                       runConfig={parsedRunConfig || defaultRunConfigForRecipe(selectedRecipeId)}
+                      onDatasetChange={() => {}}
+                      onRunConfigChange={replaceRunConfig}
+                    />
+                  ) : selectedManifest.recipe_id === "embeddings_model_selection" ? (
+                    <EmbeddingsModelSelectionConfig
+                      datasetSource="saved"
+                      dataset={[]}
+                      runConfig={parsedRunConfig || defaultRunConfigForRecipe(selectedRecipeId)}
+                      manifest={selectedManifest}
                       onDatasetChange={() => {}}
                       onRunConfigChange={replaceRunConfig}
                     />
@@ -1614,25 +1997,29 @@ export const RecipesTab: React.FC = () => {
                   />
                 )}
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  {Object.entries(report.recommendation_slots || {}).map(([slotName, slot]) => (
-                    <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
-                      <div className="space-y-1">
-                        <Text strong>{prettifySlotName(slotName)}</Text>
-                        <div className="text-xs text-text-muted">
-                          {slot.candidate_run_id || t("evaluations:recipeNoWinner", {
-                            defaultValue: "No winner yet"
-                          })}
+                {isEmbeddingsRecipeReport ? (
+                  renderEmbeddingsRecommendationCards()
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {Object.entries(report.recommendation_slots || {}).map(([slotName, slot]) => (
+                      <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
+                        <div className="space-y-1">
+                          <Text strong>{prettifySlotName(slotName)}</Text>
+                          <div className="text-xs text-text-muted">
+                            {slot.candidate_run_id || t("evaluations:recipeNoWinner", {
+                              defaultValue: "No winner yet"
+                            })}
+                          </div>
+                          {slot.explanation && (
+                            <Paragraph className="mb-0 text-xs">
+                              {slot.explanation}
+                            </Paragraph>
+                          )}
                         </div>
-                        {slot.explanation && (
-                          <Paragraph className="mb-0 text-xs">
-                            {slot.explanation}
-                          </Paragraph>
-                        )}
-                      </div>
-                    </Card>
-                  ))}
-                </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
 
                 {reportCandidates.length > 0 && (
                   <div className="space-y-2">
@@ -1760,6 +2147,7 @@ export const RecipesTab: React.FC = () => {
             )}
           </Card>
         )}
+        {renderPreviewApplyModal()}
       </div>
     </div>
   )
