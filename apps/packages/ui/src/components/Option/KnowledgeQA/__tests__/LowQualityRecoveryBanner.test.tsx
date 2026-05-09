@@ -21,6 +21,15 @@ describe("LowQualityRecoveryBanner", () => {
     ).toBeInTheDocument()
   })
 
+  it("renders through the shared RecoveryCallout primitive", () => {
+    render(<LowQualityRecoveryBanner {...defaultProps} />)
+    expect(
+      screen
+        .getByText(/sources may not closely match/i)
+        .closest("[data-ds-component]")
+    ).toHaveAttribute("data-ds-component", "RecoveryCallout")
+  })
+
   it("calls onEnableWeb when web button clicked", () => {
     render(<LowQualityRecoveryBanner {...defaultProps} />)
     fireEvent.click(screen.getByRole("button", { name: /include web/i }))

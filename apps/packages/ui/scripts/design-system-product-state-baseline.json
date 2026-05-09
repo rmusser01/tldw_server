@@ -5423,17 +5423,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-recovery-banner:src/components/Option/KnowledgeQA/panels/LowQualityRecoveryBanner.tsx:LowQualityRecoveryBanner",
-    "path": "src/components/Option/KnowledgeQA/panels/LowQualityRecoveryBanner.tsx",
-    "rule": "local-recovery-banner",
-    "subject": "LowQualityRecoveryBanner",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local LowQualityRecoveryBanner recovery banner before the guard.",
-    "replacement": "RecoveryCallout or StatePanel",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-recovery-banner:src/components/Option/Playground/PlaygroundChatErrorBanner.tsx:PlaygroundChatErrorBanner",
     "path": "src/components/Option/Playground/PlaygroundChatErrorBanner.tsx",
     "rule": "local-recovery-banner",
