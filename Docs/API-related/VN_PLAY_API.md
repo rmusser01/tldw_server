@@ -26,7 +26,7 @@ Linked chat is read-only in V1. `linked_chat_id` may be stored as session contex
 | `PATCH` | `/sessions/{session_id}` | Update session title, status, linked chat, settings, or soft-delete flag. |
 | `DELETE` | `/sessions/{session_id}` | Soft-delete one session. |
 | `POST` | `/sessions/{session_id}/turn` | Submit one user turn. |
-| `POST` | `/sessions/{session_id}/retry-last-turn` | Retry the latest user turn input with a new idempotency key. |
+| `POST` | `/sessions/{session_id}/retry-last-turn` | Retry the latest failed accepted turn with a new idempotency key. |
 | `GET` | `/sessions/{session_id}/events` | List ordered event history. |
 | `POST` | `/sessions/{session_id}/checkpoint` | Create a named checkpoint at the current scene state. |
 | `GET` | `/sessions/{session_id}/checkpoints` | List checkpoints. |
@@ -155,6 +155,8 @@ The runtime stores turn request keys before model work starts. If the same key a
 
 Model `visual_directives` are resolved by the backend against the session's approved VN asset-pack manifest. Resolved assets update scene state and unresolved directives remain warning-only: the text/model turn can still complete, while the runtime records a rejection event with a stable reason such as `asset_not_found` or `manifest_unavailable`.
 
+Story mode is backend-authoritative. A `choice_id` is accepted only when it matches the current persisted `scene_state.visible_choices` for the submitted `client_scene_version`. Accepted Story choices atomically create branch metadata, append `turn_started` and `choice_selected`, set the scene state's `active_branch_node_id`, clear `visible_choices`, and only then call the turn adapter/model. This lets custom frontends submit simple choice IDs without owning branch persistence. Story `custom_action` is non-branching and is stored as a normal `user_turn`.
+
 Freeform turn:
 
 ```bash
@@ -199,6 +201,7 @@ Minimal response:
     "session_id": 1,
     "scene_version": 2,
     "location_key": "archive",
+    "active_branch_node_id": 12,
     "visible_choices": [
       { "id": "step-inside", "text": "Step inside" }
     ],
@@ -233,6 +236,12 @@ The session scene version is server-authoritative. Clients must submit the versi
 
 Model or parse failures are recorded as turn/event state and returned as `502 model_failed` or `502 parse_failed` when the accepted turn cannot complete.
 
+Validation errors returned as HTTP 400 include:
+
+- `choice_not_allowed`: Freeform received `choice_id`, or Story received freeform `input_text`.
+- `invalid_choice_id`: Story `choice_id` is not in the persisted current `visible_choices`.
+- `retry_last_turn_not_failed`: no latest failed accepted turn is available to retry.
+
 ## Events And Scene State
 
 `GET /sessions/{session_id}/events` returns append-only ordered events. Scene state is derived from these events and persisted for fast reads. Important event types include:
@@ -242,6 +251,7 @@ Model or parse failures are recorded as turn/event state and returned as `502 mo
 - `user_turn`
 - `model_turn`
 - `choice_presented`
+- `choice_selected`
 - `scene_state_changed`
 - `turn_completed`
 - `turn_failed`
@@ -250,6 +260,19 @@ Model or parse failures are recorded as turn/event state and returned as `502 mo
 - `session_restored`
 
 The current scene state includes background/depth item ids, active sprite item payloads, location, mood, time of day, weather, visible choices, transcript cursor, scene version, and warnings.
+
+Story choice selection appends `choice_selected` instead of `user_turn`. Its payload includes:
+
+```json
+{
+  "schema_version": 1,
+  "turn_request_id": 5,
+  "choice_id": "open-the-door",
+  "choice": { "id": "open-the-door", "text": "Open the door" },
+  "branch_node_id": 12,
+  "scene_version": 1
+}
+```
 
 When a session has resolved visual state, scene responses also include render-ready asset payloads:
 
@@ -264,6 +287,36 @@ Visual directive event behavior:
 - `visual_directive_rejected`: appended when the directive cannot be resolved safely. The event payload includes `code=visual_directive_rejected`, `reason`, the original directive context, and `scene_version`.
 
 Custom frontends should prefer `scene_state.background`, `scene_state.depth`, and `scene_state.active_sprites` from VN Play responses instead of calling VN asset-pack internals directly for runtime rendering.
+
+## Branches And Retry
+
+`GET /sessions/{session_id}/branches` returns durable Story branch metadata. `branch_path` is always a list so clients can render path breadcrumbs without special-casing single-choice branches:
+
+```json
+[
+  {
+    "id": 12,
+    "session_id": 1,
+    "parent_event_id": 9,
+    "branch_label": "Open the door",
+    "branch_path": [
+      {
+        "schema_version": 1,
+        "type": "choice",
+        "choice_id": "open-the-door",
+        "choice_text": "Open the door",
+        "choice_presented_event_id": 9,
+        "scene_version": 1
+      }
+    ],
+    "status": "active"
+  }
+]
+```
+
+`POST /sessions/{session_id}/retry-last-turn` is failure-only. It retries the newest accepted turn whose turn request is still `model_failed`, `parse_failed`, or recoverable `abandoned`, and it uses that failed request's stored `input_event_id` as the source of truth. For failed Story choices, retry does not append another `choice_selected` event and does not create another branch; it reuses the original branch and calls the model again from the replayed scene state.
+
+A retry after a completed turn returns `400 retry_last_turn_not_failed`. A retry request still requires the current `client_scene_version` and a fresh `idempotency_key`.
 
 ## Checkpoints And Restore
 

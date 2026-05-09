@@ -194,6 +194,43 @@ def _create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]
     )
 
 
+def _create_story_session_with_choice(
+    chacha_db: CharactersRAGDB,
+    *,
+    character_id: int,
+    pack_id: int,
+) -> int:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(repo=repo, owner_user_id=42)
+    session = service.create_session(
+        mode="story",
+        title="Archive Door",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        content_rating="general",
+        seed="story-seed",
+    )
+    choice_presented = repo.append_event(
+        session_id=session.id,
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": "Open the door"}],
+            "scene_version": 1,
+        },
+        source="runtime",
+    )
+    repo.set_scene_state(
+        session_id=session.id,
+        owner_user_id=42,
+        last_event_id=int(choice_presented["id"]),
+        visible_choices=[{"id": "open", "text": "Open the door"}],
+        scene_version=1,
+    )
+    repo.update_session(session.id, {"scene_version": 1}, owner_user_id=42)
+    return session.id
+
+
 def test_turn_request_requires_exactly_one_input_field() -> None:
     VNPlayTurnRequest(input_text="hello", client_scene_version=0, idempotency_key="k")
 
@@ -241,6 +278,127 @@ def test_create_session_endpoint_returns_scene_state(
     body = response.json()
     assert body["mode"] == "freeform"
     assert body["scene_state"]["scene_version"] == 0
+
+
+def test_story_choice_turn_returns_branch_state(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id = _create_story_session_with_choice(
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+    )
+
+    response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/turn",
+        json={
+            "choice_id": "open",
+            "client_scene_version": 1,
+            "idempotency_key": "api-story-choice-1",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    active_branch_node_id = body["current_scene"]["active_branch_node_id"]
+    assert body["status"] == "completed"
+    assert body["scene_version"] == 2
+    assert isinstance(active_branch_node_id, int)
+    choice_selected = next(
+        event for event in body["events"] if event["event_type"] == "choice_selected"
+    )
+    assert choice_selected["branch_node_id"] == active_branch_node_id
+    assert body["current_scene"]["visible_choices"] == []
+
+
+def test_story_unknown_choice_returns_invalid_choice_id(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id = _create_story_session_with_choice(
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+    )
+
+    response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/turn",
+        json={
+            "choice_id": "unknown",
+            "client_scene_version": 1,
+            "idempotency_key": "api-story-choice-unknown",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_choice_id"
+
+
+def test_story_retry_completed_turn_returns_not_failed(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id = _create_story_session_with_choice(
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+    )
+    turn_response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/turn",
+        json={
+            "choice_id": "open",
+            "client_scene_version": 1,
+            "idempotency_key": "api-story-choice-completed",
+        },
+    )
+    assert turn_response.status_code == 200
+
+    response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/retry-last-turn",
+        json={
+            "client_scene_version": 2,
+            "idempotency_key": "api-story-retry-completed",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "retry_last_turn_not_failed"
+
+
+def test_branch_list_keeps_branch_path_list_shape(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id = _create_story_session_with_choice(
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+    )
+    turn_response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/turn",
+        json={
+            "choice_id": "open",
+            "client_scene_version": 1,
+            "idempotency_key": "api-story-choice-branch-path",
+        },
+    )
+    assert turn_response.status_code == 200
+
+    response = client.get(f"/api/v1/vn-play/sessions/{story_session_id}/branches")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body[0]["branch_path"], list)
+    assert body[0]["branch_path"][0]["choice_id"] == "open"
 
 
 @pytest.mark.asyncio
