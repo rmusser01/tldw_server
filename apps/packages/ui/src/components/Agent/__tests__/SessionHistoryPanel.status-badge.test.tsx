@@ -1,13 +1,21 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SessionHistoryPanel } from "../SessionHistoryPanel"
 import type { SessionMetadata } from "@/services/agent/storage"
 import type { AgentStatus } from "@/services/agent/types"
 
+type TranslationFallback = string | { defaultValue?: string }
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key
+    t: (key: string, fallback?: TranslationFallback) => {
+      if (typeof fallback === "string") {
+        return fallback
+      }
+
+      return fallback?.defaultValue ?? key
+    }
   })
 }))
 
@@ -33,6 +41,15 @@ const badgeFor = (label: string) => {
 }
 
 describe("SessionHistoryPanel status badges", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-05-09T17:30:00.000Z"))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("renders agent status labels through shared Badge variants", () => {
     render(
       <SessionHistoryPanel
