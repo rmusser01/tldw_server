@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -26,34 +27,37 @@ from ..schemas.prototype_workspace_schemas import (
 router = APIRouter(tags=["prototype-workspaces"])
 
 
-def _get_repo():
+def _get_repo() -> Any:
+    """Build the prototype workspace repository from the AuthNZ database pool."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
         PrototypeWorkspacesRepo,
     )
 
-    async def _build():
+    async def _build() -> Any:
         return PrototypeWorkspacesRepo(db_pool=await get_db_pool())
 
     return _build()
 
 
-def _get_preview_broker():
+def _get_preview_broker() -> Any:
+    """Build the preview broker dependency with the shared prototype repo."""
     from tldw_Server_API.app.core.Prototype_Workspaces.preview_broker import (
         PrototypePreviewBroker,
     )
 
-    async def _build():
+    async def _build() -> Any:
         repo = await _maybe_await(_get_repo())
         return PrototypePreviewBroker(repo=repo)
 
     return _build()
 
 
-def _get_service():
+def _get_service() -> Any:
+    """Build the orchestration service dependency for workspace operations."""
     from tldw_Server_API.app.core.Prototype_Workspaces.service import PrototypeWorkspaceService
 
-    async def _build():
+    async def _build() -> Any:
         repo = await _maybe_await(_get_repo())
         broker = await _maybe_await(_get_preview_broker())
         return PrototypeWorkspaceService(repo=repo, preview_broker=broker)
@@ -61,38 +65,68 @@ def _get_service():
     return _build()
 
 
-def _get_jobs_service():
+def _get_jobs_service() -> Any:
+    """Build the runtime jobs dependency for prototype branch sessions."""
     from tldw_Server_API.app.core.Prototype_Workspaces.jobs import PrototypeWorkspaceJobs
 
-    async def _build():
+    async def _build() -> Any:
         repo = await _maybe_await(_get_repo())
         return PrototypeWorkspaceJobs(repo=repo)
 
     return _build()
 
 
-def _get_access_service():
+def _get_access_service() -> Any:
+    """Build the external collaborator access dependency."""
     from tldw_Server_API.app.core.Prototype_Workspaces.access import PrototypeAccessService
 
-    async def _build():
+    async def _build() -> Any:
         repo = await _maybe_await(_get_repo())
         return PrototypeAccessService(repo)
 
     return _build()
 
 
-async def _maybe_await(value):
+async def _repo_dependency() -> Any:
+    """Resolve the repository factory through FastAPI dependency injection."""
+    return await _maybe_await(_get_repo())
+
+
+async def _preview_broker_dependency() -> Any:
+    """Resolve the preview broker factory through FastAPI dependency injection."""
+    return await _maybe_await(_get_preview_broker())
+
+
+async def _service_dependency() -> Any:
+    """Resolve the orchestration service factory through FastAPI dependency injection."""
+    return await _maybe_await(_get_service())
+
+
+async def _jobs_service_dependency() -> Any:
+    """Resolve the jobs service factory through FastAPI dependency injection."""
+    return await _maybe_await(_get_jobs_service())
+
+
+async def _access_service_dependency() -> Any:
+    """Resolve the access service factory through FastAPI dependency injection."""
+    return await _maybe_await(_get_access_service())
+
+
+async def _maybe_await(value: Any) -> Any:
+    """Await factory results that are coroutines while preserving sync test doubles."""
     if inspect.isawaitable(value):
         return await value
     return value
 
 
 def _request_nonce_or_new(value: str | None) -> str:
+    """Return a provided idempotency nonce or generate a request-scoped nonce."""
     candidate = str(value or "").strip()
     return candidate or f"req_{uuid.uuid4().hex}"
 
 
 def _coerce_user_id(user: User) -> int:
+    """Convert the authenticated user id into the integer form used by AuthNZ repos."""
     try:
         return int(user.id)
     except (TypeError, ValueError) as exc:
@@ -103,12 +137,42 @@ def _coerce_user_id(user: User) -> int:
 
 
 def _epoch_to_iso8601(epoch: int | None) -> str | None:
+    """Convert a JWT epoch timestamp into an ISO-8601 string for persisted sessions."""
     if epoch is None:
         return None
     return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
 
 
-async def _build_workspace_detail_response(repo, workspace: dict) -> PrototypeWorkspaceDetailResponse:
+def _branch_session_http_error(exc: ValueError | RuntimeError) -> HTTPException:
+    """Map expected branch-session domain failures to stable HTTP responses."""
+    detail = str(exc).lower()
+    if "not found" in detail:
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+    if "archived" in detail:
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Prototype workspace is archived")
+    if "revoked" in detail or "expired" in detail:
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Prototype session token is no longer active",
+        )
+    if "canonical snapshot" in detail or "base_snapshot_id" in detail:
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Prototype workspace is not ready for branch sessions",
+        )
+    if isinstance(exc, ValueError):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid prototype branch session request",
+        )
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Prototype branch session could not be created",
+    )
+
+
+async def _build_workspace_detail_response(repo: Any, workspace: dict[str, Any]) -> PrototypeWorkspaceDetailResponse:
+    """Build an owner-facing workspace detail response with sessions and snapshots."""
     sessions = await repo.list_sessions_for_workspace(str(workspace["id"]))
     snapshots = await repo.list_snapshots_for_workspace(str(workspace["id"]))
     canonical_snapshot_id = str(workspace.get("canonical_snapshot_id") or "")
@@ -142,8 +206,9 @@ async def _build_workspace_detail_response(repo, workspace: dict) -> PrototypeWo
 async def create_prototype_workspace(
     body: PrototypeWorkspaceCreateRequest,
     user: User = Depends(get_request_user),
-):
-    service = await _maybe_await(_get_service())
+    service: Any = Depends(_service_dependency),
+) -> PrototypeWorkspaceResponse:
+    """Create a prototype workspace and seed its canonical snapshot for the owner."""
     workspace = await service.create_workspace(
         owner_user_id=_coerce_user_id(user),
         title=body.title,
@@ -167,8 +232,9 @@ async def create_prototype_workspace(
 async def get_prototype_workspace(
     prototype_workspace_id: str,
     user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
+    repo: Any = Depends(_repo_dependency),
+) -> PrototypeWorkspaceDetailResponse:
+    """Return owner-visible prototype workspace detail and branch inventory."""
     workspace = await repo.get_workspace(prototype_workspace_id)
     if not workspace:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
@@ -190,8 +256,11 @@ async def create_owner_branch_session(
     prototype_workspace_id: str,
     body: PrototypeWorkspaceSessionCreateRequest,
     user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
+    repo: Any = Depends(_repo_dependency),
+    service: Any = Depends(_service_dependency),
+    jobs: Any = Depends(_jobs_service_dependency),
+) -> PrototypeSessionJobResponse:
+    """Create or reuse an owner branch session and enqueue its bootstrap job."""
     workspace = await repo.get_workspace(prototype_workspace_id)
     if not workspace:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
@@ -200,17 +269,18 @@ async def create_owner_branch_session(
     if _coerce_user_id(user) != owner_user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can create branch sessions")
 
-    service = await _maybe_await(_get_service())
     request_nonce = _request_nonce_or_new(body.request_nonce)
-    created = await service.create_or_reuse_branch_session(
-        prototype_workspace_id=prototype_workspace_id,
-        actor_type="owner",
-        actor_user_id=owner_user_id,
-        request_nonce=request_nonce,
-    )
+    try:
+        created = await service.create_or_reuse_branch_session(
+            prototype_workspace_id=prototype_workspace_id,
+            actor_type="owner",
+            actor_user_id=owner_user_id,
+            request_nonce=request_nonce,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _branch_session_http_error(exc) from exc
     session = created["session"]
 
-    jobs = await _maybe_await(_get_jobs_service())
     job = await jobs.enqueue_branch_session_bootstrap(
         prototype_workspace_id=prototype_workspace_id,
         actor_type="owner",
@@ -236,8 +306,11 @@ async def create_owner_branch_session(
 )
 async def create_external_branch_session(
     body: PrototypeCollaboratorSessionCreateRequest,
-):
-    access_service = await _maybe_await(_get_access_service())
+    access_service: Any = Depends(_access_service_dependency),
+    service: Any = Depends(_service_dependency),
+    jobs: Any = Depends(_jobs_service_dependency),
+) -> PrototypeSessionJobResponse:
+    """Create or reuse an external collaborator branch session from a session token."""
     token_payload = access_service.decode_session_token(body.session_token)
     if not token_payload:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid prototype session token")
@@ -247,18 +320,19 @@ async def create_external_branch_session(
     share_link_id = int(token_payload["share_link_id"])
     request_nonce = _request_nonce_or_new(body.request_nonce)
 
-    service = await _maybe_await(_get_service())
-    created = await service.create_or_reuse_branch_session(
-        prototype_workspace_id=prototype_workspace_id,
-        actor_type="external_collaborator",
-        actor_shared_actor_id=shared_actor_id,
-        request_nonce=request_nonce,
-        share_link_id=share_link_id,
-        expires_at=_epoch_to_iso8601(token_payload.get("exp")),
-    )
+    try:
+        created = await service.create_or_reuse_branch_session(
+            prototype_workspace_id=prototype_workspace_id,
+            actor_type="external_collaborator",
+            actor_shared_actor_id=shared_actor_id,
+            request_nonce=request_nonce,
+            share_link_id=share_link_id,
+            expires_at=_epoch_to_iso8601(token_payload.get("exp")),
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise _branch_session_http_error(exc) from exc
     session = created["session"]
 
-    jobs = await _maybe_await(_get_jobs_service())
     job = await jobs.enqueue_branch_session_bootstrap(
         prototype_workspace_id=prototype_workspace_id,
         actor_type="external_collaborator",
@@ -287,15 +361,16 @@ async def create_external_branch_session(
 )
 async def create_promotion_request(
     body: PrototypePromotionCreateRequest,
-):
-    access_service = await _maybe_await(_get_access_service())
+    access_service: Any = Depends(_access_service_dependency),
+    repo: Any = Depends(_repo_dependency),
+) -> PrototypePromotionRequestResponse:
+    """Create a promotion request for an external collaborator-owned snapshot."""
     token_payload = access_service.decode_session_token(body.session_token)
     if not token_payload:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid prototype session token")
     if str(token_payload["prototype_workspace_id"]) != body.prototype_workspace_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session token does not match prototype workspace")
 
-    repo = await _maybe_await(_get_repo())
     session = await repo.get_session(body.prototype_session_id)
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype session not found")
@@ -348,8 +423,10 @@ async def review_promotion_request(
     promotion_request_id: str,
     body: PrototypePromotionReviewRequest,
     user: User = Depends(get_request_user),
-):
-    repo = await _maybe_await(_get_repo())
+    repo: Any = Depends(_repo_dependency),
+    service: Any = Depends(_service_dependency),
+) -> PrototypePromotionReviewResponse:
+    """Review a promotion request and promote or reject the candidate snapshot."""
     promotion_request = await repo.get_promotion_request(promotion_request_id)
     if not promotion_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype promotion request not found")
@@ -358,7 +435,6 @@ async def review_promotion_request(
     if not workspace:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
     reviewer_user_id = _coerce_user_id(user)
-    service = await _maybe_await(_get_service())
     if not service._is_promoter(workspace, reviewer_user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -403,16 +479,17 @@ async def renew_preview_grant(
     preview_handle: str,
     body: PrototypePreviewRenewRequest,
     user: User = Depends(get_request_user),
-):
+    preview_broker: Any = Depends(_preview_broker_dependency),
+    repo: Any = Depends(_repo_dependency),
+) -> PrototypePreviewGrantResponse:
+    """Renew an owner-authorized prototype preview grant."""
     body.model_dump()
-    preview_broker = await _maybe_await(_get_preview_broker())
     record = preview_broker.get_preview_record(preview_handle)
     if not record:
         record = await preview_broker.get_preview_record_async(preview_handle)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype preview handle not found")
 
-    repo = await _maybe_await(_get_repo())
     workspace = await repo.get_workspace(str(record["prototype_workspace_id"]))
     if not workspace:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")

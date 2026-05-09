@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -248,6 +249,34 @@ class TestPrototypeWorkspaceEndpoints:
         assert body["prototype_workspace_id"] == workspace["id"]
         assert body["job_type"] == "branch_session_bootstrap"
         assert body["prototype_session_id"].startswith("pss_")
+
+    def test_revoked_collaborator_session_token_returns_403(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, _ = _seed_workspace(test_services, title="Revoked collaborator prototype")
+        access_context = _seed_external_access(
+            test_services,
+            prototype_workspace_id=workspace["id"],
+        )
+        _run(
+            test_services.repo.db_pool.execute(
+                "UPDATE prototype_shared_actors SET revoked_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), access_context.shared_actor_id),
+            )
+        )
+
+        resp = client.post(
+            "/api/v1/prototype-sessions",
+            json={
+                "session_token": access_context.session_token,
+                "request_nonce": "req_revoked_collab_token_1",
+            },
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Prototype session token is no longer active"
 
     def test_collaborator_can_submit_promotion_request(
         self,

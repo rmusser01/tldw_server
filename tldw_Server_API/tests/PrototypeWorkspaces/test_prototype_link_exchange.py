@@ -70,6 +70,9 @@ def exchange_db():
     conn.execute(
         "INSERT INTO users (id, username, email, password_hash) VALUES (1, 'owner', 'owner@test.com', 'hash')"
     )
+    conn.execute(
+        "INSERT INTO users (id, username, email, password_hash) VALUES (2, 'other', 'other@test.com', 'hash')"
+    )
     conn.commit()
     yield conn
     conn.close()
@@ -272,6 +275,18 @@ def missing_workspace_prototype_share_token(token_service):
             resource_type="prototype_workspace",
             resource_id="pws_missing_workspace",
             owner_user_id=1,
+        )
+    )
+    return token["raw_token"]
+
+
+@pytest.fixture
+def mismatched_owner_prototype_share_token(token_service, prototype_workspace):
+    token = asyncio.run(
+        token_service.generate_token(
+            resource_type="prototype_workspace",
+            resource_id=prototype_workspace["id"],
+            owner_user_id=2,
         )
     )
     return token["raw_token"]
@@ -701,6 +716,18 @@ def test_public_prototype_exchange_missing_workspace_returns_404(
 ):
     resp = client.post(
         f"/api/v1/sharing/public/{missing_workspace_prototype_share_token}/prototype-session",
+        json={"display_name": "Acme PM"},
+    )
+
+    assert resp.status_code == 404
+
+
+def test_public_prototype_exchange_rejects_token_owner_mismatch(
+    client,
+    mismatched_owner_prototype_share_token,
+):
+    resp = client.post(
+        f"/api/v1/sharing/public/{mismatched_owner_prototype_share_token}/prototype-session",
         json={"display_name": "Acme PM"},
     )
 

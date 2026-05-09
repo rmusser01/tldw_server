@@ -1,15 +1,15 @@
 """Integration tests for the sharing API endpoints."""
 from __future__ import annotations
 
-import builtins
 import asyncio
+import builtins
 import inspect
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import Field
 
@@ -368,6 +368,10 @@ async def test_lazy_prototype_repo_awaits_db_pool(monkeypatch):
 @pytest.fixture
 def mock_repo(repo, tmp_path):
     """Patch repo and security helpers while keeping the real audit service wiring."""
+    class _PrototypeRepoStub:
+        async def get_workspace(self, prototype_workspace_id: str):
+            return {"id": prototype_workspace_id, "owner_user_id": 1}
+
     async def _noop_verify(*args, **kwargs):
         pass
 
@@ -383,6 +387,7 @@ def mock_repo(repo, tmp_path):
          patch("tldw_Server_API.app.api.v1.endpoints.sharing._verify_workspace_ownership", _noop_verify), \
          patch("tldw_Server_API.app.api.v1.endpoints.sharing._validate_user_has_share_access", _noop_verify), \
          patch("tldw_Server_API.app.api.v1.endpoints.sharing._get_token_service") as mock_ts, \
+         patch("tldw_Server_API.app.api.v1.endpoints.sharing._get_prototype_repo", return_value=_PrototypeRepoStub()), \
          patch("tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_shared_audit_db_path", return_value=shared_audit_path):
         from tldw_Server_API.app.core.Sharing.share_token_service import ShareTokenService
         mock_ts.return_value = ShareTokenService(repo)
@@ -616,6 +621,20 @@ class TestShareTokens:
         assert data["resource_type"] == "prototype_workspace"
         assert data["resource_id"] == "pws-1"
 
+    def test_create_prototype_workspace_token_requires_owner(self, client, mock_repo, monkeypatch):
+        class _ForeignPrototypeRepo:
+            async def get_workspace(self, prototype_workspace_id: str):
+                return {"id": prototype_workspace_id, "owner_user_id": 2}
+
+        monkeypatch.setattr(sharing_endpoints, "_get_prototype_repo", lambda: _ForeignPrototypeRepo())
+
+        resp = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "prototype_workspace",
+            "resource_id": "pws-foreign",
+        })
+
+        assert resp.status_code == 404
+
     def test_list_tokens(self, client, mock_repo):
         client.post("/api/v1/sharing/tokens", json={
             "resource_type": "workspace",
@@ -633,6 +652,22 @@ class TestShareTokens:
         token_id = create.json()["id"]
         resp = client.delete(f"/api/v1/sharing/tokens/{token_id}")
         assert resp.status_code == 200
+
+
+def test_request_is_secure_uses_first_forwarded_proto_value():
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 50000),
+            "headers": [(b"x-forwarded-proto", b"http,https")],
+        }
+    )
+
+    assert sharing_endpoints._request_is_secure(request) is False
 
 
 class TestPublicEndpoints:

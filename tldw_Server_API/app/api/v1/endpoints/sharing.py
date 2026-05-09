@@ -17,7 +17,8 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
 from ..schemas.sharing_schemas import (
@@ -27,9 +28,9 @@ from ..schemas.sharing_schemas import (
     CloneWorkspaceRequest,
     CloneWorkspaceResponse,
     CreateTokenRequest,
-    PublicSharePreview,
     PrototypeLinkExchangeRequest,
     PrototypeLinkExchangeResponse,
+    PublicSharePreview,
     ResourceType,
     SharedChatRequest,
     SharedMediaResponse,
@@ -66,6 +67,7 @@ def _get_repo():
 
 
 def _get_token_service():
+    """Lazily construct the share-token service from the shared workspace repo."""
     from tldw_Server_API.app.core.Sharing.share_token_service import ShareTokenService
 
     async def _build():
@@ -75,6 +77,7 @@ def _get_token_service():
 
 
 def _get_prototype_repo():
+    """Lazily construct the prototype workspace repo for share-token checks."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
         PrototypeWorkspacesRepo,
@@ -87,6 +90,7 @@ def _get_prototype_repo():
 
 
 def _get_prototype_access_service():
+    """Lazily construct the prototype private-link access service."""
     from tldw_Server_API.app.core.Prototype_Workspaces.access import PrototypeAccessService
 
     async def _build():
@@ -101,7 +105,7 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
-_cached_audit_service: "ShareAuditService | None" = None  # noqa: F821
+_cached_audit_service: ShareAuditService | None = None  # noqa: F821
 
 
 def _get_audit_service():
@@ -125,10 +129,33 @@ def _client_ip(request: Request) -> str:
 
 
 def _request_is_secure(request: Request) -> bool:
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    if forwarded_proto and "https" in forwarded_proto.lower():
-        return True
+    """Mirror SecurityHeadersMiddleware HTTPS detection for cookie security."""
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if forwarded_proto:
+        return forwarded_proto == "https"
     return request.url.scheme == "https"
+
+
+def _coerce_int(value: Any) -> int | None:
+    """Return an integer value when possible without raising for malformed inputs."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _get_owned_prototype_workspace(
+    prototype_workspace_id: str,
+    owner_user_id: Any,
+) -> dict[str, Any]:
+    """Return a prototype workspace only when the expected owner matches."""
+    repo = await _maybe_await(_get_prototype_repo())
+    workspace = await repo.get_workspace(prototype_workspace_id)
+    expected_owner_id = _coerce_int(owner_user_id)
+    actual_owner_id = _coerce_int(workspace.get("owner_user_id")) if workspace else None
+    if not workspace or expected_owner_id is None or actual_owner_id != expected_owner_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+    return workspace
 
 
 def _sanitize_shared_chat_result(value: Any) -> Any:
@@ -774,6 +801,11 @@ async def create_token(
 ):
     svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
+    if body.resource_type == ResourceType.PROTOTYPE_WORKSPACE:
+        await _get_owned_prototype_workspace(
+            prototype_workspace_id=body.resource_id,
+            owner_user_id=user.id,
+        )
 
     result = await svc.generate_token(
         resource_type=body.resource_type.value,
@@ -945,6 +977,10 @@ async def public_prototype_session_exchange(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Share token is not a prototype workspace link",
         )
+    await _get_owned_prototype_workspace(
+        prototype_workspace_id=prototype_workspace_id,
+        owner_user_id=validated.get("owner_user_id"),
+    )
 
     resume_cookie_value = request.cookies.get(PROTOTYPE_SHARED_ACTOR_COOKIE)
     access_service = await _maybe_await(_get_prototype_access_service())
