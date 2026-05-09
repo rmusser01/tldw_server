@@ -49,11 +49,11 @@ Continue GitHub issue #1346 by investigating the tooling-only lockfile candidate
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Exact usage search found @eslint/eslintrc, eslint-config-next, eslint-config-prettier, and fake-indexeddb only in apps/tldw-frontend/package.json and apps/bun.lock. The active WebUI flat ESLint config imports @eslint/js, @next/eslint-plugin-next, eslint-plugin-react, eslint-plugin-react-hooks, and TypeScript ESLint directly; package scripts call eslint . and do not invoke eslint-config-prettier. No tests or setup files import fake-indexeddb.
+Exact active-code usage search found @eslint/eslintrc, eslint-config-next, eslint-config-prettier, and fake-indexeddb only in apps/tldw-frontend/package.json and apps/bun.lock; that scan covered source, config, scripts, tests, manifests, and lockfile entries, and excluded historical documentation examples. The active WebUI flat ESLint config imports @eslint/js, @next/eslint-plugin-next, eslint-plugin-react, eslint-plugin-react-hooks, @typescript-eslint/eslint-plugin, and @typescript-eslint/parser directly; package scripts call eslint . and do not invoke eslint-config-prettier. No active tests or setup files import fake-indexeddb.
 
 Removed the four direct WebUI devDeclarations and regenerated apps/bun.lock with bun install. eslint-config-next, eslint-config-prettier, and fake-indexeddb dropped out completely. @eslint/eslintrc remains only as an ESLint transitive dependency. Impact against origin/dev: direct declaration entries changed from 260 to 256 (-4); candidate declaration entries changed from 4 to 0 (-4); apps/bun.lock changed from 518,386 bytes to 501,563 bytes (-16,823), from 4,473 lines to 4,347 lines (-126), and from 2,077 package records to 2,016 package records (-61). Bandit skipped because no Python files were modified.
 
-Verification completed in /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/webui-tooling-deps-cleanup-1346: git diff --check (exit 0), bun install --frozen-lockfile from apps (exit 0), bun run lint from apps/tldw-frontend (exit 0 with 0 errors and 131 warnings), bunx vitest run --changed=origin/dev from apps/tldw-frontend (exit 0 with no changed tests), and NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile from apps/tldw-frontend (exit 0).
+Verification completed from the repo worktree: git diff --check (exit 0), bun install --frozen-lockfile from apps (exit 0), bun run lint from apps/tldw-frontend (exit 0 with 0 errors and 131 warnings), bunx vitest run --changed=origin/dev from apps/tldw-frontend (exit 0 with no changed tests), and NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile from apps/tldw-frontend (exit 0).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
