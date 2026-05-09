@@ -4,7 +4,7 @@ title: Document Persona Visuals pack ownership and activation semantics
 status: Done
 assignee: []
 created_date: '2026-05-09 20:13'
-updated_date: '2026-05-09 20:27'
+updated_date: '2026-05-09 20:41'
 labels:
   - WebUI
   - Persona
@@ -44,6 +44,8 @@ Use the lightweight PRD/spec in `Docs/superpowers/specs/2026-05-09-persona-visua
 Created from GitHub issue #1429 after PR #1439 merged and tracker #1428 was updated. This task is intentionally scoped to Persona/Buddy visual-pack ownership, activation, import/commit/review, and docs copy. It must not implement duplicate-to-persona, shared libraries, marketplaces, or VN/CYOA behavior.
 
 Implemented Persona Visuals editor ownership copy, portability copy, generated-candidate review copy, and Persona Visual Packs code documentation. Verification: focused Vitest passed, docs grep passed, git diff --check passed. Bandit skipped because this change only touches TSX copy/tests and Markdown documentation; no Python code was changed.
+
+PR opened for review: https://github.com/rmusser01/tldw_server/pull/1447. The PR body links issue #1429 for closeout on merge and keeps the human-authored Change summary placeholder required by the AI-generated PR merge policy.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

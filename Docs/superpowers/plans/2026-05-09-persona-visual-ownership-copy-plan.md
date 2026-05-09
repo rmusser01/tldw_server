@@ -96,7 +96,7 @@
 
 **Tests:** Focused Vitest, docs grep, diff hygiene. Bandit is not required if only docs and TSX copy/tests are touched; record the skip reason.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Run focused Vitest:
   `./node_modules/.bin/vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
@@ -105,6 +105,7 @@
 - [x] Run diff hygiene:
   `git diff --check`
 - [x] Update TASK-189 acceptance criteria, notes, verification, and final summary.
-- [ ] Commit with:
+- [x] Commit with:
   `git commit -m "docs: clarify persona visual pack ownership"`
-- [ ] Push and open a PR against `dev` linked to #1429.
+- [x] Push and open a PR against `dev` linked to #1429:
+  https://github.com/rmusser01/tldw_server/pull/1447
