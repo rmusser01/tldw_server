@@ -408,4 +408,107 @@ describe("VisualPackEditor", () => {
       )
     )
   })
+
+  it("enqueues generation jobs and accepts or rejects review candidates", async () => {
+    const calls: string[] = []
+    const candidate = {
+      id: "candidate-1",
+      pack_id: "pack-1",
+      persona_id: "persona-1",
+      job_id: "job-1",
+      status: "review",
+      proposed_manifest_patch: {
+        states: { thinking: { animation_id: "generated-thinking" } }
+      },
+      generated_asset_ids: ["asset-a"],
+      generated_assets: [visualAssets[0]],
+      prompt: "make a thinking pose",
+      failure_reason: null,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 1
+    }
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [candidate] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-jobs" &&
+        method === "POST"
+      ) {
+        return okResponse({ job_id: "job-created", status: "queued" })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/candidates/candidate-1/review" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          ...candidate,
+          status: parseJsonBody(init?.body).status
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByText("make a thinking pose")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("persona-visual-generation-prompt-input"), {
+      target: { value: "make a speaking pose" }
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-generation-target-state-select"), {
+      target: { value: "speaking" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-generation-enqueue-button"))
+
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-jobs"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-candidate-accept-candidate-1"))
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/candidates/candidate-1/review"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-candidate-reject-candidate-1"))
+    await waitFor(() =>
+      expect(
+        calls.filter((call) =>
+          call.includes("/visual-packs/pack-1/candidates/candidate-1/review")
+        )
+      ).toHaveLength(2)
+    )
+  })
 })

@@ -13,9 +13,13 @@ import { useTranslation } from "react-i18next"
 
 import {
   activatePersonaVisualPack,
+  createPersonaVisualGenerationJob,
   createPersonaVisualPack,
   deactivatePersonaVisualPack,
+  listPersonaVisualCandidates,
   listPersonaVisualPacks,
+  PersonaVisualApiError,
+  reviewPersonaVisualCandidate,
   updatePersonaVisualManifest,
   uploadPersonaVisualAsset
 } from "@/services/persona-visuals"
@@ -24,6 +28,7 @@ import type {
   PersonaVisualAsset,
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
+  PersonaVisualCandidate,
   PersonaVisualFrame,
   PersonaVisualManifest,
   PersonaVisualPack,
@@ -224,6 +229,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [uploading, setUploading] = React.useState(false)
   const [activating, setActivating] = React.useState(false)
   const [deactivating, setDeactivating] = React.useState(false)
+  const [candidates, setCandidates] = React.useState<PersonaVisualCandidate[]>([])
+  const [candidatesLoading, setCandidatesLoading] = React.useState(false)
+  const [generationPrompt, setGenerationPrompt] = React.useState("")
+  const [generationTargetState, setGenerationTargetState] =
+    React.useState<PersonaVisualStateId>("thinking")
+  const [generationBackend, setGenerationBackend] = React.useState("")
+  const [enqueueingGeneration, setEnqueueingGeneration] = React.useState(false)
+  const [reviewingCandidateId, setReviewingCandidateId] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -253,6 +266,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setPacks([])
       setSelectedPackId("")
       setDraftManifest(DEFAULT_MANIFEST)
+      setCandidates([])
       return
     }
     setLoading(true)
@@ -285,9 +299,37 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId])
 
+  const loadCandidates = React.useCallback(async () => {
+    const packId = selectedPack?.id || ""
+    if (!isActive || !selectedPersonaId || !packId) {
+      setCandidates([])
+      return
+    }
+    setCandidatesLoading(true)
+    try {
+      const response = await listPersonaVisualCandidates(selectedPersonaId, packId)
+      setCandidates(response.candidates || [])
+    } catch (loadError) {
+      setCandidates([])
+      if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load generated candidates."
+        )
+      }
+    } finally {
+      setCandidatesLoading(false)
+    }
+  }, [isActive, selectedPersonaId, selectedPack?.id])
+
   React.useEffect(() => {
     void loadPacks()
   }, [loadPacks])
+
+  React.useEffect(() => {
+    void loadCandidates()
+  }, [loadCandidates])
 
   React.useEffect(() => {
     if (!selectedPack) {
@@ -485,6 +527,86 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setDeactivating(false)
+    }
+  }
+
+  const handleEnqueueGeneration = async () => {
+    if (!selectedPersonaId || !selectedPack || !generationPrompt.trim()) return
+    setEnqueueingGeneration(true)
+    setError(null)
+    try {
+      const job = await createPersonaVisualGenerationJob(
+        selectedPersonaId,
+        selectedPack.id,
+        {
+          prompt: generationPrompt.trim(),
+          target_state: generationTargetState || null,
+          backend: generationBackend.trim() || null
+        }
+      )
+      setGenerationPrompt("")
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.generationQueued", {
+          defaultValue: `Generation job ${job.job_id} queued.`
+        })
+      )
+    } catch (generationError) {
+      setError(
+        generationError instanceof Error
+          ? generationError.message
+          : t("sidepanel:personaGarden.visuals.generationError", {
+              defaultValue: "Failed to queue generation job."
+            })
+      )
+    } finally {
+      setEnqueueingGeneration(false)
+    }
+  }
+
+  const handleReviewCandidate = async (
+    candidateId: string,
+    status: "accepted" | "rejected"
+  ) => {
+    if (!selectedPersonaId || !selectedPack) return
+    setReviewingCandidateId(candidateId)
+    setError(null)
+    try {
+      const updated = await reviewPersonaVisualCandidate(
+        selectedPersonaId,
+        selectedPack.id,
+        candidateId,
+        {
+          status,
+          failure_reason: status === "rejected" ? "Rejected in editor." : null
+        }
+      )
+      setCandidates((current) =>
+        current.map((candidate) =>
+          candidate.id === candidateId ? { ...candidate, ...updated } : candidate
+        )
+      )
+      if (status === "accepted") {
+        void loadPacks()
+      }
+      setStatusMessage(
+        status === "accepted"
+          ? t("sidepanel:personaGarden.visuals.candidateAccepted", {
+              defaultValue: "Candidate accepted."
+            })
+          : t("sidepanel:personaGarden.visuals.candidateRejected", {
+              defaultValue: "Candidate rejected."
+            })
+      )
+    } catch (reviewError) {
+      setError(
+        reviewError instanceof Error
+          ? reviewError.message
+          : t("sidepanel:personaGarden.visuals.reviewError", {
+              defaultValue: "Failed to review candidate."
+            })
+      )
+    } finally {
+      setReviewingCandidateId("")
     }
   }
 
@@ -1224,11 +1346,127 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           </div>
 
           <div className="rounded-lg border border-border bg-surface p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              Generated Candidates
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                Generated Candidates
+              </div>
+              <Button size="small" onClick={() => void loadCandidates()}>
+                {candidatesLoading ? "Loading" : "Refresh"}
+              </Button>
             </div>
-            <div className="mt-2 text-xs text-text-muted">
-              No generated candidates.
+            <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_minmax(120px,160px)_auto]">
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Prompt</span>
+                <input
+                  data-testid="persona-visual-generation-prompt-input"
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={generationPrompt}
+                  onChange={(event) => setGenerationPrompt(event.target.value)}
+                />
+              </label>
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Target state</span>
+                <select
+                  data-testid="persona-visual-generation-target-state-select"
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={generationTargetState}
+                  onChange={(event) =>
+                    setGenerationTargetState(event.target.value as PersonaVisualStateId)
+                  }
+                >
+                  {VISUAL_STATES.map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Backend</span>
+                <input
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={generationBackend}
+                  onChange={(event) => setGenerationBackend(event.target.value)}
+                />
+              </label>
+              <Button
+                data-testid="persona-visual-generation-enqueue-button"
+                className="self-end"
+                size="small"
+                type="primary"
+                loading={enqueueingGeneration}
+                disabled={!generationPrompt.trim()}
+                onClick={() => void handleEnqueueGeneration()}
+              >
+                Queue
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {candidates.length ? (
+                candidates.map((candidate) => (
+                  <div
+                    key={candidate.id}
+                    className="rounded border border-border bg-bg p-2 text-xs"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="font-medium text-text">
+                          {candidate.prompt || candidate.id}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1 text-text-muted">
+                          <Tag>{candidate.status}</Tag>
+                          {candidate.job_id ? <span>{candidate.job_id}</span> : null}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          data-testid={`persona-visual-candidate-accept-${candidate.id}`}
+                          size="small"
+                          loading={reviewingCandidateId === candidate.id}
+                          onClick={() => void handleReviewCandidate(candidate.id, "accepted")}
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          data-testid={`persona-visual-candidate-reject-${candidate.id}`}
+                          size="small"
+                          danger
+                          loading={reviewingCandidateId === candidate.id}
+                          onClick={() => void handleReviewCandidate(candidate.id, "rejected")}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                    {candidate.generated_assets?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {candidate.generated_assets.map((asset) => (
+                          <div
+                            key={asset.id}
+                            className="flex items-center gap-2 rounded border border-border bg-surface px-2 py-1"
+                          >
+                            <img
+                              src={asset.url}
+                              alt={asset.original_filename || asset.id}
+                              className="h-10 w-10 rounded object-contain"
+                            />
+                            <div>
+                              <div className="text-text">
+                                {asset.original_filename || asset.id}
+                              </div>
+                              <div className="text-text-muted">{asset.id}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
+                  No generated candidates.
+                </div>
+              )}
             </div>
           </div>
         </>

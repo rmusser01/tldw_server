@@ -1,0 +1,216 @@
+from __future__ import annotations
+
+from io import BytesIO
+from pathlib import Path
+from typing import Any
+
+import pytest
+from PIL import Image
+
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
+
+
+pytestmark = pytest.mark.unit
+
+
+def _png_bytes() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGBA", (2, 2), (255, 0, 0, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class FakeJobsManager:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        self.created.append(kwargs)
+        return {"id": 42, "status": "queued", **kwargs}
+
+
+def _create_persona_and_pack(db: CharactersRAGDB) -> tuple[str, dict[str, Any]]:
+    persona_id = db.create_persona_profile({"user_id": "1", "name": "Visual Job Persona"})
+    pack = db.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="1",
+        title="Generated Draft",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "states": {},
+            "animations": {},
+        },
+    )
+    return persona_id, pack
+
+
+def test_create_persona_visual_generation_job_uses_domain_and_idempotency_key() -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUALS_DOMAIN,
+        PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
+        create_generate_candidate_job,
+    )
+
+    manager = FakeJobsManager()
+
+    job = create_generate_candidate_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="make a thinking pose",
+        target_state="thinking",
+        backend="fake",
+    )
+
+    assert job["domain"] == PERSONA_VISUALS_DOMAIN
+    assert job["queue"] == "generation"
+    assert job["job_type"] == PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE
+    assert job["owner_user_id"] == "user-1"
+    assert job["idempotency_key"] == "persona_visuals:user-1:persona-1:pack-1:thinking"
+    assert manager.created[0]["payload"] == {
+        "user_id": "user-1",
+        "persona_id": "persona-1",
+        "pack_id": "pack-1",
+        "prompt": "make a thinking pose",
+        "target_state": "thinking",
+        "backend": "fake",
+    }
+
+
+@pytest.fixture()
+def persona_visual_db(tmp_path: Path):
+    db = CharactersRAGDB(tmp_path / "persona_visual_jobs.sqlite", client_id="persona-visual-jobs-tests")
+    yield db
+    db.close_connection()
+
+
+@pytest.fixture(autouse=True)
+def visual_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "visuals"
+
+    def _fake_visuals_dir(user_id: str) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_persona_visuals_dir",
+        staticmethod(_fake_visuals_dir),
+    )
+    return root
+
+
+@pytest.mark.asyncio
+async def test_generation_worker_fails_when_image_backend_unavailable(
+    persona_visual_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualGenerationWorker,
+    )
+
+    persona_id, pack = _create_persona_and_pack(persona_visual_db)
+
+    class NoBackendRegistry:
+        def resolve_backend(self, requested: str | None) -> None:
+            return None
+
+    worker = PersonaVisualGenerationWorker(
+        db=persona_visual_db,
+        image_registry=NoBackendRegistry(),
+    )
+
+    with pytest.raises(ValueError, match="image_backend_unavailable"):
+        await worker.handle_job_async(
+            {
+                "id": 100,
+                "job_type": PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
+                "payload": {
+                    "user_id": "1",
+                    "persona_id": persona_id,
+                    "pack_id": pack["id"],
+                    "prompt": "make a thinking pose",
+                    "target_state": "thinking",
+                    "backend": None,
+                },
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_generation_worker_stores_generated_asset_and_candidate(
+    persona_visual_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualGenerationWorker,
+    )
+
+    persona_id, pack = _create_persona_and_pack(persona_visual_db)
+    generated_requests: list[Any] = []
+
+    class FakeAdapter:
+        def generate(self, request: Any) -> ImageGenResult:
+            generated_requests.append(request)
+            content = _png_bytes()
+            return ImageGenResult(
+                content=content,
+                content_type="image/png",
+                bytes_len=len(content),
+            )
+
+    class FakeRegistry:
+        def resolve_backend(self, requested: str | None) -> str:
+            assert requested == "fake"
+            return "fake"
+
+        def get_adapter(self, name: str) -> FakeAdapter:
+            assert name == "fake"
+            return FakeAdapter()
+
+    worker = PersonaVisualGenerationWorker(
+        db=persona_visual_db,
+        image_registry=FakeRegistry(),
+    )
+
+    result = await worker.handle_job_async(
+        {
+            "id": 101,
+            "job_type": PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
+            "payload": {
+                "user_id": "1",
+                "persona_id": persona_id,
+                "pack_id": pack["id"],
+                "prompt": "make a thinking pose",
+                "target_state": "thinking",
+                "backend": "fake",
+            },
+        }
+    )
+
+    assert result["status"] == "candidate_created"
+    assert generated_requests[0].backend == "fake"
+    assert generated_requests[0].width == 1024
+    assets = persona_visual_db.list_persona_visual_assets(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="1",
+    )
+    assert len(assets) == 1
+    assert assets[0]["asset_role"] == "generated_candidate"
+    candidates = persona_visual_db.list_persona_visual_candidates(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="1",
+    )
+    assert len(candidates) == 1
+    assert candidates[0]["job_id"] == "101"
+    assert candidates[0]["generated_asset_ids"] == [assets[0]["id"]]
+    assert candidates[0]["proposed_manifest_patch"]["states"]["thinking"]["animation_id"]

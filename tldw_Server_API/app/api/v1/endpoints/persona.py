@@ -77,9 +77,12 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVoiceDefaults,
     PersonaVoiceFallbackAnalytics,
     PersonaVisualAssetResponse,
+    PersonaVisualCandidateListResponse,
     PersonaVisualCandidateResponse,
     PersonaVisualCandidateReviewRequest,
     PersonaVisualDeactivateResponse,
+    PersonaVisualGenerationJobResponse,
+    PersonaVisualGenerationRequest,
     PersonaVisualManifestUpdate,
     PersonaVisualPackCreate,
     PersonaVisualPackResponse,
@@ -116,10 +119,12 @@ from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
 from tldw_Server_API.app.core.Metrics import increment_counter
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Persona.buddy import (
     build_persona_buddy_summary,
     ensure_persona_buddy_for_profile,
 )
+from tldw_Server_API.app.core.Persona.visual_jobs import create_generate_candidate_job
 from tldw_Server_API.app.core.Persona.visual_service import (
     PersonaVisualService,
     PersonaVisualServiceError,
@@ -1850,6 +1855,17 @@ def _persona_visual_asset_to_response(asset: dict[str, Any]) -> PersonaVisualAss
     )
 
 
+def get_persona_visual_job_manager() -> JobManager:
+    db_url = (os.getenv("JOBS_DB_URL") or "").strip()
+    db_path = (os.getenv("JOBS_DB_PATH") or "").strip()
+    if db_url:
+        backend = "postgres" if db_url.startswith("postgres") else None
+        return JobManager(backend=backend, db_url=db_url)
+    if db_path:
+        return JobManager(db_path=Path(db_path))
+    return JobManager()
+
+
 def _persona_visual_pack_to_response(
     pack: dict[str, Any],
     *,
@@ -1876,7 +1892,11 @@ def _persona_visual_pack_to_response(
     )
 
 
-def _persona_visual_candidate_to_response(candidate: dict[str, Any]) -> PersonaVisualCandidateResponse:
+def _persona_visual_candidate_to_response(
+    candidate: dict[str, Any],
+    *,
+    generated_assets: list[dict[str, Any]] | None = None,
+) -> PersonaVisualCandidateResponse:
     return PersonaVisualCandidateResponse(
         id=str(candidate.get("id") or ""),
         pack_id=str(candidate.get("pack_id") or ""),
@@ -1890,12 +1910,35 @@ def _persona_visual_candidate_to_response(candidate: dict[str, Any]) -> PersonaV
             else {}
         ),
         generated_asset_ids=[str(item) for item in list(candidate.get("generated_asset_ids") or [])],
+        generated_assets=[
+            _persona_visual_asset_to_response(asset)
+            for asset in (generated_assets or [])
+        ],
         prompt=candidate.get("prompt"),
         failure_reason=candidate.get("failure_reason"),
         created_at=str(candidate.get("created_at") or _utc_now_iso()),
         last_modified=str(candidate.get("last_modified") or candidate.get("created_at") or _utc_now_iso()),
         version=int(candidate.get("version") or 1),
     )
+
+
+def _persona_visual_generated_assets_for_candidate(
+    *,
+    db: CharactersRAGDB,
+    candidate: dict[str, Any],
+    pack_id: str,
+    persona_id: str,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    generated_ids = {str(item) for item in list(candidate.get("generated_asset_ids") or [])}
+    if not generated_ids:
+        return []
+    assets = db.list_persona_visual_assets(
+        pack_id=pack_id,
+        persona_id=persona_id,
+        user_id=user_id,
+    )
+    return [asset for asset in assets if str(asset.get("id") or "") in generated_ids]
 
 
 def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTTPException:
@@ -3511,6 +3554,176 @@ async def activate_persona_visual_pack(
         raise _to_http_exception(exc, action="activate persona visual pack") from exc
 
 
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates",
+    response_model=PersonaVisualCandidateListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_generated_candidates(
+    persona_id: str,
+    pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualCandidateListResponse:
+    """Return generated visual candidates and preview asset URLs for review."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        service = PersonaVisualService(db)
+        candidates = await _run_persona_db_call(
+            service.list_candidates,
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+        )
+        responses: list[PersonaVisualCandidateResponse] = []
+        for candidate in candidates:
+            generated_assets = await _run_persona_db_call(
+                _persona_visual_generated_assets_for_candidate,
+                db=db,
+                candidate=candidate,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            responses.append(
+                _persona_visual_candidate_to_response(
+                    candidate,
+                    generated_assets=generated_assets,
+                )
+            )
+        return PersonaVisualCandidateListResponse(candidates=responses)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona visual candidates") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates/{candidate_id}",
+    response_model=PersonaVisualCandidateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_generated_candidate(
+    persona_id: str,
+    pack_id: str,
+    candidate_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualCandidateResponse:
+    """Return one generated visual candidate and its preview asset URLs."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        candidate = await _run_persona_db_call(
+            db.get_persona_visual_candidate,
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Persona visual candidate not found")
+        generated_assets = await _run_persona_db_call(
+            _persona_visual_generated_assets_for_candidate,
+            db=db,
+            candidate=candidate,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_candidate_to_response(
+            candidate,
+            generated_assets=generated_assets,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual candidate") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generation-jobs",
+    response_model=PersonaVisualGenerationJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def create_persona_visual_generation_job(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualGenerationRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualGenerationJobResponse:
+    """Queue a generated visual candidate job for later human review."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        job = await _run_persona_db_call(
+            create_generate_candidate_job,
+            jobs_manager,
+            user_id=user_id,
+            persona_id=persona_id,
+            pack_id=pack_id,
+            prompt=payload.prompt,
+            target_state=payload.target_state,
+            backend=payload.backend,
+        )
+        return PersonaVisualGenerationJobResponse(
+            job_id=str(job.get("id") or ""),
+            status=None if job.get("status") is None else str(job.get("status")),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="create persona visual generation job") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post(
     "/profiles/{persona_id}/visual-packs/{pack_id}/candidates/{candidate_id}/review",
     response_model=PersonaVisualCandidateResponse,
@@ -3537,20 +3750,41 @@ async def review_persona_visual_candidate(
             user_id=user_id,
             include_deleted=False,
         )
-        candidate = await _run_persona_db_call(
-            db.update_persona_visual_candidate_status,
-            candidate_id=candidate_id,
+        service = PersonaVisualService(db)
+        if payload.status == "accepted":
+            candidate = await _run_persona_db_call(
+                service.accept_candidate,
+                persona_id=persona_id,
+                user_id=user_id,
+                pack_id=pack_id,
+                candidate_id=candidate_id,
+            )
+        else:
+            candidate = await _run_persona_db_call(
+                service.reject_candidate,
+                persona_id=persona_id,
+                user_id=user_id,
+                pack_id=pack_id,
+                candidate_id=candidate_id,
+                status=payload.status,
+                failure_reason=payload.failure_reason,
+            )
+        generated_assets = await _run_persona_db_call(
+            _persona_visual_generated_assets_for_candidate,
+            db=db,
+            candidate=candidate,
             pack_id=pack_id,
             persona_id=persona_id,
             user_id=user_id,
-            status=payload.status,
-            failure_reason=payload.failure_reason,
         )
-        if candidate is None:
-            raise HTTPException(status_code=404, detail="Persona visual candidate not found")
-        return _persona_visual_candidate_to_response(candidate)
+        return _persona_visual_candidate_to_response(
+            candidate,
+            generated_assets=generated_assets,
+        )
     except HTTPException:
         raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="review persona visual candidate") from exc
 

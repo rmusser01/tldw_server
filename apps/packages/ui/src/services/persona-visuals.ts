@@ -3,8 +3,11 @@ import type {
   PersonaVisualAsset,
   PersonaVisualAssetRole,
   PersonaVisualCandidate,
+  PersonaVisualCandidateListResponse,
   PersonaVisualCandidateReviewRequest,
   PersonaVisualDeactivateResponse,
+  PersonaVisualGenerationJobResponse,
+  PersonaVisualGenerationRequest,
   PersonaVisualManifestUpdate,
   PersonaVisualPack,
   PersonaVisualPackCreate,
@@ -185,6 +188,30 @@ export async function deactivatePersonaVisualPack(
     personaVisualPath(personaId, "/visual-packs/deactivate"),
     {
       method: "POST"
+    }
+  )
+}
+
+export async function listPersonaVisualCandidates(
+  personaId: string,
+  packId: string
+): Promise<PersonaVisualCandidateListResponse> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualCandidate[] | PersonaVisualCandidateListResponse
+  >(packPath(personaId, packId, "/generated-candidates"))
+  return Array.isArray(payload) ? { candidates: payload } : payload
+}
+
+export async function createPersonaVisualGenerationJob(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualGenerationRequest
+): Promise<PersonaVisualGenerationJobResponse> {
+  return fetchPersonaVisualJson<PersonaVisualGenerationJobResponse>(
+    packPath(personaId, packId, "/generation-jobs"),
+    {
+      method: "POST",
+      body: payload
     }
   )
 }

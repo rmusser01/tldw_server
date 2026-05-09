@@ -46,6 +46,8 @@ class OptionalWorkerStartupHandles:
     workflows_maint_task: Any | None = None
     jobs_integrity_stop_event: Any | None = None
     jobs_integrity_task: Any | None = None
+    persona_visual_generation_stop_event: Any | None = None
+    persona_visual_generation_task: Any | None = None
 
 
 async def start_optional_workers(
@@ -77,6 +79,9 @@ async def start_optional_workers(
     jobs_integrity_stop_event, jobs_integrity_task = await _start_jobs_integrity_sweeper(
         worker_inventory=worker_inventory,
     )
+    persona_visual_generation_stop_event, persona_visual_generation_task = await _start_persona_visual_generation_worker(
+        worker_inventory=worker_inventory,
+    )
     return OptionalWorkerStartupHandles(
         jobs_metrics_reconcile_stop=jobs_metrics_reconcile_stop,
         jobs_metrics_reconcile_task=jobs_metrics_reconcile_task,
@@ -94,6 +99,8 @@ async def start_optional_workers(
         workflows_maint_task=workflows_maint_task,
         jobs_integrity_stop_event=jobs_integrity_stop_event,
         jobs_integrity_task=jobs_integrity_task,
+        persona_visual_generation_stop_event=persona_visual_generation_stop_event,
+        persona_visual_generation_task=persona_visual_generation_task,
     )
 
 
@@ -361,6 +368,34 @@ async def _start_jobs_integrity_sweeper(
         return None, None
 
 
+async def _start_persona_visual_generation_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start persona visual generation worker only when explicitly enabled."""
+
+    try:
+        if not _env_flag_enabled("PERSONA_VISUAL_GENERATION_WORKER_ENABLED"):
+            logger.info("Persona visual generation worker disabled by flag")
+            return None, None
+        if worker_inventory is not None:
+            stop_event, task = await _start_registered_optional_worker(
+                worker_inventory=worker_inventory,
+                name="persona_visual_generation_task",
+                coroutine_factory=_run_persona_visual_generation_worker_service,
+                category="persona",
+            )
+            logger.info("Persona visual generation worker started with explicit stop_event signal")
+            return stop_event, task
+        stop_event = _make_event()
+        task = _create_task(_run_persona_visual_generation_worker_service(stop_event))
+        logger.info("Persona visual generation worker started with explicit stop_event signal")
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start persona visual generation worker: {exc}")
+        return None, None
+
+
 async def _start_registered_optional_worker(
     *,
     worker_inventory: Any,
@@ -448,3 +483,11 @@ def _run_jobs_integrity_sweeper_service(stop_event: Any) -> Any:
     )
 
     return _run_jobs_integrity(stop_event)
+
+
+def _run_persona_visual_generation_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        run_persona_visual_generation_worker as _run_persona_visuals,
+    )
+
+    return _run_persona_visuals(stop_event)

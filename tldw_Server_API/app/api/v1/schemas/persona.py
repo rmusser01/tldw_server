@@ -105,6 +105,17 @@ class PersonaVisualCandidateReviewRequest(BaseModel):
     failure_reason: str | None = Field(default=None, max_length=1000)
 
 
+class PersonaVisualGenerationRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    target_state: str | None = Field(default=None, max_length=80)
+    backend: str | None = Field(default=None, max_length=80)
+
+
+class PersonaVisualGenerationJobResponse(BaseModel):
+    job_id: str
+    status: str | None = None
+
+
 class PersonaVisualCandidateResponse(BaseModel):
     id: str
     pack_id: str
@@ -114,11 +125,16 @@ class PersonaVisualCandidateResponse(BaseModel):
     status: PersonaVisualCandidateStatus
     proposed_manifest_patch: dict[str, Any] = Field(default_factory=dict)
     generated_asset_ids: list[str] = Field(default_factory=list)
+    generated_assets: list[PersonaVisualAssetResponse] = Field(default_factory=list)
     prompt: str | None = None
     failure_reason: str | None = None
     created_at: str
     last_modified: str
     version: int = 1
+
+
+class PersonaVisualCandidateListResponse(BaseModel):
+    candidates: list[PersonaVisualCandidateResponse] = Field(default_factory=list)
 
 
 class PersonaVisualDeactivateResponse(BaseModel):

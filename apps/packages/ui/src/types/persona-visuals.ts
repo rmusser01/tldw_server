@@ -140,11 +140,27 @@ export interface PersonaVisualCandidate {
   status: PersonaVisualCandidateStatus
   proposed_manifest_patch?: Record<string, unknown>
   generated_asset_ids?: string[]
+  generated_assets?: PersonaVisualAsset[]
   prompt?: string | null
   failure_reason?: string | null
   created_at?: string
   last_modified?: string
   version?: number
+}
+
+export interface PersonaVisualCandidateListResponse {
+  candidates: PersonaVisualCandidate[]
+}
+
+export interface PersonaVisualGenerationRequest {
+  prompt: string
+  target_state?: PersonaVisualStateId | string | null
+  backend?: string | null
+}
+
+export interface PersonaVisualGenerationJobResponse {
+  job_id: string
+  status?: string | null
 }
 
 export interface PersonaVisualCandidateReviewRequest {

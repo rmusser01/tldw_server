@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -72,6 +73,7 @@ class PersonaVisualService:
         mime_type: str,
         original_filename: str | None,
         asset_role: str = "frame",
+        provenance: str = "uploaded",
     ) -> dict[str, Any]:
         normalized_mime = self._normalize_mime_type(mime_type)
         content_bytes = bytes(content or b"")
@@ -124,7 +126,7 @@ class PersonaVisualService:
                 checksum_sha256=checksum,
                 width=width,
                 height=height,
-                provenance="uploaded",
+                provenance=provenance,
             )
         except Exception:
             storage_path.unlink(missing_ok=True)
@@ -132,6 +134,27 @@ class PersonaVisualService:
 
         asset["storage_path"] = str(storage_path)
         return asset
+
+    def create_generated_asset(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        pack_id: str,
+        content: bytes,
+        mime_type: str,
+        original_filename: str | None = None,
+    ) -> dict[str, Any]:
+        return self.create_asset_from_upload(
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+            content=content,
+            mime_type=mime_type,
+            original_filename=original_filename,
+            asset_role="generated_candidate",
+            provenance="generated",
+        )
 
     def activate_pack(
         self,
@@ -199,6 +222,171 @@ class PersonaVisualService:
             persona_id=persona_id,
             user_id=user_id,
         )
+
+    def list_candidates(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        pack_id: str,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._db.list_persona_visual_candidates(
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            status=status,
+        )
+
+    def accept_candidate(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        pack_id: str,
+        candidate_id: str,
+    ) -> dict[str, Any]:
+        candidate = self._db.get_persona_visual_candidate(
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if not candidate:
+            raise PersonaVisualServiceError(
+                "candidate_not_found",
+                "Persona visual candidate not found for user.",
+                details={"candidate_id": candidate_id},
+            )
+        pack = self._db.get_persona_visual_pack(
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if not pack:
+            raise PersonaVisualServiceError(
+                "pack_not_found",
+                "Persona visual pack not found for user.",
+                details={"pack_id": pack_id},
+            )
+
+        merged_manifest = self._merge_candidate_patch(
+            pack.get("manifest") if isinstance(pack.get("manifest"), dict) else {},
+            candidate.get("proposed_manifest_patch")
+            if isinstance(candidate.get("proposed_manifest_patch"), dict)
+            else {},
+        )
+        assets = self._db.list_persona_visual_assets(
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        asset_ids = {str(asset["id"]) for asset in assets}
+        asset_dimensions = {
+            str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+            for asset in assets
+            if asset.get("width") is not None and asset.get("height") is not None
+        }
+        try:
+            validation = validate_visual_manifest(
+                merged_manifest,
+                available_asset_ids=asset_ids,
+                available_asset_dimensions=asset_dimensions,
+                require_activatable=False,
+            )
+        except PersonaVisualManifestError as exc:
+            raise PersonaVisualServiceError(
+                "invalid_manifest",
+                str(exc),
+                details={"candidate_id": candidate_id, "pack_id": pack_id},
+            ) from exc
+
+        self._db.update_persona_visual_pack_manifest(
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            manifest=validation.manifest,
+            expected_version=int(pack["version"]),
+        )
+        updated = self._db.update_persona_visual_candidate_status(
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            status="accepted",
+        )
+        if not updated:
+            raise PersonaVisualServiceError(
+                "candidate_not_found",
+                "Persona visual candidate not found for user.",
+                details={"candidate_id": candidate_id},
+            )
+        return updated
+
+    def reject_candidate(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        pack_id: str,
+        candidate_id: str,
+        status: str = "rejected",
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        updated = self._db.update_persona_visual_candidate_status(
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            status=status,
+            failure_reason=failure_reason,
+        )
+        if not updated:
+            raise PersonaVisualServiceError(
+                "candidate_not_found",
+                "Persona visual candidate not found for user.",
+                details={"candidate_id": candidate_id},
+            )
+        return updated
+
+    @staticmethod
+    def _merge_candidate_patch(
+        manifest: dict[str, Any],
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = deepcopy(manifest if isinstance(manifest, dict) else {})
+        merged.setdefault("manifest_version", 1)
+        merged.setdefault("renderer_type", "sprite_frames")
+        merged.setdefault("states", {})
+        merged.setdefault("animations", {})
+        merged.setdefault("fallbacks", {})
+        merged.setdefault("authored_triggers", [])
+
+        for field_name in ("states", "animations", "fallbacks"):
+            patch_value = patch.get(field_name)
+            if not isinstance(patch_value, dict):
+                continue
+            target = merged.get(field_name)
+            if not isinstance(target, dict):
+                target = {}
+                merged[field_name] = target
+            for key, value in patch_value.items():
+                if not isinstance(key, str) or not key:
+                    continue
+                if value is None:
+                    continue
+                target[key] = deepcopy(value)
+
+        patch_triggers = patch.get("authored_triggers")
+        if isinstance(patch_triggers, list):
+            current_triggers = merged.get("authored_triggers")
+            if not isinstance(current_triggers, list):
+                current_triggers = []
+            merged["authored_triggers"] = [
+                *deepcopy(current_triggers),
+                *deepcopy(patch_triggers),
+            ]
+        return merged
 
     @staticmethod
     def _normalize_mime_type(mime_type: str) -> str:

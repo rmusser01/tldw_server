@@ -256,6 +256,7 @@ class JobManager:
     DOMAIN_ALLOWED_QUEUES: ClassVar[dict[str, tuple[str, ...]]] = {
         "reading": ("reading-digest",),
         "vn_assets": ("generation",),
+        "persona_visuals": ("generation",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

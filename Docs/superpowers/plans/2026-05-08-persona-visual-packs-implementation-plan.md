@@ -1545,7 +1545,7 @@ git commit -m "feat: add persona visual pack editor"
 - Test: `tldw_Server_API/tests/Services/test_persona_visual_jobs_worker_startup.py`
 - Test: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Write failing Jobs tests**
+- [x] **Step 1: Write failing Jobs tests**
 
 Cover:
 
@@ -1560,7 +1560,7 @@ Cover:
 - candidate list endpoint returns generated asset preview URLs
 - candidate manifest patch merge only writes state mapping, animation definitions, and authored triggers
 
-- [ ] **Step 2: Run failing Jobs tests**
+- [x] **Step 2: Run failing Jobs tests**
 
 Run:
 
@@ -1570,7 +1570,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test
 
 Expected: FAIL because Jobs helpers do not exist.
 
-- [ ] **Step 3: Implement job helpers**
+- [x] **Step 3: Implement job helpers**
 
 In `visual_jobs.py`:
 
@@ -1604,7 +1604,7 @@ def create_generate_candidate_job(jobs_manager: Any, *, user_id: str, persona_id
     )
 ```
 
-- [ ] **Step 4: Implement worker**
+- [x] **Step 4: Implement worker**
 
 In `visual_jobs_worker.py`:
 
@@ -1635,7 +1635,7 @@ In `visual_jobs_worker.py`:
 
 Mirror the async/sync boundary style in `tldw_Server_API/app/core/VN_Assets/worker.py`.
 
-- [ ] **Step 5: Register optional generation worker startup**
+- [x] **Step 5: Register optional generation worker startup**
 
 In `startup_optional_workers.py`:
 
@@ -1659,7 +1659,7 @@ def test_persona_visual_generation_worker_registers_when_enabled(monkeypatch) ->
     # factory are registered without running the real worker.
 ```
 
-- [ ] **Step 6: Add API generation endpoints**
+- [x] **Step 6: Add API generation endpoints**
 
 Add:
 
@@ -1682,7 +1682,7 @@ Add candidate list/detail support before the editor controls:
 - API endpoints return `PersonaVisualCandidateListResponse` and `PersonaVisualCandidateResponse`.
 - Job status polling uses the normal Jobs API by `job_id`; the visual-pack API only returns the candidate review record and the originating `job_id`.
 
-- [ ] **Step 7: Add editor candidate review controls**
+- [x] **Step 7: Add editor candidate review controls**
 
 In `VisualPackEditor.tsx`:
 
@@ -1694,7 +1694,7 @@ In `VisualPackEditor.tsx`:
 - job id/status link or compact polling status using the existing Jobs status API
 - accept/reject buttons
 
-- [ ] **Step 8: Run backend and frontend tests**
+- [x] **Step 8: Run backend and frontend tests**
 
 Run:
 
@@ -1705,7 +1705,7 @@ cd apps/packages/ui && bunx vitest run src/components/PersonaGarden/__tests__/Vi
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Run:
 

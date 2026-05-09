@@ -117,6 +117,15 @@ def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     return response.json()
 
 
+class FakeJobManager:
+    def __init__(self) -> None:
+        self.created: list[dict] = []
+
+    def create_job(self, **kwargs):
+        self.created.append(kwargs)
+        return {"id": 9001, "status": "queued", **kwargs}
+
+
 def test_create_list_and_activate_visual_pack(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Visual API Persona")
@@ -187,13 +196,23 @@ def test_accept_and_reject_generated_candidates(persona_db: CharactersRAGDB) -> 
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Candidate Persona")
         pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
         accepted = persona_db.create_persona_visual_candidate(
             pack_id=pack["id"],
             persona_id=persona_id,
             user_id="1",
             job_id="job-1",
-            proposed_manifest_patch={"states": {"thinking": {"animation_id": "think"}}},
-            generated_asset_ids=["asset-1"],
+            proposed_manifest_patch={
+                "states": {"thinking": {"animation_id": "generated-thinking"}},
+                "animations": {
+                    "generated-thinking": {
+                        "asset_ids": [asset["id"]],
+                        "frame_rate": 1,
+                        "loop": True,
+                    }
+                },
+            },
+            generated_asset_ids=[asset["id"]],
             prompt="make thinking",
         )
         rejected = persona_db.create_persona_visual_candidate(
@@ -217,9 +236,87 @@ def test_accept_and_reject_generated_candidates(persona_db: CharactersRAGDB) -> 
 
         assert accepted_response.status_code == 200, accepted_response.text
         assert accepted_response.json()["status"] == "accepted"
+        detail = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["status"] == "draft"
+        assert detail.json()["manifest"]["states"]["thinking"]["animation_id"] == "generated-thinking"
         assert rejected_response.status_code == 200, rejected_response.text
         assert rejected_response.json()["status"] == "rejected"
         assert rejected_response.json()["failure_reason"] == "not useful"
+
+
+def test_list_generated_candidates_returns_preview_asset_urls(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Candidate List Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        candidate = persona_db.create_persona_visual_candidate(
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id="1",
+            job_id="job-preview",
+            proposed_manifest_patch={},
+            generated_asset_ids=[asset["id"]],
+            prompt="make preview",
+        )
+
+        response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generated-candidates"
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["candidates"][0]["id"] == candidate["id"]
+        assert payload["candidates"][0]["generated_assets"][0]["id"] == asset["id"]
+        assert payload["candidates"][0]["generated_assets"][0]["url"].endswith(
+            f"/visual-packs/{pack['id']}/assets/{asset['id']}/content"
+        )
+        detail = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generated-candidates/{candidate['id']}"
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["generated_assets"][0]["id"] == asset["id"]
+
+
+def test_create_generation_job_for_visual_pack(persona_db: CharactersRAGDB) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Generation Job Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "prompt": "make a speaking pose",
+                "target_state": "speaking",
+                "backend": "fake",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["job_id"] == "9001"
+        assert manager.created[0]["domain"] == "persona_visuals"
+        assert manager.created[0]["payload"]["target_state"] == "speaking"
+
+
+def test_create_generation_job_rejects_other_user_pack(persona_db: CharactersRAGDB) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Generation Owner Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+    with _client_for_user(2, persona_db) as other_client:
+        response = other_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={"prompt": "steal pack", "target_state": "idle"},
+        )
+
+    assert response.status_code == 404
+    assert manager.created == []
 
 
 def test_deactivate_visual_pack_reverts_to_derived_buddy(persona_db: CharactersRAGDB) -> None:
