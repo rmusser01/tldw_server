@@ -399,6 +399,7 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
   const imports = {
     emptyState: new Set(),
     loadingState: new Set(),
+    recoveryState: new Set(),
     badge: new Set(),
     stateRegistry: new Set()
   }
@@ -434,6 +435,12 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
         if (isCanonicalComponentImport && importedName === "LoadingState") {
           imports.loadingState.add(element.name.text)
         }
+        if (
+          isCanonicalComponentImport &&
+          (importedName === "RecoveryCallout" || importedName === "StatePanel")
+        ) {
+          imports.recoveryState.add(element.name.text)
+        }
         if (isCanonicalComponentImport && importedName === "Badge") {
           imports.badge.add(element.name.text)
         }
@@ -460,6 +467,13 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
     if (
       isCanonicalComponentImport &&
       importClause?.name &&
+      /\/(?:RecoveryCallout|StatePanel)$/.test(importPath)
+    ) {
+      imports.recoveryState.add(importClause.name.text)
+    }
+    if (
+      isCanonicalComponentImport &&
+      importClause?.name &&
       /\/Badge$/.test(importPath)
     ) {
       imports.badge.add(importClause.name.text)
@@ -478,6 +492,11 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
   )
 
   return {
+    recoveryStateOwners: collectReturnedJsxTreeTagOwners(
+      sourceFile,
+      imports.recoveryState,
+      fileSubject
+    ),
     emptyStateOwners: collectJsxTagOwners(
       sourceFile,
       imports.emptyState,
@@ -545,7 +564,10 @@ function pushLocalComponentFinding(
     return
   }
 
-  if (RECOVERY_COMPONENT_PATTERN.test(subject)) {
+  if (
+    RECOVERY_COMPONENT_PATTERN.test(subject) &&
+    !canonicalUsage.recoveryStateOwners?.has(subject)
+  ) {
     pushFinding(findings, {
       relativePath,
       rule: "local-recovery-banner",

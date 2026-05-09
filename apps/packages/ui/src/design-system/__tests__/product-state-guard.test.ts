@@ -41,6 +41,58 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("allows recovery-banner adapters that return RecoveryCallout", () => {
+    const findings = analyze(
+      "src/components/Sidepanel/Chat/ConnectionBanner.tsx",
+      `
+        import { RecoveryCallout } from "@/components/ui/state"
+
+        export function ConnectionBanner() {
+          return (
+            <RecoveryCallout
+              state="unavailable"
+              title="Can't reach your tldw server"
+              primaryAction={{ label: "Retry", onClick: () => undefined }}
+            />
+          )
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-recovery-banner",
+        subject: "ConnectionBanner"
+      })
+    )
+  })
+
+  it("allows recovery-banner adapters that return StatePanel", () => {
+    const findings = analyze(
+      "src/components/Common/BackendErrorBanner.tsx",
+      `
+        import { StatePanel } from "@/components/ui/state"
+
+        export function BackendErrorBanner() {
+          return (
+            <StatePanel
+              state="error"
+              title="Backend error"
+              primaryAction={{ label: "Retry", onClick: () => undefined }}
+            />
+          )
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-recovery-banner",
+        subject: "BackendErrorBanner"
+      })
+    )
+  })
+
   it("flags local empty, loading, and status wrappers", () => {
     const findings = [
       ...analyze(
