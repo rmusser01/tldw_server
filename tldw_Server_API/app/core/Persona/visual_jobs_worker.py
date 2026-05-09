@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Persona.visual_jobs import (
     PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
     PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
     persona_visual_generation_queue,
+    persona_visual_portability_queue,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
     PersonaVisualPackExporter,
@@ -64,7 +65,8 @@ class PersonaVisualGenerationWorker:
         if not user_id or not persona_id or not pack_id or not prompt:
             raise ValueError("invalid_persona_visual_generation_payload")
 
-        pack = self._db.get_persona_visual_pack(
+        pack = await asyncio.to_thread(
+            self._db.get_persona_visual_pack,
             pack_id=pack_id,
             persona_id=persona_id,
             user_id=user_id,
@@ -97,14 +99,48 @@ class PersonaVisualGenerationWorker:
         )
         result = await asyncio.to_thread(adapter.generate, request)
 
-        service = PersonaVisualService(self._db)
-        asset = service.create_generated_asset(
+        asset, candidate = await asyncio.to_thread(
+            self._persist_generated_candidate,
             persona_id=persona_id,
             user_id=user_id,
             pack_id=pack_id,
             content=result.content,
             mime_type=result.content_type or "image/png",
             original_filename=f"generated-{target_state or 'candidate'}-{job_id or 'job'}.png",
+            target_state=target_state,
+            job_id=job_id,
+            prompt=prompt,
+        )
+        asset_id = str(asset["id"])
+        return {
+            "status": "candidate_created",
+            "candidate_id": str(candidate["id"]),
+            "asset_id": asset_id,
+            "pack_id": pack_id,
+            "persona_id": persona_id,
+        }
+
+    def _persist_generated_candidate(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        pack_id: str,
+        content: bytes,
+        mime_type: str,
+        original_filename: str,
+        target_state: str | None,
+        job_id: str,
+        prompt: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        service = PersonaVisualService(self._db)
+        asset = service.create_generated_asset(
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+            content=content,
+            mime_type=mime_type,
+            original_filename=original_filename,
         )
         asset_id = str(asset["id"])
         animation_id = f"generated-{target_state or 'candidate'}-{asset_id[:8]}"
@@ -133,13 +169,7 @@ class PersonaVisualGenerationWorker:
             generated_asset_ids=[asset_id],
             prompt=prompt,
         )
-        return {
-            "status": "candidate_created",
-            "candidate_id": str(candidate["id"]),
-            "asset_id": asset_id,
-            "pack_id": pack_id,
-            "persona_id": persona_id,
-        }
+        return asset, candidate
 
 
 class PersonaVisualPortabilityWorker:
@@ -550,6 +580,65 @@ async def run_persona_visual_generation_worker(stop_event: asyncio.Event | None 
                 await stop_watcher
 
 
+async def run_persona_visual_portability_worker(stop_event: asyncio.Event | None = None) -> None:
+    worker_id = (os.getenv("PERSONA_VISUAL_PORTABILITY_WORKER_ID") or f"persona-visual-portability-{os.getpid()}").strip()
+    queue = persona_visual_portability_queue()
+    lease_seconds = _coerce_int(
+        os.getenv("PERSONA_VISUAL_PORTABILITY_JOBS_LEASE_SECONDS") or os.getenv("JOBS_LEASE_SECONDS"),
+        60,
+    )
+    renew_jitter = _coerce_int(
+        os.getenv("PERSONA_VISUAL_PORTABILITY_JOBS_RENEW_JITTER_SECONDS")
+        or os.getenv("JOBS_LEASE_RENEW_JITTER_SECONDS"),
+        5,
+    )
+    renew_threshold = _coerce_int(
+        os.getenv("PERSONA_VISUAL_PORTABILITY_JOBS_RENEW_THRESHOLD_SECONDS")
+        or os.getenv("JOBS_LEASE_RENEW_THRESHOLD_SECONDS"),
+        10,
+    )
+    cfg = WorkerConfig(
+        domain=PERSONA_VISUALS_DOMAIN,
+        queue=queue,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        renew_jitter_seconds=renew_jitter,
+        renew_threshold_seconds=renew_threshold,
+    )
+    sdk = WorkerSDK(_jobs_manager(), cfg)
+    stop_watcher: asyncio.Task[None] | None = None
+
+    if stop_event is not None:
+        async def _watch_stop() -> None:
+            await stop_event.wait()
+            sdk.stop()
+
+        stop_watcher = asyncio.create_task(_watch_stop())
+
+    async def _handler(job: dict[str, Any]) -> dict[str, Any]:
+        payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+        user_id = str(payload.get("user_id") or "").strip()
+        if not user_id:
+            raise ValueError("invalid_persona_visual_portability_payload")
+        db = CharactersRAGDB(
+            DatabasePaths.get_chacha_db_path(user_id),
+            client_id="persona-visual-portability-worker",
+        )
+        try:
+            return await PersonaVisualPortabilityWorker(db=db).handle_job_async(job)
+        finally:
+            db.close_connection()
+
+    logger.info("Persona visual portability worker starting: queue={} worker_id={}", queue, worker_id)
+    try:
+        await sdk.run(handler=_handler)
+    finally:
+        if stop_watcher is not None and not stop_watcher.done():
+            stop_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_watcher
+
+
 def _payload_text(payload: dict[str, Any], key: str, *, default: str | None = None) -> str:
     value = payload.get(key, default)
     if value is None:
@@ -582,4 +671,5 @@ __all__ = [
     "PersonaVisualGenerationWorker",
     "PersonaVisualPortabilityWorker",
     "run_persona_visual_generation_worker",
+    "run_persona_visual_portability_worker",
 ]

@@ -182,6 +182,33 @@ def visual_pack_import_commit_idempotency_key(
     )
 
 
+def visual_generate_candidate_idempotency_key(
+    *,
+    user_id: str,
+    persona_id: str,
+    pack_id: str,
+    prompt: str,
+    target_state: str | None = None,
+    backend: str | None = None,
+) -> str:
+    normalized_target_state = str(target_state).strip() if target_state else None
+    generation_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "backend": str(backend).strip() if backend else None,
+                "prompt": str(prompt or "").strip(),
+                "target_state": normalized_target_state,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    return (
+        f"{PERSONA_VISUALS_DOMAIN}:{user_id}:{persona_id}:{pack_id}:"
+        f"{normalized_target_state or 'pack'}:{generation_digest}"
+    )
+
+
 def create_generate_candidate_job(
     jobs_manager: Any,
     *,
@@ -210,9 +237,13 @@ def create_generate_candidate_job(
         job_type=PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
         payload=payload,
         owner_user_id=str(user_id),
-        idempotency_key=(
-            f"{PERSONA_VISUALS_DOMAIN}:{user_id}:{persona_id}:{pack_id}:"
-            f"{normalized_target_state or 'pack'}"
+        idempotency_key=visual_generate_candidate_idempotency_key(
+            user_id=user_id,
+            persona_id=persona_id,
+            pack_id=pack_id,
+            prompt=normalized_prompt,
+            target_state=normalized_target_state,
+            backend=backend,
         ),
         max_retries=1,
     )
@@ -349,6 +380,7 @@ __all__ = [
     "create_generate_candidate_job",
     "persona_visual_generation_queue",
     "persona_visual_portability_queue",
+    "visual_generate_candidate_idempotency_key",
     "visual_pack_export_group",
     "visual_pack_export_idempotency_key",
     "visual_pack_import_commit_group",

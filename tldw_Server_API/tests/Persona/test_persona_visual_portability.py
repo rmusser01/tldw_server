@@ -135,6 +135,21 @@ def test_validate_archive_members_rejects_path_traversal(tmp_path: Path) -> None
         validate_archive_members(archive_path)
 
 
+def test_validate_archive_members_allows_zip_directory_entries(tmp_path: Path) -> None:
+    archive_path = tmp_path / "with-directories.tldw-persona-vpack"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("metadata/", b"")
+        archive.writestr("assets/", b"")
+        archive.writestr("assets/persona_visuals/", b"")
+        for member in REQUIRED_MEMBERS:
+            archive.writestr(member, b"{}")
+
+    members = validate_archive_members(archive_path)
+
+    assert REQUIRED_MEMBERS <= set(members)
+    assert "metadata/" not in members
+
+
 def test_export_pack_writes_manifest_metadata_checksums_and_asset_bytes(
     db_instance: CharactersRAGDB,
     tmp_path: Path,

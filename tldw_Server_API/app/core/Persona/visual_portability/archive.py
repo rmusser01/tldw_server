@@ -31,6 +31,9 @@ def validate_archive_members(
         with zipfile.ZipFile(archive_path, "r") as archive:
             for info in archive.infolist():
                 raw_member_name = getattr(info, "orig_filename", info.filename)
+                if info.is_dir():
+                    _validate_directory_member_name(raw_member_name)
+                    continue
                 normalized_name = normalize_member_name(raw_member_name)
                 if normalized_name in seen_members:
                     raise ValueError(f"duplicate_archive_member: {normalized_name}")
@@ -61,6 +64,15 @@ def validate_archive_members(
             f"missing_required_archive_member: {sorted(missing_members)[0]}"
         )
     return normalized_members
+
+
+def _validate_directory_member_name(member_name: str) -> None:
+    if not member_name.endswith("/"):
+        raise ValueError("unsafe_archive_member: invalid_directory")
+    normalized_name = normalize_member_name(member_name[:-1])
+    parts = PurePosixPath(normalized_name).parts
+    if not parts or parts[0] not in ALLOWED_TOP_LEVEL_DIRS:
+        raise ValueError(f"unexpected_archive_member: {normalized_name}")
 
 
 def normalize_member_name(member_name: str) -> str:

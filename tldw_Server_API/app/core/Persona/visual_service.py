@@ -382,10 +382,23 @@ class PersonaVisualService:
             current_triggers = merged.get("authored_triggers")
             if not isinstance(current_triggers, list):
                 current_triggers = []
-            merged["authored_triggers"] = [
-                *deepcopy(current_triggers),
-                *deepcopy(patch_triggers),
-            ]
+            merged_triggers: list[Any] = []
+            trigger_index_by_id: dict[str, int] = {}
+            for trigger in [*deepcopy(current_triggers), *deepcopy(patch_triggers)]:
+                if not isinstance(trigger, dict):
+                    merged_triggers.append(trigger)
+                    continue
+                trigger_id = str(trigger.get("id") or "").strip()
+                if not trigger_id:
+                    merged_triggers.append(trigger)
+                    continue
+                existing_index = trigger_index_by_id.get(trigger_id)
+                if existing_index is None:
+                    trigger_index_by_id[trigger_id] = len(merged_triggers)
+                    merged_triggers.append(trigger)
+                    continue
+                merged_triggers[existing_index] = trigger
+            merged["authored_triggers"] = merged_triggers
         return merged
 
     @staticmethod

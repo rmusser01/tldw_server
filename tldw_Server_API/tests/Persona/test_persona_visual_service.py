@@ -83,6 +83,49 @@ def _create_pack(db: CharactersRAGDB, *, user_id: str = "user-1", title: str = "
     return persona_id, pack
 
 
+def test_merge_candidate_patch_replaces_authored_trigger_by_id() -> None:
+    merged = PersonaVisualService._merge_candidate_patch(
+        {
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "states": {},
+            "animations": {},
+            "authored_triggers": [
+                {
+                    "id": "gesture-wave",
+                    "source": "keyword",
+                    "match": "hello",
+                    "state": "idle",
+                    "priority": 10,
+                }
+            ],
+        },
+        {
+            "authored_triggers": [
+                {
+                    "id": "gesture-wave",
+                    "source": "keyword",
+                    "match": "hello",
+                    "state": "speaking",
+                    "priority": 20,
+                },
+                {
+                    "id": "gesture-nod",
+                    "source": "keyword",
+                    "match": "yes",
+                    "state": "listening",
+                    "priority": 5,
+                },
+            ]
+        },
+    )
+
+    triggers = merged["authored_triggers"]
+    assert [trigger["id"] for trigger in triggers] == ["gesture-wave", "gesture-nod"]
+    assert triggers[0]["state"] == "speaking"
+    assert triggers[0]["priority"] == 20
+
+
 def test_service_rejects_unsupported_mime_type_without_writing(
     service: PersonaVisualService,
     db_instance: CharactersRAGDB,

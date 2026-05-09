@@ -132,6 +132,7 @@ class FakeJobManager:
     def __init__(self) -> None:
         self.created: list[dict] = []
         self.jobs_by_id: dict[int, dict] = {}
+        self.cancelled: list[tuple[int, str | None]] = []
 
     def create_job(self, **kwargs):
         job_id = 9001 + len(self.created)
@@ -142,6 +143,14 @@ class FakeJobManager:
 
     def get_job(self, job_id: int):
         return self.jobs_by_id.get(int(job_id))
+
+    def cancel_job(self, job_id: int, reason: str | None = None):
+        job = self.jobs_by_id.get(int(job_id))
+        if job is None:
+            return False
+        job["status"] = "cancelled"
+        self.cancelled.append((int(job_id), reason))
+        return True
 
 
 def test_create_list_and_activate_visual_pack(persona_db: CharactersRAGDB) -> None:
@@ -182,6 +191,34 @@ def test_upload_rejects_unsupported_mime_type(persona_db: CharactersRAGDB) -> No
 
         assert response.status_code == 400
         assert response.json()["detail"]["code"] == "unsupported_mime_type"
+
+
+def test_upload_rejects_oversized_asset_before_service_call(persona_db: CharactersRAGDB) -> None:
+    from tldw_Server_API.app.core.Persona.visual_service import MAX_VISUAL_UPLOAD_BYTES
+
+    class UnexpectedService:
+        def create_asset_from_upload(self, **_kwargs):
+            raise AssertionError("oversized upload reached visual service")
+
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_service] = lambda: UnexpectedService()
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Oversized Visual Upload Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/assets",
+            data={"asset_role": "frame"},
+            files={
+                "file": (
+                    "too-large.png",
+                    BytesIO(b"x" * (MAX_VISUAL_UPLOAD_BYTES + 1)),
+                    "image/png",
+                )
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json()["detail"]["code"] == "upload_too_large"
 
 
 def test_activation_rejects_manifest_without_required_states(persona_db: CharactersRAGDB) -> None:
@@ -430,6 +467,39 @@ def test_visual_pack_export_status_download_and_scope(persona_db: CharactersRAGD
     assert denied.status_code == 404
 
 
+def test_cancel_visual_pack_export_updates_job_and_portability_row(
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Export Cancel Persona")
+        pack = _create_visual_pack(client, persona_id)
+        started = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/export",
+            json={"request_id": "req-cancel"},
+        )
+        assert started.status_code == 202, started.text
+        job_id = started.json()["job_id"]
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/exports/{job_id}/cancel"
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "cancelled"
+    assert manager.cancelled == [(int(job_id), "persona_visual_pack_export_cancel_requested")]
+    repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+    row = repo.get_portability_job_by_job_id(job_id, owner_user_id="1")
+    assert row is not None
+    assert row["status"] == "cancelled"
+    assert row["stage"] == "cancelled"
+
+
 def test_start_visual_pack_export_rejects_other_user_pack(persona_db: CharactersRAGDB) -> None:
     manager = FakeJobManager()
     fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
@@ -551,6 +621,115 @@ def test_import_preview_status_is_scoped(persona_db: CharactersRAGDB) -> None:
         )
 
     assert denied.status_code == 404
+
+
+def test_cancel_import_preview_updates_preview_and_portability_row(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Preview Cancel Persona")
+        archive_path = tmp_path / f"queued{PERSONA_VISUAL_PACK_EXTENSION}"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="9001",
+            status="queued",
+            stage="queued",
+            archive_path=str(archive_path),
+            target_persona_id=persona_id,
+        )
+        repo.create_portability_job(
+            owner_user_id="1",
+            job_id="9001",
+            operation="import_preview",
+            status="queued",
+            stage="queued",
+            preview_id=preview["id"],
+            archive_path=str(archive_path),
+        )
+        manager.jobs_by_id[9001] = {"id": 9001, "status": "queued"}
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/cancel"
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["stage"] == "cancelled"
+    assert manager.cancelled == [(9001, "persona_visual_pack_import_preview_cancel_requested")]
+    updated_preview = repo.get_import_preview(preview["id"], owner_user_id="1")
+    updated_job = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert updated_preview is not None
+    assert updated_preview["status"] == "cancelled"
+    assert updated_preview["stage"] == "cancelled"
+    assert updated_job is not None
+    assert updated_job["status"] == "cancelled"
+    assert updated_job["stage"] == "cancelled"
+
+
+def test_delete_import_preview_removes_staged_archive(
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Preview Delete Persona")
+        archive_root = DatabasePaths.get_user_temp_outputs_dir("1") / "persona_visual_pack_import_previews"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_root / f"delete-me{PERSONA_VISUAL_PACK_EXTENSION}"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="9001",
+            status="failed",
+            stage="failed",
+            archive_path=str(archive_path),
+            target_persona_id=persona_id,
+        )
+        repo.create_portability_job(
+            owner_user_id="1",
+            job_id="9001",
+            operation="import_preview",
+            status="failed",
+            stage="failed",
+            preview_id=preview["id"],
+            archive_path=str(archive_path),
+        )
+        manager.jobs_by_id[9001] = {"id": 9001, "status": "failed"}
+
+        response = client.delete(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}"
+        )
+
+    assert response.status_code == 204, response.text
+    assert not archive_path.exists()
+    updated_preview = repo.get_import_preview(preview["id"], owner_user_id="1")
+    updated_job = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert updated_preview is not None
+    assert updated_preview["status"] == "deleted"
+    assert updated_preview["stage"] == "deleted"
+    assert updated_job is not None
+    assert updated_job["status"] == "cancelled"
+    assert updated_job["stage"] == "deleted"
 
 
 def test_start_import_commit_creates_jobs_backed_portability_row(

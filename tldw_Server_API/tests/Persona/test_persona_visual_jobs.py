@@ -51,6 +51,7 @@ def test_create_persona_visual_generation_job_uses_domain_and_idempotency_key() 
         PERSONA_VISUALS_DOMAIN,
         PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
         create_generate_candidate_job,
+        visual_generate_candidate_idempotency_key,
     )
 
     manager = FakeJobsManager()
@@ -69,7 +70,14 @@ def test_create_persona_visual_generation_job_uses_domain_and_idempotency_key() 
     assert job["queue"] == "generation"
     assert job["job_type"] == PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE
     assert job["owner_user_id"] == "user-1"
-    assert job["idempotency_key"] == "persona_visuals:user-1:persona-1:pack-1:thinking"
+    assert job["idempotency_key"] == visual_generate_candidate_idempotency_key(
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="make a thinking pose",
+        target_state="thinking",
+        backend="fake",
+    )
     assert manager.created[0]["payload"] == {
         "user_id": "user-1",
         "persona_id": "persona-1",
@@ -78,6 +86,43 @@ def test_create_persona_visual_generation_job_uses_domain_and_idempotency_key() 
         "target_state": "thinking",
         "backend": "fake",
     }
+
+
+def test_create_persona_visual_generation_job_idempotency_distinguishes_prompt_and_backend() -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import create_generate_candidate_job
+
+    manager = FakeJobsManager()
+
+    create_generate_candidate_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="make a thinking pose",
+        target_state="thinking",
+        backend="fake-a",
+    )
+    create_generate_candidate_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="make a speaking pose",
+        target_state="thinking",
+        backend="fake-a",
+    )
+    create_generate_candidate_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="make a thinking pose",
+        target_state="thinking",
+        backend="fake-b",
+    )
+
+    keys = [created["idempotency_key"] for created in manager.created]
+    assert len(set(keys)) == 3
 
 
 def test_create_persona_visual_pack_export_job_includes_options_digest() -> None:
@@ -278,6 +323,7 @@ async def test_generation_worker_fails_when_image_backend_unavailable(
 @pytest.mark.asyncio
 async def test_generation_worker_stores_generated_asset_and_candidate(
     persona_visual_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core.Persona.visual_jobs import (
         PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
@@ -307,6 +353,17 @@ async def test_generation_worker_stores_generated_asset_and_candidate(
         def get_adapter(self, name: str) -> FakeAdapter:
             assert name == "fake"
             return FakeAdapter()
+
+    import tldw_Server_API.app.core.Persona.visual_jobs_worker as worker_module
+
+    offloaded_call_names: list[str] = []
+    real_to_thread = worker_module.asyncio.to_thread
+
+    async def recording_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        offloaded_call_names.append(getattr(func, "__name__", repr(func)))
+        return await real_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(worker_module.asyncio, "to_thread", recording_to_thread)
 
     worker = PersonaVisualGenerationWorker(
         db=persona_visual_db,
@@ -347,3 +404,5 @@ async def test_generation_worker_stores_generated_asset_and_candidate(
     assert candidates[0]["job_id"] == "101"
     assert candidates[0]["generated_asset_ids"] == [assets[0]["id"]]
     assert candidates[0]["proposed_manifest_patch"]["states"]["thinking"]["animation_id"]
+    assert {"get_persona_visual_pack", "generate"} <= set(offloaded_call_names)
+    assert any(name == "_persist_generated_candidate" for name in offloaded_call_names)
