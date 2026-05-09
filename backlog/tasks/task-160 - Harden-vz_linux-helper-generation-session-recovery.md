@@ -20,6 +20,8 @@ documentation:
   - >-
     Docs/superpowers/specs/2026-05-09-vz-linux-helper-generation-session-recovery-design.md
   - >-
+    Docs/superpowers/plans/2026-05-09-vz-linux-helper-generation-session-recovery.md
+  - >-
     Docs/superpowers/plans/2026-04-27-vz-linux-lifecycle-recovery-hardening-implementation-plan.md
 priority: medium
 ---
@@ -64,6 +66,7 @@ Add the next narrow sandbox recovery slice after PR #1406: make vz_linux session
 
 <!-- SECTION:NOTES:BEGIN -->
 - Design spec added at `Docs/superpowers/specs/2026-05-09-vz-linux-helper-generation-session-recovery-design.md`.
+- Implementation plan added at `Docs/superpowers/plans/2026-05-09-vz-linux-helper-generation-session-recovery.md`.
 - Current evidence: helper ping/status has no generation signal, and persisted VZ session control stores only VM/template/workspace readiness.
 - Design decision: helper generation must be helper-owned rather than Python-synthesized; Python should preserve session-control rows when helper availability/protocol truth is ambiguous.
 <!-- SECTION:NOTES:END -->
