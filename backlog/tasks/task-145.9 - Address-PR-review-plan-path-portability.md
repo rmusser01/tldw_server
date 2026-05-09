@@ -1,10 +1,10 @@
 ---
 id: TASK-145.9
 title: Address PR review plan path portability
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 17:07'
-updated_date: '2026-05-09 17:08'
+updated_date: '2026-05-09 17:10'
 labels:
   - evals
   - docs
@@ -25,7 +25,7 @@ Fix PR #1421 review feedback by replacing hardcoded user-specific verification p
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Implementation plan no longer includes /Users/macbook-dev verification command paths
-- [ ] #2 PR review thread is addressed with a pushed commit
+- [x] #2 PR review thread is addressed with a pushed commit
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -38,6 +38,8 @@ Search the implementation plan for user-specific absolute paths, replace verific
 
 <!-- SECTION:NOTES:BEGIN -->
 Replaced hardcoded /Users/macbook-dev verification command paths in Docs/superpowers/plans/2026-05-09-embeddings-rag-recipe-webui-implementation-plan.md with repo-relative source .venv/bin/activate examples. Verification: rg -n "/Users/macbook-dev" on the plan returned no matches; git diff --check on the plan and task file passed. Bandit not applicable because this review fix only changes markdown/task tracking.
+
+Pushed commit 13520b0a1 to origin/codex/embeddings-rag-recipe-design for PR #1421.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -48,10 +50,10 @@ Addressed Gemini PR review feedback by making the embeddings RAG recipe implemen
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
