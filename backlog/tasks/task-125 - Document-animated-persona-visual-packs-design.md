@@ -1,10 +1,10 @@
 ---
 id: TASK-125
 title: Document animated persona visual packs design
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-08 21:28'
-updated_date: '2026-05-08 21:35'
+updated_date: '2026-05-09 04:22'
 labels:
   - persona
   - webui
@@ -44,12 +44,20 @@ Commit attempt with message "docs: add persona visual packs design" was blocked 
 Spec review subagent result: Approved with no blocking issues. Advisory recommendations: resolve implementation-planning open questions for storage adapter, revision model, upload limits, and first generation-provider path; keep first implementation plan staged because the spec spans backend storage/API, frontend rendering/editor, Jobs, and MCP.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Change summary: Added the approved persona visual packs design spec and kept it as the architecture source for the merged implementation in PR #1393. The spec captures the existing Buddy shell as the animated surface, sprite/frame packs first, Jobs-backed generation with review, internal MCP controls, and persona-owned manifest packs.
+
+Verification: Spec and task acceptance criteria were completed before implementation; downstream implementation, portability, MCP, E2E, Bandit, and review-fix tasks are now complete on dev via merged PR #1393.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
