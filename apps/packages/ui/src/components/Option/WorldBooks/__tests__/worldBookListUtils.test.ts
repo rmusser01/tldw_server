@@ -9,6 +9,10 @@ import {
   UNKNOWN_LAST_MODIFIED_LABEL
 } from "../worldBookListUtils"
 
+const STABLE_NOW_MS = Date.parse("2026-02-18T12:00:00Z")
+const beforeStableNow = (deltaMs: number): string =>
+  new Date(STABLE_NOW_MS - deltaMs).toISOString()
+
 describe("worldBookListUtils", () => {
   it.each([
     ["2026-02-18T09:00:00Z", 1771405200000],
@@ -34,18 +38,29 @@ describe("worldBookListUtils", () => {
     ["2026-02-17T12:00:00Z", "a day ago"],
     ["2026-02-19T12:00:00Z", "in a day"],
   ])("formats %s with dayjs-compatible relative text", (value, relative) => {
-    const nowMs = Date.parse("2026-02-18T12:00:00Z")
-
     expect(
-      formatWorldBookLastModified(value, { nowMs }).relative
+      formatWorldBookLastModified(value, { nowMs: STABLE_NOW_MS }).relative
+    ).toBe(relative)
+  })
+
+  it.each([
+    [beforeStableNow(89_500), "a minute ago"],
+    [beforeStableNow(90_000), "2 minutes ago"],
+    [beforeStableNow(89.5 * 60_000), "an hour ago"],
+    [beforeStableNow(90 * 60_000), "2 hours ago"],
+    [beforeStableNow(35.5 * 60 * 60_000), "a day ago"],
+    [beforeStableNow(36 * 60 * 60_000), "2 days ago"],
+    [beforeStableNow(540 * 24 * 60 * 60_000), "a year ago"],
+    [beforeStableNow(550 * 24 * 60 * 60_000), "2 years ago"],
+  ])("formats rounding boundary %s as %s", (value, relative) => {
+    expect(
+      formatWorldBookLastModified(value, { nowMs: STABLE_NOW_MS }).relative
     ).toBe(relative)
   })
 
   it("formats absolute timestamps from a stable now", () => {
-    const nowMs = Date.parse("2026-02-18T12:00:00Z")
-
     expect(
-      formatWorldBookLastModified("2026-02-18T09:00:00Z", { nowMs })
+      formatWorldBookLastModified("2026-02-18T09:00:00Z", { nowMs: STABLE_NOW_MS })
     ).toMatchObject({
       absolute: "2026-02-18 09:00:00 UTC",
       timestamp: 1771405200000
@@ -55,7 +70,8 @@ describe("worldBookListUtils", () => {
   it("does not depend on dayjs for display-only relative timestamps", () => {
     const testDir = dirname(fileURLToPath(import.meta.url))
     const source = readFileSync(resolve(testDir, "../worldBookListUtils.ts"), "utf8")
+    const dayjsImportPattern = /^\s*import\s+(?:type\s+)?(?:.+?\s+from\s+)?["']dayjs(?:\/[^"']*)?["']/m
 
-    expect(source).not.toContain("dayjs")
+    expect(source).not.toMatch(dayjsImportPattern)
   })
 })

@@ -37,29 +37,33 @@ const formatRelativeTimestamp = (timestamp: number, nowMs: number): string => {
   const absMs = Math.abs(diffMs)
   const suffixRelative = (label: string): string =>
     diffMs > 0 ? `in ${label}` : `${label} ago`
+  const unitRelative = (count: number, singular: string, pluralUnit: string): string =>
+    suffixRelative(count === 1 ? singular : `${count} ${pluralUnit}`)
 
-  const seconds = Math.round(absMs / SECONDS_TO_MS)
-  if (seconds < 45) return suffixRelative("a few seconds")
-  if (seconds < 90) return suffixRelative("a minute")
+  if (absMs < 45 * SECONDS_TO_MS) return suffixRelative("a few seconds")
+  if (absMs < 90 * SECONDS_TO_MS) return suffixRelative("a minute")
 
-  const minutes = Math.round(absMs / MINUTES_TO_MS)
-  if (minutes < 45) return suffixRelative(`${minutes} minutes`)
-  if (minutes < 90) return suffixRelative("an hour")
+  if (absMs < 45 * MINUTES_TO_MS) {
+    return unitRelative(Math.round(absMs / MINUTES_TO_MS), "a minute", "minutes")
+  }
+  if (absMs < 90 * MINUTES_TO_MS) return suffixRelative("an hour")
 
-  const hours = Math.round(absMs / HOURS_TO_MS)
-  if (hours < 22) return suffixRelative(`${hours} hours`)
-  if (hours < 36) return suffixRelative("a day")
+  if (absMs < 22 * HOURS_TO_MS) {
+    return unitRelative(Math.round(absMs / HOURS_TO_MS), "an hour", "hours")
+  }
+  if (absMs < 36 * HOURS_TO_MS) return suffixRelative("a day")
 
-  const days = Math.round(absMs / DAYS_TO_MS)
-  if (days < 26) return suffixRelative(`${days} days`)
-  if (days < 46) return suffixRelative("a month")
+  if (absMs < 26 * DAYS_TO_MS) {
+    return unitRelative(Math.round(absMs / DAYS_TO_MS), "a day", "days")
+  }
+  if (absMs < 46 * DAYS_TO_MS) return suffixRelative("a month")
 
   const months = Math.round(absMs / MONTHS_TO_MS)
-  if (months < 11) return suffixRelative(`${months} months`)
+  if (months < 11) return unitRelative(months, "a month", "months")
   if (months < 18) return suffixRelative("a year")
 
   const years = Math.round(absMs / YEARS_TO_MS)
-  return suffixRelative(`${years} years`)
+  return unitRelative(years, "a year", "years")
 }
 
 export const formatWorldBookLastModified = (
