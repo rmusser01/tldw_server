@@ -1,11 +1,10 @@
 import { Select, Spin } from "antd"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { browser } from "wxt/browser"
 import { AvailableModelsList } from "./AvailableModelsList"
+import { formatModelsLastRefreshedTime } from "./modelsDisplayUtils"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { tldwClient, tldwModels } from "@/services/tldw"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -15,8 +14,6 @@ import {
   normalizeProviderKey
 } from "@/utils/provider-registry"
 import { isAutoModelId } from "@/utils/resolve-api-provider"
-
-dayjs.extend(relativeTime)
 
 interface RefreshResponse {
   ok: boolean
@@ -426,7 +423,7 @@ export const ModelsBody = () => {
                 <span className="text-xs text-text-subtle">
                   {t("settings:models.lastRefreshedAt", {
                     defaultValue: "Last checked at {{time}}",
-                    time: dayjs(lastRefreshedAt).format("HH:mm")
+                    time: formatModelsLastRefreshedTime(lastRefreshedAt)
                   })}
                 </span>
               )}
