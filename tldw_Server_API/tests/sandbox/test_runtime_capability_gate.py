@@ -116,6 +116,21 @@ def _runtime_reason_details_contract_is_documented(text: str) -> bool:
     )
 
 
+def _session_contract_gap_is_documented(text: str) -> bool:
+    current_gaps = _markdown_section(text, "Current Gaps")
+    has_portable_gate = re.search(
+        r"\bportable\b.*\bsession[- ]contract\b.*\bgate\b",
+        current_gaps,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    has_host_gated_recovery_gap = re.search(
+        r"\bhost[- ]gated\b.*\brecovery\b",
+        current_gaps,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return bool(has_portable_gate and has_host_gated_recovery_gap)
+
+
 def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -170,6 +185,60 @@ def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     assert discovery[RuntimeType.vz_linux.value].session_contract.repair_state == "host_gated"
 
 
+def test_portable_session_contract_gate_projects_to_admin_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setattr(
+        SandboxService,
+        "_collect_runtime_preflights",
+        lambda self, network_policy=None: _synthetic_preflights(),
+    )
+
+    rows = SandboxService().feature_discovery()
+    response = SandboxRuntimesResponse(runtimes=rows)
+    validated_rows = {
+        row.name.value if isinstance(row.name, RuntimeType) else str(row.name): row
+        for row in response.runtimes
+    }
+    diagnostics = {
+        str(row["name"]): SandboxService._runtime_diagnostics_item(row)
+        for row in rows
+    }
+
+    assert set(diagnostics) == {runtime.value for runtime in RuntimeType}
+    for runtime in RuntimeType:
+        contract = runtime_caps.runtime_session_contract_metadata(runtime)
+        row = validated_rows[runtime.value]
+        item = diagnostics[runtime.value]
+        expected_repair_supported = contract.repair_state in {"supported", "host_gated"}
+
+        assert row.session_contract.reuse_model == contract.reuse_model
+        assert (
+            row.session_contract.requires_live_health_check
+            is contract.requires_live_health_check
+        )
+        assert item["session_reuse_model"] == contract.reuse_model
+        assert item["requires_live_health_check"] is contract.requires_live_health_check
+        assert item["repair_supported"] is expected_repair_supported
+
+    for runtime in (RuntimeType.seatbelt, RuntimeType.worktree):
+        row = validated_rows[runtime.value]
+        item = diagnostics[runtime.value]
+        assert row.session_contract.reuse_model == "workspace_only"
+        assert row.session_contract.requires_live_health_check is False
+        assert row.session_contract.repair_state == "unsupported"
+        assert item["session_reuse_model"] == "workspace_only"
+        assert item["requires_live_health_check"] is False
+        assert item["repair_supported"] is False
+
+    vz_linux = validated_rows[RuntimeType.vz_linux.value]
+    vz_linux_item = diagnostics[RuntimeType.vz_linux.value]
+    assert vz_linux.session_contract.reuse_model == "warm_vm"
+    assert vz_linux.session_contract.requires_live_health_check is True
+    assert vz_linux_item["repair_supported"] is True
+
+
 def test_portable_runtime_capability_gate_covers_emitted_status_reason_aliases() -> None:
     for message in _EMITTED_POLICY_FAILURE_MESSAGES:
         assert normalize_run_status_reason(
@@ -211,6 +280,22 @@ def test_portable_runtime_capability_gate_inventory_no_longer_lists_gate_as_miss
 
     assert "CI has no single cross-runtime capability gate" not in text
     assert _portable_gate_scope_is_documented(text)
+
+
+def test_inventory_documents_portable_session_contract_gate_scope(
+    pytestconfig: pytest.Config,
+) -> None:
+    repo_root = Path(pytestconfig.rootpath)
+    inventory = repo_root / "Docs" / "Sandbox" / "sandbox-runtime-capability-inventory.md"
+    text = inventory.read_text(encoding="utf-8")
+    current_gaps = _markdown_section(text, "Current Gaps")
+
+    assert not re.search(
+        r"\bincomplete\b.*\bbeyond\b.*\bdiscovery[- ]level\b.*`?session_contract`?",
+        current_gaps,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    assert _session_contract_gap_is_documented(text)
 
 
 def test_inventory_documents_status_reason_details_metadata(

@@ -295,7 +295,7 @@ for `untrusted` workloads.
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
-| Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
+| The portable session-contract gate covers discovery/admin projection, but real host-gated recovery flows remain incomplete. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | No single CI job proves real execution for every runtime; the portable capability gate covers capability contracts only. | all | Phase 5 |
 
@@ -309,6 +309,8 @@ for `untrusted` workloads.
   current `enforcement_ready` host/preflight truth.
 - Add session contract metadata for every runtime and keep it separate from
   current host availability and admin diagnostics.
+- Keep admin runtime diagnostics session fields aligned with `session_contract`
+  so operator surfaces do not invent separate reuse or repair claims.
 - Add runtime reason metadata for every `RuntimeReasonCode` and keep it derived
   from `normalized_reasons`, not raw runtime-specific reason strings.
 - Prefer `unsupported` over ambiguous wording when a guarantee cannot be
