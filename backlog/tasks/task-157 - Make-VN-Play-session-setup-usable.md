@@ -4,6 +4,7 @@ title: Make VN Play session setup usable
 status: In Progress
 assignee: []
 created_date: '2026-05-09 05:15'
+updated_date: '2026-05-09 06:03'
 labels:
   - vn-play
   - frontend
@@ -16,7 +17,8 @@ references:
   - 'https://github.com/rmusser01/tldw_server/pull/1409'
 documentation:
   - Docs/API-related/VN_PLAY_API.md
-  - Docs/superpowers/plans/2026-05-09-vn-play-session-setup-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-05-09-vn-play-session-setup-implementation-plan.md
 priority: medium
 ---
 
@@ -59,7 +61,15 @@ Verification recorded:
 - Smoke: `TLDW_WEB_URL=http://localhost:18081 TLDW_WEB_CMD='bun run dev -- -p 18081' bunx playwright test e2e/smoke/vn-play.spec.ts --reporter=line` passed 1 test after rerunning outside the sandbox for port binding.
 - Whitespace: `git diff --check` exited 0.
 - Bandit: not applicable; touched production code is frontend TypeScript/React only.
+
+PR #1409 review follow-up: verified unresolved review threads, then added regressions and fixes for paginated character loading via /characters/query, bounded VN asset readiness request fan-out, rendering selectors before readiness completes, and duplicate readiness-warning React keys. Verification: red run failed 5 expected tests before fixes; final focused vitest passed 5 files / 26 tests; touched-file ESLint exited 0; git diff --check exited 0; VN Play smoke passed 1 test outside the sandbox after port binding was denied inside the sandbox. Bandit remains not applicable because touched production code is frontend TypeScript/React only.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Made VN Play session setup selectable from named character and VN asset-pack records while preserving the existing create-session payload. The dialog now loads characters, packs, and pack readiness; prefers compatible ready packs; disables incompatible/unready/draft selections; shows readiness, trust, and content-rating guidance; falls back to manual numeric IDs when selector loading fails; and updates the smoke test to cover the selector flow.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -70,9 +80,3 @@ Verification recorded:
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Made VN Play session setup selectable from named character and VN asset-pack records while preserving the existing create-session payload. The dialog now loads characters, packs, and pack readiness; prefers compatible ready packs; disables incompatible/unready/draft selections; shows readiness, trust, and content-rating guidance; falls back to manual numeric IDs when selector loading fails; and updates the smoke test to cover the selector flow.
-<!-- SECTION:FINAL_SUMMARY:END -->

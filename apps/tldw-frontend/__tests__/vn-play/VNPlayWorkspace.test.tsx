@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { VNAssetReadiness } from '@web/types/vn-assets';
 import type { VNPlayBranch, VNPlayCheckpoint, VNPlaySession } from '@web/types/vn-play';
 
 const mocks = vi.hoisted(() => ({
@@ -65,6 +66,25 @@ const defaultPacks = [
     planned_output_count: 8,
   },
 ];
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, reject, resolve };
+}
+
+function readyReadiness(): VNAssetReadiness {
+  return {
+    ready: true,
+    status: 'ready',
+    warnings: [],
+    errors: [],
+  };
+}
 
 function mockVNPlayApi({
   branches = [],
@@ -208,6 +228,63 @@ describe('VNPlayWorkspace', () => {
     expect(await screen.findByText('Moonlit Archive')).toBeInTheDocument();
   });
 
+  it('renders character and pack selectors before readiness checks finish', async () => {
+    const user = userEvent.setup();
+    const readiness = createDeferred<VNAssetReadiness>();
+    mockVNPlayApi({ sessions: [] });
+    mocks.getVNAssetReadiness.mockReturnValue(readiness.promise);
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new freeform/i }));
+
+    expect(await screen.findByLabelText('Character')).toBeInTheDocument();
+    expect(screen.getAllByText('Mira Vale').length).toBeGreaterThan(0);
+    expect(screen.getByRole('option', { name: /Moonlit Archive Pack/i })).toBeInTheDocument();
+
+    readiness.resolve(readyReadiness());
+  });
+
+  it('limits concurrent readiness checks while loading selector data', async () => {
+    const user = userEvent.setup();
+    const packs = Array.from({ length: 6 }, (_, index) => ({
+      ...defaultPacks[0],
+      id: index + 1,
+      title: `Pack ${index + 1}`,
+    }));
+    const pendingReadiness = new Map<number, ReturnType<typeof createDeferred<VNAssetReadiness>>>();
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNAssetPacks.mockResolvedValue(packs);
+    mocks.getVNAssetReadiness.mockImplementation((packId: number) => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      const readiness = createDeferred<VNAssetReadiness>();
+      pendingReadiness.set(packId, readiness);
+      return readiness.promise.finally(() => {
+        activeRequests -= 1;
+      });
+    });
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new freeform/i }));
+    await waitFor(() => expect(mocks.getVNAssetReadiness).toHaveBeenCalledTimes(4));
+    expect(maxActiveRequests).toBeLessThanOrEqual(4);
+
+    for (const readiness of pendingReadiness.values()) {
+      readiness.resolve(readyReadiness());
+    }
+    await waitFor(() => expect(mocks.getVNAssetReadiness).toHaveBeenCalledTimes(6));
+    for (const readiness of pendingReadiness.values()) {
+      readiness.resolve(readyReadiness());
+    }
+    await waitFor(() => expect(activeRequests).toBe(0));
+    expect(maxActiveRequests).toBeLessThanOrEqual(4);
+  });
+
   it('marks incompatible asset packs as unavailable for the selected character', async () => {
     const user = userEvent.setup();
     mockVNPlayApi({ sessions: [] });
@@ -259,6 +336,33 @@ describe('VNPlayWorkspace', () => {
     expect(screen.getByText(/sprite.primary has no approved file bytes/i)).toBeInTheDocument();
     expect(screen.getByText(/Pack content rating mature differs from session rating general/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+  });
+
+  it('renders duplicate readiness warnings without duplicate React keys', async () => {
+    const user = userEvent.setup();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockVNPlayApi({ sessions: [] });
+    mocks.getVNAssetReadiness.mockResolvedValue({
+      ready: true,
+      status: 'ready',
+      warnings: ['Review duplicate slot metadata', 'Review duplicate slot metadata'],
+      errors: [],
+    });
+
+    try {
+      render(<VNPlayWorkspace />);
+
+      await user.click(await screen.findByRole('button', { name: /new freeform/i }));
+
+      expect(await screen.findAllByText('Review duplicate slot metadata')).toHaveLength(2);
+      expect(
+        consoleErrorSpy.mock.calls.some((call) =>
+          call.some((value) => String(value).includes('Encountered two children with the same key'))
+        )
+      ).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it('keeps manual ID entry available when setup selectors fail to load', async () => {

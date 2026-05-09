@@ -21,6 +21,7 @@ type ReadinessByPackId = Record<number, VNAssetReadiness>;
 const SELECT_CLASS =
   'mt-1 block w-full rounded-md border-border bg-bg shadow-sm focus:border-primary focus:ring-primary';
 const APPROVED_PACK_STATUSES = new Set(['approved', 'ready', 'runtime_ready', 'active']);
+const READINESS_REQUEST_BATCH_SIZE = 4;
 
 function parsePositiveInteger(value: string): number | null {
   const parsed = Number(value);
@@ -65,25 +66,31 @@ function chooseBestPack(
 }
 
 async function loadReadinessForPacks(packs: VNAssetPack[]): Promise<ReadinessByPackId> {
-  const entries = await Promise.all(
-    packs.map(async (pack) => {
-      try {
-        const readiness = await getVNAssetReadiness(pack.id);
-        return [pack.id, readiness] as const;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Readiness request failed';
-        return [
-          pack.id,
-          {
-            ready: false,
-            status: 'readiness_unavailable',
-            warnings: [],
-            errors: [`Could not load readiness for ${pack.title}: ${message}`],
-          },
-        ] as const;
-      }
-    })
-  );
+  const entries: Array<readonly [number, VNAssetReadiness]> = [];
+
+  for (let index = 0; index < packs.length; index += READINESS_REQUEST_BATCH_SIZE) {
+    const batch = packs.slice(index, index + READINESS_REQUEST_BATCH_SIZE);
+    const batchEntries = await Promise.all(
+      batch.map(async (pack) => {
+        try {
+          const readiness = await getVNAssetReadiness(pack.id);
+          return [pack.id, readiness] as const;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Readiness request failed';
+          return [
+            pack.id,
+            {
+              ready: false,
+              status: 'readiness_unavailable',
+              warnings: [],
+              errors: [`Could not load readiness for ${pack.title}: ${message}`],
+            },
+          ] as const;
+        }
+      })
+    );
+    entries.push(...batchEntries);
+  }
 
   return entries.reduce<ReadinessByPackId>((accumulator, [packId, readiness]) => {
     accumulator[packId] = readiness;
@@ -202,17 +209,24 @@ export default function NewSessionDialog({
           listCharacters(),
           listVNAssetPacks(),
         ]);
-        const nextReadiness = await loadReadinessForPacks(nextPacks);
         if (cancelled) return;
 
         const firstCharacter = nextCharacters[0] ?? null;
         const nextCharacterId = firstCharacter ? String(firstCharacter.id) : '';
-        const bestPack = chooseBestPack(nextPacks, firstCharacter?.id ?? null, nextReadiness);
 
         setCharacters(nextCharacters);
         setAssetPacks(nextPacks);
-        setReadinessByPackId(nextReadiness);
+        setReadinessByPackId({});
         setSelectedCharacterId(nextCharacterId);
+        setSelectedPackId(chooseBestPack(nextPacks, firstCharacter?.id ?? null, {})?.id.toString() ?? '');
+        setIsLoadingSelectors(false);
+
+        const nextReadiness = await loadReadinessForPacks(nextPacks);
+        if (cancelled) return;
+
+        const bestPack = chooseBestPack(nextPacks, firstCharacter?.id ?? null, nextReadiness);
+
+        setReadinessByPackId(nextReadiness);
         setSelectedPackId(bestPack ? String(bestPack.id) : '');
       } catch (error) {
         if (!cancelled) {
@@ -465,8 +479,8 @@ export default function NewSessionDialog({
               <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
                 <p className="font-medium">Review pack readiness before starting.</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
-                  {selectedPackWarnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
+                  {selectedPackWarnings.map((warning, index) => (
+                    <li key={`${warning}-${index}`}>{warning}</li>
                   ))}
                 </ul>
               </div>

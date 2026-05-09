@@ -32,17 +32,24 @@ test.describe('VN play smoke', () => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
     });
 
-    await page.route(/\/api\/v1\/characters\/?(?:\?.*)?$/, async (route) => {
-      await fulfillJson(route, 200, [
-        {
-          id: 7,
-          version: 1,
-          name: 'Mira Vale',
-          description: 'Archive guide',
-          tags: ['archive', 'story'],
-          image_present: true,
-        },
-      ]);
+    await page.route(/\/api\/v1\/characters(?:\/query|\/)?(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, {
+        items: [
+          {
+            id: 7,
+            version: 1,
+            name: 'Mira Vale',
+            description: 'Archive guide',
+            tags: ['archive', 'story'],
+            image_present: true,
+          },
+        ],
+        has_more: false,
+        next_offset: null,
+        page: 1,
+        page_size: 100,
+        total: 1,
+      });
     });
 
     await page.route(/\/api\/v1\/vn-assets(?:\/.*)?$/, async (route) => {
