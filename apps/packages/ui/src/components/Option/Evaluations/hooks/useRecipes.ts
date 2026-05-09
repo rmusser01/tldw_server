@@ -9,9 +9,11 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { ApiSendResponse } from "@/services/api-send"
 import {
   createRecipeRun,
+  getEmbeddingRecipeCandidates,
   getRecipeLaunchReadiness,
   getRecipeRunReport,
   listRecipeManifests,
+  previewRecipeRecommendationApply,
   validateRecipeDataset,
   type DatasetSample
 } from "@/services/evaluations"
@@ -143,5 +145,28 @@ export function useRecipeRunReport(runId: string | null) {
       const status = String((query.state.data as any)?.data?.run?.status || "").toLowerCase()
       return ["pending", "running"].includes(status) ? 3000 : false
     }
+  })
+}
+
+export function useEmbeddingRecipeCandidates(enabled: boolean) {
+  return useQuery({
+    queryKey: ["evaluations", "recipes", "embeddings_model_selection", "candidates"],
+    queryFn: getEmbeddingRecipeCandidates,
+    enabled,
+    staleTime: 60 * 1000
+  })
+}
+
+export function usePreviewRecipeRecommendationApply() {
+  return useMutation({
+    mutationFn: (params: {
+      runId: string
+      slotName: string
+      candidateRunId?: string | null
+    }) =>
+      previewRecipeRecommendationApply(params.runId, {
+        slot_name: params.slotName,
+        candidate_run_id: params.candidateRunId ?? null
+      })
   })
 }

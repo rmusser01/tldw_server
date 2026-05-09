@@ -259,6 +259,54 @@ export type RecipeRunReport = {
   recommendation_slots: Record<string, RecipeRecommendationSlot>
 }
 
+export type EmbeddingRecipeCandidateStatus =
+  | "ready"
+  | "missing_key"
+  | "disallowed_provider"
+  | "disallowed_model"
+  | "quota_risk"
+  | "unknown"
+
+export type EmbeddingRecipeCandidateHint = {
+  provider: string
+  model: string
+  is_local: boolean
+  default: boolean
+  status: EmbeddingRecipeCandidateStatus
+  status_reason?: string | null
+  dimensions?: number | null
+  revision?: string | null
+  cost_hint?: string | null
+}
+
+export type EmbeddingRecipeCandidatesResponse = {
+  recipe_id: "embeddings_model_selection"
+  current?: EmbeddingRecipeCandidateHint | null
+  candidates: EmbeddingRecipeCandidateHint[]
+  warnings: string[]
+}
+
+export type RecipeRecommendationApplyPreviewPayload = {
+  slot_name: string
+  candidate_run_id?: string | null
+}
+
+export type RecipeRecommendationApplyPreviewResponse = {
+  run_id: string
+  recipe_id: string
+  slot_name: string
+  candidate_run_id?: string | null
+  apply_eligible: boolean
+  apply_available: boolean
+  blocked_reason?: string | null
+  warnings: string[]
+  current: Record<string, string | null>
+  proposed: Record<string, string | null>
+  affected_config: Record<string, string>
+  copy_config: Record<string, Record<string, string>>
+  reindex_required: boolean
+}
+
 export type SyntheticEvalDraftSample = {
   sample_id: string
   recipe_kind: string
@@ -580,6 +628,24 @@ export async function getRecipeRunReport(runId: string) {
   return await apiSend<RecipeRunReport>({
     path: `/api/v1/evaluations/recipe-runs/${encodeURIComponent(runId)}/report` as any,
     method: "GET"
+  })
+}
+
+export async function getEmbeddingRecipeCandidates() {
+  return await apiSend<EmbeddingRecipeCandidatesResponse>({
+    path: "/api/v1/evaluations/recipes/embeddings_model_selection/candidates" as any,
+    method: "GET"
+  })
+}
+
+export async function previewRecipeRecommendationApply(
+  runId: string,
+  payload: RecipeRecommendationApplyPreviewPayload
+) {
+  return await apiSend<RecipeRecommendationApplyPreviewResponse>({
+    path: `/api/v1/evaluations/recipe-runs/${encodeURIComponent(runId)}/apply-preview` as any,
+    method: "POST",
+    body: payload
   })
 }
 

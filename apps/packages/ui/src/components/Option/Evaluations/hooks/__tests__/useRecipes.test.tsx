@@ -1,10 +1,19 @@
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { getRecipeRunUserErrorMessage, useCreateRecipeRun } from "../useRecipes"
-import { createRecipeRun } from "@/services/evaluations"
+import {
+  getRecipeRunUserErrorMessage,
+  useCreateRecipeRun,
+  useEmbeddingRecipeCandidates,
+  usePreviewRecipeRecommendationApply
+} from "../useRecipes"
+import {
+  createRecipeRun,
+  getEmbeddingRecipeCandidates,
+  previewRecipeRecommendationApply
+} from "@/services/evaluations"
 
 const { successNotificationSpy, errorNotificationSpy } = vi.hoisted(() => ({
   successNotificationSpy: vi.fn(),
@@ -42,9 +51,11 @@ vi.mock("@/services/evaluations", async () => {
   return {
     ...actual,
     createRecipeRun: vi.fn(),
+    getEmbeddingRecipeCandidates: vi.fn(),
     getRecipeLaunchReadiness: noopAsync,
     getRecipeRunReport: noopAsync,
     listRecipeManifests: noopAsync,
+    previewRecipeRecommendationApply: vi.fn(),
     validateRecipeDataset: noopAsync
   }
 })
@@ -146,5 +157,88 @@ describe("useRecipes", () => {
         message: "Recipe run started"
       })
     )
+  })
+
+  it("loads embeddings recipe candidates with a stable query key", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+
+    vi.mocked(getEmbeddingRecipeCandidates).mockResolvedValue({
+      ok: true,
+      data: {
+        recipe_id: "embeddings_model_selection",
+        current: {
+          provider: "openai",
+          model: "text-embedding-3-small",
+          status: "ready",
+          default: true,
+          is_local: false
+        },
+        candidates: [],
+        warnings: []
+      }
+    } as any)
+
+    const { result } = renderHook(() => useEmbeddingRecipeCandidates(true), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await waitFor(() =>
+      expect(result.current.data?.data?.current?.provider).toBe("openai")
+    )
+
+    expect(
+      queryClient.getQueryData([
+        "evaluations",
+        "recipes",
+        "embeddings_model_selection",
+        "candidates"
+      ])
+    ).toEqual(result.current.data)
+  })
+
+  it("posts apply preview requests through the hook", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+
+    vi.mocked(previewRecipeRecommendationApply).mockResolvedValue({
+      ok: true,
+      data: {
+        run_id: "recipe-run-1",
+        recipe_id: "embeddings_model_selection",
+        slot_name: "best_overall",
+        apply_eligible: true,
+        apply_available: false,
+        current: {},
+        proposed: {},
+        affected_config: {},
+        copy_config: {},
+        warnings: []
+      }
+    } as any)
+
+    const { result } = renderHook(() => usePreviewRecipeRecommendationApply(), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        runId: "recipe-run-1",
+        slotName: "best_overall"
+      })
+    })
+
+    expect(previewRecipeRecommendationApply).toHaveBeenCalledWith("recipe-run-1", {
+      slot_name: "best_overall",
+      candidate_run_id: null
+    })
   })
 })
