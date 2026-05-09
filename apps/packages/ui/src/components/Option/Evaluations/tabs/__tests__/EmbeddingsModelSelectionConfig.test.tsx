@@ -138,6 +138,48 @@ describe("EmbeddingsModelSelectionConfig", () => {
     ])
   })
 
+  it("serializes the source id contract as the backend string when run config changes", () => {
+    const onRunConfigChange = vi.fn()
+
+    const Harness = () => {
+      const [dataset, setDataset] = React.useState<DatasetSample[]>([])
+      const [runConfig, setRunConfig] = React.useState<Record<string, any>>({
+        comparison_mode: "embedding_only",
+        candidates: [],
+        top_k: 10
+      })
+
+      const handleRunConfigChange = (next: Record<string, any>) => {
+        onRunConfigChange(next)
+        setRunConfig(next)
+      }
+
+      return (
+        <EmbeddingsModelSelectionConfig
+          datasetSource="inline"
+          dataset={dataset}
+          runConfig={runConfig}
+          manifest={manifest}
+          onDatasetChange={setDataset}
+          onRunConfigChange={handleRunConfigChange}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    fireEvent.change(screen.getByLabelText("Top K"), {
+      target: { value: "12" }
+    })
+
+    expect(onRunConfigChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        top_k: 12,
+        source_id_contract: "media_id"
+      })
+    )
+  })
+
   it("lets ready candidates be selected while disallowed candidates remain status-only", async () => {
     let runConfigState: Record<string, any> = {}
 

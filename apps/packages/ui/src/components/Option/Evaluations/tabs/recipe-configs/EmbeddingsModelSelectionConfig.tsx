@@ -38,7 +38,7 @@ const DEFAULT_RUN_CONFIG = {
   top_k: 10,
   hybrid_alpha: 0.7,
   guided_source_labeling: true,
-  source_id_contract: { kind: "media_id", type: "integer" }
+  source_id_contract: "media_id"
 }
 
 const parseInteger = (value: unknown, fallback: number): number => {
@@ -107,10 +107,16 @@ const normalizeRunConfig = (
   manifest?: RecipeManifest | null
 ): Record<string, any> => {
   const manifestDefaults = manifest?.default_run_config || {}
+  const manifestSourceIdContract =
+    manifest?.capabilities?.source_labeling?.source_id_contract
   const sourceIdContract =
-    manifest?.capabilities?.source_labeling?.source_id_contract ||
-    runConfig.source_id_contract ||
-    DEFAULT_RUN_CONFIG.source_id_contract
+    typeof runConfig.source_id_contract === "string" &&
+    runConfig.source_id_contract.trim()
+      ? runConfig.source_id_contract.trim()
+      : typeof manifestSourceIdContract?.kind === "string" &&
+          manifestSourceIdContract.kind.trim()
+        ? manifestSourceIdContract.kind.trim()
+        : DEFAULT_RUN_CONFIG.source_id_contract
 
   return {
     ...DEFAULT_RUN_CONFIG,
@@ -207,6 +213,11 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
     () => candidateHints.filter((candidate) => candidate.status === "ready"),
     [candidateHints]
   )
+  const sourceContractDisplay =
+    manifest?.capabilities?.source_labeling?.source_id_contract &&
+    typeof manifest.capabilities.source_labeling.source_id_contract === "object"
+      ? manifest.capabilities.source_labeling.source_id_contract
+      : { kind: normalizedRunConfig.source_id_contract, type: "integer" }
   const didPrefillCandidates = React.useRef(false)
   const [searchQueries, setSearchQueries] = React.useState<Record<number, string>>({})
   const [searchResults, setSearchResults] = React.useState<
@@ -385,8 +396,8 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
           <div>
             <Text strong>Source ID contract</Text>
             <div className="mt-2">
-              <Tag>{String(normalizedRunConfig.source_id_contract?.kind || "media_id")}</Tag>
-              <Tag>{String(normalizedRunConfig.source_id_contract?.type || "integer")}</Tag>
+              <Tag>{String(sourceContractDisplay.kind || "media_id")}</Tag>
+              <Tag>{String(sourceContractDisplay.type || "integer")}</Tag>
             </div>
           </div>
         </div>

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-09 05:26'
-updated_date: '2026-05-09 05:32'
+updated_date: '2026-05-09 05:38'
 labels:
   - evaluations
   - embeddings
@@ -52,12 +52,18 @@ RED: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/Embeddings
 GREEN: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passed 3 tests after implementation.
 
 Verification: git diff --check exited 0. Bandit skipped because this task only touched frontend TypeScript/TSX and Backlog task metadata.
+
+Review fix RED: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx failed with the new source_id_contract regression because onRunConfigChange emitted the manifest object instead of "media_id".
+
+Review fix GREEN: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passed 4 tests after normalizing emitted source_id_contract to "media_id". git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Created the dedicated guided embeddings model selection recipe config component and focused tests. The component serializes inline query/source labels as media ID expected_ids, searches media defensively through tldwClient.searchMedia, preserves backend-friendly run_config fields, and uses useEmbeddingRecipeCandidates so only ready embedding candidates can be selected or prefilling candidates when empty.
+
+Follow-up review fix: source_id_contract is now serialized as the backend string "media_id" while the UI can still display manifest contract tags.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
