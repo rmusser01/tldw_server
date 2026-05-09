@@ -46,6 +46,7 @@ import type {
   PersonaVisualPortabilityJobResponse,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
+import { getDesignSystemState } from "@/design-system"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -80,6 +81,8 @@ const VISUAL_STATES: PersonaVisualStateId[] = [
   ...REQUIRED_VISUAL_STATES,
   ...OPTIONAL_VISUAL_STATES
 ]
+
+const LOADING_STATE_LABEL = getDesignSystemState("loading").label
 
 const ASSET_ROLES: PersonaVisualAssetRole[] = [
   "frame",
@@ -1000,7 +1003,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             disabled={loading}
           >
             {loading
-              ? t("common:loading", "Loading")
+              ? t("common:loading", LOADING_STATE_LABEL)
               : t("common:refresh", "Refresh")}
           </Button>
         </div>
@@ -1689,7 +1692,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 Generated Candidates
               </div>
               <Button size="small" onClick={() => void loadCandidates()}>
-                {candidatesLoading ? "Loading" : "Refresh"}
+                {candidatesLoading ? LOADING_STATE_LABEL : "Refresh"}
               </Button>
             </div>
             <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_minmax(120px,160px)_auto]">
