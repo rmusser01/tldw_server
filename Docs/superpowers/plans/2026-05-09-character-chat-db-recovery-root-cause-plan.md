@@ -49,7 +49,7 @@ Do not report any hypothesis as proven until it has supporting evidence.
 
 **Tests:** Shell verification only; no production tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
@@ -71,7 +71,11 @@ Steps:
 
 **Tests:** A one-off recovery smoke script or focused pytest around opening a copied recovered DB.
 
-**Status:** Not Started
+**Status:** Complete
+
+Outcome note: `.recover` produced an integrity-clean candidate with substantial
+character-chat data, but `CharactersRAGDB` rejected the candidate because
+`flashcards_fts` was missing. Treat it as salvage data, not a direct restore.
 
 Steps:
 
@@ -91,7 +95,7 @@ Steps:
 
 **Tests:** Focused reproductions where practical.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
@@ -114,7 +118,7 @@ Steps:
 
 **Tests:** Unit tests for error classification plus a startup/dependency test using a deliberately malformed temp SQLite file.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 

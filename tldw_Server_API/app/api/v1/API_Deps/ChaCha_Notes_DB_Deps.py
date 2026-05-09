@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 from cachetools import LRUCache
 from fastapi import Depends, HTTPException, status
@@ -42,6 +43,12 @@ _CHACHA_EXECUTOR_LOCK = threading.Lock()
 _CHACHA_EXECUTOR_MAX_WORKERS = max(1, int(os.getenv("CHACHA_EXECUTOR_MAX_WORKERS", "4")))
 _CHACHA_WATCHDOG_SECS = float(os.getenv("CHACHA_INIT_WATCHDOG_SECS", "5"))
 _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL = "ChaChaNotes shutdown in progress"
+_CHACHA_CORRUPTION_ERROR_DETAIL = "ChaChaNotes DB corruption detected; repair or restore required"
+_SQLITE_CORRUPTION_SIGNATURES = (
+    "database disk image is malformed",
+    "malformed database schema",
+    "file is not a database",
+)
 _CHACHA_HEALTH_LOCK = threading.Lock()
 _CHACHA_HEALTH: dict[str, Any] = {
     "init_attempts": 0,
@@ -58,7 +65,22 @@ _CHACHA_SHUTTING_DOWN = False
 _CHACHA_SHUTDOWN_LOCK = threading.Lock()
 
 
+class ChaChaDatabaseCorruptionError(CharactersRAGDBError):
+    """Raised when an existing ChaChaNotes SQLite DB fails integrity preflight."""
+
+
+def _is_sqlite_corruption_error(error: Exception | None) -> bool:
+    if isinstance(error, ChaChaDatabaseCorruptionError):
+        return True
+    text = str(error or "").strip().lower()
+    if not text:
+        return False
+    return any(signature in text for signature in _SQLITE_CORRUPTION_SIGNATURES)
+
+
 def _safe_chacha_health_error(error: Exception | None) -> str:
+    if _is_sqlite_corruption_error(error):
+        return "sqlite_corruption"
     return type(error).__name__ if error else "unknown error"
 
 
@@ -216,6 +238,31 @@ def _get_chacha_db_path_for_user(user_id: int) -> Path:
     return db_file
 
 
+def _sqlite_readonly_uri(db_path: Path) -> str:
+    return f"file:{quote(str(db_path), safe='/:')}?mode=ro"
+
+
+def _verify_existing_chacha_db_integrity(db_path: Path) -> None:
+    """Run a read-only quick check before opening an existing SQLite DB for writes."""
+    if not db_path.exists():
+        return
+
+    try:
+        with sqlite3.connect(_sqlite_readonly_uri(db_path), uri=True, timeout=1.0) as conn:
+            conn.execute("PRAGMA busy_timeout=1000")
+            rows = conn.execute("PRAGMA quick_check;").fetchall()
+    except sqlite3.Error as exc:
+        if _is_sqlite_corruption_error(exc):
+            raise ChaChaDatabaseCorruptionError(_CHACHA_CORRUPTION_ERROR_DETAIL) from exc
+        raise
+
+    check_values = [str(row[0]).strip() for row in rows if row and str(row[0]).strip()]
+    if check_values and all(value.lower() == "ok" for value in check_values):
+        return
+
+    raise ChaChaDatabaseCorruptionError(_CHACHA_CORRUPTION_ERROR_DETAIL)
+
+
 def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
     if db_instance.backend_type != BackendType.SQLITE:
         return
@@ -259,6 +306,11 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     except OSError as _mk2:
         logger.debug("Secondary ensure for ChaChaNotes parent failed softly ({})", type(_mk2).__name__)
     logger.info(f"Initializing CharactersRAGDB instance for user {user_id} at path: {db_path}")
+    try:
+        _verify_existing_chacha_db_integrity(db_path)
+    except ChaChaDatabaseCorruptionError:
+        logger.error("ChaChaNotes DB corruption preflight failed for user {} at path: {}", user_id, db_path)
+        raise
     db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
     _apply_sqlite_tuning(db_instance)
     return db_instance
@@ -375,6 +427,12 @@ async def _is_instance_healthy(db_instance: CharactersRAGDB) -> bool:
 def _map_chacha_init_db_error(exc: Exception) -> HTTPException:
     from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
+    if _is_sqlite_corruption_error(exc):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_CHACHA_CORRUPTION_ERROR_DETAIL,
+        )
+
     return map_db_error_to_http(
         exc,
         default_detail="ChaChaNotes DB unavailable",
@@ -440,6 +498,8 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
                 ) from init_error
+            if _is_sqlite_corruption_error(init_error):
+                raise _map_chacha_init_db_error(init_error) from init_error
             if isinstance(init_error, (CharactersRAGDBError, InputError)):
                 raise _map_chacha_init_db_error(init_error) from init_error
             raise HTTPException(
@@ -474,7 +534,7 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         _record_init(duration_ms, False, e)
         with _chacha_db_lock:
             _chacha_db_init_errors[cache_key] = e
-        if isinstance(e, (CharactersRAGDBError, InputError)):
+        if _is_sqlite_corruption_error(e) or isinstance(e, (CharactersRAGDBError, InputError)):
             raise _map_chacha_init_db_error(e) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
