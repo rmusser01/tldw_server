@@ -264,7 +264,16 @@ describe("VisualPackEditor", () => {
       />
     )
 
-    expect(await screen.findByTestId("persona-visual-pack-empty")).toBeInTheDocument()
+    const emptyState = await screen.findByTestId("persona-visual-pack-empty")
+    expect(emptyState).toHaveTextContent(
+      "Garden Helper's Persona Buddy does not have a visual pack yet."
+    )
+    expect(emptyState).toHaveTextContent("Create a draft visual pack first.")
+    expect(emptyState).toHaveTextContent(
+      "After a draft exists, upload frames, map states, import packs, queue generation, review candidates, and activate a valid pack."
+    )
+    expect(emptyState).not.toHaveTextContent("VN")
+    expect(emptyState).not.toHaveTextContent("CYOA")
     fireEvent.change(screen.getByTestId("persona-visual-pack-title-input"), {
       target: { value: "First pack" }
     })
