@@ -26,6 +26,12 @@ const checkOnceMock = vi.fn().mockResolvedValue(undefined)
 const beginOnboardingMock = vi.fn().mockResolvedValue(undefined)
 const markFirstRunCompleteMock = vi.fn().mockResolvedValue(undefined)
 const navigateMock = vi.fn()
+let currentLocation = {
+  pathname: "/",
+  search: "",
+  hash: "",
+  state: null as unknown
+}
 
 vi.mock("~/components/Layouts/Layout", () => ({
   __esModule: true,
@@ -63,7 +69,8 @@ vi.mock("@/hooks/useDarkmode", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => navigateMock
+  useNavigate: () => navigateMock,
+  useLocation: () => currentLocation
 }))
 
 vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
@@ -106,6 +113,12 @@ describe("core route identity guardrails", () => {
     toggleDarkModeMock.mockReset()
     state.hasCompletedFirstRun = false
     phase = null
+    currentLocation = {
+      pathname: "/",
+      search: "",
+      hash: "",
+      state: null
+    }
   })
 
   it("provides unique route-intent headings for home/setup/onboarding-test", async () => {
@@ -204,6 +217,56 @@ describe("core route identity guardrails", () => {
     fireEvent.click(toggle)
 
     expect(toggleDarkModeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces a character-chat first-run lane from preserved route intent", async () => {
+    currentLocation = {
+      pathname: "/",
+      search:
+        "?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue",
+      hash: "",
+      state: null
+    }
+
+    render(<OptionIndex />)
+
+    expect(screen.getByText("Character Chat Onboarding")).toBeInTheDocument()
+    expect(
+      screen.getByText("Finish setup, then continue creating and chatting with characters.")
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("character-chat-onboarding-lane")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Create character" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Import character" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Choose model" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Start character chat" })
+    ).toBeInTheDocument()
+    expect(await screen.findByTestId("onboarding-wizard")).toBeInTheDocument()
+  })
+
+  it("returns character-chat users to their interrupted route after onboarding finishes", async () => {
+    currentLocation = {
+      pathname: "/",
+      search:
+        "?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue",
+      hash: "",
+      state: null
+    }
+
+    render(<OptionIndex />)
+
+    fireEvent.click(await screen.findByTestId("onboarding-finish"))
+
+    await waitFor(() => {
+      expect(markFirstRunCompleteMock).toHaveBeenCalledTimes(1)
+    })
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/characters?from=header-select&create=true"
+    )
   })
 
   it("renders Companion Home from / after onboarding", async () => {

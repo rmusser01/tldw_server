@@ -60,6 +60,11 @@ import {
   trackOnboardingSuccessReached
 } from "@/utils/onboarding-ingestion-telemetry"
 import {
+  buildCharacterOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  type OnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
+import {
   validateApiKey,
   validateMultiUserAuth,
   validateMagicLinkAuth,
@@ -67,6 +72,7 @@ import {
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
+import { CharacterChatOnboardingLane } from "./CharacterChatOnboardingLane"
 import { ProgressItem, type ProgressStatus } from "./ProgressItem"
 
 type AuthMode = "single-user" | "multi-user"
@@ -172,7 +178,9 @@ function connectionUiReducer(
 }
 
 interface Props {
+  entryIntent?: OnboardingEntryIntent | null
   onFinish?: () => void
+  returnTo?: string | null
 }
 
 const QUICK_INGEST_OPEN_DELAY_MS = 120
@@ -249,7 +257,11 @@ function IntentSteps({
  * - Granular error messages
  * - All fields on one page (no multi-step wizard)
  */
-export function OnboardingConnectForm({ onFinish }: Props) {
+export function OnboardingConnectForm({
+  entryIntent,
+  onFinish,
+  returnTo
+}: Props) {
   const { t } = useTranslation(["settings", "common"])
   const navigate = useNavigate()
   const { setDemoEnabled } = useDemoMode()
@@ -298,6 +310,8 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
   // Post-connection guided flow: when user selects an intent, show persona-specific steps
   const [selectedIntent, setSelectedIntent] = useState<"chat" | "family" | "research" | null>(null)
+  const isCharacterChatEntry =
+    entryIntent === CHARACTER_CHAT_ONBOARDING_INTENT
 
   const {
     data: availableModels = [],
@@ -930,6 +944,37 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     await finishAndNavigate("/settings/tldw")
   }, [finishAndNavigate])
 
+  const handleCreateCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "create"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleImportCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "import"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleChooseCharacterModelFlow = useCallback(async () => {
+    await finishAndNavigate("/settings/model?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
+  const handleStartCharacterChatFlow = useCallback(async () => {
+    try {
+      await openSidepanelForActiveTab()
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to open sidepanel", err)
+    }
+    await finishAndNavigate("/chat?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
   const handleOpenFamilyFlow = useCallback(async () => {
     try {
       await actions.setUserPersona("family")
@@ -1041,7 +1086,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
             <Check className="size-7 text-success" />
           </div>
           <h2 className="text-2xl font-semibold text-text tracking-tight">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.titleCharacterChat",
+                  "You're connected. Set up character chat."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.titlePostIngest",
                   "Connected and ingest is working. Continue to verification."
@@ -1052,7 +1102,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                 )}
           </h2>
           <p className="mt-2 text-sm text-text-muted">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.subtitleCharacterChat",
+                  "Create or import a character, choose a model, then start chatting."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.subtitlePostIngest",
                   "Great start. Next, verify the result in Media, then ask Chat for a summary."
@@ -1066,7 +1121,14 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
         {/* Intent selector — route to persona-appropriate next step */}
         <div data-testid="intent-selector" className="mb-6">
-          {selectedIntent == null ? (
+          {isCharacterChatEntry ? (
+            <CharacterChatOnboardingLane
+              onCreateCharacter={handleCreateCharacterFlow}
+              onImportCharacter={handleImportCharacterFlow}
+              onChooseModel={handleChooseCharacterModelFlow}
+              onStartCharacterChat={handleStartCharacterChatFlow}
+            />
+          ) : selectedIntent == null ? (
             <>
               <p className="mb-3 text-sm font-medium text-text-muted">
                 {t("settings:onboarding.success.intentTitle", "What would you like to do first?")}

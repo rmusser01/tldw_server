@@ -7,13 +7,26 @@
 
 import React from 'react'
 import { OnboardingConnectForm } from './OnboardingConnectForm'
+import type { OnboardingEntryIntent } from '@/utils/onboarding-route-intent'
 
 type Props = {
+  entryIntent?: OnboardingEntryIntent | null
   onFinish?: () => void
+  returnTo?: string | null
 }
 
-export const OnboardingWizard: React.FC<Props> = ({ onFinish }) => {
-  return <OnboardingConnectForm onFinish={onFinish} />
+export const OnboardingWizard: React.FC<Props> = ({
+  entryIntent,
+  onFinish,
+  returnTo
+}) => {
+  return (
+    <OnboardingConnectForm
+      entryIntent={entryIntent}
+      onFinish={onFinish}
+      returnTo={returnTo}
+    />
+  )
 }
 
 export default OnboardingWizard
