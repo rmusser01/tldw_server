@@ -376,13 +376,30 @@ const NoFilteredReferencesState: React.FC = () => {
 /**
  * Loading state.
  */
-const LoadingState: React.FC = () => {
+const ReferencePlaceholders: React.FC = () => {
   return (
-    <SharedLoadingState
-      mode="skeleton"
-      rows={8}
-      className="p-4"
-    />
+    <div className="space-y-3 p-4">
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+    </div>
   )
 }
 
@@ -499,7 +516,7 @@ export const ReferencesTab: React.FC = () => {
 
   // Loading state
   if (isLoading) {
-    return <LoadingState />
+    return <ReferencePlaceholders />
   }
 
   // Error state

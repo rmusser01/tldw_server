@@ -308,7 +308,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/LeftSidebar/ReferencesTab.tsx:Empty#antd-empty-errorstate-line-396-fnj2vo",
+    "id": "antd-product-state-import:src/components/DocumentWorkspace/LeftSidebar/ReferencesTab.tsx:Empty#antd-empty-errorstate-line-413-wx7ci2",
     "path": "src/components/DocumentWorkspace/LeftSidebar/ReferencesTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Empty",

@@ -4,7 +4,7 @@ title: Adapt DocumentWorkspace sidebar loading states to shared LoadingState
 status: Done
 assignee: []
 created_date: '2026-05-09 00:06'
-updated_date: '2026-05-09 00:10'
+updated_date: '2026-05-09 00:43'
 labels:
   - design-system
   - webui
@@ -51,14 +51,18 @@ Finish the current local-loading-state migration queue by routing the DocumentWo
 TDD red path: focused sidebar tests failed before implementation because neither loading branch rendered data-ds-component="LoadingState". Implementation replaced the local Skeleton wrappers with SharedLoadingState in both sidebar tabs.
 
 Verification: focused sidebar Vitest passed (2 files, 4 tests); product-state guard Vitest passed (42 tests); bun run verify:design-system-state passed with 516 allowed legacy exceptions and no local-loading-state bucket; git diff --check passed. Bandit was not run because the touched implementation scope is TypeScript/TSX, JSON, and Backlog metadata with no Python files.
+
+PR review follow-up: Gemini flagged that a single shared LoadingState collapsed the original per-item loading structure in QuickInsightsTab and ReferencesTab. CodeRabbit flagged hardcoded store teardown in the QuickInsights loading-state test. Reopening this task to address those comments on the same PR branch.
+
+Review fix verification: focused sidebar Vitest passed (2 files, 4 tests); product-state guard Vitest passed (42 tests); bun run verify:design-system-state passed after refreshing the ReferencesTab Empty baseline id; git diff --check passed. Bandit remains not applicable because no Python files are touched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Adapted the DocumentWorkspace left-sidebar QuickInsights and References loading branches to render through the shared design-system LoadingState primitive instead of local AntD Skeleton wrappers. This removes the final local-loading-state baseline exceptions while preserving the existing sidebar loading layout density through skeleton row counts.
+Adapted the DocumentWorkspace left-sidebar QuickInsights and References loading branches to render through the shared design-system LoadingState primitive instead of local AntD Skeleton wrappers. The PR review follow-up now preserves the original per-item loading structure by rendering three shared placeholders for QuickInsights and four shared placeholders for References, left-aligned within the existing spaced containers.
 
-Added focused tests for both loading branches, removed the migrated baseline entries, and refreshed the single ReferencesTab AntD Empty baseline id caused by import/line movement.
+Added focused tests for both loading branches, strengthened those tests to assert the expected shared LoadingState counts, and updated the QuickInsights loading test to snapshot and restore the exact Zustand store states between tests. Removed the migrated local-loading-state baseline entries and refreshed ReferencesTab AntD Empty baseline ids caused by line movement.
 
 Verification: bunx vitest run src/components/DocumentWorkspace/LeftSidebar/__tests__/QuickInsightsTab.loading-state.test.tsx src/components/DocumentWorkspace/LeftSidebar/__tests__/ReferencesTab.test.tsx --reporter=dot; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot; bun run verify:design-system-state; git diff --check. Bandit was not applicable because no Python files were touched.
 <!-- SECTION:FINAL_SUMMARY:END -->

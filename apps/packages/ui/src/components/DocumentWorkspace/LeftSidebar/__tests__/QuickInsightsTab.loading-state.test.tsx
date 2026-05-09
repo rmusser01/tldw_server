@@ -23,11 +23,20 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("QuickInsightsTab loading state", () => {
+  let previousWorkspaceState = useDocumentWorkspaceStore.getState()
+  let previousConnectionStoreState = useConnectionStore.getState()
+
   beforeEach(() => {
+    previousWorkspaceState = useDocumentWorkspaceStore.getState()
+    previousConnectionStoreState = useConnectionStore.getState()
+
     useDocumentWorkspaceStore.setState({ activeDocumentId: 1 })
-    const prev = useConnectionStore.getState().state
     useConnectionStore.setState({
-      state: { ...prev, isConnected: true, mode: "normal" },
+      state: {
+        ...previousConnectionStoreState.state,
+        isConnected: true,
+        mode: "normal",
+      },
     })
     mockUseDocumentInsights.mockReturnValue({
       data: null,
@@ -43,11 +52,8 @@ describe("QuickInsightsTab loading state", () => {
 
   afterEach(() => {
     cleanup()
-    useDocumentWorkspaceStore.setState({ activeDocumentId: null })
-    const prev = useConnectionStore.getState().state
-    useConnectionStore.setState({
-      state: { ...prev, isConnected: false, mode: "normal" },
-    })
+    useDocumentWorkspaceStore.setState(previousWorkspaceState)
+    useConnectionStore.setState(previousConnectionStoreState)
     vi.clearAllMocks()
   })
 
@@ -55,7 +61,7 @@ describe("QuickInsightsTab loading state", () => {
     const { container } = render(<QuickInsightsTab />)
 
     expect(
-      container.querySelector('[data-ds-component="LoadingState"]')
-    ).toBeInTheDocument()
+      container.querySelectorAll('[data-ds-component="LoadingState"]')
+    ).toHaveLength(3)
   })
 })

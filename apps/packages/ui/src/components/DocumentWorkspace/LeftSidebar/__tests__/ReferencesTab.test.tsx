@@ -84,8 +84,8 @@ describe("ReferencesTab", () => {
     )
 
     expect(
-      container.querySelector('[data-ds-component="LoadingState"]')
-    ).toBeInTheDocument()
+      container.querySelectorAll('[data-ds-component="LoadingState"]')
+    ).toHaveLength(4)
   })
 
   it("passes search query to backend hook for cross-page filtering", async () => {

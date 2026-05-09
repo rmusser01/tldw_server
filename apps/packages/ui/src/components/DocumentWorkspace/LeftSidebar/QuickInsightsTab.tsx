@@ -191,13 +191,25 @@ const ErrorState: React.FC<{
 /**
  * Loading state during generation.
  */
-const LoadingState: React.FC = () => {
+const InsightPlaceholders: React.FC = () => {
   return (
-    <SharedLoadingState
-      mode="skeleton"
-      rows={6}
-      className="p-4"
-    />
+    <div className="space-y-3 p-4">
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+    </div>
   )
 }
 
@@ -251,7 +263,7 @@ export const QuickInsightsTab: React.FC = () => {
 
   // Loading state during generation
   if (generateMutation.isPending || isLoading) {
-    return <LoadingState />
+    return <InsightPlaceholders />
   }
 
   // Error state
