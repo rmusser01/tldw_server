@@ -4,7 +4,7 @@ title: Implement VN Play branch navigation API
 status: In Progress
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-09 23:53'
+updated_date: '2026-05-09 23:55'
 labels:
   - vn-play
   - api
@@ -90,6 +90,8 @@ Task 4 quality review fix started at 914f0b714 in .worktrees/vn-play-branch-navi
 Quality review fixes complete: added race-safe create_session_action duplicate-at-insert recovery for matching idempotency payload hashes and deterministic idempotency_key_conflict for hash mismatches; added transactional mark_session_action_terminal helper that marks failed/abandoned and clears active_session_action_id only when it still points at that action; updated VNPlayService failure/abandon paths to use the atomic helper. TDD red evidence: targeted new tests failed before implementation with raw sqlite UNIQUE constraint, missing mark_session_action_terminal, and service still using separate lock clear. Green/verification: targeted new tests passed; focused DB+turn suite 63 passed; full VN_Play suite 110 passed; git diff --check clean; Bandit touched production scope wrote /tmp/bandit_vn_play_branch_navigation_task4_fix.json with 0 errors and 0 results.
 
 Task 4 review fix loop complete. Fix commit 2957038cb Fix VN Play restore action races. Code-quality re-review found no Critical/Important/Minor issues and approved continuing to Task 5. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q => 63 passed, 5 warnings. git diff --check => exit 0. Bandit artifact /tmp/bandit_vn_play_branch_navigation_task4_fix.json has results/errors empty.
+
+Rebased codex/vn-play-branch-navigation-api onto latest origin/dev before Task 5. Post-rebase head b104bbb06; Task 4 commits rewritten as 480595fad Add guarded VN Play branch restore and 689d972cf Fix VN Play restore action races. Post-rebase focused VN Play baseline: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 110 passed, 5 warnings in 29.49s.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
