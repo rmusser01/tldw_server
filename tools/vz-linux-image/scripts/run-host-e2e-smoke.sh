@@ -17,6 +17,7 @@ SKIP_BUILD=0
 SKIP_SIGN=0
 INCLUDE_FAILURE_DRILLS=0
 HELPER_PID=""
+HELPER_PID_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -75,9 +76,11 @@ die() {
 }
 
 cleanup() {
-  if [[ -n "${HELPER_PID}" ]] && kill -0 "${HELPER_PID}" 2>/dev/null; then
-    kill "${HELPER_PID}" 2>/dev/null || true
-    wait "${HELPER_PID}" 2>/dev/null || true
+  local pid
+  pid="$(current_helper_pid)"
+  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
   fi
   if [[ -S "${SOCKET_PATH}" ]]; then
     rm -f "${SOCKET_PATH}"
@@ -276,6 +279,34 @@ prepare_runtime_paths() {
   prepare_private_serial_log_dir
 }
 
+helper_pid_file_path() {
+  local socket_dir
+  socket_dir="$(dirname "${SOCKET_PATH}")"
+  printf '%s/helper.pid' "${socket_dir}"
+}
+
+record_helper_pid() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return 0
+  fi
+  HELPER_PID_FILE="$(helper_pid_file_path)"
+  printf '%s\n' "${HELPER_PID}" > "${HELPER_PID_FILE}"
+  chmod 600 "${HELPER_PID_FILE}" 2>/dev/null || true
+}
+
+current_helper_pid() {
+  local candidate=""
+  local pid_file="${HELPER_PID_FILE:-$(helper_pid_file_path)}"
+  if [[ -f "${pid_file}" && ! -L "${pid_file}" ]]; then
+    candidate="$(tr -d '[:space:]' < "${pid_file}" 2>/dev/null || true)"
+    if [[ "${candidate}" =~ ^[1-9][0-9]*$ ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  fi
+  printf '%s\n' "${HELPER_PID}"
+}
+
 run_helper_daemon_smoke() {
   run_cmd env \
     TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
@@ -306,6 +337,7 @@ start_helper_for_real_e2e() {
     > "${SERIAL_LOG_DIR}/helper.stdout.log" \
     2> "${SERIAL_LOG_DIR}/helper.stderr.log" &
   HELPER_PID="$!"
+  record_helper_pid
 }
 
 wait_for_helper_socket() {
@@ -347,7 +379,22 @@ run_real_vz_linux_host_smoke() {
 }
 
 run_real_vz_linux_failure_drills() {
-  run_real_vz_linux_pytest -m vz_linux_host_failure_drill -q -rs
+  local helper_pid_file
+  helper_pid_file="$(helper_pid_file_path)"
+  run_cmd env \
+    TEST_MODE=0 \
+    TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+    TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE="${BUNDLE_PATH}" \
+    TLDW_SANDBOX_MACOS_HELPER_SOCKET="${SOCKET_PATH}" \
+    TLDW_SANDBOX_MACOS_HELPER_BINARY="${HELPER_PATH}" \
+    TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR="${SERIAL_LOG_DIR}" \
+    TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_RESTART_ALLOWED=1 \
+    TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_PID_FILE="${helper_pid_file}" \
+    SANDBOX_ENABLE_EXECUTION=1 \
+    SANDBOX_BACKGROUND_EXECUTION=0 \
+    "${PYTHON_BIN}" -m pytest \
+    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py" \
+    -m vz_linux_host_failure_drill -q -rs
 }
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
