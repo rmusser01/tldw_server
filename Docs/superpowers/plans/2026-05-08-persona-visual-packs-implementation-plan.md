@@ -1923,6 +1923,68 @@ git commit -m "test: cover persona visual pack workflow"
 
 Only include the design spec in this commit if it actually changed.
 
+## Task 12: PR #1135-Aligned Portability Foundation
+
+**Context:**
+
+After PR #1135 merged, persona visual pack import/export should follow the VN asset pack portability model instead of inventing a separate ad hoc archive format. This task adds the backend portability contract foundation only; Jobs/API/frontend review UX belong to the next slice.
+
+**Files:**
+
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/__init__.py`
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/constants.py`
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/archive.py`
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/fingerprints.py`
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/models.py`
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/exporter.py`
+- Create: `tldw_Server_API/app/core/Persona/visual_portability/preview.py`
+- Create: `tldw_Server_API/tests/Persona/test_persona_visual_portability.py`
+- Modify through MCP: `TASK-126.1`
+
+- [x] **Step 1: Add red portability tests**
+
+Cover the persona visual archive shape, safe member validation, strict missing-byte behavior, and import preview validation without pack mutation.
+
+- [x] **Step 2: Add archive constants and validation**
+
+Use a persona-specific schema and extension while mirroring PR #1135 concepts: schema version, `manifest.json`, metadata section files, checksums, safe ZIP member validation, reserved signatures, and missing-byte statuses.
+
+- [x] **Step 3: Add exporter and previewer foundation**
+
+Export a persona visual pack into a portable archive containing pack metadata, visual manifest, asset metadata, present asset bytes, canonical fingerprint, checksums, warnings, and trust hints. Preview validates the archive, checksums, visual manifest references, asset byte status, quota estimate, required target persona choice, and proposed review-before-commit plan without mutating existing packs.
+
+- [x] **Step 4: Run focused regression tests**
+
+Run:
+
+```bash
+source .venv/bin/activate && python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visual_service.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability.py \
+  -q
+```
+
+Expected: PASS.
+
+- [x] **Step 5: Run Bandit on touched backend scope**
+
+Run:
+
+```bash
+source .venv/bin/activate && python -m bandit -r \
+  tldw_Server_API/app/core/Persona/visual_portability \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability.py \
+  -f json -o /tmp/bandit_persona_visual_portability.json
+```
+
+Expected: no new findings in production code. Test-only `assert` findings may be documented as expected if present.
+
+- [x] **Step 6: Update Backlog task final summary and commit**
+
+Record verification and the next slice in `TASK-126.1`, then commit.
+
+Next slice: add Jobs-backed API endpoints and frontend review UX that mirror PR #1135's export job, import preview, import commit, status polling, cleanup, and portability panel flows.
+
 ## Final Verification Gate
 
 Before declaring implementation complete, run:
