@@ -20,7 +20,9 @@ export const parseFlashcardTimestamp = (value: unknown): number | null => {
     return Number.isFinite(timestamp) ? timestamp : null
   }
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value < SECOND_TIMESTAMP_CUTOFF ? value * SECONDS_TO_MS : value
+    return Math.abs(value) < SECOND_TIMESTAMP_CUTOFF
+      ? value * SECONDS_TO_MS
+      : value
   }
   if (typeof value === "string") {
     const trimmed = value.trim()

@@ -28,6 +28,14 @@ describe("flashcard date display utilities", () => {
     [
       new Date(2000, 0, 1, 0, 0).getTime(),
       new Date(2000, 0, 1, 0, 0).getTime()
+    ],
+    [
+      new Date(1960, 0, 1, 0, 0).getTime() / 1000,
+      new Date(1960, 0, 1, 0, 0).getTime()
+    ],
+    [
+      new Date(1960, 0, 1, 0, 0).getTime(),
+      new Date(1960, 0, 1, 0, 0).getTime()
     ]
   ])("parses %s to %s", (value, expected) => {
     expect(parseFlashcardTimestamp(value)).toBe(expected)

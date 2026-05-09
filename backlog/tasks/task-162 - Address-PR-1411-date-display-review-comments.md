@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - codex
 created_date: '2026-05-09 06:15'
-updated_date: '2026-05-09 06:22'
+updated_date: '2026-05-09 06:31'
 labels:
   - webui
   - dependencies
@@ -45,6 +45,8 @@ Address actionable review feedback on PR #1411 for the FlashcardEditDrawer dayjs
 Fixed the review feedback by removing the FlashcardEditDrawer scheduling metadata test's empty-string fallback, asserting formatter outputs are non-null before includes() assertions, lowering the numeric epoch-seconds cutoff to 10_000_000_000, and formatting combined absolute/relative labels from the already-normalized millisecond timestamp.
 
 Verification so far: red Vitest run failed on the new pre-2001 millisecond timestamp regression before implementation; after the fix, `bunx vitest run src/components/Flashcards/utils/__tests__/date-display.test.ts src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx` passed with 2 files and 23 tests. `git diff --check` passed. Flashcards component/utils dayjs import scan returned no matches; broader shared-ui dayjs scan remains the known 11-line baseline. `bun run lint` in apps/tldw-frontend exited 0 with the existing 131-warning baseline. Full apps/packages/ui TypeScript check still exits 2 on unrelated baseline diagnostics; filtered diagnostics for `date-display` and `FlashcardEditDrawer.scheduling-metadata` returned no matches. Bandit is not applicable because this review fix touches TypeScript/frontend test files and a Backlog task file, not Python code.
+
+Additional CodeRabbit review pass: removed `React.useMemo` around `dueAtDisplay` and `lastReviewedDisplay` so relative labels are recomputed on render, changed numeric timestamp detection to compare `Math.abs(value)` against the seconds cutoff, and added regression coverage for pre-1970 numeric second and millisecond timestamps. Verification after this pass: red Vitest failed for the new pre-1970 millisecond case before implementation; after the fix, focused Vitest passed with 2 files and 25 tests, `git diff --check` passed, Flashcards component/utils dayjs scan returned no matches, broader shared-ui dayjs scan remains the known 11-line baseline, `bun run lint` exited 0 with the existing 131-warning baseline, and the narrow TypeScript diagnostic filter for `date-display`, `FlashcardEditDrawer.tsx`, and `FlashcardEditDrawer.scheduling-metadata` returned no matches.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

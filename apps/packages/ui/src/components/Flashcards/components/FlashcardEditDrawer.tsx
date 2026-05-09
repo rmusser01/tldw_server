@@ -110,13 +110,9 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
     () => (card ? getFlashcardSourceMeta(card) : null),
     [card]
   )
-  const dueAtDisplay = React.useMemo(
-    () => formatFlashcardTimestampWithRelative(card?.due_at),
-    [card?.due_at]
-  )
-  const lastReviewedDisplay = React.useMemo(
-    () => formatFlashcardTimestampWithRelative(card?.last_reviewed_at),
-    [card?.last_reviewed_at]
+  const dueAtDisplay = formatFlashcardTimestampWithRelative(card?.due_at)
+  const lastReviewedDisplay = formatFlashcardTimestampWithRelative(
+    card?.last_reviewed_at
   )
 
   const templateHelperText = React.useMemo(() => {
