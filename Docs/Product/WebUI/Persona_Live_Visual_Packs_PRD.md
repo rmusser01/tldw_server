@@ -1,0 +1,570 @@
+# Persona Live Visual Packs PRD
+
+Product Requirements Document
+
+Feature: User-owned animated 2D visual packs for Persona Buddy and Persona Live
+Location: WebUI Persona Garden and shared Persona Buddy shell
+Status: Draft product record
+Owner: Product / WebUI / Persona
+Last Updated: 2026-05-09
+
+---
+
+## 1. Executive Summary
+
+Persona Live already gives users a live assistant surface backed by persona
+profiles, voice state, MCP tools, and the floating Persona Buddy shell. Persona
+Visual Packs turn that Buddy shell into a user-owned animated 2D assistant:
+users can upload, generate, review, import, export, activate, and deactivate
+visual packs attached to a persona.
+
+This PRD is the durable product record for the feature. The implementation
+brainstorm and staging spec in
+`Docs/superpowers/specs/2026-05-08-persona-visual-packs-design.md` remains useful
+historical context, but this file is the long-standing Product/WebUI source of
+truth.
+
+The primary user path is Persona Buddy / Persona Garden, not VN or CYOA play
+surfaces. VN asset-pack portability work from PR #1135 informed the background
+job and review model for pack import/export, but Persona Visual Packs are a
+Persona Live feature and should remain centered on the live assistant.
+
+---
+
+## 2. Problem Statement
+
+Users can define rich persona behavior, voices, commands, tools, and live
+sessions, but the visible Buddy assistant is still mostly derived/static unless
+a custom visual pack exists. Users need a first-class way to make the live
+assistant visually theirs without creating a separate persona identity or
+leaving the Persona workflow.
+
+The earlier implementation proved the data model, renderer, API, editor, Jobs
+flow, MCP module, and E2E runtime behavior. The remaining product gap is making
+the capability durable, discoverable, and clearly documented as part of the
+Persona Live assistant experience.
+
+---
+
+## 3. Goals
+
+1. Let users create, upload, generate, import, export, and activate animated 2D
+   visual packs for an existing persona.
+2. Keep visual identity attached to Persona Buddy and Persona Live rather than
+   creating a parallel avatar/runtime model.
+3. Use the existing Persona Garden Visuals tab as the main authoring and review
+   surface.
+4. Make the floating Persona Buddy shell a direct entry point into the Visuals
+   workflow for the selected persona.
+5. Preserve a manifest-backed pack format that supports import/export,
+   duplicate-to-persona, shared libraries, and future renderer types.
+6. Use Jobs for generation and portability work that needs progress, review,
+   retry, and user-visible status.
+7. Allow MCP to control transient runtime states and create draft/review changes
+   without silently replacing the active pack.
+8. Ensure broken or missing visual assets never block Persona Live controls.
+
+---
+
+## 4. Non-Goals
+
+1. Do not make VN Play or CYOA scenes the primary visual-assistant path.
+2. Do not create a new assistant identity separate from the existing persona.
+3. Do not replace profile avatars or character card images across the app.
+4. Do not allow executable user-supplied visual plugins, arbitrary JavaScript,
+   or unsafe SVG animation logic.
+5. Do not ship Live2D as the initial required renderer.
+6. Do not let MCP tools silently activate generated or imported packs.
+7. Do not require microphone, TTS provider, or external image generation
+   availability for baseline runtime tests.
+
+---
+
+## 5. Current Implementation Snapshot
+
+As of 2026-05-09:
+
+1. The durable implementation from PR #1393 is merged into `dev`.
+2. The closeout documentation and E2E verification from PR #1400 is merged into
+   `dev`.
+3. Draft PR #1412 adds the direct floating Buddy popover action to open the
+   selected persona's Visuals workflow.
+
+Implemented foundations include:
+
+1. Backend visual-pack persistence in the persona/ChaChaNotes data layer.
+2. `PersonaVisualService` for upload validation, asset storage, activation, and
+   deactivation behavior.
+3. Persona-scoped visual-pack API routes under
+   `/api/v1/persona/profiles/{persona_id}/visual-packs`.
+4. Frontend service helpers in `apps/packages/ui/src/services/persona-visuals.ts`.
+5. `VisualPackEditor` in Persona Garden for pack creation, asset upload,
+   manifest editing, activation, deactivation, export, import preview, and
+   generated candidate review.
+6. Floating `BuddyShellHost` active-pack loading and `SpriteFrameRenderer`
+   rendering for sprite/frame packs.
+7. Runtime visual state resolution for live voice, tools, recovery, authored
+   triggers, and MCP state overrides.
+8. Internal MCP module `persona_visuals` with capabilities, bounded runtime
+   state trigger, draft-pack creation, manifest update, and generation enqueue
+   tools.
+9. Jobs-backed generation and pack portability flows.
+10. Persona Live E2E coverage for active-pack rendering and broken-pack
+    fallback.
+
+Open PR #1412 adds:
+
+1. An `Open Visuals` action in the floating Persona Buddy popover.
+2. Active persona id propagation from `BuddyShellHost` to the popover.
+3. Routing through the existing Persona Garden helper to
+   `/persona?persona_id=<id>&tab=visuals`.
+
+---
+
+## 6. Product Principles
+
+1. Persona-owned: visual packs belong to users and attach to one persona by
+   default.
+2. Pack-based: assets are stored as manifest-backed packs, not loose profile
+   blobs.
+3. Review-first: generation and imports produce drafts or review candidates
+   before activation.
+4. Runtime-safe: Persona Live must remain usable when visual packs fail.
+5. Discoverable from Buddy: the visible assistant should lead users directly to
+   its visual configuration.
+6. Renderer-neutral: V1 is sprite/frame rendering, but the contract should not
+   block future Live2D or external renderer adapters.
+7. VN-informed, not VN-owned: PR #1135's pack portability model is a precedent,
+   but Persona Visual Packs are not a VN runtime feature.
+
+---
+
+## 7. Users and Jobs To Be Done
+
+### Primary Users
+
+1. Local-first research users who rely on a live assistant and want persistent
+   visual identity.
+2. Power users building multiple personas with different roles, moods, and
+   assistant behaviors.
+3. Users composing MCP-powered workflows where visual state can reflect tool
+   progress, speaking, approvals, or errors.
+
+### Jobs
+
+1. "When I use a live persona, I want the visible assistant to match the persona
+   I created."
+2. "When I see the floating Buddy, I want an obvious way to customize its
+   visuals."
+3. "When I generate or import assets, I want to review them before they affect
+   my active assistant."
+4. "When a tool or live session changes state, I want the assistant visual to
+   respond without breaking the session."
+
+---
+
+## 8. User Experience
+
+### 8.1 Primary Navigation
+
+The primary visual-pack path is:
+
+```text
+Floating Persona Buddy -> Open Visuals -> /persona?persona_id=<id>&tab=visuals
+```
+
+Persona Garden remains the main authoring and review surface. The floating
+Buddy should not duplicate the full editor; it should provide a direct action
+that preserves persona context and opens the existing Visuals tab.
+
+### 8.2 Visuals Tab
+
+The Visuals tab should support:
+
+1. pack listing and current active/draft state.
+2. draft pack creation.
+3. raster asset upload.
+4. manifest editing for state mappings, animations, timing, loops, fallbacks,
+   authored triggers, and frame references.
+5. validation feedback.
+6. generated candidate review.
+7. export job queue, status refresh, and authenticated archive download.
+8. import-preview upload, status refresh, preview summary, conflicts, warnings,
+   proposed plan, and commit flow.
+9. explicit activation and deactivation.
+
+### 8.3 Floating Buddy Runtime
+
+The floating Buddy shell should:
+
+1. render the active pack when one is available and valid.
+2. reflect live visual states such as idle, listening, thinking, speaking,
+   tool-running, approval-needed, wake-armed, error, and offline.
+3. fall back to derived/static Buddy summary when no active pack exists or a
+   pack cannot render.
+4. include a compact `Open Visuals` action when expanded.
+5. avoid becoming a second full visual-pack editor.
+
+### 8.4 First-Run and Empty State
+
+The current system exposes the Visuals tab and, via PR #1412, the Buddy popover
+entry point. Future product work should improve first-run discoverability:
+
+1. If no active pack exists, Buddy can still show the derived/static summary and
+   expose `Open Visuals`.
+2. Visuals tab empty state should make clear that users can create a draft,
+   upload assets, import a `.tldw-persona-vpack`, or request generation where
+   configured.
+3. Missing generation providers should be shown as setup/unavailable states, not
+   hidden failures.
+
+---
+
+## 9. Functional Requirements
+
+### FR-1: Persona-Scoped Pack Ownership
+
+Visual packs MUST be owned by the current user and scoped to one persona by
+default.
+
+### FR-2: Manifest-Backed Runtime Contract
+
+Each pack MUST have a structured manifest with renderer type, state mappings,
+animation definitions, asset references, frame timing, loop behavior, fallbacks,
+and optional authored triggers.
+
+### FR-3: Sprite/Frame V1 Renderer
+
+V1 MUST support sprite/frame rendering through the floating Buddy shell. Still
+poses, frame sequences, and sprite-sheet frame references are valid V1 shapes.
+
+### FR-4: Explicit Activation
+
+Users MUST explicitly activate a valid pack. Drafts, generated candidates,
+imports, and MCP-created changes MUST NOT silently replace the active pack.
+
+### FR-5: Upload and Asset Validation
+
+Uploads MUST validate MIME type, size, dimensions, storage path, checksum, and
+persona/pack ownership before assets are attached to a pack.
+
+### FR-6: Persona Garden Visuals Editor
+
+The Visuals tab MUST be the main user-visible authoring and review interface for
+visual packs.
+
+### FR-7: Buddy Direct Entry Point
+
+The expanded floating Buddy popover MUST provide a direct action to the selected
+persona's Visuals tab.
+
+### FR-8: Runtime Fallback
+
+Persona Live and Buddy controls MUST remain usable when pack list, pack detail,
+asset loading, or rendering fails.
+
+### FR-9: Jobs-Based Generation and Portability
+
+Asset generation, pack export, import preview, and import commit SHOULD use Jobs
+when work is user-visible, long-running, reviewable, retryable, or needs status
+polling.
+
+### FR-10: PR #1135-Aligned Portability
+
+Persona visual pack export/import SHOULD follow the same product pattern proven
+by PR #1135 asset-pack portability:
+
+1. queue background work.
+2. expose status and warnings.
+3. download completed archives through authenticated clients.
+4. upload archives for review-only preview.
+5. require explicit commit/activation decisions.
+
+### FR-11: MCP Runtime State Control
+
+The internal `persona_visuals` MCP module MAY trigger bounded runtime visual
+state overrides. Overrides MUST be named-state only, scoped to persona/session,
+duration-limited, and auditable.
+
+### FR-12: MCP Durable Changes
+
+MCP durable actions MUST create drafts, manifest updates, generation jobs, or
+review items. They MUST NOT silently activate packs.
+
+---
+
+## 10. Non-Functional Requirements
+
+1. Runtime pack loading failure MUST degrade without blocking live controls.
+2. Manifest validation MUST reject missing asset references, unsupported
+   renderer types, invalid frame timing, fallback cycles, and activation states
+   that cannot resolve.
+3. Visual runtime state resolution MUST be deterministic for known live/session
+   states.
+4. Frontend tests MUST cover active-pack rendering, state transitions, fallback,
+   and direct Buddy-to-Visuals routing.
+5. Backend tests MUST cover persistence, upload validation, activation gating,
+   portability jobs, and MCP tool boundaries.
+6. E2E tests MUST not depend on real microphone input, external TTS, or external
+   image generation.
+7. Pack archive handling MUST avoid leaking assets across users or personas.
+8. API and job errors MUST return actionable status/failure reasons where
+   available.
+9. The UI MUST avoid layout breakage when no pack, a broken pack, or missing
+   generation providers are present.
+
+---
+
+## 11. Data and API Model
+
+### Core Entities
+
+1. `PersonaVisualPack`
+   - id
+   - user id
+   - persona id
+   - title
+   - status: draft, active, archived, failed, or review-oriented variants
+   - renderer type
+   - manifest
+   - version
+   - provenance
+   - parent pack id where relevant
+
+2. `PersonaVisualAsset`
+   - id
+   - pack id
+   - user id
+   - persona id
+   - storage key
+   - asset role
+   - MIME type
+   - dimensions
+   - byte size
+   - checksum
+   - provenance
+
+3. `PersonaVisualCandidate`
+   - id
+   - pack id
+   - target state
+   - generated assets
+   - proposed manifest patch
+   - review status
+   - warning/failure metadata
+
+### Current API Surface
+
+Current persona-scoped API routes include:
+
+1. `GET /api/v1/persona/profiles/{persona_id}/visual-packs`
+2. `POST /api/v1/persona/profiles/{persona_id}/visual-packs`
+3. `GET /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}`
+4. `PATCH /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/manifest`
+5. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets`
+6. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/activate`
+7. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/deactivate`
+8. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/generation-jobs`
+9. `GET /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates`
+10. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/candidates/{candidate_id}/review`
+11. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/export`
+12. `GET /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}`
+13. `GET /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}/download`
+14. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/import-previews`
+15. `GET /api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview_id}`
+16. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview_id}/commit`
+
+---
+
+## 12. MCP Contract
+
+The internal `persona_visuals` MCP module is the V1 MCP integration point.
+
+Supported tool families:
+
+1. `persona_visuals.capabilities`
+2. `persona_visuals.trigger_state`
+3. `persona_visuals.create_draft_pack`
+4. `persona_visuals.update_manifest`
+5. `persona_visuals.enqueue_generation`
+
+Rules:
+
+1. Runtime triggers are transient and duration bounded.
+2. Durable changes stay draft/review-only until explicit user activation.
+3. Tools must resolve persona scope from context or explicit persona id.
+4. Tools must reject unknown states, missing pack ids, invalid manifests, and
+   unauthorized persona/pack access.
+5. Tool outputs that affect runtime state should be visible in live status and
+   audit metadata where existing infrastructure supports it.
+
+---
+
+## 13. Pack Portability
+
+Persona visual packs should be portable as `.tldw-persona-vpack` archives.
+
+The portability model should stay aligned with PR #1135:
+
+1. Export is queued as a background job.
+2. Export status includes progress, warnings, archive metadata, and download URL
+   when complete.
+3. Download uses authenticated binary fetch.
+4. Import starts with a review-only preview.
+5. Preview reports summary, validation warnings, conflicts, proposed plan, quota
+   estimate, required choices, and target warnings.
+6. Import commit is explicit and should create a draft pack unless a future
+   product decision allows direct replacement.
+7. Activation remains separate from import commit.
+
+Future work may add:
+
+1. duplicate to another persona.
+2. shared user library.
+3. cross-device sync.
+4. signed community packs.
+5. external MCP-compatible pack providers.
+
+---
+
+## 14. Success Metrics
+
+Initial metrics can be instrumentation-light and test-driven:
+
+1. A user can create or import a draft pack from Persona Garden.
+2. A user can reach the selected persona's Visuals workflow from floating Buddy
+   in one action.
+3. Active visual packs render in the floating Buddy for Persona Live.
+4. Broken packs do not block live connection or controls.
+5. Export/import preview flows complete without unauthenticated downloads or
+   silent activation.
+6. MCP runtime state triggers do not outlive configured duration limits.
+
+Suggested future product metrics:
+
+1. Percent of live-persona users who open Visuals from Buddy.
+2. Draft pack creation to activation conversion rate.
+3. Import preview to commit conversion rate.
+4. Visual-pack render failure rate.
+5. Generation candidate accept/reject/edit rate.
+
+---
+
+## 15. Rollout Plan
+
+### Phase 0: Foundation - Complete
+
+Merged foundation includes storage, service, API, frontend primitives, Buddy
+runtime rendering, Visuals editor, Jobs generation/review, internal MCP module,
+portability flows, and E2E coverage.
+
+### Phase 1: Direct Buddy Entry - In Review
+
+PR #1412 adds the floating Buddy `Open Visuals` action and focused tests.
+
+### Phase 2: Product Hardening
+
+1. Improve first-run and no-pack empty states.
+2. Add stronger unavailable-provider states for generation.
+3. Make import commit controls fully visible from the editor if backend support
+   is present but not yet exposed end to end.
+4. Add docs/help copy that explains pack ownership and activation semantics.
+5. Add visual-state diagnostics for pack/render failures.
+
+### Phase 3: Library and Externalization
+
+1. Duplicate pack to another persona.
+2. Personal shared visual-pack library.
+3. Import/export polish and conflict choices.
+4. External MCP-compatible visual providers.
+5. Live2D or other renderer adapter after the sprite/frame path is stable.
+
+---
+
+## 16. Risks and Mitigations
+
+1. Risk: Users confuse VN assets with Persona Buddy visuals.
+   - Mitigation: Keep primary UI, docs, and navigation in Persona Garden and
+     Buddy. Treat VN only as portability precedent.
+
+2. Risk: Generated assets silently change the active assistant.
+   - Mitigation: Require review and explicit activation.
+
+3. Risk: Broken packs degrade Persona Live.
+   - Mitigation: Runtime fallback to derived/static Buddy and test failed pack
+     loading.
+
+4. Risk: Future renderer types force a schema rewrite.
+   - Mitigation: Keep manifest versioned and renderer typed.
+
+5. Risk: Cross-persona asset leakage.
+   - Mitigation: Enforce user/persona/pack ownership checks at API, service, and
+     storage levels.
+
+6. Risk: The editor becomes a full image editor.
+   - Mitigation: Keep V1 focused on upload, preview, state mapping, timing,
+     review, activation, and portability.
+
+---
+
+## 17. Testing and Verification Requirements
+
+Frontend:
+
+1. Buddy shell loads and renders active visual packs.
+2. Buddy shell falls back when active visual pack loading fails.
+3. Buddy popover links to `/persona?persona_id=<id>&tab=visuals`.
+4. Visual state resolver covers live, tool, wake, recovery, authored trigger,
+   and MCP override cases.
+5. Sprite renderer handles frame selection and invalid frame/asset cases.
+6. VisualPackEditor covers creation, upload, manifest edits, activation,
+   generation review, export, import preview, and import commit where surfaced.
+
+Backend:
+
+1. Manifest validation rejects broken references, fallback cycles, and invalid
+   renderer/state data.
+2. Upload validation rejects invalid files and unsafe storage keys.
+3. Activation requires a valid renderable baseline.
+4. Export/import-preview/import-commit jobs preserve ownership and review
+   semantics.
+5. MCP tools enforce persona scope, state bounds, duration bounds, and draft-only
+   durable edits.
+
+E2E:
+
+1. Persona Live renders an active visual pack through mocked backend fixtures.
+2. Persona Live remains usable when pack loading fails.
+3. Direct Buddy to Visuals routing is covered in focused frontend tests and can
+   be promoted to E2E if routing regressions recur.
+
+---
+
+## 18. Open Product Questions
+
+1. Should import commit create a draft only, or optionally create a draft plus
+   "activate now" checkbox after validation?
+2. Should empty Buddy state show a stronger first-run affordance when no active
+   pack exists?
+3. What are the default upload quotas per user, persona, pack, and archive?
+4. Which image generation provider path should be the default first-run
+   recommendation?
+5. Should users be able to mark packs as reusable templates before shared
+   libraries exist?
+6. Which visual state names should become externally documented for future MCP
+   providers?
+
+---
+
+## 19. Durable References
+
+1. Historical implementation spec:
+   `Docs/superpowers/specs/2026-05-08-persona-visual-packs-design.md`
+2. Implementation plan:
+   `Docs/superpowers/plans/2026-05-08-persona-visual-packs-implementation-plan.md`
+3. Buddy workflow entry plan:
+   `Docs/superpowers/plans/2026-05-09-persona-buddy-visual-workflow-entry-plan.md`
+4. PR #1393: Add persona visual packs and portability flow.
+5. PR #1400: Persona visual closeout docs/E2E.
+6. PR #1412: Expose persona visuals from Buddy shell.
+7. Issue #1410: Expose Persona Buddy visual packs in live assistant.

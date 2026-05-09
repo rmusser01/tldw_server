@@ -1,16 +1,28 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { Palette } from "lucide-react"
+import { Link } from "react-router-dom"
 
 import type { PersonaBuddySummary } from "@/types/persona-buddy"
+import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 
 type BuddyShellPopoverProps = {
   buddySummary: PersonaBuddySummary
+  personaId?: string | null
 }
 
 export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
-  buddySummary
+  buddySummary,
+  personaId = null
 }) => {
   const { t } = useTranslation("common")
+  const normalizedPersonaId = String(personaId ?? "").trim()
+  const visualsRoute = normalizedPersonaId
+    ? buildPersonaGardenRoute({
+        personaId: normalizedPersonaId,
+        tab: "visuals"
+      })
+    : null
 
   return (
     <div
@@ -27,6 +39,16 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         <div className="mt-1 text-xs leading-5 text-text-muted">
           {buddySummary.role_summary}
         </div>
+      ) : null}
+      {visualsRoute ? (
+        <Link
+          data-testid="persona-buddy-open-visuals-link"
+          to={visualsRoute}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface2"
+        >
+          <Palette aria-hidden="true" className="h-3.5 w-3.5" />
+          <span>{t("personaBuddy.openVisuals", "Open Visuals")}</span>
+        </Link>
       ) : null}
     </div>
   )

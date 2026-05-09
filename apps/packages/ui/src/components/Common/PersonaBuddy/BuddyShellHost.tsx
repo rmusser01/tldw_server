@@ -371,6 +371,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   return createPortal(
     <BuddyShellDock
       buddySummary={dockSummary}
+      personaId={resolvedPersona.activePersonaId}
       isOpen={isOpen}
       isDormant={isDormant}
       visualPack={visualPack}
