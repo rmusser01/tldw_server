@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+
 import { describe, expect, it } from "vitest"
 import {
   formatWorldBookLastModified,
@@ -6,9 +10,11 @@ import {
 } from "../worldBookListUtils"
 
 describe("worldBookListUtils", () => {
-  it("parses string and second-based numeric timestamps", () => {
-    expect(parseWorldBookTimestamp("2026-02-18T09:00:00Z")).toBe(1771405200000)
-    expect(parseWorldBookTimestamp(1771405200)).toBe(1771405200000)
+  it.each([
+    ["2026-02-18T09:00:00Z", 1771405200000],
+    [1771405200, 1771405200000],
+  ])("parses %s as a millisecond timestamp", (value, expected) => {
+    expect(parseWorldBookTimestamp(value)).toBe(expected)
   })
 
   it("returns unknown-safe display values for null/invalid timestamps", () => {
@@ -20,14 +26,36 @@ describe("worldBookListUtils", () => {
     })
   })
 
-  it("formats relative and absolute timestamps from a stable now", () => {
+  it.each([
+    ["2026-02-18T11:59:30Z", "a few seconds ago"],
+    ["2026-02-18T11:59:00Z", "a minute ago"],
+    ["2026-02-18T11:58:00Z", "2 minutes ago"],
+    ["2026-02-18T09:00:00Z", "3 hours ago"],
+    ["2026-02-17T12:00:00Z", "a day ago"],
+    ["2026-02-19T12:00:00Z", "in a day"],
+  ])("formats %s with dayjs-compatible relative text", (value, relative) => {
     const nowMs = Date.parse("2026-02-18T12:00:00Z")
+
+    expect(
+      formatWorldBookLastModified(value, { nowMs }).relative
+    ).toBe(relative)
+  })
+
+  it("formats absolute timestamps from a stable now", () => {
+    const nowMs = Date.parse("2026-02-18T12:00:00Z")
+
     expect(
       formatWorldBookLastModified("2026-02-18T09:00:00Z", { nowMs })
-    ).toEqual({
-      relative: "3 hours ago",
+    ).toMatchObject({
       absolute: "2026-02-18 09:00:00 UTC",
       timestamp: 1771405200000
     })
+  })
+
+  it("does not depend on dayjs for display-only relative timestamps", () => {
+    const testDir = dirname(fileURLToPath(import.meta.url))
+    const source = readFileSync(resolve(testDir, "../worldBookListUtils.ts"), "utf8")
+
+    expect(source).not.toContain("dayjs")
   })
 })
