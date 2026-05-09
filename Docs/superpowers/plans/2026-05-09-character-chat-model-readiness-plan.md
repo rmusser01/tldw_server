@@ -27,13 +27,19 @@
 
 **Tests:** Unit tests for readiness states.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Inventory existing model availability checks.
 - Define a typed readiness result with status, missing requirement, and recommended action.
 - Decide whether AI-generation model readiness is separate from chat model readiness.
+
+Outcome:
+
+- Added shared `buildCharacterChatReadiness` and `getCharacterChatReadinessCopy` helpers in `chat-model-availability.ts`.
+- Readiness now distinguishes server connection, selected character, chat model selection/catalog state, and send-disabled state.
+- Kept AI character generation model copy separate from character-chat model readiness.
 
 ## Stage 2: Replace Fragmented Blockers
 
@@ -46,13 +52,19 @@ Steps:
 
 **Tests:** Component tests for each missing requirement.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Add a compact readiness panel or inline callout.
 - Include local actions such as `Open Model Settings`, `Retry`, and `Back to character`.
 - Preserve selected character context when taking setup actions.
+
+Outcome:
+
+- Added an in-context quick-chat blocker in the Characters modal when the selected character exists but no chat model is ready.
+- Reused the readiness copy in the chat no-model banner when a selected character is active.
+- Updated generation no-model copy so saved characters are not framed as unavailable.
 
 ## Stage 3: Verify Positive And Negative Paths
 
@@ -63,15 +75,21 @@ Steps:
 - Model-present state allows chat bootstrap.
 - The same message does not appear in unrelated non-character flows unless applicable.
 
-**Tests:** Focused E2E using mocked provider/model state, plus existing chat model tests.
+**Tests:** Focused mocked component tests and existing chat model utility tests; full browser screenshot re-walkthrough remains in the post-package audit plan.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Add a mocked-model happy path if existing E2E harness supports it.
 - Add screenshots for no-model and model-ready states.
 - Re-run affected chat and Characters tests.
+
+Outcome:
+
+- Verified utility readiness states, quick-chat no-model blocker, and generation-model copy with focused Vitest coverage.
+- Ran package TypeScript verification; it remains blocked by existing broad UI type debt outside this package, while the new helper-specific diagnostics were resolved.
+- Deferred full Puppeteer/Chrome screenshot validation to the explicit post-implementation re-walkthrough package.
 
 ## Risks
 

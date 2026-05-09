@@ -9,6 +9,10 @@ import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { focusComposer } from "@/hooks/useComposerFocus"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import {
+  buildCharacterChatReadiness,
+  getCharacterChatReadinessCopy
+} from "@/utils/chat-model-availability"
 import { buildCharacterSelectionPayload } from "../utils"
 
 type CharacterQuickChatMessage = {
@@ -135,12 +139,16 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
   const sendQuickChatMessage = React.useCallback(async () => {
     const trimmed = quickChatDraft.trim()
     if (!trimmed || quickChatSending || !quickChatCharacter) return
-    if (!activeQuickChatModel) {
-      setQuickChatError(
-        t("settings:manageCharacters.quickChat.modelRequired", {
-          defaultValue: "Select a model to start quick chat."
-        })
-      )
+    const readiness = buildCharacterChatReadiness({
+      selectedCharacter: quickChatCharacter,
+      selectedModel: activeQuickChatModel
+    })
+    if (!readiness.canStart) {
+      const characterSelection = buildCharacterSelectionPayload(quickChatCharacter)
+      const readinessCopy = getCharacterChatReadinessCopy(readiness, t, {
+        characterName: characterSelection.name
+      })
+      setQuickChatError(readinessCopy.title)
       return
     }
 

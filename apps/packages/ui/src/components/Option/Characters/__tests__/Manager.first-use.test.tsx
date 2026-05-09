@@ -3471,6 +3471,65 @@ describe("CharactersManager first-use onboarding", () => {
     expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
   }, 30000)
 
+  it("shows an in-context blocker when quick chat has no chat model", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "104",
+      name: "No Model Character",
+      system_prompt: "Stay in character.",
+      greeting: "Ready when a model is configured.",
+      description: "Quick chat blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return [null, vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(await screen.findByRole("button", { name: /More actions/i }))
+    await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
+
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as No Model Character"
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Saved characters are still available. Configure a chat model, then return here to continue with No Model Character."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
+      "href",
+      "/settings/model"
+    )
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    expect(tldwClientMock.createChat).not.toHaveBeenCalled()
+    expect(navigateMock).not.toHaveBeenCalled()
+  }, 30000)
+
   it("opens quick chat from gallery preview actions", async () => {
     const user = userEvent.setup()
     const characterRecord = {
