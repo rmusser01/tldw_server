@@ -45,6 +45,13 @@ _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
 
 
+def _coerce_optional_nonempty_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 class IdempotencyConflict(Exception):
     def __init__(self, original_id: str, key: str | None = None, prior_created_at: str | None = None, message: str = "Idempotency conflict") -> None:
         super().__init__(message)
@@ -1418,6 +1425,8 @@ class SandboxOrchestrator:
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         self._store.put_vz_session_control(
             session_id=str(session_id),
@@ -1426,6 +1435,8 @@ class SandboxOrchestrator:
             template_id=(str(template_id) if template_id is not None else None),
             workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
             agent_ready=bool(agent_ready),
+            helper_instance_id=_coerce_optional_nonempty_string(helper_instance_id),
+            helper_started_at=_coerce_optional_nonempty_string(helper_started_at),
         )
 
     def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:

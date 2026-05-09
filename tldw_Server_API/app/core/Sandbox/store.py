@@ -56,6 +56,14 @@ def _coerce_optional_iso_datetime(value: Any) -> str | None:
     return text
 
 
+def _coerce_optional_nonempty_string(value: Any) -> str | None:
+    """Normalize optional metadata strings and avoid persisting empty placeholders."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _parse_optional_iso_datetime(value: Any) -> datetime | None:
     """Parse ISO datetime text defensively; return None on empty/invalid input."""
     text = _coerce_optional_iso_datetime(value)
@@ -214,6 +222,8 @@ class SandboxStore:
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -719,6 +729,8 @@ class InMemoryStore(SandboxStore):
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         now_ts = time.time()
         with self._lock:
@@ -731,6 +743,8 @@ class InMemoryStore(SandboxStore):
                 "template_id": (str(template_id) if template_id is not None else None),
                 "workspace_mount": (str(workspace_mount) if workspace_mount is not None else None),
                 "agent_ready": bool(agent_ready),
+                "helper_instance_id": _coerce_optional_nonempty_string(helper_instance_id),
+                "helper_started_at": _coerce_optional_nonempty_string(helper_started_at),
                 "created_at": float(created_at),
                 "updated_at": float(now_ts),
             }
@@ -1137,6 +1151,8 @@ class SQLiteStore(SandboxStore):
                     template_id TEXT,
                     workspace_mount TEXT,
                     agent_ready INTEGER,
+                    helper_instance_id TEXT,
+                    helper_started_at TEXT,
                     created_at REAL,
                     updated_at REAL
                 );
@@ -1196,6 +1212,8 @@ class SQLiteStore(SandboxStore):
             _ensure_sqlite_column("sandbox_acp_sessions", "workspace_id", "TEXT")
             _ensure_sqlite_column("sandbox_acp_sessions", "workspace_group_id", "TEXT")
             _ensure_sqlite_column("sandbox_acp_sessions", "scope_snapshot_id", "TEXT")
+            _ensure_sqlite_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
+            _ensure_sqlite_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
 
     def _fp(self, body: dict[str, Any]) -> str:
         """
@@ -1870,20 +1888,25 @@ class SQLiteStore(SandboxStore):
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         now_ts = time.time()
         with self._lock, self._conn() as con:
             con.execute(
                 (
                     "INSERT INTO sandbox_vz_sessions("
-                    "id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at"
-                    ") VALUES (?,?,?,?,?,?,?,?) "
+                    "id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                    "helper_instance_id,helper_started_at,created_at,updated_at"
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(id) DO UPDATE SET "
                     "runtime=excluded.runtime,"
                     "vm_id=excluded.vm_id,"
                     "template_id=excluded.template_id,"
                     "workspace_mount=excluded.workspace_mount,"
                     "agent_ready=excluded.agent_ready,"
+                    "helper_instance_id=excluded.helper_instance_id,"
+                    "helper_started_at=excluded.helper_started_at,"
                     "updated_at=excluded.updated_at"
                 ),
                 (
@@ -1893,6 +1916,8 @@ class SQLiteStore(SandboxStore):
                     (str(template_id) if template_id is not None else None),
                     (str(workspace_mount) if workspace_mount is not None else None),
                     1 if agent_ready else 0,
+                    _coerce_optional_nonempty_string(helper_instance_id),
+                    _coerce_optional_nonempty_string(helper_started_at),
                     float(now_ts),
                     float(now_ts),
                 ),
@@ -1902,7 +1927,8 @@ class SQLiteStore(SandboxStore):
         with self._lock, self._conn() as con:
             cur = con.execute(
                 (
-                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                    "helper_instance_id,helper_started_at,created_at,updated_at "
                     "FROM sandbox_vz_sessions WHERE id=?"
                 ),
                 (str(session_id),),
@@ -1926,7 +1952,8 @@ class SQLiteStore(SandboxStore):
     def list_vz_session_controls(self) -> list[dict[str, Any]]:
         with self._lock, self._conn() as con:
             cur = con.execute(
-                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                "helper_instance_id,helper_started_at,created_at,updated_at "
                 "FROM sandbox_vz_sessions ORDER BY id"
             )
             rows = [dict(row) for row in cur.fetchall() or []]
@@ -2394,6 +2421,8 @@ class PostgresStore(SandboxStore):
                         template_id TEXT,
                         workspace_mount TEXT,
                         agent_ready BOOLEAN,
+                        helper_instance_id TEXT,
+                        helper_started_at TEXT,
                         created_at DOUBLE PRECISION,
                         updated_at DOUBLE PRECISION
                     );
@@ -2475,6 +2504,8 @@ class PostgresStore(SandboxStore):
             _ensure_column("sandbox_acp_sessions", "workspace_id", "TEXT")
             _ensure_column("sandbox_acp_sessions", "workspace_group_id", "TEXT")
             _ensure_column("sandbox_acp_sessions", "scope_snapshot_id", "TEXT")
+            _ensure_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
+            _ensure_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
 
     def _fp(self, body: dict[str, Any]) -> str:
         try:
@@ -3155,6 +3186,8 @@ class PostgresStore(SandboxStore):
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         now_ts = time.time()
         with self._lock, self._conn() as con:
@@ -3162,15 +3195,18 @@ class PostgresStore(SandboxStore):
                 cur.execute(
                     """
                     INSERT INTO sandbox_vz_sessions(
-                        id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at
+                        id,runtime,vm_id,template_id,workspace_mount,agent_ready,
+                        helper_instance_id,helper_started_at,created_at,updated_at
                     )
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (id) DO UPDATE SET
                         runtime=EXCLUDED.runtime,
                         vm_id=EXCLUDED.vm_id,
                         template_id=EXCLUDED.template_id,
                         workspace_mount=EXCLUDED.workspace_mount,
                         agent_ready=EXCLUDED.agent_ready,
+                        helper_instance_id=EXCLUDED.helper_instance_id,
+                        helper_started_at=EXCLUDED.helper_started_at,
                         updated_at=EXCLUDED.updated_at
                     """,
                     (
@@ -3180,6 +3216,8 @@ class PostgresStore(SandboxStore):
                         (str(template_id) if template_id is not None else None),
                         (str(workspace_mount) if workspace_mount is not None else None),
                         bool(agent_ready),
+                        _coerce_optional_nonempty_string(helper_instance_id),
+                        _coerce_optional_nonempty_string(helper_started_at),
                         float(now_ts),
                         float(now_ts),
                     ),
@@ -3189,7 +3227,8 @@ class PostgresStore(SandboxStore):
         with self._lock, self._conn() as con, con.cursor() as cur:
             cur.execute(
                 (
-                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                    "helper_instance_id,helper_started_at,created_at,updated_at "
                     "FROM sandbox_vz_sessions WHERE id=%s"
                 ),
                 (str(session_id),),
@@ -3209,7 +3248,8 @@ class PostgresStore(SandboxStore):
     def list_vz_session_controls(self) -> list[dict[str, Any]]:
         with self._lock, self._conn() as con, con.cursor() as cur:
             cur.execute(
-                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                "helper_instance_id,helper_started_at,created_at,updated_at "
                 "FROM sandbox_vz_sessions ORDER BY id"
             )
             return [dict(row) for row in cur.fetchall() or [] if isinstance(row, dict)]
