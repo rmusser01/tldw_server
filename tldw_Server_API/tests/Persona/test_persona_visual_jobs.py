@@ -80,6 +80,99 @@ def test_create_persona_visual_generation_job_uses_domain_and_idempotency_key() 
     }
 
 
+def test_create_persona_visual_pack_export_job_includes_options_digest() -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUALS_DOMAIN,
+        PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE,
+        create_visual_pack_export_job,
+        visual_pack_export_idempotency_key,
+    )
+
+    manager = FakeJobsManager()
+
+    job = create_visual_pack_export_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        portability_job_id="export-row-1",
+        request_id="request-1",
+        options={"strict": True},
+    )
+
+    expected_key = visual_pack_export_idempotency_key(
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        request_id="request-1",
+        options={"strict": True},
+    )
+    assert job["domain"] == PERSONA_VISUALS_DOMAIN
+    assert job["queue"] == "default"
+    assert job["job_type"] == PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE
+    assert job["owner_user_id"] == "user-1"
+    assert job["batch_group"] == "persona_visuals:user:user-1:persona:persona-1:pack:pack-1:portability:export:request-1"
+    assert job["idempotency_key"] == expected_key
+    assert expected_key != visual_pack_export_idempotency_key(
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        request_id="request-1",
+        options={"strict": False},
+    )
+    assert manager.created[0]["payload"] == {
+        "user_id": "user-1",
+        "persona_id": "persona-1",
+        "pack_id": "pack-1",
+        "portability_job_id": "export-row-1",
+        "request_id": "request-1",
+        "options": {"strict": True},
+    }
+
+
+def test_create_persona_visual_pack_import_preview_job_uses_archive_digest() -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
+        create_visual_pack_import_preview_job,
+        visual_pack_import_preview_idempotency_key,
+    )
+
+    manager = FakeJobsManager()
+
+    job = create_visual_pack_import_preview_job(
+        manager,
+        user_id="user-1",
+        preview_id="preview-1",
+        archive_path="archives/pack.tldw-persona-vpack",
+        request_id="request-1",
+        target_persona_id="persona-2",
+    )
+
+    expected_key = visual_pack_import_preview_idempotency_key(
+        user_id="user-1",
+        preview_id="preview-1",
+        archive_path="archives/pack.tldw-persona-vpack",
+        request_id="request-1",
+    )
+    assert job["queue"] == "default"
+    assert job["job_type"] == PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE
+    assert job["batch_group"] == "persona_visuals:user:user-1:portability:import-preview:preview-1:request-1"
+    assert job["idempotency_key"] == expected_key
+    assert expected_key != visual_pack_import_preview_idempotency_key(
+        user_id="user-1",
+        preview_id="preview-1",
+        archive_path="archives/other.tldw-persona-vpack",
+        request_id="request-1",
+    )
+    assert manager.created[0]["payload"] == {
+        "user_id": "user-1",
+        "preview_id": "preview-1",
+        "archive_path": "archives/pack.tldw-persona-vpack",
+        "request_id": "request-1",
+        "target_persona_id": "persona-2",
+    }
+
+
 @pytest.fixture()
 def persona_visual_db(tmp_path: Path):
     db = CharactersRAGDB(tmp_path / "persona_visual_jobs.sqlite", client_id="persona-visual-jobs-tests")
