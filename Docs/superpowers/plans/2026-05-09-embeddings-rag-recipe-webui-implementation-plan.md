@@ -154,7 +154,7 @@ def test_validation_rejects_non_integer_expected_ids_for_media_scoped_guided_flo
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_retrieval.py -q
 ```
 
@@ -240,7 +240,7 @@ Use warnings for low sample count or close margin only from already computed rep
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_retrieval.py -q
 ```
 
@@ -410,7 +410,7 @@ def test_apply_preview_resolves_slot_to_copy_config(monkeypatch) -> None:
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py -q
 ```
 
@@ -560,7 +560,7 @@ Guard the preview endpoint:
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py -q
 ```
 
@@ -1212,7 +1212,7 @@ In the modal, only show `Apply to RAG config` when preview returns `apply_availa
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py -q
 cd apps/packages/ui
 bunx vitest run src/components/Option/Evaluations/hooks/__tests__/useRecipes.test.tsx src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx
@@ -1234,7 +1234,7 @@ git commit -m "feat: apply embeddings recipe recommendation to rag config"
 - [ ] **Backend focused tests**
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/Evaluations/test_recipe_embeddings_retrieval.py \
   tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py \
@@ -1263,7 +1263,7 @@ bun run verify:openapi
 - [ ] **Bandit on touched backend source**
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m bandit -r \
   tldw_Server_API/app/core/Evaluations/recipes/embeddings_retrieval.py \
   tldw_Server_API/app/core/Evaluations/recipes/embeddings_recipe_hints.py \
