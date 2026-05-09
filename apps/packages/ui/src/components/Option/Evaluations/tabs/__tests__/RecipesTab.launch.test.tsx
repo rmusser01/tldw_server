@@ -10,6 +10,7 @@ const validateSpy = vi.fn()
 const createSpy = vi.fn()
 const generateSyntheticDraftsSpy = vi.fn()
 const useEmbeddingRecipeCandidatesSpy = vi.fn()
+const previewApplySpy = vi.fn()
 const setActiveTabSpy = vi.fn()
 const setSyntheticReviewRecipeKindSpy = vi.fn()
 const setSyntheticReviewBatchIdSpy = vi.fn()
@@ -259,6 +260,10 @@ vi.mock("../../hooks/useRecipes", () => ({
     isPending: false
   }),
   useEmbeddingRecipeCandidates: () => useEmbeddingRecipeCandidatesSpy(),
+  usePreviewRecipeRecommendationApply: () => ({
+    mutateAsync: previewApplySpy,
+    isPending: false
+  }),
   useRecipeRunReport: (runId: string | null) => ({
     data:
       runId === "recipe-run-1"
@@ -598,6 +603,7 @@ describe("RecipesTab recipe launch flow", () => {
     vi.clearAllMocks()
     resetMockEvaluationsStore()
     generateSyntheticDraftsSpy.mockReset()
+    previewApplySpy.mockReset()
     recipeManifestState.data = {
       data: [
       {
@@ -1056,6 +1062,121 @@ describe("RecipesTab recipe launch flow", () => {
       ).toBeInTheDocument()
       expect(screen.getByText("Candidates")).toBeInTheDocument()
     })
+  })
+
+  it("renders server-normalized apply preview and copy fallback", async () => {
+    previewApplySpy.mockResolvedValue({
+      ok: true,
+      data: {
+        run_id: "embeddings-run-1",
+        recipe_id: "embeddings_model_selection",
+        slot_name: "best_overall",
+        candidate_run_id: "arm-openai-small",
+        apply_eligible: true,
+        apply_available: false,
+        current: {
+          provider: "huggingface",
+          model: "Qwen/Qwen3-Embedding-0.6B"
+        },
+        proposed: {
+          provider: "openai",
+          model: "text-embedding-3-small"
+        },
+        affected_config: {
+          section: "Embeddings",
+          provider_key: "embedding_provider",
+          model_key: "embedding_model"
+        },
+        copy_config: {
+          Embeddings: {
+            embedding_provider: "openai",
+            embedding_model: "text-embedding-3-small"
+          }
+        },
+        reindex_required: true,
+        warnings: ["Existing indexes may need rebuild."]
+      }
+    })
+    createSpy.mockResolvedValue({
+      data: {
+        run_id: "embeddings-run-1",
+        recipe_id: "embeddings_model_selection",
+        status: "completed"
+      }
+    })
+
+    renderRecipesTab()
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Embeddings Model Selection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run recipe" }))
+    fireEvent.click(await screen.findByRole("button", { name: /Preview RAG config change/i }))
+
+    await waitFor(() => {
+      expect(previewApplySpy).toHaveBeenCalledWith({
+        runId: "embeddings-run-1",
+        slotName: "best_overall",
+        candidateRunId: "arm-openai-small"
+      })
+    })
+    expect(await screen.findByText("Current embedding model")).toBeInTheDocument()
+    expect(screen.getByText(/Qwen\/Qwen3-Embedding-0\.6B/)).toBeInTheDocument()
+    expect(screen.getAllByText("text-embedding-3-small").length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/embedding_provider/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/embedding_model/).length).toBeGreaterThan(0)
+    expect(screen.getByText("Existing indexes may need rebuild.")).toBeInTheDocument()
+    expect(screen.getByText("Reindex required")).toBeInTheDocument()
+    expect(screen.getByText(/"embedding_provider": "openai"/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Copy config change/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /^Apply config change$/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows a disabled live apply placeholder when apply is available", async () => {
+    previewApplySpy.mockResolvedValue({
+      ok: true,
+      data: {
+        run_id: "embeddings-run-1",
+        recipe_id: "embeddings_model_selection",
+        slot_name: "best_overall",
+        candidate_run_id: "arm-openai-small",
+        apply_eligible: true,
+        apply_available: true,
+        current: {
+          provider: "huggingface",
+          model: "Qwen/Qwen3-Embedding-0.6B"
+        },
+        proposed: {
+          provider: "openai",
+          model: "text-embedding-3-small"
+        },
+        affected_config: {
+          section: "Embeddings",
+          provider_key: "embedding_provider",
+          model_key: "embedding_model"
+        },
+        reindex_required: false,
+        warnings: []
+      }
+    })
+    createSpy.mockResolvedValue({
+      data: {
+        run_id: "embeddings-run-1",
+        recipe_id: "embeddings_model_selection",
+        status: "completed"
+      }
+    })
+
+    renderRecipesTab()
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Embeddings Model Selection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run recipe" }))
+    fireEvent.click(await screen.findByRole("button", { name: /Preview RAG config change/i }))
+
+    expect(await screen.findByText("Proposed embedding model")).toBeInTheDocument()
+    const applyButton = screen.getByRole("button", { name: /^Apply config change$/i })
+    expect(applyButton).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /Copy config change/i })).not.toBeInTheDocument()
   })
 
   it("shows embeddings blocked apply reasons without preview actions", async () => {

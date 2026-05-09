@@ -13,6 +13,7 @@ import {
   Empty,
   Input,
   InputNumber,
+  Modal,
   Select,
   Space,
   Spin,
@@ -26,6 +27,7 @@ import {
   useCreateRecipeRun,
   useRecipeLaunchReadiness,
   useRecipeManifests,
+  usePreviewRecipeRecommendationApply,
   useRecipeRunReport,
   useValidateRecipeDataset
 } from "../hooks/useRecipes"
@@ -204,6 +206,14 @@ const formatMetricValue = (value: unknown): string =>
     ? value.toFixed(value >= 1 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")
     : String(value)
 
+const formatProviderModel = (value: unknown): string => {
+  if (!value || typeof value !== "object") return ""
+  const record = value as Record<string, any>
+  const provider = String(record.provider || "").trim()
+  const model = String(record.model || "").trim()
+  return [provider, model].filter(Boolean).join(" / ")
+}
+
 const parseJsonObject = (text: string, label: string): Record<string, any> => {
   try {
     const parsed = JSON.parse(text)
@@ -300,6 +310,8 @@ export const RecipesTab: React.FC = () => {
     React.useState<RecipeDatasetValidation | null>(null)
   const [localError, setLocalError] = React.useState<string | null>(null)
   const [currentRunId, setCurrentRunId] = React.useState<string | null>(null)
+  const [previewApplyData, setPreviewApplyData] = React.useState<Record<string, any> | null>(null)
+  const [previewApplyError, setPreviewApplyError] = React.useState<string | null>(null)
   const setActiveTab = useEvaluationsStore((s) => s.setActiveTab)
   const syntheticReviewRecipeKind = useEvaluationsStore(
     (s) => s.syntheticReviewRecipeKind
@@ -321,6 +333,7 @@ export const RecipesTab: React.FC = () => {
   const { data: datasetsResp } = useDatasetsList({ limit: 100, offset: 0 })
   const validateMutation = useValidateRecipeDataset()
   const createRunMutation = useCreateRecipeRun()
+  const previewApplyMutation = usePreviewRecipeRecommendationApply()
   const { data: readinessResp, isLoading: readinessLoading } =
     useRecipeLaunchReadiness(selectedRecipeId)
   const {
@@ -377,6 +390,8 @@ export const RecipesTab: React.FC = () => {
     setValidationResult(null)
     setLocalError(null)
     setCurrentRunId(null)
+    setPreviewApplyData(null)
+    setPreviewApplyError(null)
     setForceRerun(false)
   }, [selectedRecipeId])
 
@@ -482,6 +497,8 @@ export const RecipesTab: React.FC = () => {
     if (!selectedManifest) return
     try {
       setLocalError(null)
+      setPreviewApplyData(null)
+      setPreviewApplyError(null)
       const datasetPayload = buildDatasetPayload()
       const runConfig = parseJsonObject(runConfigText, "Run config")
       const resp = await createRunMutation.mutateAsync({
@@ -495,6 +512,32 @@ export const RecipesTab: React.FC = () => {
     } catch (error: any) {
       setLocalError(getRecipeRunUserErrorMessage(error))
     }
+  }
+
+  const handlePreviewApply = async (
+    slotName: string,
+    candidateRunId?: string | null
+  ) => {
+    const runId = String(report?.run?.run_id || currentRunId || "").trim()
+    if (!runId) return
+    try {
+      setPreviewApplyError(null)
+      const response = await previewApplyMutation.mutateAsync({
+        runId,
+        slotName,
+        candidateRunId: candidateRunId || null
+      })
+      setPreviewApplyData((response as any)?.data || response || null)
+    } catch (error: any) {
+      setPreviewApplyData(null)
+      setPreviewApplyError(error?.message || "Unable to preview the config change.")
+    }
+  }
+
+  const handleCopyConfigChange = () => {
+    if (!previewApplyData?.copy_config) return
+    const serialized = JSON.stringify(previewApplyData.copy_config, null, 2)
+    void navigator?.clipboard?.writeText?.(serialized)
   }
 
   const canEnqueueRuns = launchReadiness?.can_enqueue_runs !== false
@@ -1209,7 +1252,16 @@ export const RecipesTab: React.FC = () => {
                     </div>
                   )}
                   {slotMetadata.apply_eligible === true ? (
-                    <Button size="small">
+                    <Button
+                      size="small"
+                      loading={previewApplyMutation.isPending}
+                      onClick={() =>
+                        handlePreviewApply(
+                          slotName,
+                          slotMetadata.candidate_run_id || slot.candidate_run_id || null
+                        )
+                      }
+                    >
                       {t("evaluations:recipePreviewRagConfigChange", {
                         defaultValue: "Preview RAG config change"
                       })}
@@ -1240,6 +1292,120 @@ export const RecipesTab: React.FC = () => {
           ]}
         />
       </div>
+    )
+  }
+
+  const renderPreviewApplyModal = () => {
+    const affectedConfig =
+      previewApplyData?.affected_config &&
+      typeof previewApplyData.affected_config === "object"
+        ? previewApplyData.affected_config
+        : null
+    const warnings = Array.isArray(previewApplyData?.warnings)
+      ? previewApplyData.warnings
+      : []
+    const copyConfig = previewApplyData?.copy_config
+    const hasCopyConfig =
+      copyConfig && typeof copyConfig === "object" && !Array.isArray(copyConfig)
+    const applyAvailable = previewApplyData?.apply_available === true
+
+    return (
+      <Modal
+        title={t("evaluations:recipeApplyPreviewTitle", {
+          defaultValue: "RAG config change preview"
+        })}
+        open={Boolean(previewApplyData || previewApplyError)}
+        onCancel={() => {
+          setPreviewApplyData(null)
+          setPreviewApplyError(null)
+        }}
+        footer={
+          <Space>
+            <Button
+              onClick={() => {
+                setPreviewApplyData(null)
+                setPreviewApplyError(null)
+              }}
+            >
+              {t("common:close", { defaultValue: "Close" })}
+            </Button>
+            {previewApplyData && applyAvailable ? (
+              <Button type="primary" disabled>
+                {t("evaluations:recipeApplyConfigChange", {
+                  defaultValue: "Apply config change"
+                })}
+              </Button>
+            ) : previewApplyData && hasCopyConfig ? (
+              <Button type="primary" onClick={handleCopyConfigChange}>
+                {t("evaluations:recipeCopyConfigChange", {
+                  defaultValue: "Copy config change"
+                })}
+              </Button>
+            ) : null}
+          </Space>
+        }
+      >
+        {previewApplyError ? (
+          <Alert type="error" showIcon title={previewApplyError} />
+        ) : previewApplyData ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Text strong>Current embedding model</Text>
+                <div className="mt-1 text-sm">
+                  {formatProviderModel(previewApplyData.current) || "None"}
+                </div>
+              </div>
+              <div>
+                <Text strong>Proposed embedding model</Text>
+                <div className="mt-1 text-sm">
+                  {formatProviderModel(previewApplyData.proposed) || "None"}
+                </div>
+              </div>
+            </div>
+            <div className="text-xs text-text-muted">
+              Run ID: {String(previewApplyData.run_id || "")}
+            </div>
+            {affectedConfig && (
+              <div className="space-y-2">
+                <Text strong>Affected config keys</Text>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(affectedConfig).map(([key, value]) => (
+                    <Tag key={key}>
+                      {key}: {String(value)}
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            )}
+            {warnings.length > 0 && (
+              <div className="space-y-2">
+                {warnings.map((warning: unknown, index: number) => (
+                  <Alert
+                    key={`apply-preview-warning-${index}`}
+                    type="warning"
+                    showIcon
+                    title={String(warning)}
+                  />
+                ))}
+              </div>
+            )}
+            <Tag color={previewApplyData.reindex_required ? "orange" : "green"}>
+              {previewApplyData.reindex_required
+                ? "Reindex required"
+                : "Reindex not required"}
+            </Tag>
+            {hasCopyConfig && (
+              <div className="space-y-2">
+                <Text strong>Copy config</Text>
+                <pre className="max-h-72 overflow-auto rounded border border-border-subtle bg-surface-subtle p-3 text-xs">
+                  {JSON.stringify(copyConfig, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </Modal>
     )
   }
 
@@ -1920,6 +2086,7 @@ export const RecipesTab: React.FC = () => {
             )}
           </Card>
         )}
+        {renderPreviewApplyModal()}
       </div>
     </div>
   )
