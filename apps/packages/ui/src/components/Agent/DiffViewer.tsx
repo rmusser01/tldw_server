@@ -16,6 +16,8 @@ import {
   CheckCheck
 } from "lucide-react"
 import { message } from "antd"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 export interface DiffHunk {
   id: string
@@ -203,29 +205,57 @@ function getFilePath(diff: FileDiff): string {
 /**
  * Get file status badge
  */
+const FILE_STATUS_CONFIG = {
+  new: {
+    label: "NEW",
+    stateKey: "ready"
+  },
+  deleted: {
+    label: "DEL",
+    stateKey: "error"
+  },
+  renamed: {
+    label: "RENAME",
+    stateKey: "empty"
+  }
+} satisfies Record<string, {
+  label: string
+  stateKey: DesignSystemStateKey
+}>
+
+const SEVERITY_BADGE_VARIANTS = {
+  success: "success",
+  error: "danger",
+  warning: "warning",
+  info: "info",
+  neutral: "secondary",
+} satisfies Record<ReturnType<typeof getDesignSystemState>["severity"], BadgeVariant>
+
 const FileStatusBadge: FC<{ diff: FileDiff }> = ({ diff }) => {
-  if (diff.isNew) {
-    return (
-      <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">
-        NEW
-      </span>
-    )
+  const config = diff.isNew
+    ? FILE_STATUS_CONFIG.new
+    : diff.isDeleted
+      ? FILE_STATUS_CONFIG.deleted
+      : diff.isRenamed
+        ? FILE_STATUS_CONFIG.renamed
+        : null
+
+  if (!config) {
+    return null
   }
-  if (diff.isDeleted) {
-    return (
-      <span className="rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">
-        DEL
-      </span>
-    )
-  }
-  if (diff.isRenamed) {
-    return (
-      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-        RENAME
-      </span>
-    )
-  }
-  return null
+
+  const state = getDesignSystemState(config.stateKey)
+
+  return (
+    <Badge
+      variant={SEVERITY_BADGE_VARIANTS[state.severity]}
+      size="md"
+      pill={false}
+      srLabel={state.label}
+    >
+      {config.label}
+    </Badge>
+  )
 }
 
 /**
