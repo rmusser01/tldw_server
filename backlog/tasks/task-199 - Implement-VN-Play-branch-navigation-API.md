@@ -4,7 +4,7 @@ title: Implement VN Play branch navigation API
 status: In Progress
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-09 23:07'
+updated_date: '2026-05-09 23:53'
 labels:
   - vn-play
   - api
@@ -76,6 +76,20 @@ Task 3 service slice started in .worktrees/vn-play-branch-navigation-api at 9bad
 Task 3 service slice complete and committed as 19eb33a72. Red evidence: new focused service tests failed before implementation with missing get_branch_navigation/list_events_with_metadata APIs and branch-tagging expectations. Green evidence: test_vn_play_turns.py => 33 passed, 5 warnings; test_vn_play_branch_navigation.py + test_vn_play_turns.py => 44 passed, 5 warnings; full tldw_Server_API/tests/VN_Play => 96 passed, 5 warnings. Hygiene: git diff --check exit 0; Bandit service.py + branch_navigation.py exit 0 with /tmp/bandit_vn_play_branch_navigation_task3.json results/errors empty. Scope changed only service.py and test_vn_play_turns.py in the Task 3 worktree commit.
 
 Task 3 complete after subagent implementation plus review loop. Commit: 19eb33a72 Expose VN Play branch navigation service. Spec review passed. Code-quality review passed with no critical/important/minor issues; only future performance consideration for large histories. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_branch_navigation.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q => 44 passed, 5 warnings; git diff --check => exit 0. Bandit reported by implementer: service.py/branch_navigation.py results/errors empty at /tmp/bandit_vn_play_branch_navigation_task3.json.
+
+Task 4 guarded restore slice started in .worktrees/vn-play-branch-navigation-api at d4531d84c. Scope constrained to service/repository core and VN Play tests per user handoff. TDD plan: add failing service tests for branch_latest restore replay/idempotency, choice_point restore semantics, stale/active-lock/idempotency conflicts, Freeform rejection, and checkpoint restore idempotency/versioning; verify focused red failures; implement service restore_branch plus checkpoint_restore idempotency using vn_play_session_actions and a focused atomic repository completion helper if needed; run focused VN Play pytest, Bandit on touched production scope, diff check, then commit.
+
+Task 4 guarded restore slice verification complete. Red evidence: initial new restore-focused test run failed with 11 failures for missing restore_branch/checkpoint idempotency behavior; later self-review regression test reproduced a target-unavailable lock leak before fix. Green evidence after fixes: restore-focused subset => 11 passed; target cleanup regression => 1 passed; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q => 61 passed, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 108 passed, 5 warnings; git diff --check => exit 0; Bandit on VN Play core + VNPlay_DB.py => exit 0, /tmp/bandit_vn_play_branch_navigation_task4.json results/errors empty.
+
+Task 4 committed as 914f0b714 Add guarded VN Play branch restore. Post-commit status in .worktrees/vn-play-branch-navigation-api: branch codex/vn-play-branch-navigation-api ahead 15 of origin/dev with no unstaged tracked changes reported by git status --short --branch.
+
+Task 4 quality review fix loop started. Validated findings: create_session_action duplicate-at-insert race should replay/conflict deterministically, and failed/abandoned restore action status plus session lock clearing should be atomic in one repository transaction. Worker asked to add regression coverage, rerun focused/full VN Play tests, diff check, and Bandit.
+
+Task 4 quality review fix started at 914f0b714 in .worktrees/vn-play-branch-navigation-api. Scope: VNPlay_DB.py, service.py, and VN Play tests only. Plan: add failing DB regression tests for duplicate-at-insert session action idempotency and terminal-action lock clearing; add/keep service coverage for target failure lock cleanup through the service helper; implement race-safe create_session_action insert handling and a transactional terminal action+guarded lock helper; rerun focused VN Play tests, diff check, Bandit, and commit.
+
+Quality review fixes complete: added race-safe create_session_action duplicate-at-insert recovery for matching idempotency payload hashes and deterministic idempotency_key_conflict for hash mismatches; added transactional mark_session_action_terminal helper that marks failed/abandoned and clears active_session_action_id only when it still points at that action; updated VNPlayService failure/abandon paths to use the atomic helper. TDD red evidence: targeted new tests failed before implementation with raw sqlite UNIQUE constraint, missing mark_session_action_terminal, and service still using separate lock clear. Green/verification: targeted new tests passed; focused DB+turn suite 63 passed; full VN_Play suite 110 passed; git diff --check clean; Bandit touched production scope wrote /tmp/bandit_vn_play_branch_navigation_task4_fix.json with 0 errors and 0 results.
+
+Task 4 review fix loop complete. Fix commit 2957038cb Fix VN Play restore action races. Code-quality re-review found no Critical/Important/Minor issues and approved continuing to Task 5. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q => 63 passed, 5 warnings. git diff --check => exit 0. Bandit artifact /tmp/bandit_vn_play_branch_navigation_task4_fix.json has results/errors empty.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
