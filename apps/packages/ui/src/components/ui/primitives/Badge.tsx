@@ -27,6 +27,10 @@ export interface BadgeProps {
   outline?: boolean
   /** Screen reader label (if different from visible text) */
   srLabel?: string
+  /** Accessible label for the badge itself */
+  "aria-label"?: string
+  /** Native tooltip text */
+  title?: string
   /** Additional CSS classes */
   className?: string
   /** Test ID */
@@ -99,6 +103,8 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       dot = false,
       outline = false,
       srLabel,
+      "aria-label": ariaLabel,
+      title,
       className,
       "data-testid": dataTestId,
     },
@@ -116,8 +122,12 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
           outline ? `border ${styles.outline} bg-transparent` : styles.filled,
           className
         )}
+        aria-label={ariaLabel}
         data-ds-component="Badge"
+        data-ds-size={size}
+        data-ds-variant={variant}
         data-testid={dataTestId}
+        title={title}
       >
         {dot && (
           <span

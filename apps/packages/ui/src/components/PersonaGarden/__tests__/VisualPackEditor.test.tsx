@@ -3,12 +3,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  fetchWithAuth: vi.fn()
-}))
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
+  fetchWithAuth: vi.fn(),
+  translate: vi.fn(
+    (
       key: string,
       defaultValueOrOptions?:
         | string
@@ -20,6 +17,12 @@ vi.mock("react-i18next", () => ({
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
     }
+  )
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (...args: Parameters<typeof mocks.translate>) => mocks.translate(...args)
   })
 }))
 
@@ -110,6 +113,94 @@ describe("VisualPackEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     mocks.fetchWithAuth.mockReset()
+    mocks.translate.mockReset()
+    mocks.translate.mockImplementation(
+      (
+        key: string,
+        defaultValueOrOptions?:
+          | string
+          | {
+              defaultValue?: string
+            }
+      ) => {
+        if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+        if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+        return key
+      }
+    )
+  })
+
+  it("localizes loading and refresh labels while candidates are loading", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    let resolveCandidates: (value: unknown) => void = () => undefined
+
+    mocks.translate.mockImplementation(
+      (
+        key: string,
+        defaultValueOrOptions?:
+          | string
+          | {
+              defaultValue?: string
+            }
+      ) => {
+        if (key === "common:loading") return "Localized loading"
+        if (key === "common:refresh") return "Localized refresh"
+        if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+        if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+        return key
+      }
+    )
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return new Promise((resolve) => {
+          resolveCandidates = resolve
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Localized loading" })).toHaveLength(1)
+    )
+
+    resolveCandidates({
+      ok: true,
+      json: async () => ({ candidates: [] })
+    })
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Localized refresh" })).toHaveLength(2)
+    )
   })
 
   it("loads pack list, creates a draft pack, and uploads the selected asset role", async () => {
