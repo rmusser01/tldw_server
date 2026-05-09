@@ -1,10 +1,10 @@
 ---
 id: TASK-145.10
 title: Address Qodo PR review findings for embeddings apply
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 17:34'
-updated_date: '2026-05-09 17:38'
+updated_date: '2026-05-09 17:45'
 labels:
   - evals
   - backend
@@ -29,7 +29,7 @@ Fix Qodo review findings on PR #1421: visible policy-helper fallback handling, n
 - [x] #1 Policy helper import/runtime fallback is no longer silent
 - [x] #2 Live apply helper supports injected config update behavior instead of hard-coding only the setup_manager singleton
 - [x] #3 Apply endpoint converts FileNotFoundError/PermissionError/OSError apply failures into sanitized HTTP 500 responses
-- [ ] #4 Qodo review threads are replied to or resolved after push
+- [x] #4 Qodo review threads are replied to or resolved after push
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,6 +44,8 @@ Inspect existing helper/endpoint tests, add focused regressions for the three re
 Implemented Qodo review fixes for the embeddings live-apply backend path. Policy helper fallback now logs a warning when import/runtime helper loading fails instead of silently returning permissive defaults. apply_embedding_recipe_recommendation now receives a config_updater callable, and the FastAPI endpoint exposes get_recipe_config_updater as a dependency returning setup_manager.update_config, so tests and callers can override config mutation behavior without patching the helper module singleton. The apply endpoint now catches OSError subclasses from config writes, logs them, and returns sanitized HTTP 500 details through sanitize_error_message.
 
 Verification: red test run first failed on missing get_recipe_config_updater import before production changes. After implementation, targeted regressions passed 3 tests with 5 warnings; focused backend eval recipe tests passed 41 tests with 5 warnings. Bandit on touched backend source wrote /tmp/bandit_embeddings_qodo_review.json with results 0/errors 0/skipped 0. git diff --check passed.
+
+Pushed commit 529e34e9a to origin/codex/embeddings-rag-recipe-design, replied to the three Qodo inline threads, and resolved them.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -54,10 +56,10 @@ Addressed the Qodo backend review findings by making embedding policy fallback v
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
