@@ -1,6 +1,10 @@
 import React from "react"
 import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
-import { Badge, type BadgeVariant } from "@/components/ui/primitives"
+import {
+  Badge,
+  getBadgeVariantForDesignSystemSeverity,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 
 export interface StatusBadgeProps {
   variant: "demo" | "warning" | "error"
@@ -13,21 +17,15 @@ const VARIANT_STATES: Record<StatusBadgeProps["variant"], DesignSystemStateKey> 
   error: "error",
 }
 
-const SEVERITY_BADGE_VARIANTS = {
-  success: "success",
-  error: "danger",
-  warning: "warning",
-  info: "info",
-  neutral: "secondary",
-} satisfies Record<ReturnType<typeof getDesignSystemState>["severity"], BadgeVariant>
-
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   variant,
   children
 }) => {
   const state = getDesignSystemState(VARIANT_STATES[variant])
   const badgeVariant: BadgeVariant =
-    variant === "demo" ? "demo" : SEVERITY_BADGE_VARIANTS[state.severity]
+    variant === "demo"
+      ? "demo"
+      : getBadgeVariantForDesignSystemSeverity(state.severity)
 
   return (
     <Badge

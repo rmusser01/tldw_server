@@ -5566,17 +5566,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-status-badge:src/components/Agent/DiffViewer.tsx:FileStatusBadge",
-    "path": "src/components/Agent/DiffViewer.tsx",
-    "rule": "local-status-badge",
-    "subject": "FileStatusBadge",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local FileStatusBadge status wrapper before the guard.",
-    "replacement": "Badge with design-system state registry mapping",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-status-badge:src/components/Agent/SessionHistoryPanel.tsx:StatusBadge",
     "path": "src/components/Agent/SessionHistoryPanel.tsx",
     "rule": "local-status-badge",
