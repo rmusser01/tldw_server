@@ -39,10 +39,12 @@ a custom visual pack exists. Users need a first-class way to make the live
 assistant visually theirs without creating a separate persona identity or
 leaving the Persona workflow.
 
-The earlier implementation proved the data model, renderer, API, editor, Jobs
-flow, MCP module, and E2E runtime behavior. The remaining product gap is making
-the capability durable, discoverable, and clearly documented as part of the
-Persona Live assistant experience.
+The implementation now covers the core data model, renderer, API, editor, Jobs
+flow, MCP module, E2E runtime behavior, Buddy entry point, diagnostics, setup
+states, and ownership/help copy. The remaining product gap is optional Phase 3
+externalization: duplication between personas, personal libraries, richer
+import/export conflict choices, external visual providers, and future renderer
+adapters.
 
 ---
 
@@ -87,8 +89,11 @@ As of 2026-05-09:
 1. The durable implementation from PR #1393 is merged into `dev`.
 2. The closeout documentation and E2E verification from PR #1400 is merged into
    `dev`.
-3. Draft PR #1412 adds the direct floating Buddy popover action to open the
-   selected persona's Visuals workflow.
+3. PR #1412 is merged and adds the direct floating Buddy popover action to open
+   the selected persona's Visuals workflow.
+4. PR #1447 is merged and closes the ordered Product Hardening tracker from
+   #1428: reliability diagnostics (#1430), generation/setup UX (#1431), and
+   ownership/help copy (#1429).
 
 Implemented foundations include:
 
@@ -111,13 +116,17 @@ Implemented foundations include:
 9. Jobs-backed generation and pack portability flows.
 10. Persona Live E2E coverage for active-pack rendering and broken-pack
     fallback.
-
-Open PR #1412 adds:
-
-1. An `Open Visuals` action in the floating Persona Buddy popover.
-2. Active persona id propagation from `BuddyShellHost` to the popover.
-3. Routing through the existing Persona Garden helper to
-   `/persona?persona_id=<id>&tab=visuals`.
+11. An `Open Visuals` action in the floating Persona Buddy popover, with active
+    persona id propagation and routing through the existing Persona Garden
+    helper to `/persona?persona_id=<id>&tab=visuals`.
+12. User-facing reliability diagnostics for broken packs, missing assets,
+    invalid manifests, and renderer fallback states.
+13. Generation setup diagnostics for disabled Jobs, unavailable image providers,
+    adapter failures, selected-backend mismatch, and missing default backends.
+14. Persona Visuals editor and code-documentation copy that explains
+    user-owned assets, one-persona default attachment, manifest-backed packs,
+    active versus available pack behavior, import preview/commit, export, and
+    generated-candidate review.
 
 ---
 
@@ -207,16 +216,19 @@ The floating Buddy shell should:
 
 ### 8.4 First-Run and Empty State
 
-The current system exposes the Visuals tab and, via PR #1412, the Buddy popover
-entry point. Future product work should improve first-run discoverability:
+The current system exposes the Visuals tab, the Buddy popover entry point, and
+diagnostic/setup copy in the Visuals editor:
 
-1. If no active pack exists, Buddy can still show the derived/static summary and
-   expose `Open Visuals`.
-2. Visuals tab empty state should make clear that users can create a draft,
-   upload assets, import a `.tldw-persona-vpack`, or request generation where
-   configured.
-3. Missing generation providers should be shown as setup/unavailable states, not
-   hidden failures.
+1. If no active pack exists, Buddy still shows the derived/static summary and
+   exposes `Open Visuals` when the selected persona context is known.
+2. The Visuals tab empty state makes draft creation the first step, then points
+   users toward uploading frames, mapping states, importing/exporting packs,
+   queueing generation, reviewing candidates, and activating a valid pack.
+3. Missing generation providers and disabled Jobs are shown as setup or
+   unavailable states before users queue generation.
+4. Ownership/help copy explains that packs are user-owned, attached to one
+   persona by default, manifest-backed, and only rendered after explicit
+   activation.
 
 ---
 
@@ -458,20 +470,30 @@ Merged foundation includes storage, service, API, frontend primitives, Buddy
 runtime rendering, Visuals editor, Jobs generation/review, internal MCP module,
 portability flows, and E2E coverage.
 
-### Phase 1: Direct Buddy Entry - In Review
+### Phase 1: Direct Buddy Entry - Complete
 
-PR #1412 adds the floating Buddy `Open Visuals` action and focused tests.
+PR #1412 merged the floating Buddy `Open Visuals` action and focused tests.
 
-### Phase 2: Product Hardening
+### Phase 2: Product Hardening - Complete
 
-1. Improve first-run and no-pack empty states.
-2. Add stronger unavailable-provider states for generation.
-3. Make import commit controls fully visible from the editor if backend support
-   is present but not yet exposed end to end.
-4. Add docs/help copy that explains pack ownership and activation semantics.
-5. Add visual-state diagnostics for pack/render failures.
+Completed Product Hardening includes:
+
+1. Reliability diagnostics for broken packs, missing assets, invalid manifests,
+   and renderer fallback states (#1430).
+2. Unavailable-provider and generation setup states for disabled Jobs, missing
+   image providers, adapter failures, selected-backend mismatch, and missing
+   default backends (#1431).
+3. Import commit controls in the Visuals editor, with reviewed import commits
+   creating draft packs rather than silently activating them.
+4. Docs/help copy explaining ownership, one-persona default attachment,
+   manifest-backed packs, active-pack semantics, import preview/commit, export,
+   and generated-candidate review (#1429 / PR #1447).
+5. Closed hardening tracker #1428.
 
 ### Phase 3: Library and Externalization
+
+Phase 3 is optional future product work, not required for the current
+Persona/Buddy visual-pack baseline:
 
 1. Duplicate pack to another persona.
 2. Personal shared visual-pack library.
@@ -542,10 +564,11 @@ E2E:
 
 ## 18. Open Product Questions
 
-1. Should import commit create a draft only, or optionally create a draft plus
-   "activate now" checkbox after validation?
+1. Current behavior: import commit creates a reviewed draft pack only. Future
+   question: should the UI add an optional "activate now" step after validation?
 2. Should empty Buddy state show a stronger first-run affordance when no active
-   pack exists?
+   pack exists, beyond the current derived/static Buddy summary plus `Open
+   Visuals` link?
 3. What are the default upload quotas per user, persona, pack, and archive?
 4. Which image generation provider path should be the default first-run
    recommendation?
@@ -568,3 +591,5 @@ E2E:
 5. PR #1400: Persona visual closeout docs/E2E.
 6. PR #1412: Expose persona visuals from Buddy shell.
 7. Issue #1410: Expose Persona Buddy visual packs in live assistant.
+8. PR #1447 / issue #1429: Persona visual pack ownership/help copy.
+9. Issue #1428: Completed Persona/Buddy visual-pack Product Hardening tracker.
