@@ -52,9 +52,13 @@ Optional configuration:
 - `TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH` or manual `entitlements_path`
 - `TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN`
 - `TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY=1` to enable scheduled runs
+- manual `include_failure_drills=true` to run VM-invalidation recovery drills
+  scoped to VMs created by the drill itself
 
 Manual `skip_sign: false` must override a true repository variable. This keeps
 one-off signing validation possible without changing repository configuration.
+Failure drills are never enabled by repository variable or schedule in the
+current policy.
 
 ## Branch And Action Safety
 
@@ -98,6 +102,13 @@ host can compute macOS sandbox reconciliation state and produce a dry-run repair
 plan for stale VZ session-control metadata. It does not terminate VMs, delete
 session controls, or run image-store cleanup.
 
+Manual failure drills are separate from the default smoke. When a maintainer
+starts the workflow with `include_failure_drills=true`, the delegated smoke
+script runs additional tests that may invalidate VMs created by those tests. The
+current drill terminates only the session VM recorded by the drill's own
+session-control row, then verifies the next same-session command provisions a
+fresh VM and completes. Scheduled runs must not enable these drills by default.
+
 ## Expected Skips And Non-Blocking Conditions
 
 These are expected and should not block ordinary PRs:
@@ -108,6 +119,8 @@ These are expected and should not block ordinary PRs:
 - workflow skipped on refs other than `main` and `dev`
 - normal hosted CI lacking Apple silicon VZ support
 - local developer machines without a prepared bundle/helper environment
+- failure-drill coverage skipped because manual dispatch did not set
+  `include_failure_drills=true`
 
 A manual run that fails before VM execution because the runner is missing the
 configured bundle path is an operator setup failure, not a sandbox runtime
@@ -127,6 +140,8 @@ prepared host and fails one of the accepted runtime guarantees:
 - same-session VM reuse fails after the first command succeeds
 - recovery diagnostics or dry-run reconciliation repair planning fails after
   helper/template readiness passes
+- a manually requested failure drill cannot replace a drill-owned stale session
+  VM after helper-side termination
 - cleanup leaves the helper process or accepted socket path behind
 - helper protocol mismatch is introduced without a matching compatibility plan
 - artifacts/logs are not uploaded when the job fails
@@ -157,9 +172,11 @@ output and should not contain secrets or raw user data.
 - Keep this policy aligned with `.github/workflows/vz-linux-host-gated.yml`.
 - Update `tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py`
   when changing workflow triggers, labels, action pins, permissions, artifact
-  paths, or nightly opt-in behavior.
+  paths, failure-drill opt-in behavior, or nightly opt-in behavior.
 - Do not add PR or push triggers without a new security review.
 - Do not remove branch gating without replacing it with an equivalent trusted
   ref policy.
 - Prefer improving `run-host-e2e-smoke.sh` over adding ad hoc workflow-only
   helper lifecycle logic.
+- Keep failure drills disabled by default until repeated prepared-host runs show
+  they are stable enough for scheduled promotion.
