@@ -293,6 +293,165 @@ def test_turn_and_session_action_locks_share_session_mutation_gate(
     assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
 
 
+def test_session_action_lock_rejects_invalid_or_unlockable_actions(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Lock target",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    other_session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Other session",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    other_owner_session = repo.create_session(
+        owner_user_id=43,
+        mode="story",
+        title="Other owner",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    other_session_action = repo.create_session_action(
+        session_id=other_session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-other-session",
+        request_payload_hash="restore-other-session-hash",
+    )
+    other_owner_action = repo.create_session_action(
+        session_id=other_owner_session["id"],
+        owner_user_id=43,
+        action_type="branch_restore",
+        idempotency_key="restore-other-owner",
+        request_payload_hash="restore-other-owner-hash",
+    )
+    completed_action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-completed",
+        request_payload_hash="restore-completed-hash",
+        status="succeeded",
+    )
+
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=999_999,
+        expected_scene_version=0,
+    ) is False
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=other_session_action["id"],
+        expected_scene_version=0,
+    ) is False
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=other_owner_action["id"],
+        expected_scene_version=0,
+    ) is False
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=completed_action["id"],
+        expected_scene_version=0,
+    ) is False
+    assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
+
+
+def test_latest_active_session_action_ignores_mismatched_active_marker(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Bad marker target",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    other_session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Bad marker source",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    other_session_action = repo.create_session_action(
+        session_id=other_session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-other-session",
+        request_payload_hash="restore-other-session-hash",
+    )
+    repo.update_session(
+        session["id"],
+        {"active_session_action_id": other_session_action["id"]},
+        owner_user_id=42,
+    )
+
+    assert repo.latest_active_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+    ) is None
+
+
+def test_update_session_action_is_owner_scoped_and_keeps_identity_fields_immutable(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Immutable action",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-immutable",
+        request_payload_hash="restore-original-hash",
+    )
+
+    wrong_owner_update = repo.update_session_action(
+        action["id"],
+        {"status": "succeeded"},
+        owner_user_id=43,
+    )
+    assert wrong_owner_update is None
+    assert repo.get_session_action(action["id"])["status"] == "pending"
+
+    updated = repo.update_session_action(
+        action["id"],
+        {
+            "action_type": "checkpoint_restore",
+            "request_payload_hash": "restore-mutated-hash",
+            "status": "abandoned",
+        },
+        owner_user_id=42,
+    )
+    assert updated["status"] == "abandoned"
+    assert updated["action_type"] == "branch_restore"
+    assert updated["request_payload_hash"] == "restore-original-hash"
+
+
 def test_scene_branches_and_checkpoints_round_trip_json(chacha_db: CharactersRAGDB) -> None:
     repo = VNPlayRepository.initialized(chacha_db)
     session = repo.create_session(

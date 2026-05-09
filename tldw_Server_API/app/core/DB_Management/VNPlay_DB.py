@@ -438,12 +438,21 @@ class VNPlayRepository:
                   AND active_turn_request_id IS NULL
                   AND active_session_action_id IS NULL
                   AND scene_version = ?
+                  AND EXISTS (
+                      SELECT 1
+                      FROM vn_play_session_actions AS action
+                      WHERE action.id = ?
+                        AND action.session_id = vn_play_sessions.id
+                        AND action.owner_user_id = vn_play_sessions.owner_user_id
+                        AND action.status IN ('pending', 'abandoned')
+                  )
                 """,
                 (
                     action_id,
                     session_id,
                     owner_user_id,
                     expected_scene_version,
+                    action_id,
                 ),
             )
             return cursor.rowcount == 1
@@ -630,11 +639,20 @@ class VNPlayRepository:
             raise RuntimeError("created_session_action_not_found")
         return session_action
 
-    def get_session_action(self, action_id: int) -> dict[str, Any] | None:
+    def get_session_action(
+        self,
+        action_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
         cursor = self.db.execute_query(
-            "SELECT * FROM vn_play_session_actions WHERE id = ?",
-            (action_id,),
+            """
+            SELECT *
+            FROM vn_play_session_actions
+            WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+            """,
+            (action_id, owner_user_id, owner_user_id),
         )
         row = cursor.fetchone()
         return _decode_session_action(row) if row is not None else None
@@ -671,13 +689,15 @@ class VNPlayRepository:
             FROM vn_play_session_actions AS action
             JOIN vn_play_sessions AS session
               ON session.active_session_action_id = action.id
+             AND session.id = action.session_id
+             AND session.owner_user_id = action.owner_user_id
             WHERE session.id = ?
               AND session.owner_user_id = ?
-              AND action.owner_user_id = ?
+              AND session.deleted = 0
             ORDER BY action.updated_at DESC, action.id DESC
             LIMIT 1
             """,
-            (session_id, owner_user_id, owner_user_id),
+            (session_id, owner_user_id),
         )
         row = cursor.fetchone()
         return _decode_session_action(row) if row is not None else None
@@ -696,7 +716,7 @@ class VNPlayRepository:
             json_fields={"response_payload", "error"},
         )
         if not update_values:
-            return self.get_session_action(action_id)
+            return self.get_session_action(action_id, owner_user_id=owner_user_id)
 
         with self.db.transaction() as conn:
             for field_name, value in update_values:
@@ -705,7 +725,7 @@ class VNPlayRepository:
                     statement,
                     (value, action_id, owner_user_id, owner_user_id),
                 )
-        return self.get_session_action(action_id)
+        return self.get_session_action(action_id, owner_user_id=owner_user_id)
 
     def get_turn_request(self, turn_request_id: int) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
@@ -1281,8 +1301,6 @@ _TURN_REQUEST_UPDATE_COLUMNS = {
 }
 
 _SESSION_ACTION_UPDATE_COLUMNS = {
-    "action_type": "action_type",
-    "request_payload_hash": "request_payload_hash",
     "status": "status",
     "response_payload": "response_payload_json",
     "error": "error_json",
@@ -1409,14 +1427,6 @@ _TURN_REQUEST_UPDATE_STATEMENTS = {
 }
 
 _SESSION_ACTION_UPDATE_STATEMENTS = {
-    "action_type": (
-        "UPDATE vn_play_session_actions SET action_type = ?, updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
-    ),
-    "request_payload_hash": (
-        "UPDATE vn_play_session_actions SET request_payload_hash = ?, updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
-    ),
     "status": (
         "UPDATE vn_play_session_actions SET status = ?, updated_at = CURRENT_TIMESTAMP "
         "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
