@@ -4,7 +4,7 @@ title: Implement VN Play branch navigation API
 status: In Progress
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-09 22:56'
+updated_date: '2026-05-09 23:07'
 labels:
   - vn-play
   - api
@@ -30,7 +30,7 @@ Implement GitHub issue #1463 from the reviewed design spec and saved implementat
 <!-- AC:BEGIN -->
 - [x] #1 Pure branch navigation read model derives active path, parent branch ids, direct/subtree event ranges, and stable warning payloads.
 - [x] #2 Repository persists session restore actions, enforces restore idempotency, and shares a session mutation gate with turn requests.
-- [ ] #3 Service exposes branch navigation, branch-aware event filtering, branch restore, and checkpoint restore idempotency while preserving existing Freeform and Story turn behavior.
+- [x] #3 Service exposes branch navigation, branch-aware event filtering, branch restore, and checkpoint restore idempotency while preserving existing Freeform and Story turn behavior.
 - [ ] #4 API exposes branch-navigation and branch restore endpoints, extends events filtering compatibly, maps stable errors, and documents the contract.
 - [ ] #5 Focused VN Play tests pass, Bandit is run for touched backend scope, and final diff hygiene is clean.
 <!-- AC:END -->
@@ -70,6 +70,12 @@ Task 2 review follow-up committed as daeb82fd1 Harden VN Play session action loc
 Task 2 complete after subagent implementation plus review loop. Commits: 2dc0736b2 Add VN Play session action locking; daeb82fd1 Harden VN Play session action locking. Spec review passed. Code-quality review passed after hardening action ownership/session/status checks, scoped update returns, and immutable action identity fields. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_branch_navigation.py -q => 27 passed, 5 warnings; git diff --check => exit 0. Bandit reported by implementer: VNPlay_DB.py results/errors empty at /tmp/bandit_vn_play_branch_navigation_task2_fix.json.
 
 Rebased codex/vn-play-branch-navigation-api onto origin/dev 90b3b767a before Task 3. New current head before Task 3 dispatch: b6984ca30. Post-rebase focused VN Play baseline: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 88 passed, 5 warnings in 22.12s.
+
+Task 3 service slice started in .worktrees/vn-play-branch-navigation-api at 9bad34d8d. Scope constrained to service.py, branch_navigation.py if needed, and VN Play turn/navigation tests. Plan: add failing service tests for branch navigation, metadata-aware branch event filtering, branch ownership errors, pagination, and branch_node_id tagging; implement get_branch_navigation/list_events_with_metadata/list_events wrapper and Story active-branch tagging; then run focused pytest, diff check, Bandit, and commit if clean.
+
+Task 3 service slice complete and committed as 19eb33a72. Red evidence: new focused service tests failed before implementation with missing get_branch_navigation/list_events_with_metadata APIs and branch-tagging expectations. Green evidence: test_vn_play_turns.py => 33 passed, 5 warnings; test_vn_play_branch_navigation.py + test_vn_play_turns.py => 44 passed, 5 warnings; full tldw_Server_API/tests/VN_Play => 96 passed, 5 warnings. Hygiene: git diff --check exit 0; Bandit service.py + branch_navigation.py exit 0 with /tmp/bandit_vn_play_branch_navigation_task3.json results/errors empty. Scope changed only service.py and test_vn_play_turns.py in the Task 3 worktree commit.
+
+Task 3 complete after subagent implementation plus review loop. Commit: 19eb33a72 Expose VN Play branch navigation service. Spec review passed. Code-quality review passed with no critical/important/minor issues; only future performance consideration for large histories. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_branch_navigation.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q => 44 passed, 5 warnings; git diff --check => exit 0. Bandit reported by implementer: service.py/branch_navigation.py results/errors empty at /tmp/bandit_vn_play_branch_navigation_task3.json.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
