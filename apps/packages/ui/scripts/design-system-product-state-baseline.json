@@ -5456,17 +5456,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-status-badge:src/components/Sidepanel/Chat/StatusDot.tsx:StatusDot",
-    "path": "src/components/Sidepanel/Chat/StatusDot.tsx",
-    "rule": "local-status-badge",
-    "subject": "StatusDot",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local StatusDot status wrapper before the guard.",
-    "replacement": "Badge with design-system state registry mapping",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx:Alert",
     "path": "src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx",
     "rule": "antd-product-state-import",

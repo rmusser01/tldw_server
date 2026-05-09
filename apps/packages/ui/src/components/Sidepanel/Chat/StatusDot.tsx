@@ -5,7 +5,12 @@ import {
   useConnectionActions,
   useConnectionUxState
 } from "@/hooks/useConnectionState"
-import { Badge, type BadgeVariant } from "@/components/ui/primitives"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import {
+  Badge,
+  getBadgeVariantForDesignSystemSeverity,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 
 /**
  * Compact connection status indicator with icon and color for accessibility.
@@ -79,13 +84,17 @@ export const StatusDot = () => {
     )
   }
 
-  const badgeVariant: BadgeVariant = (() => {
-    if (isChecking) return "warning"
-    if (isConnectedUx && mode === "demo") return "demo"
-    if (isConnectedUx) return "success"
-    if (isConfigOrError) return "warning"
-    return "danger"
+  const connectionStateKey: DesignSystemStateKey = (() => {
+    if (isChecking) return "retrying"
+    if (isConnectedUx) return "ready"
+    if (isConfigOrError) return "setup_required"
+    return "unavailable"
   })()
+  const connectionState = getDesignSystemState(connectionStateKey)
+  const badgeVariant: BadgeVariant =
+    isConnectedUx && mode === "demo"
+      ? "demo"
+      : getBadgeVariantForDesignSystemSeverity(connectionState.severity)
 
   return (
     <Tooltip title={tooltip}>

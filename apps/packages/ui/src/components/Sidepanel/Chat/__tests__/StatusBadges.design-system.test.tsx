@@ -3,6 +3,7 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { getDesignSystemState } from "@/design-system"
 import { SaveStatusIcon } from "../SaveStatusIcon"
 import { StatusDot } from "../StatusDot"
 
@@ -31,6 +32,15 @@ vi.mock("antd", () => ({
   Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(actual.getDesignSystemState)
+  }
+})
+
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionUxState: () => connectionState.ux,
   useConnectionActions: () => ({
@@ -53,9 +63,95 @@ describe("Chat status design-system badges", () => {
     }
     connectionState.checkOnce.mockReset()
     notificationMock.warning.mockReset()
+    vi.clearAllMocks()
   })
 
-  it("renders the connection status through the shared Badge while preserving retry behavior", () => {
+  it.each([
+    [
+      "connected",
+      {
+        uxState: "connected",
+        mode: "full",
+        isConnectedUx: true,
+        isChecking: false,
+        isConfigOrError: false
+      },
+      "ready",
+      "success",
+      "Connected to your tldw server"
+    ],
+    [
+      "checking",
+      {
+        uxState: "checking",
+        mode: "full",
+        isConnectedUx: false,
+        isChecking: true,
+        isConfigOrError: false
+      },
+      "retrying",
+      "info",
+      "Checking connection to your tldw server…"
+    ],
+    [
+      "demo",
+      {
+        uxState: "connected",
+        mode: "demo",
+        isConnectedUx: true,
+        isChecking: false,
+        isConfigOrError: false
+      },
+      "ready",
+      "demo",
+      "Demo mode: explore with a sample workspace."
+    ],
+    [
+      "setup issue",
+      {
+        uxState: "error_config",
+        mode: "full",
+        isConnectedUx: false,
+        isChecking: false,
+        isConfigOrError: true
+      },
+      "setup_required",
+      "warning",
+      "Not connected. Open Settings to configure."
+    ],
+    [
+      "retryable failure",
+      {
+        uxState: "failed",
+        mode: "full",
+        isConnectedUx: false,
+        isChecking: false,
+        isConfigOrError: false
+      },
+      "unavailable",
+      "danger",
+      "Connection failed. Click to retry."
+    ]
+  ])(
+    "renders %s connection status through the design-system state registry",
+    (_label, uxState, stateKey, variant, accessibleName) => {
+      connectionState.ux = uxState
+
+      render(<StatusDot />)
+
+      const statusButton = screen.getByTestId("status-dot")
+      const badge = screen.getByTestId("status-dot-badge")
+
+      expect(getDesignSystemState).toHaveBeenCalledWith(stateKey)
+      expect(statusButton).toHaveAccessibleName(accessibleName)
+      expect(badge).toHaveAttribute("data-ds-component", "Badge")
+      expect(badge).toHaveAttribute("data-ds-variant", variant)
+      expect(badge.querySelector(".sr-only")).toBeNull()
+      expect(badge.querySelector("svg")).toHaveClass("text-current")
+    }
+  )
+
+  it("preserves retry behavior for retryable connection failures", () => {
     connectionState.ux = {
       uxState: "failed",
       mode: "full",
@@ -67,16 +163,32 @@ describe("Chat status design-system badges", () => {
     render(<StatusDot />)
 
     const statusButton = screen.getByTestId("status-dot")
-    const badge = screen.getByTestId("status-dot-badge")
 
     expect(statusButton).toHaveAccessibleName("Connection failed. Click to retry.")
-    expect(badge).toHaveAttribute("data-ds-component", "Badge")
-    expect(badge.querySelector(".sr-only")).toBeNull()
-    expect(badge.querySelector("svg")).toHaveClass("text-current")
 
     fireEvent.click(statusButton)
 
     expect(connectionState.checkOnce).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables retry while checking the connection", () => {
+    connectionState.ux = {
+      uxState: "checking",
+      mode: "full",
+      isConnectedUx: false,
+      isChecking: true,
+      isConfigOrError: false
+    }
+
+    render(<StatusDot />)
+
+    const statusButton = screen.getByTestId("status-dot")
+
+    expect(statusButton).toBeDisabled()
+
+    fireEvent.click(statusButton)
+
+    expect(connectionState.checkOnce).not.toHaveBeenCalled()
   })
 
   it("renders the chat save status through the shared Badge while preserving the action", () => {
