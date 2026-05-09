@@ -87,7 +87,7 @@ Docs:
 - Modify: `tldw_Server_API/app/core/Persona/visual_portability/importer.py`
 - Test: `tldw_Server_API/tests/Persona/test_persona_visual_manifest_assets.py`
 
-- [ ] **Step 1: Write failing tests for asset collection and remapping**
+- [x] **Step 1: Write failing tests for asset collection and remapping**
 
 Create `tldw_Server_API/tests/Persona/test_persona_visual_manifest_assets.py`:
 
@@ -151,7 +151,7 @@ def test_remap_visual_manifest_assets_returns_copy_with_supported_references_rem
     assert animation["preview_asset_id"] == "target-b"
 ```
 
-- [ ] **Step 2: Run the new tests and verify they fail**
+- [x] **Step 2: Run the new tests and verify they fail**
 
 Run:
 
@@ -162,7 +162,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_manifest_asse
 
 Expected: import failure because `visual_manifest_assets.py` does not exist.
 
-- [ ] **Step 3: Implement the shared helper**
+- [x] **Step 3: Implement the shared helper**
 
 Create `tldw_Server_API/app/core/Persona/visual_manifest_assets.py`:
 
@@ -231,7 +231,7 @@ def remap_visual_manifest_assets(
     return remapped
 ```
 
-- [ ] **Step 4: Update importer to use the shared helper**
+- [x] **Step 4: Update importer to use the shared helper**
 
 In `tldw_Server_API/app/core/Persona/visual_portability/importer.py`:
 
@@ -255,7 +255,7 @@ remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["asset
 
 Then remove the private `_remap_visual_manifest_assets()` function and the now-unused `deepcopy` import from `importer.py`.
 
-- [ ] **Step 5: Run helper and import regression tests**
+- [x] **Step 5: Run helper and import regression tests**
 
 Run:
 
@@ -266,7 +266,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_manifest_asse
 
 Expected: helper tests pass and existing import/export API tests still pass.
 
-- [ ] **Step 6: Commit helper extraction**
+- [x] **Step 6: Commit helper extraction**
 
 ```bash
 git add tldw_Server_API/app/core/Persona/visual_manifest_assets.py \

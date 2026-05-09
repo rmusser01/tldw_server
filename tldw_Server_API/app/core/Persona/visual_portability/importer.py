@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import zipfile
-from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,7 @@ from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     _section_list,
     _section_record,
 )
+from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual_manifest_assets
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 from tldw_Server_API.app.core.Persona.visuals import validate_visual_manifest
 
@@ -123,7 +123,7 @@ class PersonaVisualPackImporter:
                 imported_assets.append(imported)
 
         visual_manifest = pack.get("visual_manifest") if isinstance(pack.get("visual_manifest"), dict) else {}
-        remapped_manifest = _remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
+        remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
         asset_ids = {str(asset["id"]) for asset in imported_assets}
         asset_dimensions = {
             str(asset["id"]): (int(asset["width"]), int(asset["height"]))
@@ -175,38 +175,6 @@ class PersonaVisualPackImporter:
     def _progress(self, progress: Any | None, stage: str, payload: dict[str, Any]) -> None:
         if progress is not None:
             progress(stage, payload)
-
-
-def _remap_visual_manifest_assets(
-    manifest: dict[str, Any],
-    asset_id_map: dict[str, str],
-) -> dict[str, Any]:
-    remapped = deepcopy(manifest)
-    animations = remapped.get("animations")
-    if not isinstance(animations, dict):
-        return remapped
-    for animation in animations.values():
-        if not isinstance(animation, dict):
-            continue
-        frames = animation.get("frames")
-        if isinstance(frames, list):
-            for frame in frames:
-                if not isinstance(frame, dict):
-                    continue
-                asset_id = str(frame.get("asset_id") or "")
-                if asset_id in asset_id_map:
-                    frame["asset_id"] = asset_id_map[asset_id]
-        asset_ids = animation.get("asset_ids")
-        if isinstance(asset_ids, list):
-            animation["asset_ids"] = [
-                asset_id_map.get(str(asset_id), asset_id)
-                for asset_id in asset_ids
-            ]
-        preview_asset_id = str(animation.get("preview_asset_id") or "")
-        if preview_asset_id in asset_id_map:
-            animation["preview_asset_id"] = asset_id_map[preview_asset_id]
-    return remapped
-
 
 def _parse_datetime(value: Any) -> datetime | None:
     if not value:
