@@ -6,6 +6,29 @@ const HOURS_TO_MS = 60 * MINUTES_TO_MS
 const DAYS_TO_MS = 24 * HOURS_TO_MS
 const MONTHS_TO_MS = 30 * DAYS_TO_MS
 const YEARS_TO_MS = 365 * DAYS_TO_MS
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday"
+] as const
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
+] as const
 
 export interface FlashcardTimestampDisplay {
   absolute: string
@@ -49,6 +72,38 @@ const formatFlashcardAbsoluteDateTimeFromMs = (timestamp: number): string => {
 export const formatFlashcardAbsoluteDateTime = (value: unknown): string | null => {
   const timestamp = parseFlashcardTimestamp(value)
   return timestamp == null ? null : formatFlashcardAbsoluteDateTimeFromMs(timestamp)
+}
+
+const formatFlashcardLongDateTimeFromMs = (timestamp: number): string => {
+  const date = new Date(timestamp)
+  const weekday = WEEKDAYS[date.getDay()]
+  const month = MONTHS[date.getMonth()]
+  const day = date.getDate()
+  const hour24 = date.getHours()
+  const hour12 = hour24 % 12 || 12
+  const minutes = padDatePart(date.getMinutes())
+  const meridiem = hour24 < 12 ? "AM" : "PM"
+
+  return `${weekday}, ${month} ${day} at ${hour12}:${minutes} ${meridiem}`
+}
+
+export const formatFlashcardLongDateTime = (value: unknown): string | null => {
+  const timestamp = parseFlashcardTimestamp(value)
+  return timestamp == null ? null : formatFlashcardLongDateTimeFromMs(timestamp)
+}
+
+export const isFlashcardTimestampBefore = (
+  value: unknown,
+  referenceMs?: number
+): boolean => {
+  const timestamp = parseFlashcardTimestamp(value)
+  if (timestamp == null) return false
+  const reference =
+    typeof referenceMs === "number" && Number.isFinite(referenceMs)
+      ? referenceMs
+      : Date.now()
+
+  return timestamp < reference
 }
 
 const formatFlashcardRelativeTimeFromMs = (
