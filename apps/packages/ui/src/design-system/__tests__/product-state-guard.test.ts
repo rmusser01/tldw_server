@@ -41,6 +41,90 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("allows recovery-banner adapters that return a wrapper containing RecoveryCallout", () => {
+    const findings = analyze(
+      "src/components/Sidepanel/Chat/ConnectionBanner.tsx",
+      `
+        import { RecoveryCallout } from "@/components/ui/state"
+
+        export function ConnectionBanner() {
+          return (
+            <div className="px-3 py-2">
+              <RecoveryCallout
+                state="unavailable"
+                title="Can't reach your tldw server"
+                primaryAction={{ label: "Retry", onClick: () => undefined }}
+              />
+            </div>
+          )
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-recovery-banner",
+        subject: "ConnectionBanner"
+      })
+    )
+  })
+
+  it("allows recovery-banner adapters that return a wrapper containing StatePanel", () => {
+    const findings = analyze(
+      "src/components/Common/BackendErrorBanner.tsx",
+      `
+        import { StatePanel } from "@/components/ui/state"
+
+        export function BackendErrorBanner() {
+          return (
+            <section aria-label="Backend recovery">
+              <StatePanel
+                state="error"
+                title="Backend error"
+                primaryAction={{ label: "Retry", onClick: () => undefined }}
+              />
+            </section>
+          )
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-recovery-banner",
+        subject: "BackendErrorBanner"
+      })
+    )
+  })
+
+  it("flags mixed bespoke recovery markup with a nested RecoveryCallout", () => {
+    const findings = analyze(
+      "src/components/Common/MixedRecoveryBanner.tsx",
+      `
+        import { RecoveryCallout } from "@/components/ui/state"
+
+        export function MixedRecoveryBanner() {
+          return (
+            <div className="rounded border p-3">
+              <p>Disconnected from backend</p>
+              <RecoveryCallout
+                state="unavailable"
+                title="Can't reach your tldw server"
+              />
+            </div>
+          )
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-recovery-banner",
+        subject: "MixedRecoveryBanner"
+      })
+    )
+  })
+
   it("flags local empty, loading, and status wrappers", () => {
     const findings = [
       ...analyze(
