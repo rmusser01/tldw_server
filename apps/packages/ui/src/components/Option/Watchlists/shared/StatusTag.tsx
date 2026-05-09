@@ -34,7 +34,7 @@ const STATUS_CONFIG: Record<string, {
     icon: Clock3
   },
   running: {
-    stateKey: "retrying",
+    stateKey: "loading",
     labelKey: "watchlists:runs.statusLabels.running",
     fallbackLabel: "Running",
     iconToken: "running",

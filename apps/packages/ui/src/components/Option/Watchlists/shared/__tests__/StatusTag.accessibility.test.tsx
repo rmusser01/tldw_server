@@ -16,11 +16,12 @@ vi.mock("react-i18next", () => ({
 describe("StatusTag accessibility labels", () => {
   it("exposes a descriptive SR label for known run statuses", () => {
     const { container } = render(<StatusTag status="running" />)
+    const badge = container.querySelector('[data-ds-component="Badge"]')
 
     expect(screen.getByLabelText("Run status: Running")).toHaveTextContent("Running")
     expect(screen.getByLabelText("Run status: Running")).toHaveAttribute("title", "Run status: Running")
     expect(screen.getByTestId("watchlists-status-icon-running")).toBeInTheDocument()
-    expect(container.querySelector('[data-ds-component="Badge"]')).toBeInTheDocument()
+    expect(badge).toHaveAttribute("data-ds-variant", "secondary")
   })
 
   it("humanizes unknown statuses and keeps descriptive SR labels", () => {
@@ -32,12 +33,10 @@ describe("StatusTag accessibility labels", () => {
     expect(container.querySelector('[data-ds-component="Badge"]')).toBeInTheDocument()
   })
 
-  it("uses the shared Badge compact sizing for small status tags", () => {
+  it("passes the compact Badge size for small status tags", () => {
     const { container } = render(<StatusTag status="pending" size="small" />)
     const badge = container.querySelector('[data-ds-component="Badge"]')
 
-    expect(badge).toHaveClass("py-0.5")
-    expect(badge).toHaveClass("text-[10px]")
-    expect(badge).not.toHaveClass("text-xs")
+    expect(badge).toHaveAttribute("data-ds-size", "sm")
   })
 })

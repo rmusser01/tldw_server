@@ -82,8 +82,6 @@ const VISUAL_STATES: PersonaVisualStateId[] = [
   ...OPTIONAL_VISUAL_STATES
 ]
 
-const LOADING_STATE_LABEL = getDesignSystemState("loading").label
-
 const ASSET_ROLES: PersonaVisualAssetRole[] = [
   "frame",
   "still_pose",
@@ -277,6 +275,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   isActive = false
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
+  const loadingLabel = t("common:loading", getDesignSystemState("loading").label)
+  const refreshLabel = t("common:refresh", "Refresh")
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
   const [selectedPackId, setSelectedPackId] = React.useState("")
   const [draftTitle, setDraftTitle] = React.useState("")
@@ -1002,9 +1002,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             onClick={() => void loadPacks()}
             disabled={loading}
           >
-            {loading
-              ? t("common:loading", LOADING_STATE_LABEL)
-              : t("common:refresh", "Refresh")}
+            {loading ? loadingLabel : refreshLabel}
           </Button>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto]">
@@ -1692,7 +1690,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 Generated Candidates
               </div>
               <Button size="small" onClick={() => void loadCandidates()}>
-                {candidatesLoading ? LOADING_STATE_LABEL : "Refresh"}
+                {candidatesLoading ? loadingLabel : refreshLabel}
               </Button>
             </div>
             <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_minmax(120px,160px)_auto]">

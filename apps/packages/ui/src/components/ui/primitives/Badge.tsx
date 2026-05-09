@@ -124,6 +124,8 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
         )}
         aria-label={ariaLabel}
         data-ds-component="Badge"
+        data-ds-size={size}
+        data-ds-variant={variant}
         data-testid={dataTestId}
         title={title}
       >
