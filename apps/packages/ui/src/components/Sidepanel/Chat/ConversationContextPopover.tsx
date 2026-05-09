@@ -18,8 +18,19 @@ import {
   resolveContextReadiness,
   summarizeConversationContextPieces
 } from "./conversation-context-utils"
-import type { ConversationContextComposition } from "@/types/conversation-context"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { normalizeConversationContextIdList } from "@/services/conversation-context/conversationContextSettings"
+import type {
+  ConversationContextComposition,
+  ConversationContextSelection
+} from "@/types/conversation-context"
 import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
+
+export type ConversationContextAssetOption = {
+  id: number
+  name: string
+  disabled?: boolean
+}
 
 type ConversationContextPopoverProps = {
   chatId?: string | null
@@ -27,6 +38,14 @@ type ConversationContextPopoverProps = {
   setSelectedCharacterId: (id: string | null) => void
   composition?: ConversationContextComposition | null
   compositionStatus: ConversationContextCompositionStatus
+  saveSelection?: (
+    selection: Pick<
+      ConversationContextSelection,
+      "worldBookIds" | "dictionaryIds"
+    >
+  ) => Promise<unknown> | unknown
+  worldBookOptions?: ConversationContextAssetOption[]
+  dictionaryOptions?: ConversationContextAssetOption[]
   disabled?: boolean
   className?: string
   iconClassName?: string
@@ -47,6 +66,62 @@ const readinessIcon = (tone: keyof typeof toneClass) => {
   if (tone === "blocked") return <AlertTriangle className="size-3.5" />
   if (tone === "partial") return <CircleDashed className="size-3.5" />
   return <CheckCircle2 className="size-3.5" />
+}
+
+const toAssetOption = (
+  value: unknown,
+  kind: "worldbook" | "dictionary"
+): ConversationContextAssetOption | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  const rawId =
+    kind === "worldbook" ? record.world_book_id ?? record.id : record.id
+  const id = Number(rawId)
+  if (!Number.isFinite(id) || id <= 0) return null
+  const rawName =
+    kind === "worldbook"
+      ? record.world_book_name ?? record.name
+      : record.name
+  const name =
+    typeof rawName === "string" && rawName.trim()
+      ? rawName.trim()
+      : kind === "worldbook"
+        ? `Worldbook ${Math.trunc(id)}`
+        : `Dictionary ${Math.trunc(id)}`
+  return {
+    id: Math.trunc(id),
+    name,
+    disabled:
+      kind === "dictionary" && typeof record.is_active === "boolean"
+        ? !record.is_active
+        : false
+  }
+}
+
+const normalizeAssetOptions = (
+  values: unknown,
+  kind: "worldbook" | "dictionary"
+): ConversationContextAssetOption[] => {
+  const list = Array.isArray(values) ? values : []
+  const seen = new Set<number>()
+  const options: ConversationContextAssetOption[] = []
+  for (const value of list) {
+    const option = toAssetOption(value, kind)
+    if (!option || seen.has(option.id)) continue
+    seen.add(option.id)
+    options.push(option)
+  }
+  return options.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const toggleId = (ids: number[], id: number, checked: boolean): number[] => {
+  const next = new Set(ids)
+  if (checked) {
+    next.add(id)
+  } else {
+    next.delete(id)
+  }
+  return Array.from(next).sort((a, b) => a - b)
 }
 
 const Section = ({
@@ -80,12 +155,25 @@ export const ConversationContextPopover: React.FC<
   setSelectedCharacterId,
   composition,
   compositionStatus,
+  saveSelection,
+  worldBookOptions,
+  dictionaryOptions,
   disabled = false,
   className = "",
   iconClassName = "size-4"
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
   const [open, setOpen] = React.useState(false)
+  const [loadedWorldBookOptions, setLoadedWorldBookOptions] = React.useState<
+    ConversationContextAssetOption[]
+  >([])
+  const [loadedDictionaryOptions, setLoadedDictionaryOptions] = React.useState<
+    ConversationContextAssetOption[]
+  >([])
+  const [assetOptionsLoading, setAssetOptionsLoading] = React.useState(false)
+  const [assetOptionsError, setAssetOptionsError] =
+    React.useState<string | null>(null)
+  const [saving, setSaving] = React.useState(false)
   const summary = React.useMemo(
     () => summarizeConversationContextPieces(composition),
     [composition]
@@ -106,6 +194,20 @@ export const ConversationContextPopover: React.FC<
       : t("sidepanel:conversationContext.none", "None")
 
   const previewSections = composition?.previewSections ?? []
+  const selectedWorldBookIds = React.useMemo(
+    () =>
+      normalizeConversationContextIdList(composition?.selection.worldBookIds),
+    [composition]
+  )
+  const selectedDictionaryIds = React.useMemo(
+    () =>
+      normalizeConversationContextIdList(composition?.selection.dictionaryIds),
+    [composition]
+  )
+  const resolvedWorldBookOptions = worldBookOptions ?? loadedWorldBookOptions
+  const resolvedDictionaryOptions =
+    dictionaryOptions ?? loadedDictionaryOptions
+  const canEditAssets = Boolean(chatId && saveSelection && !disabled)
   const sources = React.useMemo(() => {
     const labels = new Set<string>()
     for (const piece of composition?.pieces ?? []) {
@@ -113,6 +215,131 @@ export const ConversationContextPopover: React.FC<
     }
     return Array.from(labels)
   }, [composition])
+
+  React.useEffect(() => {
+    if (!open) return
+    if (worldBookOptions && dictionaryOptions) return
+    let cancelled = false
+    setAssetOptionsLoading(true)
+    setAssetOptionsError(null)
+
+    const load = async () => {
+      try {
+        await tldwClient.initialize()
+        const [worldBookResponse, dictionaryResponse] = await Promise.all([
+          worldBookOptions
+            ? Promise.resolve(null)
+            : tldwClient.listWorldBooks(false),
+          dictionaryOptions
+            ? Promise.resolve(null)
+            : tldwClient.listDictionaries(false, true)
+        ])
+        if (cancelled) return
+        if (!worldBookOptions) {
+          setLoadedWorldBookOptions(
+            normalizeAssetOptions(
+              worldBookResponse?.world_books ?? worldBookResponse,
+              "worldbook"
+            )
+          )
+        }
+        if (!dictionaryOptions) {
+          setLoadedDictionaryOptions(
+            normalizeAssetOptions(
+              dictionaryResponse?.dictionaries ?? dictionaryResponse,
+              "dictionary"
+            )
+          )
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAssetOptionsError(
+            error instanceof Error ? error.message : String(error)
+          )
+        }
+      } finally {
+        if (!cancelled) setAssetOptionsLoading(false)
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [dictionaryOptions, open, worldBookOptions])
+
+  const saveAssetSelection = React.useCallback(
+    async (nextSelection: Pick<ConversationContextSelection, "worldBookIds" | "dictionaryIds">) => {
+      if (!canEditAssets || !saveSelection) return
+      setSaving(true)
+      try {
+        await saveSelection(nextSelection)
+      } finally {
+        setSaving(false)
+      }
+    },
+    [canEditAssets, saveSelection]
+  )
+
+  const handleWorldBookToggle = React.useCallback(
+    (id: number, checked: boolean) => {
+      void saveAssetSelection({
+        worldBookIds: toggleId(selectedWorldBookIds, id, checked),
+        dictionaryIds: selectedDictionaryIds
+      })
+    },
+    [saveAssetSelection, selectedDictionaryIds, selectedWorldBookIds]
+  )
+
+  const handleDictionaryToggle = React.useCallback(
+    (id: number, checked: boolean) => {
+      void saveAssetSelection({
+        worldBookIds: selectedWorldBookIds,
+        dictionaryIds: toggleId(selectedDictionaryIds, id, checked)
+      })
+    },
+    [saveAssetSelection, selectedDictionaryIds, selectedWorldBookIds]
+  )
+
+  const renderAssetOptions = (
+    options: ConversationContextAssetOption[],
+    selectedIds: number[],
+    onToggle: (id: number, checked: boolean) => void,
+    emptyLabel: string
+  ) => {
+    if (options.length === 0) {
+      return (
+        <div className="text-xs text-text-subtle">
+          {assetOptionsLoading
+            ? t("sidepanel:conversationContext.loadingAssets", "Loading...")
+            : emptyLabel}
+        </div>
+      )
+    }
+
+    return (
+      <div className="grid max-h-28 gap-1 overflow-auto pr-1">
+        {options.map((option) => {
+          const checked = selectedIds.includes(option.id)
+          return (
+            <label
+              key={option.id}
+              className="flex min-h-7 items-center gap-2 text-xs text-text"
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={!canEditAssets || saving || option.disabled}
+                onChange={(event) => onToggle(option.id, event.target.checked)}
+              />
+              <span className="min-w-0 truncate">{option.name}</span>
+            </label>
+          )
+        })}
+      </div>
+    )
+  }
 
   const content = (
     <div
@@ -164,17 +391,32 @@ export const ConversationContextPopover: React.FC<
         value={worldbookValue}
         detail={
           summary.worldbooks.total > 0 ? (
-            <span>
-              {summary.worldbooks.explicit}{" "}
-              {t("sidepanel:conversationContext.chatScoped", "chat-scoped")}
-              {summary.worldbooks.inherited > 0
-                ? `, ${summary.worldbooks.inherited} ${t(
-                    "sidepanel:conversationContext.inherited",
-                    "inherited"
-                  )}`
-                : ""}
-            </span>
-          ) : null
+            <div className="space-y-2">
+              <span>
+                {summary.worldbooks.explicit}{" "}
+                {t("sidepanel:conversationContext.chatScoped", "chat-scoped")}
+                {summary.worldbooks.inherited > 0
+                  ? `, ${summary.worldbooks.inherited} ${t(
+                      "sidepanel:conversationContext.inherited",
+                      "inherited"
+                    )}`
+                  : ""}
+              </span>
+              {renderAssetOptions(
+                resolvedWorldBookOptions,
+                selectedWorldBookIds,
+                handleWorldBookToggle,
+                t("sidepanel:conversationContext.noWorldbooks", "No worldbooks")
+              )}
+            </div>
+          ) : (
+            renderAssetOptions(
+              resolvedWorldBookOptions,
+              selectedWorldBookIds,
+              handleWorldBookToggle,
+              t("sidepanel:conversationContext.noWorldbooks", "No worldbooks")
+            )
+          )
         }
       />
       <Section
@@ -183,13 +425,37 @@ export const ConversationContextPopover: React.FC<
         value={dictionaryValue}
         detail={
           summary.dictionaries.total > 0 ? (
-            <span>
-              {summary.dictionaries.explicit}{" "}
-              {t("sidepanel:conversationContext.chatScoped", "chat-scoped")}
-            </span>
-          ) : null
+            <div className="space-y-2">
+              <span>
+                {summary.dictionaries.explicit}{" "}
+                {t("sidepanel:conversationContext.chatScoped", "chat-scoped")}
+              </span>
+              {renderAssetOptions(
+                resolvedDictionaryOptions,
+                selectedDictionaryIds,
+                handleDictionaryToggle,
+                t(
+                  "sidepanel:conversationContext.noDictionaries",
+                  "No dictionaries"
+                )
+              )}
+            </div>
+          ) : (
+            renderAssetOptions(
+              resolvedDictionaryOptions,
+              selectedDictionaryIds,
+              handleDictionaryToggle,
+              t("sidepanel:conversationContext.noDictionaries", "No dictionaries")
+            )
+          )
         }
       />
+
+      {assetOptionsError ? (
+        <div className="border-t border-border py-2 text-xs text-error">
+          {assetOptionsError}
+        </div>
+      ) : null}
 
       {!hasOptionalContext && !selectedCharacterId ? (
         <div className="border-t border-border py-2 text-xs text-text-subtle">

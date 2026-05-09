@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { ConversationContextPopover } from "../ConversationContextPopover"
@@ -35,6 +35,14 @@ vi.mock("antd", async () => {
   }
 })
 
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    initialize: vi.fn(async () => undefined),
+    listWorldBooks: vi.fn(async () => ({ world_books: [] })),
+    listDictionaries: vi.fn(async () => ({ dictionaries: [] }))
+  }
+}))
+
 vi.mock("../CharacterSelect", () => ({
   CharacterSelect: ({
     selectedCharacterId
@@ -51,7 +59,7 @@ const buildComposition = (): ConversationContextComposition => ({
   selection: {
     chatId: "chat-1",
     characterId: "42",
-    worldBookIds: [3, 4],
+    worldBookIds: [3],
     dictionaryIds: [7]
   },
   inputText: "EV",
@@ -105,6 +113,50 @@ const buildComposition = (): ConversationContextComposition => ({
       role: "system",
       content: "Worldbooks:\nEcho Vault lore."
     },
+    {
+      role: "user",
+      content: "Echo Vault"
+    }
+  ],
+  readiness: "ready",
+  warnings: []
+})
+
+const buildBlankComposition = (): ConversationContextComposition => ({
+  selection: {
+    chatId: "chat-1",
+    characterId: null,
+    worldBookIds: [3],
+    dictionaryIds: [7]
+  },
+  inputText: "EV",
+  transformedInputText: "Echo Vault",
+  pieces: [
+    {
+      kind: "worldbook",
+      id: 3,
+      source: "explicit_chat",
+      status: "configured"
+    },
+    {
+      kind: "dictionary",
+      id: 7,
+      source: "explicit_chat",
+      status: "active",
+      diagnostics: {
+        replacements: 1,
+        entries_used: [7]
+      }
+    }
+  ],
+  previewSections: [
+    {
+      name: "Dictionaries",
+      content: "Echo Vault",
+      source: "explicit_chat"
+    }
+  ],
+  providerMessages: [
     {
       role: "user",
       content: "Echo Vault"
@@ -197,5 +249,78 @@ describe("ConversationContextPopover", () => {
     expect(readyClassName).toContain("min-w-[44px]")
     expect(loadingClassName).toContain("sm:min-w-[104px]")
     expect(readyClassName).toContain("sm:min-w-[104px]")
+  })
+
+  it("persists selected worldbooks through conversation-scoped settings", () => {
+    const saveSelection = vi.fn(async () => undefined)
+    render(
+      <ConversationContextPopover
+        chatId="chat-1"
+        selectedCharacterId={null}
+        setSelectedCharacterId={vi.fn()}
+        composition={buildBlankComposition()}
+        compositionStatus="ready"
+        saveSelection={saveSelection}
+        worldBookOptions={[
+          { id: 3, name: "Echo Vault" },
+          { id: 5, name: "Lore Atlas" }
+        ]}
+        dictionaryOptions={[{ id: 7, name: "Glossary" }]}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Lore Atlas"))
+
+    expect(saveSelection).toHaveBeenCalledWith({
+      worldBookIds: [3, 5],
+      dictionaryIds: [7]
+    })
+  })
+
+  it("persists selected dictionaries through nested and compatibility settings", () => {
+    const saveSelection = vi.fn(async () => undefined)
+    render(
+      <ConversationContextPopover
+        chatId="chat-1"
+        selectedCharacterId={null}
+        setSelectedCharacterId={vi.fn()}
+        composition={buildBlankComposition()}
+        compositionStatus="ready"
+        saveSelection={saveSelection}
+        worldBookOptions={[{ id: 3, name: "Echo Vault" }]}
+        dictionaryOptions={[
+          { id: 7, name: "Glossary" },
+          { id: 8, name: "Aliases" }
+        ]}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Aliases"))
+
+    expect(saveSelection).toHaveBeenCalledWith({
+      worldBookIds: [3],
+      dictionaryIds: [7, 8]
+    })
+  })
+
+  it("does not offer destructive asset edits before a chat is persisted", () => {
+    const saveSelection = vi.fn(async () => undefined)
+    render(
+      <ConversationContextPopover
+        chatId={null}
+        selectedCharacterId={null}
+        setSelectedCharacterId={vi.fn()}
+        composition={buildComposition()}
+        compositionStatus="ready"
+        saveSelection={saveSelection}
+        worldBookOptions={[{ id: 5, name: "Lore Atlas" }]}
+        dictionaryOptions={[{ id: 8, name: "Aliases" }]}
+      />
+    )
+
+    expect(screen.getByLabelText("Lore Atlas")).toBeDisabled()
+    expect(screen.getByLabelText("Aliases")).toBeDisabled()
+    fireEvent.click(screen.getByLabelText("Lore Atlas"))
+    expect(saveSelection).not.toHaveBeenCalled()
   })
 })

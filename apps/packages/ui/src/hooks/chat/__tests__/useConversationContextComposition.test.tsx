@@ -150,4 +150,33 @@ describe("useConversationContextComposition", () => {
     expect(primitives.processDictionary).toHaveBeenCalledTimes(1)
     unmount()
   })
+
+  it("saves selections using nested conversation context and dictionary compatibility keys", async () => {
+    const updateSettings = vi.fn(async () => undefined)
+    const { result } = renderHook(() =>
+      useConversationContextComposition({
+        draftMessage: "Hello",
+        selection: {
+          characterId: null,
+          worldBookIds: [],
+          dictionaryIds: []
+        },
+        primitives: buildPrimitives(),
+        updateSettings
+      })
+    )
+
+    await result.current.saveSelection({
+      worldBookIds: [5],
+      dictionaryIds: [7]
+    })
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      conversationContext: {
+        world_book_ids: [5],
+        chat_dictionary_ids: [7]
+      },
+      chat_dictionary_ids: [7]
+    })
+  })
 })

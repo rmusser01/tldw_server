@@ -41,6 +41,12 @@ interface ControlRowProps {
   serverChatId?: string | null
   conversationContextComposition?: ConversationContextComposition | null
   conversationContextStatus?: ConversationContextCompositionStatus
+  conversationContextSaveSelection?: (
+    selection: {
+      worldBookIds: number[]
+      dictionaryIds: number[]
+    }
+  ) => Promise<unknown> | unknown
   // Toggles
   webSearch: boolean
   setWebSearch: (value: boolean) => void
@@ -68,6 +74,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   serverChatId,
   conversationContextComposition,
   conversationContextStatus = "idle",
+  conversationContextSaveSelection,
   webSearch,
   setWebSearch,
   chatMode,
@@ -672,6 +679,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           setSelectedCharacterId={setSelectedCharacterId}
           composition={conversationContextComposition}
           compositionStatus={conversationContextStatus}
+          saveSelection={conversationContextSaveSelection}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />

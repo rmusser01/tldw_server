@@ -2915,6 +2915,9 @@ export const SidepanelForm = ({
                               conversationContextStatus={
                                 conversationContextComposition.status
                               }
+                              conversationContextSaveSelection={
+                                conversationContextComposition.saveSelection
+                              }
                               webSearch={webSearch}
                               setWebSearch={setWebSearch}
                               chatMode={chatMode}
