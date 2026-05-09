@@ -118,6 +118,13 @@ class PersonaVisualGenerationJobResponse(BaseModel):
 
 
 class PersonaVisualGenerationReadinessResponse(BaseModel):
+    """Preflight state for queueing Persona visual generation jobs.
+
+    ``available`` is true only when the Jobs worker is enabled and the
+    selected or default image backend can resolve to an instantiable adapter.
+    ``reasons`` contains machine-readable blockers for setup UI copy.
+    """
+
     available: bool
     worker_enabled: bool
     queue: str

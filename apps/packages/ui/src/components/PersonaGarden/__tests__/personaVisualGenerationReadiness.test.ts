@@ -76,6 +76,20 @@ describe("classifyPersonaVisualGenerationReadiness", () => {
     expect(view.canQueue).toBe(false)
   })
 
+  it("blocks resolved backends whose adapter cannot be started", () => {
+    const view = classifyPersonaVisualGenerationReadiness(
+      readiness({
+        available: false,
+        image_backend_available: false,
+        reasons: ["image_adapter_unavailable"]
+      }),
+      ""
+    )
+
+    expect(view.status).toBe("image_adapter_unavailable")
+    expect(view.canQueue).toBe(false)
+  })
+
   it("allows queueing when the user selects an enabled backend even without a default", () => {
     const base = readiness({
       available: false,

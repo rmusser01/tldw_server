@@ -114,6 +114,17 @@ const getGenerationReadinessCopy = (
         }),
         toneClassName: "border-warning/40 bg-warning/10 text-warning"
       }
+    case "image_adapter_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationAdapterUnavailableTitle", {
+          defaultValue: "Configured image backend cannot be started."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationAdapterUnavailableMessage", {
+          defaultValue:
+            "Check the selected image backend installation and credentials before queueing a Persona Buddy visual generation job."
+        }),
+        toneClassName: "border-warning/40 bg-warning/10 text-warning"
+      }
     case "backend_unavailable":
       return {
         title: t("sidepanel:personaGarden.visuals.generationBackendUnavailableTitle", {
@@ -438,6 +449,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
+  const generationReadinessRequestIdRef = React.useRef(0)
 
   const selectedPack =
     packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
@@ -551,11 +563,15 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const loadGenerationReadiness = React.useCallback(async () => {
     const packId = selectedPack?.id || ""
     if (!isActive || !selectedPersonaId || !packId) {
+      generationReadinessRequestIdRef.current += 1
       setGenerationReadiness(null)
       setGenerationReadinessError(null)
       setGenerationReadinessLoading(false)
       return
     }
+    const requestId = generationReadinessRequestIdRef.current + 1
+    generationReadinessRequestIdRef.current = requestId
+    const isLatestRequest = () => generationReadinessRequestIdRef.current === requestId
     setGenerationReadinessLoading(true)
     setGenerationReadinessError(null)
     try {
@@ -563,16 +579,18 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         selectedPersonaId,
         packId
       )
-      setGenerationReadiness(response)
+      if (isLatestRequest()) setGenerationReadiness(response)
     } catch (loadError) {
-      setGenerationReadiness(null)
-      setGenerationReadinessError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Failed to check generation readiness."
-      )
+      if (isLatestRequest()) {
+        setGenerationReadiness(null)
+        setGenerationReadinessError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to check generation readiness."
+        )
+      }
     } finally {
-      setGenerationReadinessLoading(false)
+      if (isLatestRequest()) setGenerationReadinessLoading(false)
     }
   }, [isActive, selectedPersonaId, selectedPack?.id])
 
