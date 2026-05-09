@@ -4,7 +4,7 @@ title: Integrate guided embeddings recipe flow in RecipesTab
 status: Done
 assignee: []
 created_date: '2026-05-09 05:42'
-updated_date: '2026-05-09 05:50'
+updated_date: '2026-05-09 05:58'
 labels:
   - evals
   - frontend
@@ -44,12 +44,20 @@ RED: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab
 GREEN: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx passed 22 tests. Component label touch verified with bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passing 4 tests.
 
 Verification: git diff --check exited 0. Bandit skipped because this task only touched frontend TypeScript/TSX tests and Backlog task metadata.
+
+Review fix RED: after moving embeddings apply fixture fields under slot.metadata and adding a top-level-only regression, bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx failed because RecipesTab still read top-level slot.apply_eligible / blocked fields.
+
+Review fix GREEN: RecipesTab now reads preview eligibility from slot.metadata.apply_eligible and blocked copy from slot.metadata.apply_warnings or explicit metadata blocked fields. Focused RecipesTab launch test passed 22 tests.
+
+Review fix verification: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passed 27 tests. git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Integrated EmbeddingsModelSelectionConfig into RecipesTab for embeddings_model_selection inline and saved modes, keeping Advanced JSON available. Added embeddings recommendation-first report cards for best overall/local/cheap slots with model/provider, Recall metrics, confidence warnings, eligible preview button gating, blocked apply reasons, and raw report details. Updated launch tests to cover guided payload shape and report rendering.
+
+Follow-up review fix: aligned embeddings recommendation preview affordance with backend RecommendationSlot metadata contract; top-level apply_eligible no longer enables the preview button.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1157,17 +1157,30 @@ export const RecipesTab: React.FC = () => {
         <div className="grid gap-3 md:grid-cols-3">
           {["best_overall", "best_local", "best_cheap"].map((slotName) => {
             const slot = (recommendationSlots as Record<string, any>)[slotName] || {}
-            const candidateId = String(slot.candidate_run_id || "").trim()
+            const slotMetadata =
+              slot.metadata && typeof slot.metadata === "object" && !Array.isArray(slot.metadata)
+                ? slot.metadata
+                : {}
+            const candidateId = String(
+              slotMetadata.candidate_run_id || slot.candidate_run_id || ""
+            ).trim()
             const candidate = candidateById.get(candidateId)
             const metrics =
               candidate && typeof candidate.metrics === "object" && candidate.metrics
                 ? candidate.metrics
                 : {}
+            const applyWarnings = Array.isArray(slotMetadata.apply_warnings)
+              ? slotMetadata.apply_warnings.map((warning: unknown) => String(warning)).filter(Boolean)
+              : []
             const blockedReason =
-              slot.apply_blocked_reason ||
-              slot.blocked_reason ||
-              slot.apply_ineligible_reason ||
-              slot.ineligible_reason
+              applyWarnings.length > 0
+                ? applyWarnings.join(" ")
+                : slotMetadata.apply_blocked_reason ||
+                  slotMetadata.blocked_reason ||
+                  slotMetadata.apply_ineligible_reason ||
+                  slotMetadata.ineligible_reason
+            const modelName = candidate?.model || slotMetadata.model || candidateId
+            const providerName = candidate?.provider || slotMetadata.provider
 
             return (
               <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
@@ -1175,12 +1188,12 @@ export const RecipesTab: React.FC = () => {
                   <Text strong>{prettifySentenceSlotName(slotName)}</Text>
                   <div>
                     <div className="font-medium">
-                      {candidate?.model || candidateId || t("evaluations:recipeNoWinner", {
+                      {modelName || t("evaluations:recipeNoWinner", {
                         defaultValue: "No winner yet"
                       })}
                     </div>
-                    {candidate?.provider && (
-                      <div className="text-xs text-text-muted">{candidate.provider}</div>
+                    {providerName && (
+                      <div className="text-xs text-text-muted">{providerName}</div>
                     )}
                   </div>
                   {slot.explanation && (
@@ -1195,7 +1208,7 @@ export const RecipesTab: React.FC = () => {
                       ))}
                     </div>
                   )}
-                  {slot.apply_eligible === true ? (
+                  {slotMetadata.apply_eligible === true ? (
                     <Button size="small">
                       {t("evaluations:recipePreviewRagConfigChange", {
                         defaultValue: "Preview RAG config change"

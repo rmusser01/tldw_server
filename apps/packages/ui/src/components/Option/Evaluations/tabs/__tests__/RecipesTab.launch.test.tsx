@@ -357,17 +357,37 @@ vi.mock("../../hooks/useRecipes", () => ({
                     candidate_run_id: "arm-openai-small",
                     reason_code: "highest_recall",
                     explanation: "Highest recall across labeled media IDs.",
-                    apply_eligible: true
+                    metadata: {
+                      candidate_run_id: "arm-openai-small",
+                      provider: "openai",
+                      model: "text-embedding-3-small",
+                      apply_eligible: true,
+                      apply_warnings: []
+                    }
                   },
                   best_local: {
                     candidate_run_id: "arm-local-bge",
                     reason_code: "best_local",
-                    explanation: "Best local embedding model."
+                    explanation: "Best local embedding model.",
+                    metadata: {
+                      candidate_run_id: "arm-local-bge",
+                      provider: "local",
+                      model: "bge-large",
+                      apply_eligible: false,
+                      apply_warnings: []
+                    }
                   },
                   best_cheap: {
                     candidate_run_id: "arm-openai-small",
                     reason_code: "lowest_cost_above_threshold",
-                    explanation: "Lowest cost candidate above recall threshold."
+                    explanation: "Lowest cost candidate above recall threshold.",
+                    metadata: {
+                      candidate_run_id: "arm-openai-small",
+                      provider: "openai",
+                      model: "text-embedding-3-small",
+                      apply_eligible: false,
+                      apply_warnings: []
+                    }
                   }
                 }
               }
@@ -401,8 +421,47 @@ vi.mock("../../hooks/useRecipes", () => ({
                   best_overall: {
                     candidate_run_id: "arm-openai-small",
                     explanation: "Highest recall across labeled media IDs.",
-                    apply_eligible: false,
-                    apply_blocked_reason: "Config preview disabled for this server."
+                    metadata: {
+                      candidate_run_id: "arm-openai-small",
+                      provider: "openai",
+                      model: "text-embedding-3-small",
+                      apply_eligible: false,
+                      apply_warnings: ["Config preview disabled for this server."]
+                    }
+                  }
+                }
+              }
+            }
+        : runId === "embeddings-top-level-only-run-1"
+          ? {
+              data: {
+                run: {
+                  run_id: "embeddings-top-level-only-run-1",
+                  recipe_id: "embeddings_model_selection",
+                  recipe_version: "1",
+                  status: "completed",
+                  created_at: "2026-03-31T14:00:00Z",
+                  metadata: {
+                    recipe_report: {
+                      candidates: [
+                        {
+                          candidate_id: "arm-openai-small",
+                          candidate_run_id: "arm-openai-small",
+                          model: "text-embedding-3-small",
+                          provider: "openai",
+                          metrics: {
+                            recall_at_10: 0.91
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                recommendation_slots: {
+                  best_overall: {
+                    candidate_run_id: "arm-openai-small",
+                    explanation: "Highest recall across labeled media IDs.",
+                    apply_eligible: true
                   }
                 }
               }
@@ -1018,6 +1077,30 @@ describe("RecipesTab recipe launch flow", () => {
       expect(
         screen.getByText("Config preview disabled for this server.")
       ).toBeInTheDocument()
+    })
+
+    expect(
+      screen.queryByRole("button", { name: /Preview RAG config change/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not render embeddings preview actions from top-level eligibility alone", async () => {
+    createSpy.mockResolvedValue({
+      data: {
+        run_id: "embeddings-top-level-only-run-1",
+        recipe_id: "embeddings_model_selection",
+        status: "completed"
+      }
+    })
+
+    renderRecipesTab()
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Embeddings Model Selection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run recipe" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Best overall")).toBeInTheDocument()
+      expect(screen.getAllByText("text-embedding-3-small").length).toBeGreaterThan(0)
     })
 
     expect(
