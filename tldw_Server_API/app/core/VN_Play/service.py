@@ -1,0 +1,739 @@
+"""VN Play runtime service orchestration."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.VN_Play.constants import (
+    ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_STALE_SCENE_VERSION,
+    ERROR_TURN_IN_PROGRESS,
+    EVENT_CHOICE_PRESENTED,
+    EVENT_MODEL_TURN,
+    EVENT_SCENE_STATE_CHANGED,
+    EVENT_SESSION_CHECKPOINT_CREATED,
+    EVENT_SESSION_RESTORED,
+    EVENT_SESSION_STARTED,
+    EVENT_TURN_COMPLETED,
+    EVENT_TURN_FAILED,
+    EVENT_TURN_STARTED,
+    EVENT_USER_TURN,
+    EVENT_MODEL_TURN_PARSE_FAILED,
+    TURN_STATUS_ABANDONED,
+    TURN_STATUS_COMPLETED,
+    TURN_STATUS_MODEL_CALLING,
+    TURN_STATUS_MODEL_FAILED,
+    TURN_STATUS_PARSE_FAILED,
+    TURN_STATUS_PENDING,
+)
+from tldw_Server_API.app.core.VN_Play.models import SceneState, TurnResult
+from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, coerce_turn_result
+from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
+
+
+class VNPlayError(Exception):
+    """Base error raised by VN Play runtime services."""
+
+
+class VNPlayNotFoundError(VNPlayError):
+    """Raised when a VN Play resource cannot be found for the current owner."""
+
+
+class VNPlayConflictError(VNPlayError):
+    """Raised when the requested turn cannot be applied to current session state."""
+
+
+class VNPlayTurnError(VNPlayError):
+    """Raised when a turn attempt fails after being accepted."""
+
+
+class VNPlayTurnAdapter(Protocol):
+    """Adapter boundary for model-backed VN Play turn generation."""
+
+    async def generate_turn(self, context: VNPlayTurnContext) -> Any:
+        """Generate a normalized turn result for the provided context."""
+
+
+@dataclass(frozen=True, slots=True)
+class VNPlaySession:
+    """Service-level VN Play session."""
+
+    id: int
+    owner_user_id: int
+    mode: str
+    title: str
+    status: str
+    primary_character_id: int
+    additional_character_ids: list[int]
+    linked_chat_id: str | None
+    vn_asset_pack_id: int
+    asset_manifest_version: str | None
+    source_world_book_ids: list[int]
+    content_rating: str
+    trust_level: str
+    linked_chat_mode: str
+    seed: str | None
+    settings: dict[str, Any]
+    scene_version: int
+    active_turn_request_id: int | None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> VNPlaySession:
+        return cls(
+            id=int(row["id"]),
+            owner_user_id=int(row["owner_user_id"]),
+            mode=str(row["mode"]),
+            title=str(row["title"]),
+            status=str(row["status"]),
+            primary_character_id=int(row["primary_character_id"]),
+            additional_character_ids=[
+                int(item) for item in row.get("additional_character_ids", [])
+            ],
+            linked_chat_id=_optional_str(row.get("linked_chat_id")),
+            vn_asset_pack_id=int(row["vn_asset_pack_id"]),
+            asset_manifest_version=_optional_str(row.get("asset_manifest_version")),
+            source_world_book_ids=[
+                int(item) for item in row.get("source_world_book_ids", [])
+            ],
+            content_rating=str(row["content_rating"]),
+            trust_level=str(row["trust_level"]),
+            linked_chat_mode=str(row["linked_chat_mode"]),
+            seed=_optional_str(row.get("seed")),
+            settings=dict(row.get("settings") or {}),
+            scene_version=int(row["scene_version"]),
+            active_turn_request_id=_optional_int(row.get("active_turn_request_id")),
+            created_at=_optional_str(row.get("created_at")),
+            updated_at=_optional_str(row.get("updated_at")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VNPlayTurnContext:
+    """Input provided to the turn adapter."""
+
+    session: VNPlaySession
+    input_payload: dict[str, Any]
+    scene_state: SceneState
+    recent_events: list[dict[str, Any]]
+    turn_request_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class VNPlayTurnResponse:
+    """Stored response returned to clients for a submitted turn."""
+
+    turn_request_id: int
+    status: str
+    scene_version: int
+    events: list[dict[str, Any]] = field(default_factory=list)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> VNPlayTurnResponse:
+        return cls(
+            turn_request_id=int(payload["turn_request_id"]),
+            status=str(payload["status"]),
+            scene_version=int(payload["scene_version"]),
+            events=_list_of_dicts(payload.get("events")),
+            warnings=_list_of_dicts(payload.get("warnings")),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "turn_request_id": self.turn_request_id,
+            "status": self.status,
+            "scene_version": self.scene_version,
+            "events": self.events,
+            "warnings": self.warnings,
+        }
+
+
+class DeterministicVNPlayTurnAdapter:
+    """Deterministic adapter for tests and local smoke flows."""
+
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        input_text = _input_text(context.input_payload)
+        narrative_text = f"Echo: {input_text}"
+        return TurnResult(
+            narrative_text=narrative_text,
+            dialogue=[{"speaker": "Narrator", "text": narrative_text}],
+            scene_updates={
+                "location_key": context.scene_state.location_key or "default",
+                "mood": context.scene_state.mood or "neutral",
+            },
+        )
+
+
+class VNPlayService:
+    """High-level service for VN Play sessions and turns."""
+
+    def __init__(
+        self,
+        *,
+        repo: VNPlayRepository,
+        owner_user_id: int,
+        adapter: VNPlayTurnAdapter | None = None,
+    ) -> None:
+        self.repo = repo
+        self.owner_user_id = owner_user_id
+        self.adapter = adapter or DeterministicVNPlayTurnAdapter()
+
+    def create_session(
+        self,
+        *,
+        mode: str,
+        title: str,
+        primary_character_id: int,
+        vn_asset_pack_id: int,
+        additional_character_ids: Sequence[int] | None = None,
+        linked_chat_id: str | None = None,
+        asset_manifest_version: str | None = None,
+        source_world_book_ids: Sequence[int] | None = None,
+        content_rating: str = "general",
+        trust_level: str = "local",
+        linked_chat_mode: str = "read_only_context",
+        seed: str | None = None,
+        settings: Mapping[str, Any] | None = None,
+    ) -> VNPlaySession:
+        row = self.repo.create_session(
+            owner_user_id=self.owner_user_id,
+            mode=mode,
+            title=title,
+            primary_character_id=primary_character_id,
+            vn_asset_pack_id=vn_asset_pack_id,
+            additional_character_ids=additional_character_ids,
+            linked_chat_id=linked_chat_id,
+            asset_manifest_version=asset_manifest_version,
+            source_world_book_ids=source_world_book_ids,
+            content_rating=content_rating,
+            trust_level=trust_level,
+            linked_chat_mode=linked_chat_mode,
+            seed=seed,
+            settings=settings,
+        )
+        self.repo.append_event(
+            session_id=int(row["id"]),
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_SESSION_STARTED,
+            event_payload={
+                "schema_version": 1,
+                "scene_version": int(row["scene_version"]),
+                "mode": mode,
+                "content_rating": content_rating,
+            },
+            source="system",
+        )
+        return VNPlaySession.from_row(row)
+
+    def list_sessions(self, *, include_deleted: bool = False) -> list[VNPlaySession]:
+        return [
+            VNPlaySession.from_row(row)
+            for row in self.repo.list_sessions(
+                owner_user_id=self.owner_user_id,
+                include_deleted=include_deleted,
+            )
+        ]
+
+    def get_session(self, session_id: int) -> VNPlaySession:
+        row = self.repo.get_session(session_id, owner_user_id=self.owner_user_id)
+        if row is None:
+            raise VNPlayNotFoundError("session_not_found")
+        return VNPlaySession.from_row(row)
+
+    async def submit_turn(
+        self,
+        session_id: int,
+        *,
+        input_text: str | None = None,
+        choice_id: str | None = None,
+        custom_action: Mapping[str, Any] | None = None,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> VNPlayTurnResponse:
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+
+        input_payload = _normalize_input_payload(
+            input_text=input_text,
+            choice_id=choice_id,
+            custom_action=custom_action,
+        )
+        request_payload_hash = _payload_hash(
+            {
+                "session_id": session_id,
+                "input": input_payload,
+            }
+        )
+
+        existing = self.repo.get_turn_request_by_key(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            return self._response_for_existing_turn(existing, request_payload_hash)
+
+        session = self.get_session(session_id)
+        if session.scene_version != client_scene_version:
+            raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
+        if session.active_turn_request_id is not None:
+            raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+
+        turn_request = self.repo.create_turn_request(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+            base_scene_version=client_scene_version,
+            status=TURN_STATUS_PENDING,
+        )
+        lock_acquired = self.repo.try_acquire_turn_lock(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            turn_request_id=int(turn_request["id"]),
+            expected_scene_version=client_scene_version,
+        )
+        if not lock_acquired:
+            return self._abandon_conflicting_turn(turn_request, session_id)
+
+        turn_events = self._append_accepted_turn_events(
+            session_id=session_id,
+            turn_request_id=int(turn_request["id"]),
+            input_payload=input_payload,
+            client_scene_version=client_scene_version,
+        )
+        scene_state = derive_scene_state(self.repo.list_events(session_id))
+        context = VNPlayTurnContext(
+            session=session,
+            input_payload=input_payload,
+            scene_state=scene_state,
+            recent_events=self.repo.list_events(session_id, limit=50),
+            turn_request_id=int(turn_request["id"]),
+        )
+
+        try:
+            result = coerce_turn_result(await self.adapter.generate_turn(context))
+        except VNPlayParseError as exc:
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_PARSE_FAILED,
+                error_message=str(exc),
+                client_scene_version=client_scene_version,
+                event_type=EVENT_MODEL_TURN_PARSE_FAILED,
+            )
+            raise VNPlayTurnError(TURN_STATUS_PARSE_FAILED) from exc
+        except Exception as exc:
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_MODEL_FAILED,
+                error_message=str(exc),
+                client_scene_version=client_scene_version,
+            )
+            raise VNPlayTurnError(TURN_STATUS_MODEL_FAILED) from exc
+
+        return self._complete_turn(
+            session_id=session_id,
+            turn_request_id=int(turn_request["id"]),
+            prior_events=turn_events,
+            result=result,
+            next_scene_version=client_scene_version + 1,
+        )
+
+    async def retry_last_turn(
+        self,
+        session_id: int,
+        *,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> VNPlayTurnResponse:
+        events = list(reversed(self.list_events(session_id)))
+        for event in events:
+            if event.get("event_type") != EVENT_USER_TURN:
+                continue
+            payload = dict(event.get("event_payload") or {})
+            input_payload = dict(payload.get("input") or {})
+            return await self.submit_turn(
+                session_id,
+                input_text=input_payload.get("input_text"),
+                choice_id=input_payload.get("choice_id"),
+                custom_action=input_payload.get("custom_action"),
+                client_scene_version=client_scene_version,
+                idempotency_key=idempotency_key,
+            )
+        raise VNPlayTurnError("retry_last_turn_no_user_turn")
+
+    def list_events(self, session_id: int) -> list[dict[str, Any]]:
+        self.get_session(session_id)
+        return self.repo.list_events(session_id)
+
+    def create_checkpoint(self, session_id: int, *, label: str) -> dict[str, Any]:
+        self.get_session(session_id)
+        events = self.repo.list_events(session_id)
+        state = self.repo.get_scene_state(session_id, owner_user_id=self.owner_user_id)
+        if state is None:
+            raise VNPlayNotFoundError("scene_state_not_found")
+        last_event_id = int(events[-1]["id"]) if events else None
+        checkpoint = self.repo.create_checkpoint(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            label=label,
+            event_id=last_event_id,
+            scene_version=int(state["scene_version"]),
+            scene_state_snapshot=state,
+        )
+        self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_SESSION_CHECKPOINT_CREATED,
+            event_payload={
+                "checkpoint_id": checkpoint["id"],
+                "label": label,
+                "scene_version": state["scene_version"],
+            },
+            source="runtime",
+        )
+        return checkpoint
+
+    def restore_checkpoint(self, session_id: int, checkpoint_id: int) -> dict[str, Any]:
+        self.get_session(session_id)
+        checkpoints = self.repo.list_checkpoints(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        checkpoint = next(
+            (item for item in checkpoints if int(item["id"]) == checkpoint_id),
+            None,
+        )
+        if checkpoint is None:
+            raise VNPlayNotFoundError("checkpoint_not_found")
+
+        snapshot = dict(checkpoint["scene_state_snapshot"])
+        event = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_SESSION_RESTORED,
+            event_payload={
+                "checkpoint_id": checkpoint_id,
+                "scene_state_snapshot": snapshot,
+                "scene_version": checkpoint["scene_version"],
+            },
+            source="runtime",
+        )
+        restored_state = derive_scene_state(self.repo.list_events(session_id))
+        self._persist_scene_state(
+            session_id=session_id,
+            state=restored_state,
+            last_event_id=int(event["id"]),
+        )
+        return checkpoint
+
+    def list_branches(self, session_id: int) -> list[dict[str, Any]]:
+        self.get_session(session_id)
+        return self.repo.list_branches(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+
+    def _response_for_existing_turn(
+        self,
+        turn_request: Mapping[str, Any],
+        request_payload_hash: str,
+    ) -> VNPlayTurnResponse:
+        if turn_request["request_payload_hash"] != request_payload_hash:
+            raise VNPlayConflictError(ERROR_IDEMPOTENCY_KEY_CONFLICT)
+
+        response_payload = turn_request.get("response_payload")
+        if (
+            turn_request.get("status") == TURN_STATUS_COMPLETED
+            and isinstance(response_payload, Mapping)
+        ):
+            return VNPlayTurnResponse.from_payload(response_payload)
+
+        return VNPlayTurnResponse(
+            turn_request_id=int(turn_request["id"]),
+            status=str(turn_request["status"]),
+            scene_version=int(turn_request["base_scene_version"]),
+        )
+
+    def _abandon_conflicting_turn(
+        self,
+        turn_request: Mapping[str, Any],
+        session_id: int,
+    ) -> VNPlayTurnResponse:
+        current = self.get_session(session_id)
+        status = (
+            ERROR_TURN_IN_PROGRESS
+            if current.active_turn_request_id is not None
+            else ERROR_STALE_SCENE_VERSION
+        )
+        self.repo.update_turn_request(
+            int(turn_request["id"]),
+            {
+                "status": TURN_STATUS_ABANDONED,
+                "error": {"code": status},
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        raise VNPlayConflictError(status)
+
+    def _append_accepted_turn_events(
+        self,
+        *,
+        session_id: int,
+        turn_request_id: int,
+        input_payload: Mapping[str, Any],
+        client_scene_version: int,
+    ) -> list[dict[str, Any]]:
+        turn_started = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_TURN_STARTED,
+            event_payload={
+                "turn_request_id": turn_request_id,
+                "scene_version": client_scene_version,
+            },
+            source="runtime",
+        )
+        user_turn = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_USER_TURN,
+            event_payload={
+                "turn_request_id": turn_request_id,
+                "input": dict(input_payload),
+                "scene_version": client_scene_version,
+            },
+            source="user",
+        )
+        self.repo.update_turn_request(
+            turn_request_id,
+            {
+                "status": TURN_STATUS_MODEL_CALLING,
+                "turn_started_event_id": turn_started["id"],
+                "input_event_id": user_turn["id"],
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        return [turn_started, user_turn]
+
+    def _complete_turn(
+        self,
+        *,
+        session_id: int,
+        turn_request_id: int,
+        prior_events: Sequence[Mapping[str, Any]],
+        result: TurnResult,
+        next_scene_version: int,
+    ) -> VNPlayTurnResponse:
+        model_turn = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_MODEL_TURN,
+            event_payload={
+                "turn_request_id": turn_request_id,
+                "narrative_text": result.narrative_text,
+                "dialogue": result.dialogue,
+                "visual_directives": result.visual_directives,
+                "warnings": result.warnings,
+                "scene_version": next_scene_version,
+            },
+            source="model",
+        )
+        new_events: list[dict[str, Any]] = [dict(event) for event in prior_events]
+        new_events.append(model_turn)
+
+        if result.choices:
+            choice_presented = self.repo.append_event(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                event_type=EVENT_CHOICE_PRESENTED,
+                event_payload={
+                    "turn_request_id": turn_request_id,
+                    "choices": result.choices,
+                    "scene_version": next_scene_version,
+                },
+                source="runtime",
+            )
+            new_events.append(choice_presented)
+
+        scene_payload = dict(result.scene_updates)
+        scene_payload["scene_version"] = next_scene_version
+        if result.warnings:
+            scene_payload["warnings"] = result.warnings
+        scene_state_changed = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_SCENE_STATE_CHANGED,
+            event_payload=scene_payload,
+            source="runtime",
+        )
+        turn_completed = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_TURN_COMPLETED,
+            event_payload={
+                "turn_request_id": turn_request_id,
+                "scene_version": next_scene_version,
+            },
+            source="runtime",
+        )
+        new_events.extend([scene_state_changed, turn_completed])
+
+        state = derive_scene_state(self.repo.list_events(session_id))
+        self._persist_scene_state(
+            session_id=session_id,
+            state=state,
+            last_event_id=int(turn_completed["id"]),
+        )
+        self.repo.update_session(
+            session_id,
+            {"active_turn_request_id": None, "scene_version": next_scene_version},
+            owner_user_id=self.owner_user_id,
+        )
+        response = VNPlayTurnResponse(
+            turn_request_id=turn_request_id,
+            status=TURN_STATUS_COMPLETED,
+            scene_version=next_scene_version,
+            events=new_events,
+            warnings=result.warnings,
+        )
+        self.repo.update_turn_request(
+            turn_request_id,
+            {
+                "status": TURN_STATUS_COMPLETED,
+                "turn_completed_event_id": turn_completed["id"],
+                "response_payload": response.to_payload(),
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        return response
+
+    def _mark_turn_failed(
+        self,
+        *,
+        session_id: int,
+        turn_request_id: int,
+        error_code: str,
+        error_message: str,
+        client_scene_version: int,
+        event_type: str = EVENT_TURN_FAILED,
+    ) -> None:
+        failed_event = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=event_type,
+            event_payload={
+                "turn_request_id": turn_request_id,
+                "code": error_code,
+                "message": error_message,
+                "scene_version": client_scene_version,
+            },
+            source="runtime",
+        )
+        state = derive_scene_state(self.repo.list_events(session_id))
+        self._persist_scene_state(
+            session_id=session_id,
+            state=state,
+            last_event_id=int(failed_event["id"]),
+        )
+        self.repo.update_turn_request(
+            turn_request_id,
+            {
+                "status": error_code,
+                "turn_completed_event_id": failed_event["id"],
+                "error": {
+                    "code": error_code,
+                    "message": error_message,
+                },
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        self.repo.update_session(
+            session_id,
+            {"active_turn_request_id": None},
+            owner_user_id=self.owner_user_id,
+        )
+
+    def _persist_scene_state(
+        self,
+        *,
+        session_id: int,
+        state: SceneState,
+        last_event_id: int | None,
+    ) -> None:
+        self.repo.set_scene_state(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            last_event_id=last_event_id,
+            current_background_item_id=state.current_background_item_id,
+            current_depth_item_id=state.current_depth_item_id,
+            active_sprite_items=state.active_sprite_items,
+            location_key=state.location_key,
+            mood=state.mood,
+            time_of_day=state.time_of_day,
+            weather=state.weather,
+            active_branch_node_id=state.active_branch_node_id,
+            visible_choices=state.visible_choices,
+            transcript_cursor=state.transcript_cursor,
+            scene_version=state.scene_version,
+            warnings=state.warnings,
+        )
+
+
+def _normalize_input_payload(
+    *,
+    input_text: str | None,
+    choice_id: str | None,
+    custom_action: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    populated = [
+        value is not None
+        for value in (input_text, choice_id, custom_action)
+    ]
+    if sum(populated) != 1:
+        raise VNPlayTurnError("exactly_one_turn_input_required")
+    if input_text is not None:
+        return {"input_text": input_text}
+    if choice_id is not None:
+        return {"choice_id": choice_id}
+    return {"custom_action": dict(custom_action or {})}
+
+
+def _payload_hash(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded, usedforsecurity=False).hexdigest()
+
+
+def _input_text(payload: Mapping[str, Any]) -> str:
+    if "input_text" in payload:
+        return str(payload["input_text"])
+    if "choice_id" in payload:
+        return f"choice:{payload['choice_id']}"
+    return json.dumps(payload.get("custom_action", {}), sort_keys=True)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]

@@ -16,14 +16,20 @@ vi.mock('@web/lib/api', () => ({
 import {
   applyVNAssetMatrix,
   bulkReviewVNAssetItems,
+  commitVNPackImport,
   cancelVNAssetGeneration,
   createVNAssetPack,
+  createVNPackImportPreview,
   deleteVNAssetPack,
+  exportVNAssetPack,
   getStarterMatrices,
   getVNAssetGeneration,
   getVNAssetManifest,
   getVNAssetPack,
   getVNAssetReadiness,
+  getVNPackExportJob,
+  getVNPackImportJob,
+  getVNPackImportPreview,
   listVNAssetItems,
   listVNAssetPacks,
   listVNAssetSlots,
@@ -109,5 +115,63 @@ describe('vnAssets api client', () => {
       slot_id: 2,
       variant_index: 0,
     });
+  });
+
+  it('calls portability export and import endpoints with expected paths and payloads', async () => {
+    const archive = new File(['vnpack'], 'pack.tldw-vnpack', { type: 'application/zip' });
+
+    await exportVNAssetPack(9, {
+      include_character_payload: true,
+      include_world_book_payloads: false,
+      include_full_provenance: true,
+      strict: true,
+      warn_for_sharing: true,
+      request_id: 'export-1',
+    });
+    await getVNPackExportJob('job-export');
+    await createVNPackImportPreview(archive);
+    await getVNPackImportPreview(33);
+    await commitVNPackImport({
+      preview_id: 33,
+      trust_mode: 'trusted_restore',
+      target_mode: 'update_existing',
+      character_action: 'link_existing_character',
+      target_character_id: 42,
+      target_pack_id: 9,
+      conflict_decisions: { confirm_all_risky_diffs: true },
+      request_id: 'commit-1',
+    });
+    await getVNPackImportJob('job-import');
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-assets/packs/9/export', {
+      include_character_payload: true,
+      include_world_book_payloads: false,
+      include_full_provenance: true,
+      strict: true,
+      warn_for_sharing: true,
+      request_id: 'export-1',
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-assets/portability/exports/job-export');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn-assets/import/previews',
+      expect.any(FormData),
+      expect.objectContaining({ headers: expect.objectContaining({ 'Content-Type': 'multipart/form-data' }) })
+    );
+    const formData = mocks.apiClient.post.mock.calls.find(
+      ([url]) => url === '/vn-assets/import/previews'
+    )?.[1] as FormData;
+    expect(formData.get('archive')).toBe(archive);
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-assets/import/previews/33');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-assets/import/commit', {
+      preview_id: 33,
+      trust_mode: 'trusted_restore',
+      target_mode: 'update_existing',
+      character_action: 'link_existing_character',
+      target_character_id: 42,
+      target_pack_id: 9,
+      conflict_decisions: { confirm_all_risky_diffs: true },
+      request_id: 'commit-1',
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-assets/portability/imports/job-import');
   });
 });

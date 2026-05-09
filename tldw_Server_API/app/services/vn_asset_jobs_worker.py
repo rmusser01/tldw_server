@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -18,10 +20,15 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
     VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
     VN_ASSETS_DOMAIN,
+    VN_PACK_EXPORT_JOB_TYPE,
+    VN_PACK_IMPORT_COMMIT_JOB_TYPE,
+    VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
     vn_asset_generation_jobs_queue,
     vn_asset_jobs_queue,
 )
+from tldw_Server_API.app.core.VN_Assets.storage import resolve_vn_asset_storage_path
 from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
 
 def _close_worker_database(db: Any) -> None:
@@ -38,9 +45,13 @@ async def handle_vn_asset_job(job: dict[str, Any], *, job_manager: JobManager | 
     if str(job.get("job_type") or "").strip() not in {
         VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
         VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
+        VN_PACK_EXPORT_JOB_TYPE,
+        VN_PACK_IMPORT_COMMIT_JOB_TYPE,
+        VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
     }:
         raise ValueError("unsupported_vn_asset_worker_job_type")
 
+    job_type = str(job.get("job_type") or "").strip()
     payload = job.get("payload") or {}
     owner_user_id = _job_owner_user_id(job)
     payload_user_id = _payload_user_id(payload)
@@ -53,7 +64,16 @@ async def handle_vn_asset_job(job: dict[str, Any], *, job_manager: JobManager | 
     )
     try:
         repo = VNAssetPacksRepository.initialized(note_db)
-        worker = VNAssetGenerationWorker(repo=repo, jobs_manager=job_manager or JobManager())
+        worker_dependencies: dict[str, Any] = {}
+        if job_type == VN_PACK_EXPORT_JOB_TYPE:
+            worker_dependencies.update(await _export_dependencies(owner_user_id))
+        if job_type == VN_PACK_IMPORT_COMMIT_JOB_TYPE:
+            worker_dependencies.update(await _import_commit_dependencies())
+        worker = VNAssetGenerationWorker(
+            repo=repo,
+            jobs_manager=job_manager or JobManager(),
+            **worker_dependencies,
+        )
         return await worker.handle_job_async(job)
     finally:
         _close_worker_database(note_db)
@@ -77,6 +97,43 @@ def _payload_user_id(payload: Any) -> int:
     if user_id <= 0:
         raise ValueError("missing_user_id")
     return user_id
+
+
+async def _export_dependencies(owner_user_id: int) -> dict[str, Any]:
+    storage_service = await get_storage_service()
+    files_repo = await storage_service.get_generated_files_repo()
+    return {
+        "generated_files_repo": files_repo,
+        "read_generated_file_bytes": _read_generated_file_bytes_for_user(owner_user_id),
+        "export_staging_root": _vn_pack_export_staging_root(owner_user_id),
+    }
+
+
+async def _import_commit_dependencies() -> dict[str, Any]:
+    storage_service = await get_storage_service()
+    return {
+        "unregister_generated_file": storage_service.unregister_generated_file,
+        "preflight_storage_quota": storage_service.check_combined_quota,
+    }
+
+
+def _read_generated_file_bytes_for_user(owner_user_id: int) -> Any:
+    def _reader(file_record: dict[str, Any]) -> bytes:
+        storage_path = str(file_record.get("storage_path") or "")
+        resolved = resolve_vn_asset_storage_path(
+            user_id=owner_user_id,
+            storage_path=storage_path,
+        )
+        return resolved.read_bytes()
+
+    return _reader
+
+
+def _vn_pack_export_staging_root(owner_user_id: int) -> Path:
+    configured = (os.getenv("VN_PACK_EXPORT_STAGING_ROOT") or "").strip()
+    if configured:
+        return Path(configured) / str(owner_user_id)
+    return DatabasePaths.get_user_temp_outputs_dir(owner_user_id) / "vn_pack_exports"
 
 
 async def _should_cancel(job: dict[str, Any], *, job_manager: JobManager | None = None) -> bool:

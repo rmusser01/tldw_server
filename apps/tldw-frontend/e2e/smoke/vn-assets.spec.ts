@@ -20,6 +20,7 @@ test.describe('VN asset packs smoke', () => {
     let packs: Array<Record<string, unknown>> = [];
     let slots: Array<Record<string, unknown>> = [];
     let items: Array<Record<string, unknown>> = [];
+    let lastExportBody: Record<string, unknown> | null = null;
     let lastMatrixBody: Record<string, unknown> | null = null;
     let lastReviewBody: Record<string, unknown> | null = null;
 
@@ -139,6 +140,20 @@ test.describe('VN asset packs smoke', () => {
         return;
       }
 
+      if (method === 'POST' && path === '/packs/1/export') {
+        lastExportBody = request.postDataJSON() as Record<string, unknown>;
+        await fulfillJson(route, 202, {
+          job_id: '700',
+          portability_job_id: 8,
+          operation: 'export',
+          pack_id: 1,
+          status: 'queued',
+          stage: 'queued',
+          download_url: null,
+        });
+        return;
+      }
+
       if (method === 'POST' && path === '/packs/1/items/bulk-review') {
         lastReviewBody = request.postDataJSON() as Record<string, unknown>;
         items = items.map((item) =>
@@ -179,5 +194,18 @@ test.describe('VN asset packs smoke', () => {
       review_status: 'approved',
     });
     await expect(page.getByText('approved').first()).toBeVisible();
+
+    await page.getByLabel('Include character payload').check();
+    await page.getByLabel('Include full provenance').check();
+    await page.getByRole('button', { name: 'Export backup bundle' }).click();
+
+    await expect.poll(() => lastExportBody).toMatchObject({
+      include_character_payload: true,
+      include_full_provenance: true,
+      include_world_book_payloads: false,
+      strict: false,
+      warn_for_sharing: true,
+    });
+    await expect(page.getByText('Export job: 700')).toBeVisible();
   });
 });

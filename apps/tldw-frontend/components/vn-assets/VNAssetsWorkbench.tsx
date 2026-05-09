@@ -1,11 +1,12 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Images, LayoutGrid, Settings } from 'lucide-react';
+import { Archive, ClipboardList, Images, LayoutGrid, Settings } from 'lucide-react';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import GenerationMonitor from '@web/components/vn-assets/GenerationMonitor';
 import MatrixEditor from '@web/components/vn-assets/MatrixEditor';
 import PackList from '@web/components/vn-assets/PackList';
 import PackSetup from '@web/components/vn-assets/PackSetup';
+import PortabilityPanel from '@web/components/vn-assets/PortabilityPanel';
 import ReadinessPanel from '@web/components/vn-assets/ReadinessPanel';
 import ReviewBoard from '@web/components/vn-assets/ReviewBoard';
 import {
@@ -37,6 +38,7 @@ const workflowSteps = [
   { key: 'matrix', label: 'Matrix', icon: LayoutGrid },
   { key: 'generation', label: 'Generation', icon: Images },
   { key: 'review', label: 'Review', icon: ClipboardList },
+  { key: 'portability', label: 'Portability', icon: Archive },
 ] as const;
 
 function plannedAssetLabel(count: number): string {
@@ -380,6 +382,8 @@ export default function VNAssetsWorkbench() {
               onBulkReview={handleBulkReview}
               onSetPreferred={handleSetPreferred}
             />
+
+            <PortabilityPanel selectedPack={selectedPack} />
           </div>
         </section>
       </div>

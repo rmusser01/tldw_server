@@ -15,6 +15,14 @@ import type {
   VNAssetSlot,
   VNAssetSlotUpdate,
   VNAssetStarterMatricesResponse,
+  VNPackExportRequest,
+  VNPackExportResponse,
+  VNPackImportCommitRequest,
+  VNPackImportCommitStartResponse,
+  VNPackImportJob,
+  VNPackImportPreview,
+  VNPackImportPreviewStartResponse,
+  VNPackPortabilityJob,
 } from '@web/types/vn-assets';
 
 const VN_ASSETS_BASE = '/vn-assets';
@@ -117,4 +125,37 @@ export function previewVNAssetPrompt(
   request: VNAssetPromptPreviewRequest
 ): Promise<VNAssetPromptPreview> {
   return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/prompt-preview`, request);
+}
+
+export function exportVNAssetPack(
+  packId: number,
+  request: VNPackExportRequest = {}
+): Promise<VNPackExportResponse> {
+  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/export`, request);
+}
+
+export function getVNPackExportJob(jobId: string): Promise<VNPackPortabilityJob> {
+  return apiClient.get(`${VN_ASSETS_BASE}/portability/exports/${jobId}`);
+}
+
+export function createVNPackImportPreview(archive: File): Promise<VNPackImportPreviewStartResponse> {
+  const formData = new FormData();
+  formData.append('archive', archive);
+  return apiClient.post(`${VN_ASSETS_BASE}/import/previews`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+export function getVNPackImportPreview(previewId: number): Promise<VNPackImportPreview> {
+  return apiClient.get(`${VN_ASSETS_BASE}/import/previews/${previewId}`);
+}
+
+export function commitVNPackImport(
+  request: VNPackImportCommitRequest
+): Promise<VNPackImportCommitStartResponse> {
+  return apiClient.post(`${VN_ASSETS_BASE}/import/commit`, request);
+}
+
+export function getVNPackImportJob(jobId: string): Promise<VNPackImportJob> {
+  return apiClient.get(`${VN_ASSETS_BASE}/portability/imports/${jobId}`);
 }

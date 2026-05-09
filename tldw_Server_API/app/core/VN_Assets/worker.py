@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from inspect import isawaitable
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -25,9 +26,16 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     VN_ASSETS_DOMAIN,
     VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
     VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
+    VN_PACK_EXPORT_JOB_TYPE,
+    VN_PACK_IMPORT_COMMIT_JOB_TYPE,
+    VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
     create_generate_variant_job,
     vn_asset_batch_group,
 )
+from tldw_Server_API.app.core.VN_Assets.portability.exporter import VNPackExporter
+from tldw_Server_API.app.core.VN_Assets.portability.importer import VNPackImporter
+from tldw_Server_API.app.core.VN_Assets.portability.models import VNPackExportOptions
+from tldw_Server_API.app.core.VN_Assets.portability.preview import VNPackImportPreviewer
 from tldw_Server_API.app.core.VN_Assets.prompts import build_prompt_preview
 
 
@@ -42,12 +50,22 @@ class VNAssetGenerationWorker:
         image_registry: Any | None = None,
         backend_gate: Any | None = None,
         save_vn_asset_image: Any | None = None,
+        generated_files_repo: Any | None = None,
+        read_generated_file_bytes: Any | None = None,
+        export_staging_root: Path | None = None,
+        unregister_generated_file: Any | None = None,
+        preflight_storage_quota: Any | None = None,
     ) -> None:
         self.repo = repo
         self.jobs_manager = jobs_manager
         self.image_registry = image_registry or get_registry()
         self.backend_gate = backend_gate or get_default_backend_generation_gate()
         self.save_vn_asset_image = save_vn_asset_image or save_and_register_vn_asset_image
+        self.generated_files_repo = generated_files_repo
+        self.read_generated_file_bytes = read_generated_file_bytes
+        self.export_staging_root = export_staging_root
+        self.unregister_generated_file = unregister_generated_file
+        self.preflight_storage_quota = preflight_storage_quota
 
     def handle_enqueue_batch(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         pack_id = _payload_int(payload, "pack_id")
@@ -181,6 +199,12 @@ class VNAssetGenerationWorker:
             return self.handle_enqueue_batch(payload)
         if job_type == VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
             raise ValueError("vn_asset_generate_variant_requires_async_handler")
+        if job_type == VN_PACK_EXPORT_JOB_TYPE:
+            raise ValueError("vn_pack_export_requires_async_handler")
+        if job_type == VN_PACK_IMPORT_PREVIEW_JOB_TYPE:
+            raise ValueError("vn_pack_import_preview_requires_async_handler")
+        if job_type == VN_PACK_IMPORT_COMMIT_JOB_TYPE:
+            raise ValueError("vn_pack_import_commit_requires_async_handler")
         raise ValueError("unsupported_vn_asset_job_type")
 
     async def handle_job_async(self, job: Mapping[str, Any]) -> dict[str, Any]:
@@ -190,7 +214,338 @@ class VNAssetGenerationWorker:
             return self.handle_enqueue_batch(payload)
         if job_type == VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
             return await self.handle_generate_variant(payload, job=job)
+        if job_type == VN_PACK_EXPORT_JOB_TYPE:
+            return await self.handle_export_pack(payload, job=job)
+        if job_type == VN_PACK_IMPORT_PREVIEW_JOB_TYPE:
+            return await self.handle_import_preview(payload, job=job)
+        if job_type == VN_PACK_IMPORT_COMMIT_JOB_TYPE:
+            return await self.handle_import_commit(payload, job=job)
         raise ValueError("unsupported_vn_asset_job_type")
+
+    async def handle_export_pack(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        job: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        pack_id = _payload_int(payload, "pack_id")
+        user_id = _payload_int(payload, "user_id")
+
+        pack = self.repo.get_pack(pack_id)
+        if pack is None or int(pack["owner_user_id"]) != user_id:
+            raise ValueError("pack_not_found")
+        portability_job_id = _payload_int(payload, "portability_job_id", default=0)
+        portability_job = (
+            self.repo.get_portability_job(portability_job_id, owner_user_id=user_id)
+            if portability_job_id > 0
+            else self.repo.get_portability_job_by_job_id(str((job or {}).get("id")), owner_user_id=user_id)
+        )
+        if portability_job is None or int(portability_job["pack_id"] or 0) != pack_id:
+            raise ValueError("vn_pack_portability_job_not_found")
+        portability_job_id = int(portability_job["id"])
+        if self.generated_files_repo is None or self.read_generated_file_bytes is None:
+            raise ValueError("vn_pack_export_storage_unavailable")
+
+        job_id = str(portability_job["job_id"])
+        self.repo.update_portability_job(
+            job_id,
+            {"status": "processing", "stage": "collecting_metadata", "progress": {"pack_id": pack_id}},
+            owner_user_id=user_id,
+        )
+
+        def _progress(stage: str, progress: dict[str, Any]) -> None:
+            self.repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": stage, "progress": progress},
+                owner_user_id=user_id,
+            )
+
+        try:
+            exporter = VNPackExporter(
+                repo=self.repo,
+                owner_user_id=user_id,
+                generated_files_repo=self.generated_files_repo,
+                read_generated_file_bytes=self.read_generated_file_bytes,
+                staging_root=self._export_staging_root(user_id),
+            )
+            result = await exporter.export_pack(
+                pack_id=pack_id,
+                options=_export_options(payload.get("options")),
+                progress=_progress,
+            )
+        except Exception as exc:
+            self.repo.update_portability_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "export_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            raise
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        self.repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "archive_path": str(result.archive_path),
+                "archive_sha256": result.archive_sha256,
+                "canonical_payload_fingerprint": result.canonical_payload_fingerprint,
+                "warnings": result.warnings,
+                "progress": {"file_size_bytes": result.file_size_bytes},
+                "expires_at": expires_at,
+            },
+            owner_user_id=user_id,
+        )
+        return {
+            "status": "exported",
+            "pack_id": pack_id,
+            "portability_job_id": portability_job_id,
+            "archive_path": str(result.archive_path),
+            "archive_sha256": result.archive_sha256,
+            "canonical_payload_fingerprint": result.canonical_payload_fingerprint,
+            "file_size_bytes": result.file_size_bytes,
+            "warnings": result.warnings,
+        }
+
+    async def handle_import_preview(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        job: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        preview_id = _payload_int(payload, "preview_id")
+        user_id = _payload_int(payload, "user_id")
+        preview = self.repo.get_import_preview(preview_id, owner_user_id=user_id)
+        if preview is None:
+            raise ValueError("vn_pack_import_preview_not_found")
+        job_id = str(preview["job_id"])
+        portability_job = self.repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
+        preview_status = str(preview["status"])
+        if preview_status in {"deleted", "cancelled"}:
+            if portability_job is not None and (
+                str(portability_job["status"]) != "cancelled"
+                or str(portability_job["stage"]) != preview_status
+            ):
+                self.repo.update_portability_job(
+                    job_id,
+                    {"status": "cancelled", "stage": preview_status},
+                    owner_user_id=user_id,
+                )
+            return {
+                "status": "cancelled",
+                "preview_id": preview_id,
+                "archive_path": str(preview.get("archive_path") or ""),
+            }
+        archive_path = Path(str(payload.get("archive_path") or preview.get("archive_path") or ""))
+        if not archive_path.is_file():
+            raise ValueError("vn_pack_import_archive_not_found")
+
+        self.repo.update_import_preview(
+            preview_id,
+            {"status": "processing", "archive_path": str(archive_path)},
+            owner_user_id=user_id,
+        )
+        if portability_job is not None:
+            self.repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": "validating_archive"},
+                owner_user_id=user_id,
+            )
+
+        def _progress(stage: str, progress: dict[str, Any]) -> None:
+            self.repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": stage, "progress": progress},
+                owner_user_id=user_id,
+            )
+
+        try:
+            previewer = VNPackImportPreviewer(repo=self.repo)
+            result = await previewer.create_preview(
+                archive_path=archive_path,
+                owner_user_id=user_id,
+                progress=_progress,
+            )
+        except Exception as exc:
+            self.repo.update_import_preview(
+                preview_id,
+                {"status": "failed"},
+                owner_user_id=user_id,
+            )
+            self.repo.update_portability_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "import_preview_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            raise
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        self.repo.update_import_preview(
+            preview_id,
+            {
+                "status": "completed",
+                "archive_sha256": result["archive_sha256"],
+                "canonical_payload_fingerprint": result["canonical_payload_fingerprint"],
+                "schema_version": result["schema_version"],
+                "bundle_summary": result["bundle_summary"],
+                "validation_warnings": result["validation_warnings"],
+                "conflicts": result["conflicts"],
+                "proposed_plan": result["proposed_plan"],
+                "quota_estimate": result["quota_estimate"],
+                "required_choices": result["required_choices"],
+                "expires_at": expires_at,
+            },
+            owner_user_id=user_id,
+        )
+        self.repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "archive_path": str(archive_path),
+                "archive_sha256": result["archive_sha256"],
+                "canonical_payload_fingerprint": result["canonical_payload_fingerprint"],
+                "warnings": result["validation_warnings"],
+                "progress": result["bundle_summary"],
+                "expires_at": expires_at,
+            },
+            owner_user_id=user_id,
+        )
+        return {
+            **result,
+            "status": "previewed",
+            "preview_id": preview_id,
+            "archive_path": str(archive_path),
+        }
+
+    async def handle_import_commit(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        job: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        import_id = _payload_int(payload, "import_id")
+        preview_id = _payload_int(payload, "preview_id")
+        user_id = _payload_int(payload, "user_id")
+        trust_mode = _payload_text(payload, "trust_mode")
+        target_mode = _payload_text(payload, "target_mode")
+        character_action = _payload_text(payload, "character_action")
+        target_character_id = _payload_optional_int(payload, "target_character_id")
+        target_pack_id = _payload_optional_int(payload, "target_pack_id")
+        conflict_decisions = payload.get("conflict_decisions")
+        if not isinstance(conflict_decisions, Mapping):
+            conflict_decisions = {}
+
+        journal = self.repo.get_import_journal(import_id, owner_user_id=user_id)
+        if journal is None or int(journal["preview_id"]) != preview_id:
+            raise ValueError("vn_pack_import_journal_not_found")
+        preview = self.repo.get_import_preview(preview_id, owner_user_id=user_id)
+        if preview is None:
+            raise ValueError("vn_pack_import_preview_not_found")
+        job_id = str((job or {}).get("id") or journal["job_id"])
+        portability_job = self.repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
+        if portability_job is None or portability_job.get("operation") != "import_commit":
+            raise ValueError("vn_pack_import_commit_job_not_found")
+
+        self.repo.update_import_journal(
+            import_id,
+            {"status": "processing", "stage": "revalidating_preview", "job_id": job_id},
+            owner_user_id=user_id,
+        )
+        self.repo.update_portability_job(
+            job_id,
+            {
+                "status": "processing",
+                "stage": "revalidating_preview",
+                "progress": {"preview_id": preview_id, "import_id": import_id},
+            },
+            owner_user_id=user_id,
+        )
+
+        def _progress(stage: str, progress: dict[str, Any]) -> None:
+            self.repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": stage, "progress": progress},
+                owner_user_id=user_id,
+            )
+
+        try:
+            importer = VNPackImporter(
+                repo=self.repo,
+                owner_user_id=user_id,
+                save_vn_asset_image=self.save_vn_asset_image,
+                unregister_generated_file=self.unregister_generated_file,
+                preflight_storage_quota=self.preflight_storage_quota,
+            )
+            result = await importer.import_pack(
+                preview_id=preview_id,
+                job_id=job_id,
+                trust_mode=trust_mode,
+                target_mode=target_mode,
+                character_action=character_action,
+                target_character_id=target_character_id,
+                target_pack_id=target_pack_id,
+                conflict_decisions=conflict_decisions,
+                journal_id=import_id,
+                progress=_progress,
+            )
+        except Exception as exc:
+            self.repo.update_import_journal(
+                import_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "import_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            self.repo.update_portability_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "import_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            raise
+
+        self.repo.update_import_journal(
+            import_id,
+            {"target_pack_id": int(result["pack_id"])},
+            owner_user_id=user_id,
+        )
+        self.repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "pack_id": int(result["pack_id"]),
+                "progress": {
+                    "pack_id": int(result["pack_id"]),
+                    "created_records": result.get("created_records", {}),
+                },
+            },
+            owner_user_id=user_id,
+        )
+        return result
+
+    def _export_staging_root(self, user_id: int) -> Path:
+        if self.export_staging_root is not None:
+            return Path(self.export_staging_root)
+        raise ValueError("vn_pack_export_staging_root_unavailable")
 
     async def _generate_variant(
         self,
@@ -387,11 +742,30 @@ class VNAssetGenerationWorker:
                 cancel_job(job_id, reason="vn_asset_batch_terminal")
 
 
-def _payload_int(payload: Mapping[str, Any], key: str) -> int:
+def _payload_int(payload: Mapping[str, Any], key: str, *, default: int | None = None) -> int:
     try:
         return int(payload[key])
     except (KeyError, TypeError, ValueError) as exc:
+        if default is not None:
+            return default
         raise ValueError(f"missing_{key}") from exc
+
+
+def _payload_optional_int(payload: Mapping[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid_{key}") from exc
+
+
+def _payload_text(payload: Mapping[str, Any], key: str) -> str:
+    value = str(payload.get(key) or "").strip()
+    if not value:
+        raise ValueError(f"missing_{key}")
+    return value
 
 
 _TERMINAL_BATCH_STATUSES = {"cancelled", "canceled", "completed", "failed"}
@@ -531,6 +905,30 @@ def _image_format_from_content_type(content_type: str | None, default: str) -> s
         return "jpg"
     if normalized.startswith("image/"):
         return normalized.split("/", 1)[1].split(";", 1)[0] or default
+    return default
+
+
+def _export_options(value: Any) -> VNPackExportOptions:
+    options = value if isinstance(value, Mapping) else {}
+    return VNPackExportOptions(
+        include_character_payload=_bool_option(options.get("include_character_payload"), default=False),
+        include_world_book_payloads=_bool_option(options.get("include_world_book_payloads"), default=False),
+        include_full_provenance=_bool_option(options.get("include_full_provenance"), default=False),
+        strict=_bool_option(options.get("strict"), default=False),
+        warn_for_sharing=_bool_option(options.get("warn_for_sharing"), default=True),
+    )
+
+
+def _bool_option(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
     return default
 
 

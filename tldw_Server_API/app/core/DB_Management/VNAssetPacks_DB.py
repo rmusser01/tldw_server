@@ -109,6 +109,73 @@ CREATE TABLE IF NOT EXISTS vn_asset_batches (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS vn_pack_portability_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,
+    owner_user_id INTEGER NOT NULL,
+    operation TEXT NOT NULL,
+    status TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    pack_id INTEGER REFERENCES vn_asset_packs(id),
+    preview_id INTEGER,
+    import_id INTEGER,
+    archive_path TEXT,
+    archive_sha256 TEXT,
+    canonical_payload_fingerprint TEXT,
+    progress_json TEXT NOT NULL DEFAULT '{}',
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    error_code TEXT,
+    error_message TEXT,
+    download_url TEXT,
+    expires_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vn_pack_import_previews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    archive_path TEXT NOT NULL,
+    archive_sha256 TEXT,
+    canonical_payload_fingerprint TEXT,
+    schema_version TEXT,
+    bundle_summary_json TEXT NOT NULL DEFAULT '{}',
+    validation_warnings_json TEXT NOT NULL DEFAULT '[]',
+    conflicts_json TEXT NOT NULL DEFAULT '[]',
+    proposed_plan_json TEXT NOT NULL DEFAULT '{}',
+    quota_estimate_json TEXT NOT NULL DEFAULT '{}',
+    required_choices_json TEXT NOT NULL DEFAULT '[]',
+    expires_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vn_pack_import_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL,
+    preview_id INTEGER NOT NULL REFERENCES vn_pack_import_previews(id),
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    trust_mode TEXT NOT NULL,
+    target_mode TEXT NOT NULL,
+    target_pack_id INTEGER,
+    archive_path TEXT,
+    archive_sha256 TEXT,
+    canonical_payload_fingerprint TEXT,
+    id_maps_json TEXT NOT NULL DEFAULT '{}',
+    created_records_json TEXT NOT NULL DEFAULT '{}',
+    cleanup_status_json TEXT NOT NULL DEFAULT '{}',
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    error_code TEXT,
+    error_message TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME
+);
+
 CREATE INDEX IF NOT EXISTS idx_vn_asset_packs_primary_character_id
     ON vn_asset_packs(primary_character_id);
 CREATE INDEX IF NOT EXISTS idx_vn_asset_packs_deleted
@@ -129,6 +196,34 @@ CREATE INDEX IF NOT EXISTS idx_vn_asset_batches_pack_id
     ON vn_asset_batches(pack_id);
 CREATE INDEX IF NOT EXISTS idx_vn_asset_batches_job_batch_id
     ON vn_asset_batches(job_batch_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_portability_jobs_owner_user_id
+    ON vn_pack_portability_jobs(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_portability_jobs_job_id
+    ON vn_pack_portability_jobs(job_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_portability_jobs_status
+    ON vn_pack_portability_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_portability_jobs_expires_at
+    ON vn_pack_portability_jobs(expires_at);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_portability_jobs_fingerprint
+    ON vn_pack_portability_jobs(canonical_payload_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_previews_owner_user_id
+    ON vn_pack_import_previews(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_previews_job_id
+    ON vn_pack_import_previews(job_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_previews_status
+    ON vn_pack_import_previews(status);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_previews_expires_at
+    ON vn_pack_import_previews(expires_at);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_previews_fingerprint
+    ON vn_pack_import_previews(canonical_payload_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_owner_user_id
+    ON vn_pack_import_journal(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_job_id
+    ON vn_pack_import_journal(job_id);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_status
+    ON vn_pack_import_journal(status);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_fingerprint
+    ON vn_pack_import_journal(canonical_payload_fingerprint);
 """
 
 VN_ASSET_SCHEMA_STATEMENTS = tuple(
@@ -164,6 +259,416 @@ class VNAssetPacksRepository:
     def initialize_schema(self) -> None:
         ensure_vn_asset_tables(self.db)
         self._schema_initialized = True
+
+    def create_portability_job(
+        self,
+        *,
+        owner_user_id: int,
+        job_id: str,
+        operation: str,
+        status: str,
+        stage: str,
+        pack_id: int | None = None,
+        preview_id: int | None = None,
+        import_id: int | None = None,
+        archive_path: str | None = None,
+        archive_sha256: str | None = None,
+        canonical_payload_fingerprint: str | None = None,
+        progress: Mapping[str, Any] | None = None,
+        warnings: list[Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        download_url: str | None = None,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO vn_pack_portability_jobs (
+                    job_id,
+                    owner_user_id,
+                    operation,
+                    status,
+                    stage,
+                    pack_id,
+                    preview_id,
+                    import_id,
+                    archive_path,
+                    archive_sha256,
+                    canonical_payload_fingerprint,
+                    progress_json,
+                    warnings_json,
+                    error_code,
+                    error_message,
+                    download_url,
+                    expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    owner_user_id,
+                    operation,
+                    status,
+                    stage,
+                    pack_id,
+                    preview_id,
+                    import_id,
+                    archive_path,
+                    archive_sha256,
+                    canonical_payload_fingerprint,
+                    _json_dump(progress or {}),
+                    _json_dump(warnings or []),
+                    error_code,
+                    error_message,
+                    download_url,
+                    expires_at,
+                ),
+            )
+            portability_job_id = cursor.lastrowid
+
+        job = self.get_portability_job(portability_job_id, owner_user_id=owner_user_id)
+        if job is None:
+            raise RuntimeError("created_portability_job_not_found")
+        return job
+
+    def get_portability_job(
+        self,
+        portability_job_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        if owner_user_id is None:
+            cursor = self.db.execute_query(
+                "SELECT * FROM vn_pack_portability_jobs WHERE id = ?",
+                (portability_job_id,),
+            )
+        else:
+            cursor = self.db.execute_query(
+                """
+                SELECT * FROM vn_pack_portability_jobs
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (portability_job_id, owner_user_id),
+            )
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def get_portability_job_by_job_id(
+        self,
+        job_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        if owner_user_id is None:
+            cursor = self.db.execute_query(
+                "SELECT * FROM vn_pack_portability_jobs WHERE job_id = ?",
+                (job_id,),
+            )
+        else:
+            cursor = self.db.execute_query(
+                """
+                SELECT * FROM vn_pack_portability_jobs
+                WHERE job_id = ? AND owner_user_id = ?
+                """,
+                (job_id, owner_user_id),
+            )
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def update_portability_job(
+        self,
+        job_id: str,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        current = self.get_portability_job_by_job_id(job_id, owner_user_id=owner_user_id)
+        if current is None:
+            return None
+
+        update_values = _portability_update_values(
+            fields,
+            _PORTABILITY_JOB_UPDATE_COLUMNS,
+            _PORTABILITY_JOB_JSON_DEFAULTS,
+        )
+        if not update_values:
+            return current
+
+        with self.db.transaction() as conn:
+            where_clause = "job_id = ?"
+            where_params: list[Any] = [job_id]
+            if owner_user_id is not None:
+                where_clause += " AND owner_user_id = ?"
+                where_params.append(owner_user_id)
+            _execute_portability_update(
+                conn,
+                table_name="vn_pack_portability_jobs",
+                update_values=update_values,
+                where_clause=where_clause,
+                where_params=where_params,
+            )
+        return self.get_portability_job_by_job_id(job_id, owner_user_id=owner_user_id)
+
+    def create_import_preview(
+        self,
+        *,
+        owner_user_id: int,
+        job_id: str,
+        status: str,
+        archive_path: str,
+        archive_sha256: str | None = None,
+        canonical_payload_fingerprint: str | None = None,
+        schema_version: str | None = None,
+        bundle_summary: Mapping[str, Any] | None = None,
+        validation_warnings: list[Any] | None = None,
+        conflicts: list[Any] | None = None,
+        proposed_plan: Mapping[str, Any] | None = None,
+        quota_estimate: Mapping[str, Any] | None = None,
+        required_choices: list[Any] | None = None,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO vn_pack_import_previews (
+                    owner_user_id,
+                    job_id,
+                    status,
+                    archive_path,
+                    archive_sha256,
+                    canonical_payload_fingerprint,
+                    schema_version,
+                    bundle_summary_json,
+                    validation_warnings_json,
+                    conflicts_json,
+                    proposed_plan_json,
+                    quota_estimate_json,
+                    required_choices_json,
+                    expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    job_id,
+                    status,
+                    archive_path,
+                    archive_sha256,
+                    canonical_payload_fingerprint,
+                    schema_version,
+                    _json_dump(bundle_summary or {}),
+                    _json_dump(validation_warnings or []),
+                    _json_dump(conflicts or []),
+                    _json_dump(proposed_plan or {}),
+                    _json_dump(quota_estimate or {}),
+                    _json_dump(required_choices or []),
+                    expires_at,
+                ),
+            )
+            preview_id = cursor.lastrowid
+
+        preview = self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+        if preview is None:
+            raise RuntimeError("created_import_preview_not_found")
+        return preview
+
+    def get_import_preview(
+        self,
+        preview_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        if owner_user_id is None:
+            cursor = self.db.execute_query(
+                "SELECT * FROM vn_pack_import_previews WHERE id = ?",
+                (preview_id,),
+            )
+        else:
+            cursor = self.db.execute_query(
+                """
+                SELECT * FROM vn_pack_import_previews
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (preview_id, owner_user_id),
+            )
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def update_import_preview(
+        self,
+        preview_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        current = self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+        if current is None:
+            return None
+
+        update_values = _portability_update_values(
+            fields,
+            _IMPORT_PREVIEW_UPDATE_COLUMNS,
+            _IMPORT_PREVIEW_JSON_DEFAULTS,
+        )
+        if not update_values:
+            return current
+
+        with self.db.transaction() as conn:
+            where_clause = "id = ?"
+            where_params: list[Any] = [preview_id]
+            if owner_user_id is not None:
+                where_clause += " AND owner_user_id = ?"
+                where_params.append(owner_user_id)
+            _execute_portability_update(
+                conn,
+                table_name="vn_pack_import_previews",
+                update_values=update_values,
+                where_clause=where_clause,
+                where_params=where_params,
+            )
+        return self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+
+    def create_import_journal(
+        self,
+        *,
+        owner_user_id: int,
+        preview_id: int,
+        job_id: str,
+        status: str,
+        stage: str,
+        trust_mode: str,
+        target_mode: str,
+        target_pack_id: int | None = None,
+        archive_path: str | None = None,
+        archive_sha256: str | None = None,
+        canonical_payload_fingerprint: str | None = None,
+        id_maps: Mapping[str, Any] | None = None,
+        created_records: Mapping[str, Any] | None = None,
+        cleanup_status: Mapping[str, Any] | None = None,
+        warnings: list[Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        completed_at: str | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO vn_pack_import_journal (
+                    owner_user_id,
+                    preview_id,
+                    job_id,
+                    status,
+                    stage,
+                    trust_mode,
+                    target_mode,
+                    target_pack_id,
+                    archive_path,
+                    archive_sha256,
+                    canonical_payload_fingerprint,
+                    id_maps_json,
+                    created_records_json,
+                    cleanup_status_json,
+                    warnings_json,
+                    error_code,
+                    error_message,
+                    completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    preview_id,
+                    job_id,
+                    status,
+                    stage,
+                    trust_mode,
+                    target_mode,
+                    target_pack_id,
+                    archive_path,
+                    archive_sha256,
+                    canonical_payload_fingerprint,
+                    _json_dump(id_maps or {}),
+                    _json_dump(created_records or {}),
+                    _json_dump(cleanup_status or {}),
+                    _json_dump(warnings or []),
+                    error_code,
+                    error_message,
+                    completed_at,
+                ),
+            )
+            import_id = cursor.lastrowid
+
+        journal = self.get_import_journal(import_id, owner_user_id=owner_user_id)
+        if journal is None:
+            raise RuntimeError("created_import_journal_not_found")
+        return journal
+
+    def get_import_journal(
+        self,
+        import_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        if owner_user_id is None:
+            cursor = self.db.execute_query(
+                "SELECT * FROM vn_pack_import_journal WHERE id = ?",
+                (import_id,),
+            )
+        else:
+            cursor = self.db.execute_query(
+                """
+                SELECT * FROM vn_pack_import_journal
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (import_id, owner_user_id),
+            )
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def update_import_journal(
+        self,
+        import_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        current = self.get_import_journal(import_id, owner_user_id=owner_user_id)
+        if current is None:
+            return None
+
+        update_values = _portability_update_values(
+            fields,
+            _IMPORT_JOURNAL_UPDATE_COLUMNS,
+            _IMPORT_JOURNAL_JSON_DEFAULTS,
+        )
+        if not update_values:
+            return current
+
+        with self.db.transaction() as conn:
+            where_clause = "id = ?"
+            where_params: list[Any] = [import_id]
+            if owner_user_id is not None:
+                where_clause += " AND owner_user_id = ?"
+                where_params.append(owner_user_id)
+            _execute_portability_update(
+                conn,
+                table_name="vn_pack_import_journal",
+                update_values=update_values,
+                where_clause=where_clause,
+                where_params=where_params,
+            )
+        return self.get_import_journal(import_id, owner_user_id=owner_user_id)
 
     def create_pack(
         self,
@@ -399,7 +904,6 @@ class VNAssetPacksRepository:
                     pack_id=pack_id,
                     **slot_kwargs,
                 )
-                slot_ids_by_key[str(spec["slot_key"])] = slot_id
                 created_slot_ids.append(slot_id)
 
         return [
@@ -658,10 +1162,11 @@ class VNAssetPacksRepository:
         row = cursor.fetchone()
         return dict(row) if row is not None else None
 
-    def delete_item(self, item_id: int) -> None:
+    def delete_item(self, item_id: int) -> bool:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
-            conn.execute("DELETE FROM vn_asset_items WHERE id = ?", (item_id,))
+            cursor = conn.execute("DELETE FROM vn_asset_items WHERE id = ?", (item_id,))
+            return cursor.rowcount > 0
 
     def update_item_storage(
         self,
@@ -934,7 +1439,139 @@ class VNAssetPacksRepository:
 def _json_or_none(value: Mapping[str, Any] | None) -> str | None:
     if value is None:
         return None
-    return json.dumps(dict(value))
+    return _json_dump(dict(value))
+
+
+def _json_dump(value: Any) -> str:
+    return json.dumps(value)
+
+
+_PORTABILITY_JOB_UPDATE_COLUMNS = {
+    "operation": "operation",
+    "status": "status",
+    "stage": "stage",
+    "pack_id": "pack_id",
+    "preview_id": "preview_id",
+    "import_id": "import_id",
+    "archive_path": "archive_path",
+    "archive_sha256": "archive_sha256",
+    "canonical_payload_fingerprint": "canonical_payload_fingerprint",
+    "progress": "progress_json",
+    "warnings": "warnings_json",
+    "error_code": "error_code",
+    "error_message": "error_message",
+    "download_url": "download_url",
+    "expires_at": "expires_at",
+}
+
+_PORTABILITY_JOB_JSON_DEFAULTS = {
+    "progress": {},
+    "warnings": [],
+}
+
+_IMPORT_PREVIEW_UPDATE_COLUMNS = {
+    "job_id": "job_id",
+    "status": "status",
+    "archive_path": "archive_path",
+    "archive_sha256": "archive_sha256",
+    "canonical_payload_fingerprint": "canonical_payload_fingerprint",
+    "schema_version": "schema_version",
+    "bundle_summary": "bundle_summary_json",
+    "validation_warnings": "validation_warnings_json",
+    "conflicts": "conflicts_json",
+    "proposed_plan": "proposed_plan_json",
+    "quota_estimate": "quota_estimate_json",
+    "required_choices": "required_choices_json",
+    "expires_at": "expires_at",
+}
+
+_IMPORT_PREVIEW_JSON_DEFAULTS = {
+    "bundle_summary": {},
+    "validation_warnings": [],
+    "conflicts": [],
+    "proposed_plan": {},
+    "quota_estimate": {},
+    "required_choices": [],
+}
+
+_IMPORT_JOURNAL_UPDATE_COLUMNS = {
+    "job_id": "job_id",
+    "status": "status",
+    "stage": "stage",
+    "trust_mode": "trust_mode",
+    "target_mode": "target_mode",
+    "target_pack_id": "target_pack_id",
+    "archive_path": "archive_path",
+    "archive_sha256": "archive_sha256",
+    "canonical_payload_fingerprint": "canonical_payload_fingerprint",
+    "id_maps": "id_maps_json",
+    "created_records": "created_records_json",
+    "cleanup_status": "cleanup_status_json",
+    "warnings": "warnings_json",
+    "error_code": "error_code",
+    "error_message": "error_message",
+    "completed_at": "completed_at",
+}
+
+_IMPORT_JOURNAL_JSON_DEFAULTS = {
+    "id_maps": {},
+    "created_records": {},
+    "cleanup_status": {},
+    "warnings": [],
+}
+
+_PORTABILITY_UPDATE_TABLE_COLUMNS = {
+    "vn_pack_portability_jobs": frozenset(_PORTABILITY_JOB_UPDATE_COLUMNS.values()),
+    "vn_pack_import_previews": frozenset(_IMPORT_PREVIEW_UPDATE_COLUMNS.values()),
+    "vn_pack_import_journal": frozenset(_IMPORT_JOURNAL_UPDATE_COLUMNS.values()),
+}
+
+
+def _portability_update_values(
+    fields: Mapping[str, Any],
+    update_columns: Mapping[str, str],
+    json_defaults: Mapping[str, Any],
+) -> list[tuple[str, Any]]:
+    values: list[tuple[str, Any]] = []
+    for field_name, raw_value in fields.items():
+        column_name = update_columns.get(field_name)
+        if column_name is None:
+            continue
+        if field_name in json_defaults:
+            default_value = json_defaults[field_name]
+            value = _json_dump(default_value if raw_value is None else raw_value)
+        else:
+            value = raw_value
+        values.append((column_name, value))
+
+    return values
+
+
+def _execute_portability_update(
+    conn: Any,
+    *,
+    table_name: str,
+    update_values: list[tuple[str, Any]],
+    where_clause: str,
+    where_params: list[Any],
+) -> None:
+    allowed_columns = _PORTABILITY_UPDATE_TABLE_COLUMNS.get(table_name)
+    if allowed_columns is None:
+        raise ValueError("unsupported_portability_update_table")
+    if any(column_name not in allowed_columns for column_name, _ in update_values):
+        raise ValueError("unsupported_portability_update_column")
+
+    assignments = ", ".join(f"{column_name} = ?" for column_name, _ in update_values)
+    # Identifiers are internal allowlists; user values stay parameterized.
+    statement = (
+        f"UPDATE {table_name} "  # nosec B608
+        f"SET {assignments}, updated_at = CURRENT_TIMESTAMP "
+        f"WHERE {where_clause}"
+    )
+    conn.execute(
+        statement,
+        tuple(value for _, value in update_values) + tuple(where_params),
+    )
 
 
 def _slot_insert_kwargs(spec: Mapping[str, Any]) -> dict[str, Any]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from tldw_Server_API.app.core.VN_Assets.constants import (
     DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
@@ -255,6 +255,141 @@ class VNAssetGenerationStatusResponse(BaseModel):
     failed_count: int = 0
     cancelled_count: int = 0
     enqueue_error: str | None = None
+
+
+class VNPackExportRequest(BaseModel):
+    """Request body for starting a VN pack backup export."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_character_payload: StrictBool = False
+    include_world_book_payloads: StrictBool = False
+    include_full_provenance: StrictBool = False
+    strict: StrictBool = False
+    warn_for_sharing: StrictBool = True
+    request_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class VNPackExportResponse(BaseModel):
+    """Response returned after a VN pack export job is queued."""
+
+    job_id: str
+    portability_job_id: int
+    operation: str
+    pack_id: int | None = None
+    status: str
+    stage: str
+    download_url: str | None = None
+
+
+class VNPackPortabilityJobResponse(BaseModel):
+    """Composed Jobs lifecycle and VN portability stage response."""
+
+    job_id: str
+    portability_job_id: int
+    operation: str
+    pack_id: int | None = None
+    status: str
+    vn_status: str
+    stage: str
+    progress: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[Any] = Field(default_factory=list)
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    download_url: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
+
+
+class VNPackImportPreviewStartResponse(BaseModel):
+    """Response returned after a VN pack import preview job is queued."""
+
+    job_id: str
+    portability_job_id: int
+    operation: str
+    preview_id: int
+    status: str
+    stage: str
+
+
+class VNPackImportPreviewResponse(BaseModel):
+    """Composed preview, Jobs lifecycle, and VN portability stage response."""
+
+    preview_id: int
+    job_id: str
+    portability_job_id: int
+    operation: str
+    status: str
+    vn_status: str
+    stage: str
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    schema_version: str | None = None
+    bundle_summary: dict[str, Any] = Field(default_factory=dict)
+    validation_warnings: list[Any] = Field(default_factory=list)
+    conflicts: list[Any] = Field(default_factory=list)
+    proposed_plan: dict[str, Any] = Field(default_factory=dict)
+    quota_estimate: dict[str, Any] = Field(default_factory=dict)
+    required_choices: list[Any] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
+
+
+class VNPackImportCommitRequest(BaseModel):
+    """Request body for committing a validated VN pack preview."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preview_id: int = Field(..., ge=1)
+    trust_mode: Literal["trusted_restore", "untrusted_import"]
+    target_mode: Literal["create_new", "update_existing"] = "create_new"
+    character_action: Literal[
+        "import_included_character",
+        "link_existing_character",
+        "create_placeholder_character",
+        "fail_import",
+    ]
+    target_character_id: int | None = Field(default=None, ge=1)
+    target_pack_id: int | None = Field(default=None, ge=1)
+    conflict_decisions: dict[str, Any] = Field(default_factory=dict)
+    request_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class VNPackImportCommitStartResponse(BaseModel):
+    """Response returned after a VN pack import commit job is queued."""
+
+    job_id: str
+    portability_job_id: int
+    operation: str
+    preview_id: int
+    import_id: int
+    status: str
+    stage: str
+
+
+class VNPackImportJobResponse(BaseModel):
+    """Composed Jobs lifecycle and VN import-journal stage response."""
+
+    job_id: str
+    portability_job_id: int
+    operation: str
+    preview_id: int
+    import_id: int
+    status: str
+    vn_status: str
+    stage: str
+    pack_id: int | None = None
+    id_maps: dict[str, Any] = Field(default_factory=dict)
+    created_records: dict[str, Any] = Field(default_factory=dict)
+    cleanup_status: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[Any] = Field(default_factory=list)
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    completed_at: str | None = None
 
 
 class VNAssetPromptPreviewRequest(BaseModel):

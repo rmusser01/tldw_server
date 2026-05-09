@@ -167,3 +167,117 @@ export interface VNAssetPromptPreview {
   token_estimates: Record<string, number>;
   warnings: string[];
 }
+
+export interface VNPackExportRequest {
+  include_character_payload?: boolean;
+  include_world_book_payloads?: boolean;
+  include_full_provenance?: boolean;
+  strict?: boolean;
+  warn_for_sharing?: boolean;
+  request_id?: string | null;
+}
+
+export interface VNPackExportResponse {
+  job_id: string;
+  portability_job_id: number;
+  operation: string;
+  pack_id?: number | null;
+  status: string;
+  stage: string;
+  download_url?: string | null;
+}
+
+export interface VNPackPortabilityJob {
+  job_id: string;
+  portability_job_id: number;
+  operation: string;
+  pack_id?: number | null;
+  status: string;
+  vn_status: string;
+  stage: string;
+  progress?: Record<string, unknown>;
+  warnings?: unknown[];
+  archive_sha256?: string | null;
+  canonical_payload_fingerprint?: string | null;
+  download_url?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  expires_at?: string | null;
+}
+
+export interface VNPackImportPreviewStartResponse {
+  job_id: string;
+  portability_job_id: number;
+  operation: string;
+  preview_id: number;
+  status: string;
+  stage: string;
+}
+
+export interface VNPackImportPreview {
+  preview_id: number;
+  job_id: string;
+  portability_job_id: number;
+  operation: string;
+  status: string;
+  vn_status: string;
+  stage: string;
+  archive_sha256?: string | null;
+  canonical_payload_fingerprint?: string | null;
+  schema_version?: string | null;
+  bundle_summary?: Record<string, unknown>;
+  validation_warnings?: unknown[];
+  conflicts?: unknown[];
+  proposed_plan?: Record<string, unknown>;
+  quota_estimate?: Record<string, unknown>;
+  required_choices?: unknown[];
+  error_code?: string | null;
+  error_message?: string | null;
+  expires_at?: string | null;
+}
+
+export interface VNPackImportCommitRequest {
+  preview_id: number;
+  trust_mode: 'trusted_restore' | 'untrusted_import';
+  target_mode?: 'create_new' | 'update_existing';
+  character_action:
+    | 'import_included_character'
+    | 'link_existing_character'
+    | 'create_placeholder_character'
+    | 'fail_import';
+  target_character_id?: number | null;
+  target_pack_id?: number | null;
+  conflict_decisions?: Record<string, unknown>;
+  request_id?: string | null;
+}
+
+export interface VNPackImportCommitStartResponse {
+  job_id: string;
+  portability_job_id: number;
+  operation: string;
+  preview_id: number;
+  import_id: number;
+  status: string;
+  stage: string;
+}
+
+export interface VNPackImportJob {
+  job_id: string;
+  portability_job_id: number;
+  operation: string;
+  preview_id: number;
+  import_id: number;
+  status: string;
+  vn_status: string;
+  stage: string;
+  pack_id?: number | null;
+  id_maps?: Record<string, unknown>;
+  created_records?: Record<string, unknown>;
+  cleanup_status?: Record<string, unknown>;
+  warnings?: unknown[];
+  archive_sha256?: string | null;
+  canonical_payload_fingerprint?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  completed_at?: string | null;
+}
