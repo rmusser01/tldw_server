@@ -157,6 +157,96 @@ def test_host_e2e_smoke_script_failure_drill_dry_run_includes_restart_lease(tmp_
     assert f"TLDW_SANDBOX_MACOS_HELPER_BINARY={helper}" in result.stdout
 
 
+def test_host_e2e_smoke_script_dry_run_does_not_kill_existing_pid_file_process(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    socket_dir = tmp_path / "runtime"
+    socket_dir.mkdir(mode=0o700)
+    pid_file = socket_dir / "helper.pid"
+    helper = tmp_path / "macos-vz-helper"
+    helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    helper.chmod(0o755)
+    proc = subprocess.Popen(  # nosec B603
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        pid_file.write_text(f"{proc.pid}\n", encoding="utf-8")
+        pid_file.chmod(0o600)
+
+        result = _run_smoke_script(
+            "--dry-run",
+            "--bundle",
+            str(bundle),
+            "--helper",
+            str(helper),
+            "--socket",
+            str(socket_dir / "helper.sock"),
+            "--python",
+            sys.executable,
+        )
+
+        assert result.returncode == 0, result.stderr
+        with pytest.raises(subprocess.TimeoutExpired):
+            proc.wait(timeout=0.2)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+def test_host_e2e_smoke_script_validation_failure_does_not_kill_existing_pid_file_process(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    socket_dir = tmp_path / "runtime"
+    socket_dir.mkdir(mode=0o700)
+    pid_file = socket_dir / "helper.pid"
+    helper = tmp_path / "macos-vz-helper"
+    helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    helper.chmod(0o755)
+    proc = subprocess.Popen(  # nosec B603
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        pid_file.write_text(f"{proc.pid}\n", encoding="utf-8")
+        pid_file.chmod(0o600)
+
+        result = _run_smoke_script(
+            "--bundle",
+            str(bundle),
+            "--helper",
+            str(helper),
+            "--socket",
+            str(socket_dir / "helper.sock"),
+            "--python",
+            sys.executable,
+            "--skip-build",
+            "--skip-sign",
+        )
+
+        assert result.returncode != 0
+        assert "bundle missing kernel" in result.stderr
+        with pytest.raises(subprocess.TimeoutExpired):
+            proc.wait(timeout=0.2)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
 def test_host_e2e_smoke_script_default_socket_uses_private_runtime_dir(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()

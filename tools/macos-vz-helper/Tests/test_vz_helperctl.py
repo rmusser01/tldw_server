@@ -2079,7 +2079,10 @@ def test_smoke_dry_run_delegates_to_host_smoke_script(tmp_path, capsys):
     CASE.assertIn(f"--serial-log-dir {serial_log_dir}", captured.out)
 
 
-def test_smoke_dry_run_forwards_failure_drills(tmp_path, capsys):
+def test_smoke_dry_run_forwards_failure_drills(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     helperctl = load_helperctl()
     bundle = tmp_path / "bundle"
     bundle.mkdir()

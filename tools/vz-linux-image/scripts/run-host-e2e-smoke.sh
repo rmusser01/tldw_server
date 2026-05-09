@@ -76,6 +76,12 @@ die() {
 }
 
 cleanup() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return 0
+  fi
+  if [[ -z "${HELPER_PID}" && -z "${HELPER_PID_FILE}" ]]; then
+    return 0
+  fi
   local pid
   pid="$(current_helper_pid)"
   if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
@@ -289,16 +295,17 @@ record_helper_pid() {
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     return 0
   fi
-  HELPER_PID_FILE="$(helper_pid_file_path)"
-  printf '%s\n' "${HELPER_PID}" > "${HELPER_PID_FILE}"
-  chmod 600 "${HELPER_PID_FILE}" 2>/dev/null || true
+  local pid_file
+  pid_file="$(helper_pid_file_path)"
+  (umask 077; printf '%s\n' "${HELPER_PID}" > "${pid_file}")
+  chmod 600 "${pid_file}" 2>/dev/null || true
+  HELPER_PID_FILE="${pid_file}"
 }
 
 current_helper_pid() {
   local candidate=""
-  local pid_file="${HELPER_PID_FILE:-$(helper_pid_file_path)}"
-  if [[ -f "${pid_file}" && ! -L "${pid_file}" ]]; then
-    candidate="$(tr -d '[:space:]' < "${pid_file}" 2>/dev/null || true)"
+  if [[ -n "${HELPER_PID_FILE}" && -f "${HELPER_PID_FILE}" && ! -L "${HELPER_PID_FILE}" ]]; then
+    candidate="$(tr -d '[:space:]' < "${HELPER_PID_FILE}" 2>/dev/null || true)"
     if [[ "${candidate}" =~ ^[1-9][0-9]*$ ]]; then
       printf '%s\n' "${candidate}"
       return 0

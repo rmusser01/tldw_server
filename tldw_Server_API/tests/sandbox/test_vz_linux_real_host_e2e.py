@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import errno
 import os
 import platform
 import signal
@@ -105,13 +106,19 @@ class _HelperRestartLease:
 
 def _require_helper_restart_lease() -> _HelperRestartLease:
     if not is_truthy(os.getenv("TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_RESTART_ALLOWED")):
-        pytest.skip("Set TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_RESTART_ALLOWED=1 to enable helper restart drill")
+        pytest.skip(
+            "Set TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_RESTART_ALLOWED=1 "
+            "to enable helper restart drill"
+        )
     helper_text = str(os.getenv("TLDW_SANDBOX_MACOS_HELPER_BINARY") or "").strip()
     socket_text = str(os.getenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET") or "").strip()
     serial_log_text = str(os.getenv("TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR") or "").strip()
     pid_file_text = str(os.getenv("TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_PID_FILE") or "").strip()
     if not helper_text or not socket_text or not serial_log_text or not pid_file_text:
-        pytest.skip("helper restart drill requires helper binary, socket, serial log dir, and pid file env")
+        pytest.skip(
+            "helper restart drill requires helper binary, socket, serial log dir, "
+            "and pid file env"
+        )
     return _HelperRestartLease(
         helper_path=Path(helper_text).expanduser(),
         socket_path=Path(socket_text).expanduser(),
@@ -138,6 +145,7 @@ def _read_valid_restart_pid(
     *,
     process_lookup=_lookup_process_command,
 ) -> int:
+    """Return a validated helper PID from the private restart-lease pid file."""
     socket_dir = lease.socket_path.parent.resolve()
     try:
         pid_parent = lease.pid_file.parent.resolve()
@@ -149,7 +157,7 @@ def _read_valid_restart_pid(
         stat_result = lease.pid_file.lstat()
     except OSError as exc:
         pytest.fail(f"helper restart pid file is unavailable: {exc}")
-    if not stat.S_ISREG(stat_result.st_mode) or lease.pid_file.is_symlink():
+    if not stat.S_ISREG(stat_result.st_mode):
         pytest.fail("helper restart pid file must be a regular non-symlink file")
     if stat_result.st_mode & 0o077:
         pytest.fail("helper restart pid file must be owner-only")
@@ -169,7 +177,11 @@ def _read_valid_restart_pid(
 
 
 def _wait_for_helper_socket_unavailable(socket_path: Path, timeout_sec: float = 5.0) -> None:
+    """Wait until the helper socket is missing or refuses connections."""
+    unavailable_errnos = {errno.ENOENT, errno.ECONNREFUSED, errno.ENOTSOCK}
+    retry_errnos = {errno.EAGAIN, errno.EWOULDBLOCK, errno.ETIMEDOUT}
     deadline = time.monotonic() + timeout_sec
+    last_error: OSError | None = None
     while time.monotonic() < deadline:
         if not socket_path.exists():
             return
@@ -177,13 +189,26 @@ def _wait_for_helper_socket_unavailable(socket_path: Path, timeout_sec: float = 
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.settimeout(0.2)
                 client.connect(str(socket_path))
-        except OSError:
+        except socket.timeout as exc:
+            last_error = exc
+        except (FileNotFoundError, ConnectionRefusedError):
             return
+        except OSError as exc:
+            if exc.errno in unavailable_errnos:
+                return
+            last_error = exc
+            if exc.errno not in retry_errnos:
+                time.sleep(0.05)
+                continue
         time.sleep(0.05)
-    pytest.fail(f"helper socket remained available after helper stop: {socket_path}")
+    pytest.fail(
+        f"helper socket remained available after helper stop: {socket_path}; "
+        f"last_error={last_error!r}"
+    )
 
 
 def _wait_for_helper_ping(helper, timeout_sec: float = 10.0) -> None:
+    """Poll the replacement helper until it answers ping or the startup budget expires."""
     deadline = time.monotonic() + timeout_sec
     last_error: Exception | None = None
     while time.monotonic() < deadline:
@@ -196,6 +221,22 @@ def _wait_for_helper_ping(helper, timeout_sec: float = 10.0) -> None:
     pytest.fail(f"replacement helper did not answer ping: {last_error}")
 
 
+def _write_restart_pid_file(pid_file: Path, pid: int) -> None:
+    """Write the replacement helper PID with owner-only permissions from creation."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(pid_file, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(f"{pid}\n")
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def _restart_helper_for_drill(
     lease: _HelperRestartLease,
     *,
@@ -203,8 +244,12 @@ def _restart_helper_for_drill(
     process_lookup=_lookup_process_command,
     startup_timeout_sec: float = 10.0,
 ) -> subprocess.Popen[str]:
+    """Stop the smoke-owned helper and start a replacement on the same socket."""
     old_pid = _read_valid_restart_pid(lease, process_lookup=process_lookup)
-    os.kill(old_pid, signal.SIGTERM)
+    try:
+        os.kill(old_pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pytest.skip("helper process exited before restart drill could stop it")
     _wait_for_helper_socket_unavailable(lease.socket_path)
 
     env = os.environ.copy()
@@ -219,8 +264,7 @@ def _restart_helper_for_drill(
             stdout=stdout,
             stderr=stderr,
         )
-    lease.pid_file.write_text(f"{replacement.pid}\n", encoding="utf-8")
-    lease.pid_file.chmod(0o600)
+    _write_restart_pid_file(lease.pid_file, replacement.pid)
     try:
         _wait_for_helper_ping(helper_client_factory(), timeout_sec=startup_timeout_sec)
     except Exception:
@@ -295,7 +339,7 @@ def test_vz_linux_real_host_e2e_requires_helper_ping(monkeypatch, tmp_path: Path
         _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
 
 
-def test_helper_restart_lease_requires_explicit_opt_in(monkeypatch) -> None:
+def test_helper_restart_lease_requires_explicit_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_RESTART_ALLOWED", raising=False)
 
     with pytest.raises(pytest.skip.Exception, match="HELPER_RESTART_ALLOWED"):
@@ -313,10 +357,71 @@ def test_helper_restart_pid_file_rejects_symlink(tmp_path: Path) -> None:
     target.chmod(0o600)
     pid_file = runtime_dir / "helper.pid"
     pid_file.symlink_to(target)
-    lease = _HelperRestartLease(helper, runtime_dir / "helper.sock", runtime_dir / "serial", pid_file)
+    lease = _HelperRestartLease(
+        helper,
+        runtime_dir / "helper.sock",
+        runtime_dir / "serial",
+        pid_file,
+    )
 
     with pytest.raises(pytest.fail.Exception, match="pid file"):
         _read_valid_restart_pid(lease, process_lookup=lambda _pid: str(helper))
+
+
+def test_wait_for_helper_socket_unavailable_retries_socket_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "helper.sock"
+    socket_path.write_text("", encoding="utf-8")
+    attempts: list[str] = []
+
+    class _FakeSocket:
+        def __enter__(self) -> "_FakeSocket":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def settimeout(self, _timeout: float) -> None:
+            return None
+
+        def connect(self, path: str) -> None:
+            attempts.append(path)
+            if len(attempts) == 1:
+                raise socket.timeout("transient timeout")
+            raise ConnectionRefusedError("helper socket unavailable")
+
+    monkeypatch.setattr(socket, "socket", lambda *_args, **_kwargs: _FakeSocket())
+
+    _wait_for_helper_socket_unavailable(socket_path, timeout_sec=1.0)
+
+    assert attempts == [str(socket_path), str(socket_path)]
+
+
+def test_restart_helper_for_drill_skips_when_pid_exits_before_signal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helper = tmp_path / "macos-vz-helper"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o755)
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o700)
+    serial_log_dir = runtime_dir / "serial"
+    serial_log_dir.mkdir(mode=0o700)
+    pid_file = runtime_dir / "helper.pid"
+    pid_file.write_text("1234\n", encoding="utf-8")
+    pid_file.chmod(0o600)
+    lease = _HelperRestartLease(helper, runtime_dir / "helper.sock", serial_log_dir, pid_file)
+
+    def _raise_process_lookup_error(_pid: int, _signal_number: int) -> None:
+        raise ProcessLookupError("process exited")
+
+    monkeypatch.setattr(os, "kill", _raise_process_lookup_error)
+
+    with pytest.raises(pytest.skip.Exception, match="helper process exited"):
+        _restart_helper_for_drill(lease, process_lookup=lambda _pid: str(helper))
 
 
 def test_restart_helper_for_drill_replaces_pid_file_and_stops_old_helper(tmp_path: Path) -> None:

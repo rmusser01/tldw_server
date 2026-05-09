@@ -4,7 +4,7 @@ title: Add manual VZ Linux helper restart recovery drill
 status: Done
 assignee: []
 created_date: '2026-05-09 04:26'
-updated_date: '2026-05-09 05:05'
+updated_date: '2026-05-09 05:27'
 labels:
   - sandbox
   - vz_linux
@@ -47,6 +47,8 @@ Add the next narrow host-gated recovery slice for vz_linux: a manual-only drill 
 
 <!-- SECTION:PLAN:BEGIN -->
 Design-first slice. Write a focused helper restart recovery drill spec, review it for lifecycle ownership and host-gated safety risks, record verification, then ask for human review before implementation planning.
+
+Review-fix pass for PR #1406: verify each open Qodo/Gemini item against current code; add regression tests for dry-run/early-exit cleanup safety, socket-timeout waiting, SIGTERM disappearance race, and PID-file permission creation where practical; then implement minimal fixes for still-valid issues and re-run focused plus touched-scope verification.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -63,12 +65,16 @@ Implementation plan added at Docs/superpowers/plans/2026-05-09-vz-linux-helper-r
 Implementation completed: smoke script now grants an opt-in restart lease only for manual failure drills, helperctl forwards --include-failure-drills, real-host pytest validates private PID-file restart ownership and adds a helper restart recovery drill, and operator docs now distinguish this manual helper restart coverage from host reboot, launchd, networking, and broad repair gaps.
 
 Verification after rebase on origin/dev: focused pytest suite passed with 108 passed, 2 skipped, 5 deselected; bash -n passed for run-host-e2e-smoke.sh; py_compile passed for vz-helperctl.py and test_vz_linux_real_host_e2e.py; host-gated failure-drill selection skipped 2 tests because TLDW_SANDBOX_VZ_LINUX_E2E was not set; Bandit report /tmp/bandit_vz_helper_restart_recovery.json had zero findings after skipping pytest assert noise with -s B101; git diff --check was clean.
+
+PR review fix pass completed for Qodo/Gemini comments. Added regression coverage proving dry-run and early validation failures do not kill a pre-existing helper.pid process, socket timeouts keep waiting for helper shutdown, and ProcessLookupError during SIGTERM becomes a clear skip. Hardened smoke cleanup so it only trusts pid files recorded by this invocation, created shell pid files under umask 077, wrote replacement helper pid files with os.open/fchmod 0600, removed the redundant symlink check after lstat, wrapped long skip strings, added missing test type hints, and documented the restart helpers.
+
+Review-fix verification: the new red tests failed before the fix and passed after; touched host-independent suite passed with 112 passed, 2 skipped, 5 deselected; bash -n, py_compile, git diff --check passed; host-gated failure-drill selection skipped 2 tests without TLDW_SANDBOX_VZ_LINUX_E2E; Bandit first pass only reported existing test-harness B404/B603/B108 baseline findings, and the test-file baseline-skipped report /tmp/bandit_vz_helper_restart_recovery_review_skips.json had zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a manual-only VZ Linux helper restart recovery drill. The smoke harness now exposes a private restart lease only for opt-in failure drills, helperctl forwards --include-failure-drills, pytest validates restart PID ownership and same-session stale VM replacement after helper restart, and docs clarify this covers the smoke-owned helper restart path but not host reboot, launchd, networking, or broad repair automation. Host-independent verification passed; real VZ execution remains host-gated and skipped locally without TLDW_SANDBOX_VZ_LINUX_E2E.
+Added a manual-only VZ Linux helper restart recovery drill. The smoke harness now exposes a private restart lease only for opt-in failure drills, helperctl forwards --include-failure-drills, pytest validates restart PID ownership and same-session stale VM replacement after helper restart, and docs clarify this covers the smoke-owned helper restart path but not host reboot, launchd, networking, or broad repair automation. Review fixes hardened dry-run/early-exit cleanup ownership, pid-file permissions, socket-timeout waiting, and SIGTERM race handling. Host-independent verification passed; real VZ execution remains host-gated and skipped locally without TLDW_SANDBOX_VZ_LINUX_E2E.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
