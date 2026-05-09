@@ -245,6 +245,8 @@ describe("VisualPackEditor", () => {
     const health = await screen.findByTestId("persona-visual-pack-health")
     expect(health).toHaveTextContent("Visual asset is missing")
     expect(health).toHaveTextContent("asset-b")
+    expect(health).toHaveClass("border-danger/30")
+    expect(health).toHaveClass("text-danger")
   })
 
   it("loads pack list, creates a draft pack, and uploads the selected asset role", async () => {

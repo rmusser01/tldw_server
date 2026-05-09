@@ -8,6 +8,8 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
+import { normalizeFrames } from "./personaVisualDiagnostics"
+
 export type PersonaVisualRenderError =
   | "missing_animation"
   | "missing_asset"
@@ -19,7 +21,7 @@ export type SpriteFrameRendererProps = {
   state: PersonaVisualStateId
   fallbackLabel: string
   className?: string
-  onRenderError?: (error: PersonaVisualRenderError) => void
+  onRenderError?: (error: PersonaVisualRenderError | null) => void
 }
 
 type ResolvedAnimation = {
@@ -27,17 +29,7 @@ type ResolvedAnimation = {
   animationId: string
 }
 
-export const normalizePersonaVisualFrames = (
-  animation: PersonaVisualAnimation | null | undefined
-): PersonaVisualFrame[] => {
-  if (!animation) return []
-  if (Array.isArray(animation.frames) && animation.frames.length > 0) {
-    return animation.frames.filter((frame) => Boolean(frame?.asset_id))
-  }
-  return (animation.asset_ids || [])
-    .filter((assetId) => Boolean(String(assetId || "").trim()))
-    .map((assetId) => ({ asset_id: String(assetId) }))
-}
+export const normalizePersonaVisualFrames = normalizeFrames
 
 export const resolveAnimationForState = (
   manifest: PersonaVisualManifest,
@@ -141,6 +133,35 @@ const renderFrame = ({
   )
 }
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value)
+
+const hasUnsupportedRegion = (
+  frame: PersonaVisualFrame,
+  asset: PersonaVisualAsset
+): boolean => {
+  if (!frame.region) return false
+  const { x, y, width, height } = frame.region
+  if (
+    !isFiniteNumber(x) ||
+    !isFiniteNumber(y) ||
+    !isFiniteNumber(width) ||
+    !isFiniteNumber(height)
+  ) {
+    return true
+  }
+  if (x < 0 || y < 0 || width <= 0 || height <= 0) {
+    return true
+  }
+  if (isFiniteNumber(asset.width) && x + width > asset.width) {
+    return true
+  }
+  if (isFiniteNumber(asset.height) && y + height > asset.height) {
+    return true
+  }
+  return false
+}
+
 export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
   manifest,
   assets,
@@ -183,10 +204,12 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     ? "missing_animation"
     : !asset
       ? "missing_asset"
-      : null
+      : hasUnsupportedRegion(frame, asset)
+        ? "unsupported_region"
+        : null
 
   React.useEffect(() => {
-    if (error) onRenderError?.(error)
+    onRenderError?.(error)
   }, [error, onRenderError])
 
   if (error || !frame || !asset) {

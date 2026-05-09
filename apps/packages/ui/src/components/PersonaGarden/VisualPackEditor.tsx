@@ -51,6 +51,7 @@ import type {
 } from "@/types/persona-visuals"
 import { getDesignSystemState } from "@/design-system"
 import {
+  getPersonaVisualDiagnosticToneClassName,
   getPrimaryPersonaVisualDiagnostic,
   type PersonaVisualDiagnostic
 } from "../Common/PersonaBuddy/personaVisualDiagnostics"
@@ -1178,9 +1179,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           <div
             data-testid="persona-visual-pack-health"
             data-severity={packHealthDiagnostic.severity}
-            className="mt-3 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
+            className={`mt-3 rounded-md border px-3 py-2 text-xs leading-5 ${getPersonaVisualDiagnosticToneClassName(packHealthDiagnostic.severity)}`}
           >
-            <div className="font-medium text-text">
+            <div className="font-medium text-inherit">
               {packHealthDiagnostic.title}
             </div>
             <div>{packHealthDiagnostic.message}</div>

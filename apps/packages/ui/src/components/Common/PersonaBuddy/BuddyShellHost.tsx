@@ -379,11 +379,14 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const activeVisualRenderError =
     visualRenderError?.key === visualRenderKey ? visualRenderError.error : null
   const handleVisualRenderError = React.useCallback(
-    (error: PersonaVisualDiagnosticCode) => {
-      setVisualRenderError({
-        key: visualRenderKey,
-        error
-      })
+    (error: PersonaVisualDiagnosticCode | null) => {
+      if (!error) {
+        setVisualRenderError((current) =>
+          current?.key === visualRenderKey ? null : current
+        )
+        return
+      }
+      setVisualRenderError({ key: visualRenderKey, error })
     },
     [visualRenderKey]
   )

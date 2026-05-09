@@ -5,13 +5,16 @@ import type {
 } from "@/store/persona-buddy-shell"
 import type { PersonaBuddySummary } from "@/types/persona-buddy"
 import type {
-  PersonaVisualAsset,
   PersonaVisualPack,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
 import { BuddyShellPopover } from "./BuddyShellPopover"
-import type { PersonaVisualDiagnostic } from "./personaVisualDiagnostics"
+import {
+  getAssetsById,
+  getPersonaVisualDiagnosticToneClassName,
+  type PersonaVisualDiagnostic
+} from "./personaVisualDiagnostics"
 import {
   SpriteFrameRenderer,
   type PersonaVisualRenderError
@@ -25,25 +28,11 @@ type BuddyShellDockProps = {
   visualPack?: PersonaVisualPack | null
   visualState?: PersonaVisualStateId
   visualDiagnostic?: PersonaVisualDiagnostic | null
-  onVisualRenderError?: (error: PersonaVisualRenderError) => void
+  onVisualRenderError?: (error: PersonaVisualRenderError | null) => void
   position: PersonaBuddyShellPosition
   onToggle: () => void
   onDragHandlePointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
   dockRef: React.RefObject<HTMLDivElement | null>
-}
-
-const getPersonaVisualAssetsById = (
-  visualPack: PersonaVisualPack | null | undefined
-): Record<string, PersonaVisualAsset> => {
-  if (!visualPack) return {}
-  if (visualPack.assets_by_id && Object.keys(visualPack.assets_by_id).length > 0) {
-    return visualPack.assets_by_id
-  }
-  const assets: Record<string, PersonaVisualAsset> = {}
-  for (const asset of visualPack.assets || []) {
-    if (asset?.id) assets[asset.id] = asset
-  }
-  return assets
 }
 
 export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
@@ -60,7 +49,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   onDragHandlePointerDown,
   dockRef
 }) => {
-  const assetsById = getPersonaVisualAssetsById(visualPack)
+  const assetsById = getAssetsById(visualPack)
   const canRenderVisualPack =
     !isDormant &&
     visualPack?.renderer_type === "sprite_frames" &&
@@ -123,9 +112,9 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         <div
           data-testid="persona-buddy-visual-diagnostic"
           data-severity={visualDiagnostic.severity}
-          className="max-w-[220px] rounded-lg border border-border bg-bg/95 px-3 py-2 text-xs leading-5 text-text-muted shadow-sm backdrop-blur"
+          className={`max-w-[220px] rounded-lg border px-3 py-2 text-xs leading-5 shadow-sm backdrop-blur ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
         >
-          <div className="font-medium text-text">{visualDiagnostic.title}</div>
+          <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
           <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}

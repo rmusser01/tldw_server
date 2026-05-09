@@ -62,7 +62,7 @@ const getErrorMessage = (error: unknown): string => {
   return "The active visual pack could not be loaded."
 }
 
-const getAssetsById = (
+export const getAssetsById = (
   pack: PersonaVisualPack | null | undefined
 ): Record<string, PersonaVisualAsset> => {
   if (!pack) return {}
@@ -76,7 +76,7 @@ const getAssetsById = (
   return assets
 }
 
-const normalizeFrames = (
+export const normalizeFrames = (
   animation: PersonaVisualAnimation | null | undefined
 ): PersonaVisualFrame[] => {
   if (!animation) return []
@@ -86,6 +86,18 @@ const normalizeFrames = (
   return (animation.asset_ids || [])
     .filter((assetId) => Boolean(String(assetId || "").trim()))
     .map((assetId) => ({ asset_id: String(assetId) }))
+}
+
+export const getPersonaVisualDiagnosticToneClassName = (
+  severity: PersonaVisualDiagnosticSeverity
+): string => {
+  if (severity === "error") {
+    return "border-danger/30 bg-danger/10 text-danger"
+  }
+  if (severity === "warning") {
+    return "border-warn/30 bg-warn/10 text-warn"
+  }
+  return "border-primary/30 bg-primary/10 text-primary"
 }
 
 const resolveAnimationForState = (
