@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, parse_mode
 from tldw_Server_API.app.core.VN_Play.service import (
     DeterministicVNPlayTurnAdapter,
     VNPlayConflictError,
+    VNPlayNotFoundError,
     VNPlayService,
     VNPlaySession,
     VNPlayTurnContext,
@@ -133,6 +134,22 @@ class InspectingStoryAdapter:
         )
 
 
+class StoryVisualDirectiveAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        return TurnResult(
+            narrative_text="The door opens onto the library.",
+            dialogue=[{"speaker": "Narrator", "text": "The door opens."}],
+            visual_directives=[
+                {"asset_type": "background", "labels": {"location": "library"}},
+            ],
+            choices=[
+                {"id": "inside", "text": "Step inside"},
+                {"id": "wait", "text": "Wait outside"},
+            ],
+            scene_updates={"location_key": "library"},
+        )
+
+
 class CountingStoryAdapter:
     def __init__(self) -> None:
         self.seen_contexts: list[VNPlayTurnContext] = []
@@ -202,6 +219,7 @@ def create_story_session_with_visible_choice(
     *,
     choice_text: str = "Open the door",
 ) -> VNPlaySession:
+    owner_user_id = service.owner_user_id
     session = service.create_session(
         mode="story",
         title="Door",
@@ -213,7 +231,7 @@ def create_story_session_with_visible_choice(
     )
     choice_presented = repo.append_event(
         session_id=session.id,
-        owner_user_id=42,
+        owner_user_id=owner_user_id,
         event_type="choice_presented",
         event_payload={
             "choices": [{"id": "open", "text": choice_text}],
@@ -223,13 +241,39 @@ def create_story_session_with_visible_choice(
     )
     repo.set_scene_state(
         session_id=session.id,
-        owner_user_id=42,
+        owner_user_id=owner_user_id,
         last_event_id=int(choice_presented["id"]),
         visible_choices=[{"id": "open", "text": choice_text}],
         scene_version=1,
     )
-    repo.update_session(session.id, {"scene_version": 1}, owner_user_id=42)
+    repo.update_session(session.id, {"scene_version": 1}, owner_user_id=owner_user_id)
     return service.get_session(session.id)
+
+
+async def create_two_level_story_branches(
+    service: VNPlayService,
+    repo: VNPlayRepository,
+) -> tuple[VNPlaySession, dict[str, Any], dict[str, Any]]:
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-open",
+    )
+    first_branch = service.list_branches(session.id)[0]
+
+    await service.submit_turn(
+        session.id,
+        choice_id="inside",
+        client_scene_version=2,
+        idempotency_key="story-inside",
+    )
+    branches = service.list_branches(session.id)
+    second_branch = next(
+        branch for branch in branches if int(branch["id"]) != int(first_branch["id"])
+    )
+    return service.get_session(session.id), first_branch, second_branch
 
 
 @pytest.fixture
@@ -293,6 +337,230 @@ async def test_story_choice_creates_branch_and_choice_selected_before_model(
         {"id": "inside", "text": "Step inside"},
         {"id": "wait", "text": "Wait outside"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_branch_navigation_service_returns_active_path(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-navigation-open",
+    )
+
+    branch = service.list_branches(session.id)[0]
+    navigation = service.get_branch_navigation(session.id)
+
+    assert navigation["mode"] == "story"
+    assert navigation["active_branch_node_id"] == branch["id"]
+    assert [step["branch_id"] for step in navigation["active_path"]] == [branch["id"]]
+    assert navigation["branches"][0]["restore"]["supported"] is True
+
+
+def test_freeform_branch_navigation_returns_empty_without_error(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    navigation = service.get_branch_navigation(ready_session.id)
+
+    assert navigation["mode"] == "freeform"
+    assert navigation["active_path"] == []
+    assert navigation["branches"] == []
+    assert navigation["warnings"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_events_with_metadata_filters_direct_branch_only(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session, first_branch, second_branch = await create_two_level_story_branches(
+        service,
+        repo,
+    )
+
+    result = service.list_events_with_metadata(
+        session.id,
+        branch_id=int(first_branch["id"]),
+        include_descendants=False,
+    )
+
+    assert result["warnings"] == []
+    assert result["events"]
+    assert any(event["branch_node_id"] == first_branch["id"] for event in result["events"])
+    assert not any(event["branch_node_id"] == second_branch["id"] for event in result["events"])
+    assert not any(
+        event["event_type"] == "choice_selected"
+        and event["event_payload"].get("choice_id") == "inside"
+        for event in result["events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_events_with_metadata_include_descendants(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session, first_branch, second_branch = await create_two_level_story_branches(
+        service,
+        repo,
+    )
+
+    result = service.list_events_with_metadata(
+        session.id,
+        branch_id=int(first_branch["id"]),
+        include_descendants=True,
+    )
+
+    assert result["warnings"] == []
+    branch_node_ids = {event["branch_node_id"] for event in result["events"]}
+    assert first_branch["id"] in branch_node_ids
+    assert second_branch["id"] in branch_node_ids
+    assert any(
+        event["event_type"] == "choice_selected"
+        and event["event_payload"].get("choice_id") == "inside"
+        for event in result["events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_events_with_metadata_rejects_missing_or_foreign_branch(
+    service: VNPlayService,
+    ready_session,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    with pytest.raises(VNPlayNotFoundError, match="branch_not_found"):
+        service.list_events_with_metadata(ready_session.id, branch_id=9999)
+
+    other_repo = VNPlayRepository.initialized(chacha_db)
+    other_service = VNPlayService(
+        repo=other_repo,
+        owner_user_id=77,
+        adapter=InspectingStoryAdapter(other_repo, owner_user_id=77),
+    )
+    foreign_session = create_story_session_with_visible_choice(other_service, other_repo)
+    await other_service.submit_turn(
+        foreign_session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="foreign-open",
+    )
+    foreign_branch_id = int(other_service.list_branches(foreign_session.id)[0]["id"])
+
+    with pytest.raises(VNPlayNotFoundError, match="branch_not_found"):
+        service.list_events_with_metadata(ready_session.id, branch_id=foreign_branch_id)
+
+
+@pytest.mark.asyncio
+async def test_list_events_with_metadata_honors_after_sequence_and_limit(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    response = await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-branch-page",
+    )
+    branch_id = service.list_branches(session.id)[0]["id"]
+    branch_events = [
+        event for event in response.events if event["branch_node_id"] == branch_id
+    ]
+
+    result = service.list_events_with_metadata(
+        session.id,
+        branch_id=int(branch_id),
+        after_sequence=int(branch_events[0]["sequence_number"]),
+        limit=2,
+    )
+
+    assert [event["id"] for event in result["events"]] == [
+        event["id"] for event in branch_events[1:3]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_story_completion_events_after_selected_branch_are_tagged(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id, pack_id, _, _ = create_visual_pack(chacha_db)
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=StoryVisualDirectiveAdapter(),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    service.repo.update_session(
+        session.id,
+        {"primary_character_id": character_id, "vn_asset_pack_id": pack_id},
+        owner_user_id=42,
+    )
+
+    response = await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-tagged-completion",
+    )
+
+    branch_id = service.list_branches(session.id)[0]["id"]
+    expected_event_types = {
+        "model_turn",
+        "visual_directive_requested",
+        "visual_directive_applied",
+        "choice_presented",
+        "scene_state_changed",
+        "turn_completed",
+    }
+    tagged = [
+        event
+        for event in response.events
+        if event["event_type"] in expected_event_types
+    ]
+    assert {event["event_type"] for event in tagged} == expected_event_types
+    assert {event["branch_node_id"] for event in tagged} == {branch_id}
+
+
+@pytest.mark.asyncio
+async def test_freeform_completion_events_remain_untagged(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    response = await service.submit_turn(
+        ready_session.id,
+        input_text="Look around",
+        client_scene_version=0,
+        idempotency_key="freeform-untagged",
+    )
+
+    assert {event["branch_node_id"] for event in response.events} == {None}
 
 
 @pytest.mark.asyncio

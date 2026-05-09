@@ -13,7 +13,12 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
+from tldw_Server_API.app.core.VN_Play.branch_navigation import (
+    build_branch_navigation,
+    filter_branch_events,
+)
 from tldw_Server_API.app.core.VN_Play.constants import (
+    ERROR_BRANCH_NOT_FOUND,
     ERROR_CHOICE_NOT_ALLOWED,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
     ERROR_INVALID_CHOICE_ID,
@@ -327,6 +332,13 @@ class VNPlayService:
                 selected_choice,
                 scene_version=client_scene_version,
                 choice_presented_event_id=parent_choice_event_id,
+                parent_branch_path=_active_branch_path(
+                    self.repo.list_branches(
+                        session_id,
+                        owner_user_id=self.owner_user_id,
+                    ),
+                    persisted_scene_state,
+                ),
             )
             input_payload = {
                 "choice_id": choice_id,
@@ -559,8 +571,63 @@ class VNPlayService:
         )
 
     def list_events(self, session_id: int) -> list[dict[str, Any]]:
+        return self.list_events_with_metadata(session_id)["events"]
+
+    def list_events_with_metadata(
+        self,
+        session_id: int,
+        *,
+        branch_id: int | None = None,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+        include_descendants: bool = False,
+    ) -> dict[str, Any]:
         self.get_session(session_id)
-        return self.repo.list_events(session_id)
+        if branch_id is None:
+            return {
+                "events": self.repo.list_events(
+                    session_id,
+                    after_sequence=after_sequence,
+                    limit=limit,
+                ),
+                "warnings": [],
+            }
+
+        branches = self.repo.list_branches(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if not any(int(branch["id"]) == branch_id for branch in branches):
+            raise VNPlayNotFoundError(ERROR_BRANCH_NOT_FOUND)
+
+        events = self.repo.list_events(session_id)
+        filtered_events, warnings = filter_branch_events(
+            branch_id=branch_id,
+            branches=branches,
+            events=events,
+            include_descendants=include_descendants,
+            after_sequence=after_sequence,
+            limit=limit if limit is not None else len(events),
+        )
+        return {"events": filtered_events, "warnings": warnings}
+
+    def get_branch_navigation(self, session_id: int) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        branches = self.repo.list_branches(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        events = self.repo.list_events(session_id)
+        scene_state = self.repo.get_scene_state(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        return build_branch_navigation(
+            session=_session_payload(session),
+            branches=branches,
+            events=events,
+            scene_state=scene_state,
+        )
 
     def get_enriched_scene_state(self, session_id: int) -> dict[str, Any] | None:
         session = self.get_session(session_id)
@@ -761,6 +828,13 @@ class VNPlayService:
         result: TurnResult,
         next_scene_version: int,
     ) -> VNPlayTurnResponse:
+        active_branch_id = _story_active_branch_id(
+            session,
+            self.repo.get_scene_state(
+                session_id,
+                owner_user_id=self.owner_user_id,
+            ),
+        )
         model_turn = self.repo.append_event(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
@@ -774,6 +848,7 @@ class VNPlayService:
                 "scene_version": next_scene_version,
             },
             source="model",
+            branch_node_id=active_branch_id,
         )
         new_events: list[dict[str, Any]] = [dict(event) for event in prior_events]
         new_events.append(model_turn)
@@ -784,6 +859,7 @@ class VNPlayService:
             turn_request_id=turn_request_id,
             directives=result.visual_directives,
             scene_version=next_scene_version,
+            branch_node_id=active_branch_id,
         )
         new_events.extend(visual_events)
 
@@ -798,6 +874,7 @@ class VNPlayService:
                     "scene_version": next_scene_version,
                 },
                 source="runtime",
+                branch_node_id=active_branch_id,
             )
             new_events.append(choice_presented)
 
@@ -813,6 +890,7 @@ class VNPlayService:
             event_type=EVENT_SCENE_STATE_CHANGED,
             event_payload=scene_payload,
             source="runtime",
+            branch_node_id=active_branch_id,
         )
         turn_completed = self.repo.append_event(
             session_id=session_id,
@@ -823,6 +901,7 @@ class VNPlayService:
                 "scene_version": next_scene_version,
             },
             source="runtime",
+            branch_node_id=active_branch_id,
         )
         new_events.extend([scene_state_changed, turn_completed])
 
@@ -863,6 +942,7 @@ class VNPlayService:
         turn_request_id: int,
         directives: Sequence[Mapping[str, Any]],
         scene_version: int,
+        branch_node_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
         if not directives:
             return [], {}, []
@@ -918,6 +998,7 @@ class VNPlayService:
                         "scene_version": scene_version,
                     },
                     source="runtime",
+                    branch_node_id=branch_node_id,
                 )
             )
 
@@ -938,6 +1019,7 @@ class VNPlayService:
                             "scene_version": scene_version,
                         },
                         source="runtime",
+                        branch_node_id=branch_node_id,
                     )
                 )
                 _merge_visual_item_scene_update(
@@ -971,6 +1053,7 @@ class VNPlayService:
                         **warning,
                     },
                     source="runtime",
+                    branch_node_id=branch_node_id,
                 )
             )
 
@@ -1144,8 +1227,10 @@ def _branch_path_for_choice(
     *,
     scene_version: int,
     choice_presented_event_id: int | None,
+    parent_branch_path: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    return [
+    path = [dict(step) for step in parent_branch_path or []]
+    path.append(
         {
             "schema_version": 1,
             "type": "choice",
@@ -1154,7 +1239,44 @@ def _branch_path_for_choice(
             "choice_presented_event_id": choice_presented_event_id,
             "scene_version": scene_version,
         }
-    ]
+    )
+    return path
+
+
+def _active_branch_path(
+    branches: Sequence[Mapping[str, Any]],
+    scene_state: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    active_branch_id = _optional_int(
+        scene_state.get("active_branch_node_id") if scene_state is not None else None
+    )
+    if active_branch_id is None:
+        return []
+    for branch in branches:
+        if _optional_int(branch.get("id")) == active_branch_id:
+            return _list_of_dicts(branch.get("branch_path"))
+    return []
+
+
+def _story_active_branch_id(
+    session: VNPlaySession,
+    scene_state: Mapping[str, Any] | None,
+) -> int | None:
+    if session.mode != MODE_STORY or scene_state is None:
+        return None
+    return _optional_int(scene_state.get("active_branch_node_id"))
+
+
+def _session_payload(session: VNPlaySession) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "owner_user_id": session.owner_user_id,
+        "mode": session.mode,
+        "title": session.title,
+        "status": session.status,
+        "primary_character_id": session.primary_character_id,
+        "scene_version": session.scene_version,
+    }
 
 
 def _event_int(event: Mapping[str, Any], key: str) -> int | None:
