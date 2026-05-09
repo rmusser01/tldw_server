@@ -7,6 +7,7 @@ import type {
   PersonaVisualCandidateListResponse,
   PersonaVisualCandidateReviewRequest,
   PersonaVisualDeactivateResponse,
+  PersonaVisualDuplicateTarget,
   PersonaVisualGenerationJobResponse,
   PersonaVisualGenerationRequest,
   PersonaVisualGenerationReadinessResponse,
@@ -17,6 +18,7 @@ import type {
   PersonaVisualManifestUpdate,
   PersonaVisualPack,
   PersonaVisualPackCreate,
+  PersonaVisualPackDuplicateRequest,
   PersonaVisualPackExportRequest,
   PersonaVisualPackExportResponse,
   PersonaVisualPackListResponse,
@@ -144,6 +146,42 @@ export async function createPersonaVisualPack(
       body: payload
     }
   )
+}
+
+export async function duplicatePersonaVisualPack(
+  sourcePersonaId: string,
+  packId: string,
+  payload: PersonaVisualPackDuplicateRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    packPath(sourcePersonaId, packId, "/duplicate"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function listPersonaVisualDuplicateTargets(): Promise<
+  PersonaVisualDuplicateTarget[]
+> {
+  const payload = await fetchPersonaVisualJson<unknown>("/api/v1/persona/catalog")
+  if (!Array.isArray(payload)) return []
+  return payload
+    .map((item) => {
+      if (!item || typeof item !== "object") return null
+      const candidate = item as { id?: unknown; name?: unknown }
+      const id = String(candidate.id || "").trim()
+      if (!id) return null
+      return {
+        id,
+        name:
+          typeof candidate.name === "string" && candidate.name.trim()
+            ? candidate.name
+            : null
+      }
+    })
+    .filter((item): item is PersonaVisualDuplicateTarget => item !== null)
 }
 
 export async function updatePersonaVisualManifest(

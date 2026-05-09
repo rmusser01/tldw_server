@@ -94,6 +94,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualPackExportRequest,
     PersonaVisualPackExportResponse,
     PersonaVisualPackCreate,
+    PersonaVisualPackDuplicateRequest,
     PersonaVisualPackResponse,
     PersonaVisualPortabilityJobResponse,
 )
@@ -2091,12 +2092,14 @@ def _persona_visual_generated_assets_for_candidate(
 
 def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTTPException:
     status_code = status.HTTP_400_BAD_REQUEST
-    if exc.code in {"pack_not_found", "asset_not_found", "candidate_not_found"}:
+    if exc.code in {"pack_not_found", "asset_not_found", "candidate_not_found", "target_persona_not_found"}:
         status_code = status.HTTP_404_NOT_FOUND
     elif exc.code in {"forbidden"}:
         status_code = status.HTTP_403_FORBIDDEN
     elif exc.code in {"upload_too_large"}:
         status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch"}:
+        status_code = status.HTTP_409_CONFLICT
     return HTTPException(
         status_code=status_code,
         detail={"code": exc.code, "message": str(exc), "details": exc.details},
@@ -3785,6 +3788,41 @@ async def update_persona_visual_pack_manifest(
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="update persona visual pack manifest") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/duplicate",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def duplicate_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualPackDuplicateRequest,
+    _current_user: User = Depends(get_request_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualPackResponse:
+    """Duplicate a persona visual pack to another same-user persona as a draft."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        duplicated = await _run_persona_db_call(
+            visual_service.duplicate_pack_to_persona,
+            source_persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+            target_persona_id=payload.target_persona_id,
+            title=payload.title,
+        )
+        assets = list(duplicated.get("assets") or [])
+        return _persona_visual_pack_to_response(duplicated, assets=assets)
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="duplicate persona visual pack") from exc
 
 
 @router.post(

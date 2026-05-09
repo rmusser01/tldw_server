@@ -57,6 +57,27 @@ class PersonaVisualPackCreate(BaseModel):
     manifest: dict[str, Any] = Field(default_factory=dict)
 
 
+class PersonaVisualPackDuplicateRequest(BaseModel):
+    target_persona_id: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("target_persona_id")
+    @classmethod
+    def normalize_target_persona_id(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("target_persona_id is required")
+        return normalized
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
 class PersonaVisualManifestUpdate(BaseModel):
     manifest: dict[str, Any] = Field(default_factory=dict)
     expected_version: int | None = Field(default=None, ge=1)

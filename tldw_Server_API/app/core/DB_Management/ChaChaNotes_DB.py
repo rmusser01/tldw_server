@@ -23792,6 +23792,8 @@ for _persona_state_store_method in (
     "activate_persona_visual_pack",
     "deactivate_persona_visual_pack",
     "update_persona_visual_pack_manifest",
+    "update_persona_visual_pack_status",
+    "soft_delete_persona_visual_pack_with_assets",
     "create_persona_visual_asset",
     "get_persona_visual_asset",
     "list_persona_visual_assets",

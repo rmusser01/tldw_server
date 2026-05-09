@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Copy,
   Download,
   FileSearch,
   Plus,
@@ -21,11 +22,13 @@ import {
   createPersonaVisualPack,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
+  duplicatePersonaVisualPack,
   getPersonaVisualGenerationReadiness,
   getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
   listPersonaVisualCandidates,
+  listPersonaVisualDuplicateTargets,
   listPersonaVisualPacks,
   PersonaVisualApiError,
   reviewPersonaVisualCandidate,
@@ -40,6 +43,7 @@ import type {
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
   PersonaVisualCandidate,
+  PersonaVisualDuplicateTarget,
   PersonaVisualImportCommitStartResponse,
   PersonaVisualFrame,
   PersonaVisualGenerationReadinessResponse,
@@ -66,6 +70,7 @@ type VisualPackEditorProps = {
   selectedPersonaId: string
   selectedPersonaName: string
   isActive?: boolean
+  onOpenPersonaVisuals?: (personaId: string) => void
 }
 
 type TriggerDraft = {
@@ -402,7 +407,8 @@ const replaceAnimation = (
 export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   selectedPersonaId,
   selectedPersonaName,
-  isActive = false
+  isActive = false,
+  onOpenPersonaVisuals
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
   const loadingLabel = t("common:loading", getDesignSystemState("loading").label)
@@ -431,6 +437,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [importCommitJob, setImportCommitJob] = React.useState<
     PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null
   >(null)
+  const [duplicateTargets, setDuplicateTargets] = React.useState<
+    PersonaVisualDuplicateTarget[]
+  >([])
+  const [duplicateTargetsLoading, setDuplicateTargetsLoading] = React.useState(false)
+  const [duplicateTargetId, setDuplicateTargetId] = React.useState("")
+  const [duplicateTitle, setDuplicateTitle] = React.useState("")
+  const [duplicatingPack, setDuplicatingPack] = React.useState(false)
+  const [lastDuplicatedPersonaId, setLastDuplicatedPersonaId] = React.useState("")
   const [previewingImport, setPreviewingImport] = React.useState(false)
   const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
   const [committingImport, setCommittingImport] = React.useState(false)
@@ -461,9 +475,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
+  const duplicateTargetsRequestIdRef = React.useRef(0)
 
   const selectedPack =
     packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
+  const availableDuplicateTargets = React.useMemo(
+    () => duplicateTargets.filter((target) => target.id !== selectedPersonaId),
+    [duplicateTargets, selectedPersonaId]
+  )
+  const selectedDuplicateTarget =
+    availableDuplicateTargets.find((target) => target.id === duplicateTargetId) ?? null
   const assets = React.useMemo(() => getPackAssets(selectedPack), [selectedPack])
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
@@ -605,6 +626,41 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId, selectedPack?.id])
 
+  const loadDuplicateTargets = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId || !selectedPack) {
+      duplicateTargetsRequestIdRef.current += 1
+      setDuplicateTargets([])
+      setDuplicateTargetId("")
+      setDuplicateTargetsLoading(false)
+      return
+    }
+    const requestId = duplicateTargetsRequestIdRef.current + 1
+    duplicateTargetsRequestIdRef.current = requestId
+    const isLatestRequest = () => duplicateTargetsRequestIdRef.current === requestId
+    setDuplicateTargets([])
+    setDuplicateTargetId("")
+    setDuplicateTargetsLoading(true)
+    try {
+      const targets = await listPersonaVisualDuplicateTargets()
+      if (!isLatestRequest()) return
+      const available = targets.filter((target) => target.id !== selectedPersonaId)
+      setDuplicateTargets(targets)
+      setDuplicateTargetId(available[0]?.id ?? "")
+    } catch (loadError) {
+      if (isLatestRequest()) {
+        setDuplicateTargets([])
+        setDuplicateTargetId("")
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load persona duplicate targets."
+        )
+      }
+    } finally {
+      if (isLatestRequest()) setDuplicateTargetsLoading(false)
+    }
+  }, [isActive, selectedPersonaId, selectedPack?.id])
+
   React.useEffect(() => {
     void loadPacks()
   }, [loadPacks])
@@ -616,6 +672,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     void loadGenerationReadiness()
   }, [loadGenerationReadiness])
+
+  React.useEffect(() => {
+    void loadDuplicateTargets()
+  }, [loadDuplicateTargets])
 
   React.useEffect(() => {
     if (!selectedPack) {
@@ -645,8 +705,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setImportPreview(null)
     setImportCommitJob(null)
     setSelectedImportPreviewFile(null)
+    setLastDuplicatedPersonaId("")
     if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
   }, [selectedPersonaId, selectedPack?.id])
+
+  React.useEffect(() => {
+    setDuplicateTitle(selectedPack ? `Copy of ${selectedPack.title}` : "")
+    setLastDuplicatedPersonaId("")
+  }, [selectedPack?.id])
 
   const updateManifest = React.useCallback(
     (updater: (manifest: PersonaVisualManifest) => PersonaVisualManifest) => {
@@ -784,6 +850,42 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setDownloadingExport(false)
+    }
+  }
+
+  const handleDuplicatePack = async () => {
+    if (!selectedPersonaId || !selectedPack || !duplicateTargetId) return
+    setDuplicatingPack(true)
+    setError(null)
+    try {
+      const duplicated = await duplicatePersonaVisualPack(
+        selectedPersonaId,
+        selectedPack.id,
+        {
+          target_persona_id: duplicateTargetId,
+          title: duplicateTitle.trim() || `Copy of ${selectedPack.title}`
+        }
+      )
+      setLastDuplicatedPersonaId(duplicated.persona_id)
+      const targetName =
+        selectedDuplicateTarget?.name ||
+        selectedDuplicateTarget?.id ||
+        duplicated.persona_id
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.duplicatedDraft", {
+          defaultValue: `Duplicated as a draft for ${targetName}. Review and activate it from that persona's Visuals tab.`
+        })
+      )
+    } catch (duplicateError) {
+      setError(
+        duplicateError instanceof Error
+          ? duplicateError.message
+          : t("sidepanel:personaGarden.visuals.duplicateError", {
+              defaultValue: "Failed to duplicate visual pack."
+            })
+      )
+    } finally {
+      setDuplicatingPack(false)
     }
   }
 
@@ -1490,7 +1592,72 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 })}
               </div>
             </div>
-            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="mt-3 grid gap-3 xl:grid-cols-3">
+              <div className="rounded border border-border bg-bg p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Typography.Text strong>Duplicate to persona</Typography.Text>
+                  <Tag>creates draft</Tag>
+                </div>
+                <div className="mt-1 text-xs text-text-muted">
+                  Copy this pack to another persona. It stays a draft until reviewed and
+                  activated.
+                </div>
+                <div className="mt-2 grid gap-2">
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Target persona</span>
+                    <select
+                      data-testid="persona-visual-duplicate-target-select"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={duplicateTargetId}
+                      disabled={
+                        duplicateTargetsLoading || !availableDuplicateTargets.length
+                      }
+                      onChange={(event) => setDuplicateTargetId(event.target.value)}
+                    >
+                      {availableDuplicateTargets.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.name || target.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Draft title</span>
+                    <input
+                      data-testid="persona-visual-duplicate-title-input"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={duplicateTitle}
+                      onChange={(event) => setDuplicateTitle(event.target.value)}
+                    />
+                  </label>
+                  <Button
+                    data-testid="persona-visual-duplicate-button"
+                    size="small"
+                    icon={<Copy className="h-3.5 w-3.5" />}
+                    loading={duplicatingPack}
+                    disabled={!duplicateTargetId || !selectedPack}
+                    onClick={() => void handleDuplicatePack()}
+                  >
+                    Duplicate as draft
+                  </Button>
+                  {lastDuplicatedPersonaId && onOpenPersonaVisuals ? (
+                    <Button
+                      data-testid="persona-visual-duplicate-open-target"
+                      size="small"
+                      type="link"
+                      onClick={() => onOpenPersonaVisuals(lastDuplicatedPersonaId)}
+                    >
+                      Open target Visuals
+                    </Button>
+                  ) : null}
+                </div>
+                {!availableDuplicateTargets.length ? (
+                  <div className="mt-2 text-xs text-text-muted">
+                    Add another persona before duplicating this pack.
+                  </div>
+                ) : null}
+              </div>
+
               <div className="rounded border border-border bg-bg p-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Typography.Text strong>Export archive</Typography.Text>
