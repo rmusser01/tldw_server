@@ -1,5 +1,5 @@
 import React from "react"
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -502,6 +502,28 @@ describe("BuddyShellHost", () => {
         expect.stringContaining("/assets/idle.png")
       )
     })
+  })
+
+  it("links the active buddy popover to the persona Visuals workflow", () => {
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      },
+      root: "sidepanel"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+    )
+
+    expect(
+      screen.getByRole("link", { name: "Open Visuals" })
+    ).toHaveAttribute("href", "/persona?persona_id=persona-1&tab=visuals")
   })
 
   it("maps active tool status into the tool_running visual state", async () => {

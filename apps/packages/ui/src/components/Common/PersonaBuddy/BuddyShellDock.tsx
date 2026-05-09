@@ -15,6 +15,7 @@ import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
 
 type BuddyShellDockProps = {
   buddySummary: PersonaBuddySummary
+  personaId?: string | null
   isOpen: boolean
   isDormant?: boolean
   visualPack?: PersonaVisualPack | null
@@ -41,6 +42,7 @@ const getPersonaVisualAssetsById = (
 
 export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   buddySummary,
+  personaId = null,
   isOpen,
   isDormant = false,
   visualPack = null,
@@ -109,7 +111,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
       </button>
 
       {isOpen && !isDormant ? (
-        <BuddyShellPopover buddySummary={buddySummary} />
+        <BuddyShellPopover buddySummary={buddySummary} personaId={personaId} />
       ) : null}
     </div>
   )
