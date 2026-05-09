@@ -471,7 +471,7 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
     imports.stateRegistry,
     fileSubject
   )
-  const returnedBadgeOwners = collectReturnedJsxTagOwners(
+  const returnedBadgeOwners = collectReturnedJsxTreeTagOwners(
     sourceFile,
     imports.badge,
     fileSubject
@@ -707,6 +707,34 @@ function collectReturnedJsxTagOwners(sourceFile, localNames, fallbackOwner) {
   return owners
 }
 
+function collectReturnedJsxTreeTagOwners(sourceFile, localNames, fallbackOwner) {
+  const owners = new Set()
+
+  if (!localNames || localNames.size === 0) {
+    return owners
+  }
+
+  walk(sourceFile, (node) => {
+    if (!isFunctionLikeNode(node)) {
+      return
+    }
+
+    const ownerName = returnedJsxOwnerName(node, fallbackOwner)
+    if (!ownerName) {
+      return
+    }
+
+    const returnsMatchingTag = collectOwnReturnExpressions(node).some(
+      (expression) => returnedExpressionContainsJsxTag(expression, localNames)
+    )
+    if (returnsMatchingTag) {
+      owners.add(ownerName)
+    }
+  })
+
+  return owners
+}
+
 function returnedJsxOwnerName(functionNode, fallbackOwner) {
   if (functionNode.name && ts.isIdentifier(functionNode.name)) {
     return functionNode.name.text
@@ -806,6 +834,70 @@ function expressionDirectlyReturnsJsxTag(expression, localNames) {
   }
 
   return false
+}
+
+function returnedExpressionContainsJsxTag(expression, localNames) {
+  const unwrapped = unwrapReturnedExpression(expression)
+
+  if (ts.isConditionalExpression(unwrapped)) {
+    return (
+      returnedExpressionContainsJsxTag(unwrapped.whenTrue, localNames) ||
+      returnedExpressionContainsJsxTag(unwrapped.whenFalse, localNames)
+    )
+  }
+
+  let found = false
+
+  const visit = (node) => {
+    if (found) {
+      return
+    }
+
+    if (node !== unwrapped && isFunctionLikeNode(node)) {
+      if (isReturnedCollectionRenderCallback(node)) {
+        ts.forEachChild(node, visit)
+      }
+      return
+    }
+
+    if (ts.isJsxSelfClosingElement(node)) {
+      const localName = jsxTagName(node.tagName)
+      if (localName && localNames.has(localName)) {
+        found = true
+      }
+      return
+    }
+
+    if (ts.isJsxOpeningElement(node)) {
+      const localName = jsxTagName(node.tagName)
+      if (localName && localNames.has(localName)) {
+        found = true
+      }
+      return
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(unwrapped)
+  return found
+}
+
+function isReturnedCollectionRenderCallback(functionNode) {
+  const parent = functionNode.parent
+
+  if (!parent || !ts.isCallExpression(parent)) {
+    return false
+  }
+
+  const isArgument = parent.arguments.some(
+    (argument) => argument === functionNode
+  )
+  if (!isArgument || !ts.isPropertyAccessExpression(parent.expression)) {
+    return false
+  }
+
+  return parent.expression.name.text === "map"
 }
 
 function unwrapReturnedExpression(expression) {
