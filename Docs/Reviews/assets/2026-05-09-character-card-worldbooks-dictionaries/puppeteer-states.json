@@ -1,0 +1,210 @@
+{
+  "timestamp": "2026-05-09T19:15:52.191Z",
+  "frontend": "http://127.0.0.1:8080",
+  "api": "http://127.0.0.1:8000",
+  "entities": {
+    "character": {
+      "id": 9,
+      "name": "Archivist Mira UX 20260509191047"
+    },
+    "worldBook": {
+      "id": 2,
+      "name": "Lumen City Field Notes UX 20260509191047"
+    },
+    "dictionary": {
+      "id": 1,
+      "name": "Mira Terminology Normalizer UX 20260509191047"
+    },
+    "globalChat": {
+      "id": "df744b4f-e680-4483-96fb-9532e84baf13",
+      "title": "Mira global lore/dictionary check 20260509191047"
+    },
+    "workspaceChat": {
+      "id": "51ec647f-52f6-4a8b-b56c-bdfa7d17ecf1",
+      "title": "Mira workspace lore/dictionary check 20260509191047"
+    }
+  },
+  "states": [
+    {
+      "name": "world-books-focused",
+      "url": "http://127.0.0.1:8080/world-books?from=characters&focusCharacterId=9&focusWorldBookId=2",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/world-books-focused.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nWorld Books\n\nCreate and manage structured knowledge bases that characters and chats can reference.\n\nAll statuses\nAll attachments\nTools\nNew World Book\n\t\nName\n\t\nEntries\n\t\nStatus\n\tLast Modified\tActions\n\n\t\nLumen City Field Notes UX 20260509190213\nLore for Archivist Mira character chat.\n\t1\tEnabled\tin 7 hours\t\n\n\n\t\nLumen City Field Notes UX 20260509191047\nLore for Archivist Mira character chat.\n\t1\tEnabled\tin 7 hours\t\n\nSelect a world book to view its entries and settings",
+      "textLength": 509,
+      "extra": {
+        "hasWorldBookName": true,
+        "hasCharacterName": false,
+        "hasAttachmentLanguage": false,
+        "hasRelationshipMatrixLanguage": false,
+        "hasEchoVaultEntry": false
+      }
+    },
+    {
+      "name": "world-books-detail-entries",
+      "url": "http://127.0.0.1:8080/world-books?from=characters&focusCharacterId=9&focusWorldBookId=2",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/world-books-detail-entries.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nWorld Books\n\nCreate and manage structured knowledge bases that characters and chats can reference.\n\nAll statuses\nAll attachments\nTools\nNew World Book\n\t\nName\n\t\nEntries\n\t\nStatus\n\tLast Modified\tActions\n\n\t\nLumen City Field Notes UX 20260509190213\nLore for Archivist Mira character chat.\n\t1\tEnabled\tin 7 hours\t\n\n\n\t\nLumen City Field Notes UX 20260509191047\nLore for Archivist Mira character chat.\n\t1\tEnabled\tin 7 hours\t\nLumen City Field Notes UX 20260509191047\nEnabled\n1 entry\nBudget: 500\n1 character\nin 7 hours\nEntries\nAttachments\nStats\nSettings\n25/500 tokens\nAll entries\nAll match types\nAll groups\n\nShowing 1 of 1 entries.\n\nEntry order is controlled by priority (0-100). Higher-priority entries are evaluated first.\n\nReferenced By is a heuristic based on keyword text found inside other entry content.\n\n\tKeywords\tGroup\tContent\tReferenced By\tPriority\tEnabled\tActions\nLumen\nArchive\nUngrouped\nLumen's hidden archive is called the Echo Vault. Only archivists with silver-thread keys can enter.\n~25 tokens\nNone\n10/100\nYes\nKeyword Index\nAdd New Entry\nGenerate with AI\nOn\nOff\nBulk add mode\nKeywords\nAdd keywords and press Enter\nContent\nGroup (optional)\n\n0 chars / ~0 tokens\n\nPriority\n?\nEnabled\nOn\nOff\nAppendable\n?\nOn\nOff\nMatching Options\nAdd Entry",
+      "textLength": 1278,
+      "extra": {
+        "hasWorldBookName": true,
+        "hasEntryContent": true,
+        "hasAttachmentsTab": true,
+        "hasStatsTab": true
+      }
+    },
+    {
+      "name": "world-books-detail-attachments",
+      "url": "http://127.0.0.1:8080/world-books?from=characters&focusCharacterId=9&focusWorldBookId=2",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/world-books-detail-attachments.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nWorld Books\n\nCreate and manage structured knowledge bases that characters and chats can reference.\n\nAll statuses\nAll attachments\nTools\nNew World Book\n\t\nName\n\t\nEntries\n\t\nStatus\n\tLast Modified\tActions\n\n\t\nLumen City Field Notes UX 20260509190213\nLore for Archivist Mira character chat.\n\t1\tEnabled\tin 7 hours\t\n\n\n\t\nLumen City Field Notes UX 20260509191047\nLore for Archivist Mira character chat.\n\t1\tEnabled\tin 7 hours\t\nLumen City Field Notes UX 20260509191047\nEnabled\n1 entry\nBudget: 500\n1 character\nin 7 hours\nEntries\nAttachments\nStats\nSettings\nAttached Characters (1)\nArchivist Mira UX 20260509191047\nDetach\nAttach a Character\nSelect a character\nAttach",
+      "textLength": 691,
+      "extra": {
+        "hasCharacterName": true,
+        "hasAttachedCharactersHeading": true,
+        "hasDetachAction": true
+      }
+    },
+    {
+      "name": "characters-focused-preview",
+      "url": "http://127.0.0.1:8080/characters?from=world-books&focusCharacterId=9&focusWorldBookId=2",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/characters-focused-preview.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nCharacters\n\nCreate reusable characters you can pick from the chat header and reuse across conversations.\n\nSkip to characters content\nUpload character\nKeyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal\nNew character\n/\nActive\nTrash\nFilters\nDisplay\n9 characters found\n\t\nName\n\tTags\t\nCreator\n\t\nActivity\n\tActions\n\n\t\nReaudit Character 20260509184619\nRe-audit test character for UX walkthrough.\n\t\t\t\n29m ago\nUpdated 29m ago\n\t\n\n\n\t\nReaudit Character 20260509184430\nRe-audit test character for UX walkthrough.\n\t\t\t\n30m ago\nUpdated 30m ago\n\t\n\n\n\t\nReaudit Character 20260509184109\nRe-audit test character for UX walkthrough.\n\t\t\t\n34m ago\nUpdated 34m ago\n\t\n\n\n\t\nP1 Smoke Character 1778350769434\nP1 smoke test character.\n\t\t\t\n56m ago\nUpdated 56m ago\n\t\n\n\n\t\nReaudit Character 20260509173128\nRe-audit test character for UX walkthrough.\n\t\t\t\n2h ago\nUpdated 2h ago\n\t\n\n\n\t\nHelpful AI Assistant\nA default, friendly assistant created automatically by the system.\n\t\ndefault\nneutral\n+1\n\t\nSystem\n\t\n2h ago\nUpdated 2h ago\n\t\n\n\n\t\nArchivist Mira UX 20260509191047\n1\nA careful archive guide for the city of Lumen.\n\t\nux-audit\nworldbook\n+1\n\t\t\n5m ago\nUpdated 5m ago\n\t\n\n\n\t\nArchivist Mira UX 20260509190213\n1\nA careful archive guide for the city of Lumen.\n\t\nux-audit\nworldbook\n+1\n\t\t\n13m ago\nUpdated 13m ago\n\t\n\n\n\t\nDefault Assistant\nA general-purpose assistant.\n\t\t\nSystem\n\t\n5h ago\nUpdated 5h ago\n\t\n1\n10 / page\nCharacter Preview\nPREVIEW\nArchivist Mira UX 20260509191047\nA careful archive guide for the city of Lumen.\nux-audit\nworldbook\ndictionary\nGreeting\n\"Welcome back to the stacks. What fragment should we trace today?\"\nBehavior\nYou are Archivist Mira. Use known Lumen lore when relevant.\nWorld Books\nOpen workspace\nBack to World Books\nLumen City Field Notes UX 20260509191047\nChat\nEdit\nDuplicate",
+      "textLength": 1845,
+      "extra": {
+        "hasCharacterPreview": true,
+        "hasWorldBooksSection": true,
+        "hasAttachedWorldBookName": true,
+        "hasBackToWorldBooksLink": true,
+        "hasDictionaryLanguage": true
+      }
+    },
+    {
+      "name": "dictionaries-list",
+      "url": "http://127.0.0.1:8080/dictionaries",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/dictionaries-list.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nChat Dictionaries\n\nDefine reusable substitutions so tldw understands your organization’s names, acronyms, and terminology.\n\nLearn more about dictionaries\nopens in a new tab\nAll categories\nFilter by tags\nImport\nNew Dictionary\n\nProcessing order for active dictionaries uses Priority (alphabetical by dictionary name), then each dictionary's entry order.\n\n\t\nName\n\tDescription\t\nActive\n\t\nPriority\n\t\nEntries\n\t\nUsed by\n\t\nUpdated\n\tStatus\tActions\n\n\tMira Terminology Normalizer UX 20260509191047\t\nNormalizes Lumen shorthand for character chat.\n\t\nOn\nOff\n\tP1\t1 entries\t\n2 chats (2 active)View linked chats\n\t6 hours ago\t\nCheck\n\t\n1-1 of 1\n1\n20 / page",
+      "textLength": 678,
+      "extra": {
+        "hasDictionaryName": true,
+        "hasUsageCount": true,
+        "hasGlobalChatTitle": false,
+        "hasWorkspaceChatTitle": false,
+        "hasCharacterCardLanguage": false
+      }
+    },
+    {
+      "name": "dictionaries-quick-assign-modal",
+      "url": "http://127.0.0.1:8080/dictionaries",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/dictionaries-quick-assign-modal.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nChat Dictionaries\n\nDefine reusable substitutions so tldw understands your organization’s names, acronyms, and terminology.\n\nLearn more about dictionaries\nopens in a new tab\nAll categories\nFilter by tags\nImport\nNew Dictionary\n\nProcessing order for active dictionaries uses Priority (alphabetical by dictionary name), then each dictionary's entry order.\n\n\t\nName\n\tDescription\t\nActive\n\t\nPriority\n\t\nEntries\n\t\nUsed by\n\t\nUpdated\n\tStatus\tActions\n\n\tMira Terminology Normalizer UX 20260509191047\t\nNormalizes Lumen shorthand for character chat.\n\t\nOn\nOff\n\tP1\t1 entries\t\n2 chats (2 active)View linked chats\n\t6 hours ago\t\nCheck\n\t\n1-1 of 1\n1\n20 / page\nQuick assign: Mira Terminology Normalizer UX 20260509191047\n\nChoose chat sessions to link with this dictionary.\n\nMira global lore/dictionary check 20260509191047\ndf744b4f-e680-4483-96fb-9532e84baf13 · in-progress\nOpen\nMira global lore/dictionary check 20260509190213\nc5116315-f7a4-4a45-97bf-6bb45120d766 · in-progress\nOpen\nCancel\nAssign to 2 chats",
+      "textLength": 1026,
+      "extra": {
+        "hasQuickAssignTitle": true,
+        "hasGlobalChatTitle": true,
+        "hasWorkspaceChatTitle": false,
+        "saysChatsNotCharacters": true
+      }
+    },
+    {
+      "name": "workspace-playground",
+      "url": "http://127.0.0.1:8080/workspace-playground",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/workspace-playground.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nSkip to chat content\nSkip to sources panel\nSkip to studio panel\nNew Research\nWorkspaces\nNew here? Take a quick tour of the workspace.\nStart tour\nDismiss\nSources\nAdd\nFOLDERS\nNew folder\n\nNo folders yet\n\nCreate a folder to organize related sources.\n\nNo sources yet\n\nAdd PDFs, videos, or websites to start researching\n\nAdd your first source\nStart your research\n\nYour research assistant — grounded in your sources\n\nSelect sources from the Sources pane for grounded answers, or type a message for general chat without sources\n\nHelp me frame a research question on this topic\nGive me a quick overview before I add sources\nWhat should I look for in high-quality sources?\n\nQuick document search? Try Knowledge QA →\n\nSources are documents, PDFs, web pages, or other content you upload. Add sources in the left panel to start asking questions about them.\n\nAdd sources to get started\n\nOr start from a template\n\nLiterature Review\nInterview Analysis\nProduct Brief\nGeneral chat\nRAG mode\nModel\nAuto\n\nEnter or Cmd/Ctrl+Enter to send, Shift+Enter for new line\n\nStudio\n\nGenerate outputs from your sources\n\nSTUDIO OPTIONS\nOUTPUT TYPES\nSummary\nCreate a concise summary of key points\nReport\nGenerate a detailed report document\nFlashcards\nCreate study flashcards for review\nQuiz\nGenerate a quiz to test understanding\nMore outputs (6)\n\nSelect sources from the Sources pane to enable generation\n\nSLIDES SETTINGS\n\nChoose the presentation strategy used when generating Slides output.\n\nSlides visual style\nNo visual style preset\nInfographic\nMinimal Academic\nExam-Focused Bullet\nDiagram / Map-Based\nTimeline\nData Visualization\nStorytelling\nHigh-Contrast Revision\nComparative Matrix\nPolicy / Case Brief\nChalkboard\nWhiteboard\nSketch Noting\nGraphite and Charcoal Realism\nClaymation\nExploded View Diagram\nBlueprint\nIsometric 3D Illustration\nMinimalist 2D Data-Viz\nDark-Mode SaaS Isometric\nProfessional Futuristic\nNeumorphic\nHigh-Contrast Monospace\nConceptual Journey Map\nStrategic Infographic\nExecutive Dashboard\nWatercolour\nHeritage\nSwiss Design\nGlass-morphic UI\nCorporate Memphis\nPapercraft\nTactile 3D\nMiniature World\nKawaii\nPop Art\nRisograph Print\nRetro 90s Gaming\nOregon Trail\nCyberpunk\nAnime Battle\nAnime\nRetro Print\nBrutalist Design\n\nCalm, low-noise academic slides with restrained text and careful structure.\n\nSelect Audio Summary to configure TTS voice and speed.\n\nAudio Settings\nGENERATED OUTPUTS\nNo outputs generated yet\nQUICK NOTES\nConnected\n0.0/5 MB\nHelp",
+      "textLength": 2475,
+      "extra": {
+        "hasChatPane": true,
+        "hasWorldBookLanguage": false,
+        "hasDictionaryLanguage": false,
+        "hasCharacterLanguage": true
+      }
+    },
+    {
+      "name": "chat-route",
+      "url": "http://127.0.0.1:8080/chat",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/chat-route.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSaved\nSearch\n⌘K\nTemp\nCharacter\n?\nConversation timeline\nShortcuts\nArtifacts panel closed\nNo LLM provider configured\n\nChat requires an LLM provider API key (OpenAI, Anthropic, etc.). Open your server's settings to add one, then restart the server.\n\nOpen Settings\nRefresh\nStart a new chat\nExperiment with different models, prompts, and knowledge sources here.\nSTART CHATTING\nQUICK INGEST\n\nCHOOSE A MODE\n\nPick any starting point. All five stay equally available from the first screen.\n\nGeneral chat\n\nStart with a single model and ask anything.\n\nCompare AI models side-by-side\n\nSend the same question to multiple models and compare their answers.\n\nChat as a character\n\nPick a character persona and have the AI respond in their style.\n\nSearch your documents\n\nAsk questions about your ingested content with cited answers.\n\nDeep research\n\nRun a thorough, multi-step investigation with citations and checkpoints.\n\nType / for commands like /search or /web\nSet a system prompt to customize AI behavior\nTake a quick tour\nComposer\nSEND\nModes\nMCP\nNone\nSearch & Context\nPrompt\nAttach image\nMore tools\nChat Settings\nOpenAI / gpt-4o\nHealthy\nTruncation\nLow risk\nContext mix\n0% non-message\n0 + ~0 = 0 tokens\nSaved\nAdvanced controls",
+      "textLength": 1227,
+      "extra": {
+        "hasCharacterName": false,
+        "hasWorldBookLanguage": false,
+        "hasDictionaryLanguage": false,
+        "hasModelBlocker": true
+      }
+    },
+    {
+      "name": "first-time-route-gate-character-focus",
+      "url": "http://127.0.0.1:8080/characters?from=world-books&focusCharacterId=9&focusWorldBookId=2",
+      "screenshot": "/private/tmp/tldw-worldbooks-dicts-audit-20260509/first-time-route-gate-character-focus.png",
+      "title": "",
+      "textSample": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nCharacters\n\nCreate reusable characters you can pick from the chat header and reuse across conversations.\n\nSkip to characters content\nUpload character\nKeyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal\nNew character\n/\nActive\nTrash\nFilters\nDisplay\n9 characters found\n\t\nName\n\tTags\t\nCreator\n\t\nActivity\n\tActions\n\n\t\nReaudit Character 20260509184619\nRe-audit test character for UX walkthrough.\n\t\t\t\n29m ago\nUpdated 29m ago\n\t\n\n\n\t\nReaudit Character 20260509184430\nRe-audit test character for UX walkthrough.\n\t\t\t\n31m ago\nUpdated 31m ago\n\t\n\n\n\t\nReaudit Character 20260509184109\nRe-audit test character for UX walkthrough.\n\t\t\t\n34m ago\nUpdated 34m ago\n\t\n\n\n\t\nP1 Smoke Character 1778350769434\nP1 smoke test character.\n\t\t\t\n56m ago\nUpdated 56m ago\n\t\n\n\n\t\nReaudit Character 20260509173128\nRe-audit test character for UX walkthrough.\n\t\t\t\n2h ago\nUpdated 2h ago\n\t\n\n\n\t\nHelpful AI Assistant\nA default, friendly assistant created automatically by the system.\n\t\ndefault\nneutral\n+1\n\t\nSystem\n\t\n2h ago\nUpdated 2h ago\n\t\n\n\n\t\nArchivist Mira UX 20260509191047\n1\nA careful archive guide for the city of Lumen.\n\t\nux-audit\nworldbook\n+1\n\t\t\n5m ago\nUpdated 5m ago\n\t\n\n\n\t\nArchivist Mira UX 20260509190213\n1\nA careful archive guide for the city of Lumen.\n\t\nux-audit\nworldbook\n+1\n\t\t\n14m ago\nUpdated 14m ago\n\t\n\n\n\t\nDefault Assistant\nA general-purpose assistant.\n\t\t\nSystem\n\t\n5h ago\nUpdated 5h ago\n\t\n1\n10 / page\nCharacter Preview\nPREVIEW\nArchivist Mira UX 20260509191047\nA careful archive guide for the city of Lumen.\nux-audit\nworldbook\ndictionary\nGreeting\n\"Welcome back to the stacks. What fragment should we trace today?\"\nBehavior\nYou are Archivist Mira. Use known Lumen lore when relevant.\nWorld Books\nOpen workspace\nBack to World Books\nLumen City Field Notes UX 20260509191047\nChat\nEdit\nDuplicate",
+      "textLength": 1845,
+      "extra": {
+        "hasSetupOrOnboardingLanguage": false,
+        "preservesCharacterIntent": true,
+        "hasCharacterName": true,
+        "hasWorldBookName": true
+      }
+    }
+  ],
+  "diagnostics": {
+    "console": [
+      {
+        "type": "error",
+        "text": "Warning: Each child in a list should have a unique \"key\" prop.%s%s See https://reactjs.org/link/warning-keys for more information.%s \n\nCheck the render method of `List`.  \n    at Item (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_2da239a9._.js:10777:17)\n    at RawList (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_2da239a9._.js:11938:13)\n    at Provider (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_1407477e._.js:39074:25)\n    at http://127.0.0.1:8080/_next/static/chunks/90300_%40rc-component_table_es_03a82942._.js:3798:13\n    at ImmutableComponent (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_1407477e._.js:39224:13)\n    at div\n    at div\n    at SingleObserver (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_6dcbdac5._.js:18078:13)\n    at ResizeObserver (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_6dcbdac5._.js:18140:13)\n    at Provider (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_1407477e._.js:39074:25)\n    at Table (http://127.0.0.1:8080/_next/static/chunks/90300_%40rc-component_table_es_03a82942._.js:2881:221)\n    at ImmutableComponent (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_1407477e._.js:39194:226)\n    at Provider (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_1407477e._.js:39074:25)\n    at VirtualTable (http://127.0.0.1:8080/_next/static/chunks/90300_%40rc-component_table_es_03a82942._.js:4092:13)\n    at ImmutableComponent (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_1407477e._.js:39194:226)\n    at div\n    at div\n    at Spin (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_51ec2deb._.js:10844:24)\n    at div\n    at InternalTable (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_table_be76d6ff._.js:3637:24)\n    at Table (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_table_be76d6ff._.js:4135:218)\n    at div\n    at div\n    at WorldBookEntryManager (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Option_9a4541ad._.js:5250:34)\n    at div\n    at http://127.0.0.1:8080/_next/static/chunks/b5200__bun_2da239a9._.js:18419:13\n    at http://127.0.0.1:8080/_next/static/chunks/b5200__bun_6dcbdac5._.js:14106:9\n    at div\n    at div\n    at TabPanelList (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_2da239a9._.js:18459:13)\n    at div\n    at http://127.0.0.1:8080/_next/static/chunks/b5200__bun_2da239a9._.js:18581:13\n    at http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_51ec2deb._.js:6903:13\n    at div\n    at main\n    at WorldBookDetailPanel (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Option_9a4541ad._.js:9594:33)\n    at div\n    at div\n    at div\n    at WorldBooksManager (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Option_9a4541ad._.js:9930:195)\n    at div\n    at div\n    at PageShell (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Common_3144be2a._.js:6698:22)\n    at WorkspaceConnectionGate (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Common_3144be2a._.js:6749:36)\n    at WorldBooksWorkspace (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Option_9a4541ad._.js:13642:287)\n    at DemoModeProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:9541:29)\n    at NestedLayoutContent (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Layouts_4d2d36f7._.js:4203:32)\n    at OptionLayout (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Layouts_4d2d36f7._.js:4328:218)\n    at RouteErrorBoundaryInner (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Common_3144be2a._.js:7396:1)\n    at RouteErrorBoundary (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Common_3144be2a._.js:7653:31)\n    at OptionWorldBooksWorkspaceRoute\n    at LoadableComponent (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_shared_lib_c4be32c3._.js:5811:9)\n    at div\n    at div\n    at main\n    at div\n    at BuddyShellRenderContextProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_components_Common_e492dcfe._.js:442:44)\n    at OptionLayoutInner (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_535611a4._.js:517:30)\n    at DemoModeProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:9541:29)\n    at RootLayoutShell (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_535611a4._.js:1366:32)\n    at OptionLayout (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_535611a4._.js:1443:218)\n    at LoadableComponent (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_shared_lib_c4be32c3._.js:5811:9)\n    at FirstRunGate (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:3623:25)\n    at ServerReadinessGate (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_82564b3a._.js:3119:32)\n    at ErrorBoundary (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_82564b3a._.js:2671:1)\n    at BackendRecoveryUiProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:2820:38)\n    at ConfigurationGuard (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_82564b3a._.js:3047:31)\n    at div\n    at App (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_5f370e79._.js:11188:24)\n    at ToastProvider (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_82564b3a._.js:1149:26)\n    at MotionWrapper (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_5f370e79._.js:3069:220)\n    at ProviderChildren (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_5f370e79._.js:3291:13)\n    at ConfigProvider (http://127.0.0.1:8080/_next/static/chunks/64702_antd_es_5f370e79._.js:3550:215)\n    at FontSizeProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:9359:29)\n    at PageAssistProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:9296:31)\n    at DemoModeProvider (http://127.0.0.1:8080/_next/static/chunks/apps_packages_ui_src_60b9c375._.js:9541:29)\n    at QueryClientProvider (http://127.0.0.1:8080/_next/static/chunks/b5200__bun_6dcbdac5._.js:21468:30)\n    at StyleProvider (http://127.0.0.1:8080/_next/static/chunks/9b4e0_%40ant-design_cssinjs_es_ffa67a35._.js:131:13)\n    at AppProviders (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_82564b3a._.js:2467:25)\n    at App (http://127.0.0.1:8080/_next/static/chunks/apps_tldw-frontend_82564b3a._.js:3411:16)\n    at PathnameContextProviderAdapter (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_shared_lib_c4be32c3._.js:5354:43)\n    at PagesDevOverlayErrorBoundary (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1117:9)\n    at PagesDevOverlayBridge (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1894:34)\n    at Container (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_client_52ad4854._.js:3085:1)\n    at AppContainer (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_client_52ad4854._.js:3184:25)\n    at Root (http://127.0.0.1:8080/_next/static/chunks/b5795_next_dist_client_52ad4854._.js:3393:17)",
+        "url": "http://127.0.0.1:8080/world-books?from=characters&focusCharacterId=9&focusWorldBookId=2"
+      },
+      {
+        "type": "error",
+        "text": "Warning: Instance created by `useForm` is not connected to any Form element. Forget to pass `form` prop?",
+        "url": "http://127.0.0.1:8080/characters?from=world-books&focusCharacterId=9&focusWorldBookId=2"
+      },
+      {
+        "type": "error",
+        "text": "Warning: [antd: Modal] `destroyOnClose` is deprecated. Please use `destroyOnHidden` instead.",
+        "url": "http://127.0.0.1:8080/workspace-playground"
+      }
+    ],
+    "pageErrors": [],
+    "requestFailures": [
+      {
+        "url": "http://127.0.0.1:8000/api/v1/notifications/stream?after=0",
+        "method": "GET",
+        "failure": "net::ERR_ABORTED",
+        "pageUrl": "http://127.0.0.1:8080/world-books?from=characters&focusCharacterId=9&focusWorldBookId=2"
+      },
+      {
+        "url": "http://127.0.0.1:8000/api/v1/notifications/stream?after=0",
+        "method": "GET",
+        "failure": "net::ERR_ABORTED",
+        "pageUrl": "http://127.0.0.1:8080/characters?from=world-books&focusCharacterId=9&focusWorldBookId=2"
+      },
+      {
+        "url": "http://127.0.0.1:8000/api/v1/notifications/stream?after=0",
+        "method": "GET",
+        "failure": "net::ERR_ABORTED",
+        "pageUrl": "http://127.0.0.1:8080/dictionaries"
+      },
+      {
+        "url": "http://127.0.0.1:8000/api/v1/llm/models/metadata",
+        "method": "GET",
+        "failure": "net::ERR_ABORTED",
+        "pageUrl": "http://127.0.0.1:8080/workspace-playground"
+      },
+      {
+        "url": "http://127.0.0.1:8000/api/v1/notifications/stream?after=0",
+        "method": "GET",
+        "failure": "net::ERR_ABORTED",
+        "pageUrl": "http://127.0.0.1:8080/workspace-playground"
+      }
+    ],
+    "httpErrors": []
+  }
+}
