@@ -107,7 +107,7 @@ This audit does not remove packages or rewrite runtime code.
 | `cytoscape` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Notes/NotesGraphModal.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesGraphModal.stage2.graph-view.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx | shared UI, shared UI tests | graph/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `cytoscape-dagre` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Notes/NotesGraphModal.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesGraphModal.stage2.graph-view.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx | shared UI, shared UI tests | graph/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `d3-dsv` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | parser/conversion | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in parser/conversion behavior. Confirm direct-vs-transitive ownership and CSV/DSV coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/parser-domain investigation slice. |
-| `dayjs` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 4 | apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemsList.tsx, apps/packages/ui/src/components/Option/Items/ItemsWorkspace.tsx | shared UI | frontend/runtime | `defer-design` | Medium; remaining shared UI imports are Ant Design RangePicker value surfaces plus an Items published-date display use co-located with the Items date-filter contract. | No immediate dependency reduction until shared UI date-picker value contracts are redesigned or isolated and the final co-located display use is migrated. | Date-picker contract design before manifest removal. |
+| `dayjs` | none after TASK-188 | 0 | none found; `antd`, `exceljs`, and `mermaid` still own transitive lockfile entries | removed WebUI, shared UI, and extension declarations | frontend/runtime | `removed` | Medium before migration; the final direct uses were Ant Design date-control value surfaces plus a co-located Items published-date display label. Focused native-date tests and an exact import guard cover the replacement. | Three direct declarations removed; `dayjs` remains in `apps/bun.lock` only through transitive package ownership. | TASK-188 complete |
 | `dexie` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/db/dexie/chat.ts, apps/packages/ui/src/db/dexie/schema.ts, apps/packages/ui/src/hooks/document-workspace/__tests__/offlineQueue.test.ts, apps/packages/ui/src/hooks/document-workspace/offlineQueue.ts | shared UI, shared UI tests, web tests, web app | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `dexie-react-hooks` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Sidepanel/Chat/TtsClipsDrawer.tsx | shared UI | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `dompurify` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 11 | apps/packages/ui/src/components/Common/CodeBlock.tsx, apps/packages/ui/src/components/Notes/NotesStudioDiagramCard.tsx, apps/packages/ui/src/components/Notes/export-utils.ts, apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemDetail.tsx | shared UI | security/sanitization | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
@@ -251,28 +251,34 @@ This audit does not remove packages or rewrite runtime code.
   slice was one active package-import surface removed and no direct manifest,
   lockfile, install-size, or bundle-size reduction until the remaining
   `dayjs` surfaces are migrated.
+- TASK-188 removed the final direct `dayjs` imports from ReadingList and Items
+  by replacing their Ant Design RangePicker/Dayjs filter paths with native
+  date inputs and replacing the Items published-date label with a native Date
+  helper. The exact active-code import scan now finds zero direct `dayjs`
+  package imports across `apps/`, so the direct WebUI, shared UI, and extension
+  manifest declarations were removed and `apps/bun.lock` was regenerated.
 
 ### Quick Cleanup Candidates
 
 No immediate low-risk quick-cleanup package remains from the issue #1346 queue
-after PRs #1357, #1359, #1365, #1368, #1375, #1385, and #1390. Remaining
+after PRs #1357, #1359, #1365, #1368, #1375, #1385, #1390, and the completed
+dayjs cleanup slices. Remaining
 zero-evidence rows are either tooling/type declarations, active transitive
 ownership checks, or complex-domain packages that should stay on the
 `investigate-lockfile` path before any manifest edit.
 
 ### Replacement Candidates
 
-1. `dayjs`: remaining shared UI imports are Ant Design date-control value
-   surfaces in reading list and items plus a co-located Items published-date
-   display use. Do not attempt a direct dependency removal until the surfaces
-   that pass or type `Dayjs` values are redesigned or isolated and the final
-   display use is migrated.
+No active replacement candidate remains from the original issue #1346 queue.
+Future package-trimming work should start from the current inventory rather
+than the now-completed `dayjs` sequence.
 
 ### Deferred Design Candidates
 
 - Icon-stack consolidation: `lucide-react`, `@heroicons/react`, `@ant-design/icons`, and `react-icons` are active visible UI dependencies and should be handled with a visual/design pass.
-- Date/time consolidation: current shared UI uses `Dayjs` values with Ant
-  Design date controls in media, reading list, and items surfaces.
+- Date/time consolidation: direct `dayjs` package imports are gone, but Ant
+  Design still owns transitive `dayjs` usage in the lockfile and ShareDialog
+  still uses Ant Design DatePicker through the form value contract.
   Treat this as a compatibility/design slice, not a quick manifest cleanup.
 - PDF, ePub, document rendering, rich text editor, Mermaid, KaTeX, markdown, parser, graph/layout, OCR, tokenizer, schema, Monaco, Tiptap, and archive packages with active evidence are kept or deferred rather than replaced with hand-rolled browser code. Remaining zero-evidence complex declarations should keep using the `investigate-lockfile` path before any manifest edit.
 - DnD package declarations with no direct import evidence, such as `@dnd-kit/abstract` and `@dnd-kit/dom`, are retained after TASK-134 because the current lockfile still routes active DnD packages through the DnD abstract/dom graph.
@@ -514,6 +520,33 @@ ownership checks, or complex-domain packages that should stay on the
   `EmbeddingsModelSelectionConfig.tsx` and `lib/api/vnPlay.ts`; filtering the
   log for `FilterPanel`, `components/Media`, `Media/__tests__`, task-176, and
   `WebUI_Dependency_Audit` returned no matches. `git diff --check` exited 0.
+- 2026-05-09 TASK-188 active-code and manifest scan: exact package-import scan
+  across `apps/` found zero direct `dayjs` imports after removing the final
+  ReadingList and Items imports. Manifest scans now find no direct `dayjs`
+  declarations in `apps/tldw-frontend/package.json`,
+  `apps/packages/ui/package.json`, or `apps/extension/package.json`; the
+  remaining `apps/bun.lock` entries are transitive ownership from `antd`,
+  `exceljs`, `mermaid`, and optional picker peers.
+- 2026-05-09 TASK-188 focused verification: `bun run test --
+  src/components/Option/Items/__tests__/ItemsWorkspace.test.tsx
+  src/components/Option/Collections/ReadingList/__tests__/ReadingItemsList.test.tsx
+  src/components/Media/__tests__/FilterPanel.dayjs-imports.test.ts
+  --maxWorkers=1` from `apps/packages/ui` first failed on missing native
+  ReadingList/Items date inputs and four remaining `dayjs` imports, then
+  passed with 10 tests after the native helper/input implementation.
+- 2026-05-09 TASK-188 WebUI build/lint verification:
+  `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` from
+  `apps/tldw-frontend` exited 0. Next compiled successfully, generated 138
+  static pages, and `verify-shared-token-sync.mjs` reported OK for the
+  generated CSS. `bun run lint` from `apps/tldw-frontend` exited 0 with the
+  existing 131-warning baseline.
+- 2026-05-09 TASK-188 TypeScript/diff verification:
+  `node_modules/.bin/tsc --noEmit --project tsconfig.json --pretty false` from
+  `apps/tldw-frontend` still exits 2 on existing baseline errors in
+  `EmbeddingsModelSelectionConfig.tsx` and `lib/api/vnPlay.ts`; filtering the
+  log for `ReadingItemsList`, `ItemsWorkspace`, `date-input`,
+  `FilterPanel.dayjs`, task-188, and `WebUI_Dependency_Audit` returned no
+  matches. `git diff --check` exited 0.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,
@@ -524,6 +557,9 @@ ownership checks, or complex-domain packages that should stay on the
   documentation, and Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-158 because the slice changed TypeScript,
   documentation, and Backlog metadata only; no Python files were modified.
+- Bandit: skipped for TASK-188 because the slice changed TypeScript,
+  documentation, package manifests/lockfile, and Backlog metadata only; no
+  Python files were modified.
 - Bandit: skipped for TASK-164 because the slice changed TypeScript,
   documentation, and Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-168 because the slice changed TypeScript,
@@ -538,7 +574,7 @@ ownership checks, or complex-domain packages that should stay on the
 - The usage JSON is a source/config/package-script signal, not a bundler trace. It does not prove transitive dependency ownership or tree-shaken bundle impact.
 - The extension is included as an impact-check surface because it consumes `@tldw/ui`; extension-only packages remain outside the primary table unless they overlap WebUI/shared UI declarations.
 - Decisions marked `investigate-lockfile` should not be removed until a follow-up confirms direct-vs-transitive ownership in `apps/bun.lock` and validates install/build behavior.
-- The audit now treats `dayjs` as the next compatibility/design target rather
-  than a quick removal. Native `Intl` helpers can reduce simple formatting
-  usage, but direct dependency removal is blocked while shared UI date-picker
-  flows pass or type `Dayjs` values.
+- Direct `dayjs` declarations and imports are removed, but the lockfile still
+  includes transitive `dayjs` ownership through Ant Design, ExcelJS, Mermaid,
+  and optional picker peer metadata. Removing those transitive entries is out
+  of scope for issue #1346 dependency-surface trimming.

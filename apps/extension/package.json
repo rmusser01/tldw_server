@@ -79,7 +79,6 @@
     "cytoscape": "^3.33.1",
     "cytoscape-dagre": "^2.5.0",
     "d3-dsv": "^2.0.0",
-    "dayjs": "^1.11.19",
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^1.1.7",
     "dompurify": "^3.3.1",

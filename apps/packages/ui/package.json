@@ -58,7 +58,6 @@
     "cheerio": "^1.0.0",
     "cytoscape": "^3.0.0",
     "cytoscape-dagre": "^2.0.0",
-    "dayjs": "^1.0.0",
     "dexie": "^4.0.0",
     "dexie-react-hooks": ">=1.0.0 <2.0.0",
     "dompurify": "^3.0.0",

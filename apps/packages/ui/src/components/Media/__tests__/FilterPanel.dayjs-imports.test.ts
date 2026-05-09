@@ -28,8 +28,8 @@ const collectDayjsImports = (): string[] => {
   })
 }
 
-describe('FilterPanel dayjs dependency cleanup', () => {
-  it('leaves only the deferred ReadingList and Items dayjs import surfaces', () => {
+describe('shared UI dayjs dependency cleanup', () => {
+  it('has no direct dayjs package import surfaces left in shared UI source', () => {
     const dayjsImports = collectDayjsImports()
     const importCountsByFile = dayjsImports.reduce<Record<string, number>>(
       (counts, importMatch) => {
@@ -40,15 +40,7 @@ describe('FilterPanel dayjs dependency cleanup', () => {
       {}
     )
 
-    expect(dayjsImports).toHaveLength(4)
-    expect(importCountsByFile).toEqual({
-      'components/Option/Collections/ReadingList/ReadingItemsList.tsx': 2,
-      'components/Option/Items/ItemsWorkspace.tsx': 2
-    })
-    expect(dayjsImports).not.toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/^components\/Media\/FilterPanel\.tsx:/)
-      ])
-    )
+    expect(dayjsImports).toHaveLength(0)
+    expect(importCountsByFile).toEqual({})
   })
 })

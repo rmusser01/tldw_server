@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Button,
   Checkbox,
-  DatePicker,
   Dropdown,
   Empty,
   Input,
@@ -14,14 +13,17 @@ import {
   message
 } from "antd"
 import type { MenuProps } from "antd"
-import type { Dayjs } from "dayjs"
-import dayjs from "dayjs"
 import { Filter, RefreshCw, Search, Star, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
+import {
+  formatDateInputValue,
+  formatDateOnlyLabel,
+  parseDateInputValue
+} from "@/utils/date-input"
 
 type ItemStatus = "saved" | "reading" | "read" | "archived"
 
@@ -117,10 +119,6 @@ export const ItemsWorkspace: React.FC = () => {
 
   const selectedCount = selectedItemIds.length
   const allPageSelected = items.length > 0 && selectedCount === items.length
-
-  const dateRangeValue = useMemo<[Dayjs | null, Dayjs | null]>(() => {
-    return [dateFrom ? dayjs(dateFrom) : null, dateTo ? dayjs(dateTo) : null]
-  }, [dateFrom, dateTo])
 
   const fetchItems = useCallback(async () => {
     setItemsLoading(true)
@@ -668,23 +666,34 @@ export const ItemsWorkspace: React.FC = () => {
           allowClear
         />
 
-        <DatePicker.RangePicker
-          value={dateRangeValue}
-          onChange={(dates: null | [Dayjs | null, Dayjs | null]) => {
-            if (!dates) {
-              setDateFrom(null)
-              setDateTo(null)
-              setItemsPage(1)
-              return
-            }
-            const [start, end] = dates
-            setDateFrom(start ? start.startOf("day").toDate().toISOString() : null)
-            setDateTo(end ? end.endOf("day").toDate().toISOString() : null)
-            setItemsPage(1)
-          }}
-          size="small"
-          allowClear
-        />
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-text-muted">
+            Date from
+            <input
+              aria-label="Date from"
+              type="date"
+              value={formatDateInputValue(dateFrom)}
+              onChange={(event) => {
+                setDateFrom(parseDateInputValue(event.target.value, "start"))
+                setItemsPage(1)
+              }}
+              className="h-6 rounded border border-border bg-bg px-2 text-xs text-text"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-text-muted">
+            Date to
+            <input
+              aria-label="Date to"
+              type="date"
+              value={formatDateInputValue(dateTo)}
+              onChange={(event) => {
+                setDateTo(parseDateInputValue(event.target.value, "end"))
+                setItemsPage(1)
+              }}
+              className="h-6 rounded border border-border bg-bg px-2 text-xs text-text"
+            />
+          </label>
+        </div>
 
         {hasFilters && (
           <Button size="small" type="link" onClick={resetFilters}>
@@ -800,10 +809,7 @@ export const ItemsWorkspace: React.FC = () => {
         <div className="space-y-3">
           {items.map((item) => {
             const selected = selectedItemIds.includes(item.id)
-            const publishedLabel =
-              item.published_at && dayjs(item.published_at).isValid()
-                ? dayjs(item.published_at).format("YYYY-MM-DD")
-                : item.published_at
+            const publishedLabel = formatDateOnlyLabel(item.published_at)
 
             return (
               <div
