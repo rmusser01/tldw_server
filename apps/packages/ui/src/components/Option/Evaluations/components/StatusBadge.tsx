@@ -30,7 +30,13 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
   pending: { stateKey: "loading" },
   running: {
     stateKey: "retrying",
-    icon: <Loader2 className="inline h-3 w-3 animate-spin" aria-hidden />
+    icon: (
+      <Loader2
+        className="inline h-3 w-3 animate-spin"
+        aria-hidden
+        data-testid="evaluations-status-running-spinner"
+      />
+    )
   },
   completed: { stateKey: "ready" },
   failed: { stateKey: "error" },
@@ -50,7 +56,11 @@ const UNKNOWN_STATUS_CONFIG = {
 } satisfies StatusConfig
 
 function getStatusConfig(status: string): StatusConfig {
-  return STATUS_CONFIG[status] || UNKNOWN_STATUS_CONFIG
+  if (Object.prototype.hasOwnProperty.call(STATUS_CONFIG, status)) {
+    return STATUS_CONFIG[status]
+  }
+
+  return UNKNOWN_STATUS_CONFIG
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
@@ -65,7 +75,6 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     <Badge
       variant={SEVERITY_BADGE_VARIANTS[state.severity]}
       className={className}
-      srLabel={state.label}
     >
       {config.icon}
       {status}

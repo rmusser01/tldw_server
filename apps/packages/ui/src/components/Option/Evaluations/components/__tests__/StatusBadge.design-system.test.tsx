@@ -26,15 +26,33 @@ describe("Evaluations StatusBadge design-system adapter", () => {
     const { container } = render(<StatusBadge status={status} />)
 
     expect(screen.getByText(status)).toBeInTheDocument()
-    expect(screen.getByText("Empty")).toBeInTheDocument()
     expect(
       container.querySelector('[data-ds-component="Badge"]')
     ).toBeInTheDocument()
   })
 
-  it("preserves the running status spinner affordance", () => {
-    const { container } = render(<StatusBadge status="running" />)
+  it("falls back safely for prototype property status keys", () => {
+    const status = "constructor" as RunStatus
+    const { container } = render(<StatusBadge status={status} />)
 
-    expect(container.querySelector(".animate-spin")).toBeInTheDocument()
+    expect(screen.getByText(status)).toBeInTheDocument()
+    expect(
+      container.querySelector('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+  })
+
+  it("keeps canonical state labels out of hidden badge copy", () => {
+    render(<StatusBadge status="running" />)
+
+    expect(screen.getByText("running")).toBeInTheDocument()
+    expect(screen.queryByText("Retrying")).not.toBeInTheDocument()
+  })
+
+  it("preserves the running status spinner affordance", () => {
+    render(<StatusBadge status="running" />)
+
+    expect(
+      screen.getByTestId("evaluations-status-running-spinner")
+    ).toHaveAttribute("aria-hidden", "true")
   })
 })
