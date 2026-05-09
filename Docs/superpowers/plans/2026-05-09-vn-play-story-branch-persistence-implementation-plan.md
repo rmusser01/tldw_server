@@ -71,7 +71,7 @@ Expected: new implementation task exists and is marked `In Progress`.
 - Modify: `tldw_Server_API/app/core/DB_Management/VNPlay_DB.py`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_db.py`
 
-- [ ] **Step 1: Write failing repository test for atomic accepted-choice persistence**
+- [x] **Step 1: Write failing repository test for atomic accepted-choice persistence**
 
 Add a test like:
 
@@ -153,7 +153,7 @@ def test_record_story_choice_selection_creates_branch_event_turn_and_state(
     assert updated_turn["input_event_id"] == result["choice_selected"]["id"]
 ```
 
-- [ ] **Step 2: Run the new repository test and verify it fails**
+- [x] **Step 2: Run the new repository test and verify it fails**
 
 Run:
 
@@ -164,7 +164,7 @@ python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py::test_record_s
 
 Expected: fails because `VNPlayRepository.record_story_choice_selection` does not exist.
 
-- [ ] **Step 3: Implement transaction-local helpers**
+- [x] **Step 3: Implement transaction-local helpers**
 
 In `VNPlay_DB.py`, add private helpers that accept a transaction connection and do not open their own transaction:
 
@@ -222,7 +222,7 @@ def _insert_event(
 
 Refactor `append_event()` to call `_insert_event()` inside its existing transaction.
 
-- [ ] **Step 4: Implement `record_story_choice_selection()`**
+- [x] **Step 4: Implement `record_story_choice_selection()`**
 
 Add a public repository method. It must:
 
@@ -239,7 +239,7 @@ Add a public repository method. It must:
 
 Keep this whole operation inside one `with self.db.transaction() as conn:` block.
 
-- [ ] **Step 5: Run repository tests**
+- [x] **Step 5: Run repository tests**
 
 Run:
 
@@ -250,7 +250,7 @@ python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py -q
 
 Expected: all VN Play DB tests pass.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 Run:
 
