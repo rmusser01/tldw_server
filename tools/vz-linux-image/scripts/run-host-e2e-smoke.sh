@@ -23,7 +23,8 @@ Usage: run-host-e2e-smoke.sh --bundle PATH [options]
 
 Build/sign/start the macOS Virtualization.framework helper, run the helper
 daemon smoke, run real vz_linux ephemeral execution, verify same-session VM
-reuse, and stop the helper.
+reuse, verify recovery diagnostics plus dry-run repair planning, and stop the
+helper.
 
 Options:
   --bundle PATH          Canonical vz_linux bundle directory (required)
@@ -321,7 +322,7 @@ wait_for_helper_socket() {
   die "helper daemon did not create socket within timeout: ${SOCKET_PATH}"
 }
 
-run_real_vz_linux_e2e() {
+run_real_vz_linux_pytest() {
   run_cmd env \
     TEST_MODE=0 \
     TLDW_SANDBOX_VZ_LINUX_E2E=1 \
@@ -331,7 +332,11 @@ run_real_vz_linux_e2e() {
     SANDBOX_BACKGROUND_EXECUTION=0 \
     "${PYTHON_BIN}" -m pytest \
     "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py" \
-    -q -rs
+    "$@"
+}
+
+run_real_vz_linux_host_smoke() {
+  run_real_vz_linux_pytest -m vz_linux_host_smoke -q -rs
 }
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
@@ -348,4 +353,4 @@ prepare_runtime_paths
 run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket
-run_real_vz_linux_e2e
+run_real_vz_linux_host_smoke

@@ -199,8 +199,11 @@ On a prepared Apple silicon macOS host, that script builds the Swift helper
 when needed, signs it with `--entitlements` unless the helper is already signed
 with `com.apple.security.virtualization`, runs the helper-daemon bundle smoke,
 starts a helper daemon for the Python sandbox runtime, runs real `vz_linux`
-ephemeral execution, verifies same-session VM reuse, and stops the helper on
-exit.
+ephemeral execution, verifies same-session VM reuse, verifies recovery
+diagnostics plus dry-run reconciliation repair planning, and stops the helper
+on exit. The recovery step is non-destructive: it uses isolated test-store
+metadata and does not terminate VMs, delete session controls, or run image-store
+cleanup.
 
 The helper refuses sockets whose parent directory is not owner-only. Do not put
 the helper socket directly under `/tmp`; use the script defaults or create a
@@ -218,7 +221,7 @@ python -m pytest tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_
 
 Use the direct module command for focused helper or bundle validation. Use
 `run-host-e2e-smoke.sh` for the full operator workflow because it also covers
-real sandbox execution and session VM reuse.
+real sandbox execution, session VM reuse, and recovery dry-run planning.
 
 The same script is the entrypoint for the host-gated GitHub Actions workflow at
 `.github/workflows/vz-linux-host-gated.yml`. That workflow is intentionally

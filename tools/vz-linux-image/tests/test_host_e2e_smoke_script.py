@@ -80,6 +80,7 @@ def test_host_e2e_smoke_script_dry_run_prints_helper_and_pytest_commands(tmp_pat
     assert f"TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR={serial_log_dir}" in result.stdout  # nosec B101
     assert "test_macos_virtualization_helper_daemon_host_gated.py" in result.stdout
     assert "test_vz_linux_real_host_e2e.py" in result.stdout
+    assert "-m vz_linux_host_smoke" in result.stdout
     assert not serial_log_dir.exists()
 
 

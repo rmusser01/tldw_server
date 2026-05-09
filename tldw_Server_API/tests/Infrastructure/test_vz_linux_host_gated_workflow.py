@@ -11,6 +11,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
 POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
+SMOKE_SCRIPT_PATH = REPO_ROOT / "tools" / "vz-linux-image" / "scripts" / "run-host-e2e-smoke.sh"
 
 
 def _load_workflow() -> dict[str, Any]:
@@ -90,6 +91,24 @@ def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     assert "--python" in run_blocks  # nosec B101
     assert 'chmod 700 "${runtime_dir}/serial"' in run_blocks  # nosec B101
     assert "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" in run_blocks  # nosec B101
+
+
+def test_vz_linux_host_gated_operator_smoke_runs_recovery_slice() -> None:
+    """The delegated operator smoke should include the non-destructive recovery slice."""
+    script = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "run_real_vz_linux_pytest" in script  # nosec B101
+    assert "run_real_vz_linux_host_smoke" in script  # nosec B101
+    assert "-m vz_linux_host_smoke" in script  # nosec B101
+
+
+def test_vz_linux_host_gated_acceptance_policy_requires_recovery_smoke() -> None:
+    """The host-gated policy should cover diagnostics plus dry-run repair."""
+    policy = POLICY_PATH.read_text(encoding="utf-8").lower()
+
+    assert "recovery diagnostics" in policy  # nosec B101
+    assert "dry-run reconciliation repair" in policy  # nosec B101
+    assert "does not terminate vms" in policy  # nosec B101
 
 
 def test_vz_linux_host_gated_workflow_pins_external_actions() -> None:

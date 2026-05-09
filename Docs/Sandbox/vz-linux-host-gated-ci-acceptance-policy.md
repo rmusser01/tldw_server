@@ -89,8 +89,14 @@ cover:
 - helper startup on a private Unix socket
 - real `vz_linux` ephemeral execution
 - same-session VM reuse with a second command in the same VM
+- recovery diagnostics plus dry-run reconciliation repair planning
 - helper shutdown/cleanup on exit
 - helper stdout/stderr and serial-log artifact upload
+
+The recovery smoke is intentionally non-destructive. It verifies that a prepared
+host can compute macOS sandbox reconciliation state and produce a dry-run repair
+plan for stale VZ session-control metadata. It does not terminate VMs, delete
+session controls, or run image-store cleanup.
 
 ## Expected Skips And Non-Blocking Conditions
 
@@ -119,6 +125,8 @@ prepared host and fails one of the accepted runtime guarantees:
   same runner
 - real ephemeral command execution fails after helper/template readiness passes
 - same-session VM reuse fails after the first command succeeds
+- recovery diagnostics or dry-run reconciliation repair planning fails after
+  helper/template readiness passes
 - cleanup leaves the helper process or accepted socket path behind
 - helper protocol mismatch is introduced without a matching compatibility plan
 - artifacts/logs are not uploaded when the job fails
