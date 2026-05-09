@@ -48,6 +48,8 @@ turning the first duplicate action into a background import/export archive flow.
 - Do not build a general archive import/export replacement.
 - Do not copy generated candidates unless they are already accepted pack assets.
 - Do not support same-persona "make a draft copy" duplication in V1.
+- Do not add idempotency keys in V1; duplicate is a synchronous command and a
+  repeated submit creates another draft.
 
 ## Existing Context
 
@@ -99,7 +101,7 @@ The service should:
    `user_id`.
 2. Validate target persona ownership by `target_persona_id` and `user_id`.
 3. Create a target draft pack with a copied or user-provided title.
-4. Copy each source pack asset that participates as a pack asset into the target
+4. Copy each source asset referenced by the source manifest into the target
    storage path.
 5. Create target asset rows with new IDs and copied metadata.
 6. Build an old-asset-ID to new-asset-ID map.
@@ -157,24 +159,18 @@ Response:
 
 ```json
 {
-  "pack": {
-    "id": "new_pack_id",
-    "persona_id": "persona_target",
-    "status": "draft",
-    "parent_pack_id": "source_pack_id",
-    "assets": []
-  },
-  "source_pack_id": "source_pack_id",
-  "target_persona_id": "persona_target",
-  "asset_id_map": {
-    "old_asset_id": "new_asset_id"
-  }
+  "id": "new_pack_id",
+  "persona_id": "persona_target",
+  "status": "draft",
+  "parent_pack_id": "source_pack_id",
+  "assets": []
 }
 ```
 
-The response can omit `asset_id_map` if the existing API response style prefers
-not to expose implementation details. The service should still return or log the
-map internally for tests and diagnostics.
+Use the existing `PersonaVisualPackResponse` shape. Do not expose
+`asset_id_map` in the public response. The service may return the map internally
+for tests and diagnostics, but client code should rely on the returned pack and
+its remapped manifest/assets.
 
 The endpoint should require normal persona auth and use the current authenticated
 user. It must not accept a source or target user ID from the client.
@@ -205,11 +201,25 @@ same persona. The implementation should either:
 The implementation should not weaken the default pack-creation path. Ordinary
 pack creation should still avoid arbitrary parent references.
 
-## Asset Copying
+## Asset Selection and Copying
 
-The duplicate should physically copy bytes into the target pack's storage path.
-The implementation can do this by reading the source asset file, then passing
-the bytes back through `PersonaVisualService.create_asset_from_upload()` with:
+The duplicate should copy only source assets referenced by the source manifest.
+This prevents unaccepted generated candidates, stale uploads, and rejected review
+artifacts from leaking into the target pack. The duplicate service should collect
+source asset IDs from:
+
+- `animations.*.frames[].asset_id`
+- `animations.*.asset_ids[]`
+- `animations.*.preview_asset_id`
+
+If the source manifest references an asset ID that does not belong to the source
+pack, the duplicate should fail with `invalid_manifest` before creating target
+records.
+
+Referenced source assets should be physically copied into the target pack's
+storage path. The implementation can do this by reading the source asset file,
+then passing the bytes back through `PersonaVisualService.create_asset_from_upload()`
+with:
 
 - `persona_id`: target persona
 - `pack_id`: target pack
@@ -219,10 +229,12 @@ the bytes back through `PersonaVisualService.create_asset_from_upload()` with:
 - `provenance`: `mixed`
 
 This reuses upload image validation, checksum calculation, safe storage-target
-construction, and DB asset creation. If this is too strict for already-accepted
-legacy assets, the implementation may add a service-private copy helper that
-performs checksum and path validation without re-decoding unnecessarily, but it
-must keep the same storage safety properties.
+construction, and DB asset creation. The implementation should preflight source
+manifest validity, referenced asset membership, source asset file existence, and
+source asset checksums before creating target records. If using
+`create_asset_from_upload()` makes all-or-nothing cleanup difficult, add a
+service-private copy helper that preserves the same image validation and storage
+safety properties while keeping target metadata creation atomic.
 
 Source asset path resolution should follow the exporter pattern:
 
@@ -231,11 +243,11 @@ Source asset path resolution should follow the exporter pattern:
 - Reject paths that escape that base.
 - Treat missing files as a failed duplicate, not as a partial success.
 
-If any asset copy or manifest update fails after creating the target draft, the
-service should clean up created target asset files where practical and leave no
-active-pack changes. A failed draft pack should either be deleted/rolled back by
-the transaction boundary or marked `failed` only if the existing DB pattern makes
-full rollback impractical.
+If any asset copy or manifest update fails after target files are written, the
+service should remove created target asset files where practical and leave no
+active-pack changes. The preferred outcome is no visible target draft. If the
+existing DB layer makes full rollback impractical, the service must mark the
+target pack `failed` rather than leaving a partial `draft`.
 
 ## Manifest Remapping
 
@@ -293,6 +305,8 @@ Expected failures:
   `same_persona_target_unsupported`
 - source pack has no assets: allowed only if the manifest validates as a draft
   without assets; otherwise return a validation error
+- source manifest references unowned or missing asset rows: `400` with
+  `invalid_manifest`
 - source asset file missing: conflict or validation error with a stable code
   such as `source_asset_missing`
 - source asset checksum mismatch: conflict or validation error with a stable
@@ -311,8 +325,10 @@ Backend service tests should cover:
 - source and target asset checksums match
 - manifest references are remapped for `frames`, `asset_ids`, and
   `preview_asset_id`
+- unreferenced source assets and unaccepted generated candidates are not copied
 - source active pack and target active pack remain unchanged
 - same-persona duplicate is rejected with the stable V1 error code
+- missing source asset rows or files fail before a usable target draft appears
 - missing source file fails without activating anything
 - cross-user target/source access fails
 
@@ -349,10 +365,9 @@ Implementation docs should explicitly preserve the distinction between:
 
 ## Open Questions for Implementation Planning
 
-1. Should the duplicate response expose `asset_id_map`, or should that remain an
-   internal service/test detail?
-2. Should duplicate use a request idempotency key in V1, or is a normal
-   synchronous action acceptable for the first slice?
+No product-level open questions remain for the first implementation plan.
+Implementation planning may still choose the exact private helper boundaries for
+asset copy atomicity.
 
 ## Success Criteria
 
