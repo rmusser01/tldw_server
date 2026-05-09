@@ -105,6 +105,31 @@ class MissingVisualDirectiveAdapter:
         )
 
 
+class InspectingStoryAdapter:
+    def __init__(self, repo: VNPlayRepository, owner_user_id: int) -> None:
+        self.repo = repo
+        self.owner_user_id = owner_user_id
+        self.seen_contexts: list[VNPlayTurnContext] = []
+
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        self.seen_contexts.append(context)
+        persisted = self.repo.get_scene_state(
+            context.session.id,
+            owner_user_id=self.owner_user_id,
+        )
+        assert persisted is not None
+        assert persisted["active_branch_node_id"] is not None
+        assert persisted["visible_choices"] == []
+        return TurnResult(
+            narrative_text="The door opens.",
+            dialogue=[{"speaker": "Narrator", "text": "The door opens."}],
+            choices=[
+                {"id": "inside", "text": "Step inside"},
+                {"id": "wait", "text": "Wait outside"},
+            ],
+        )
+
+
 def create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
     character_id = chacha_db.add_character_card(
         {
@@ -154,6 +179,40 @@ def create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
     )
 
 
+def create_story_session_with_visible_choice(
+    service: VNPlayService,
+    repo: VNPlayRepository,
+) -> VNPlaySession:
+    session = service.create_session(
+        mode="story",
+        title="Door",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-story",
+        settings={},
+    )
+    choice_presented = repo.append_event(
+        session_id=session.id,
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": "Open the door"}],
+            "scene_version": 1,
+        },
+        source="runtime",
+    )
+    repo.set_scene_state(
+        session_id=session.id,
+        owner_user_id=42,
+        last_event_id=int(choice_presented["id"]),
+        visible_choices=[{"id": "open", "text": "Open the door"}],
+        scene_version=1,
+    )
+    repo.update_session(session.id, {"scene_version": 1}, owner_user_id=42)
+    return service.get_session(session.id)
+
+
 @pytest.fixture
 def ready_session(service: VNPlayService):
     return service.create_session(
@@ -178,6 +237,118 @@ def failing_ready_session(service_with_failing_adapter: VNPlayService):
         seed="seed-1",
         settings={},
     )
+
+
+@pytest.mark.asyncio
+async def test_story_choice_creates_branch_and_choice_selected_before_model(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+
+    response = await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-choice-1",
+    )
+
+    event_types = [event["event_type"] for event in response.events]
+    assert event_types[:2] == ["turn_started", "choice_selected"]
+    assert adapter.seen_contexts[0].scene_state.active_branch_node_id is not None
+
+    branches = service.list_branches(session.id)
+    assert len(branches) == 1
+    assert branches[0]["branch_path"][0]["choice_id"] == "open"
+
+    state = repo.get_scene_state(session.id, owner_user_id=42)
+    assert state is not None
+    assert state["active_branch_node_id"] == branches[0]["id"]
+    assert state["visible_choices"] == [
+        {"id": "inside", "text": "Step inside"},
+        {"id": "wait", "text": "Wait outside"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_story_unknown_choice_id_fails_before_model(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+
+    with pytest.raises(VNPlayTurnError, match="invalid_choice_id"):
+        await service.submit_turn(
+            session.id,
+            choice_id="locked",
+            client_scene_version=1,
+            idempotency_key="story-choice-invalid",
+        )
+
+    assert adapter.seen_contexts == []
+
+
+@pytest.mark.asyncio
+async def test_freeform_choice_id_is_not_allowed(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    with pytest.raises(VNPlayTurnError, match="choice_not_allowed"):
+        await service.submit_turn(
+            ready_session.id,
+            choice_id="open",
+            client_scene_version=0,
+            idempotency_key="freeform-choice",
+        )
+
+
+@pytest.mark.asyncio
+async def test_story_input_text_is_not_allowed(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+
+    with pytest.raises(VNPlayTurnError, match="choice_not_allowed"):
+        await service.submit_turn(
+            session.id,
+            input_text="Open the door",
+            client_scene_version=1,
+            idempotency_key="story-input-text",
+        )
+
+    assert adapter.seen_contexts == []
+
+
+@pytest.mark.asyncio
+async def test_story_custom_action_remains_non_branching(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=DeterministicVNPlayTurnAdapter(),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+
+    response = await service.submit_turn(
+        session.id,
+        custom_action={"verb": "inspect", "target": "door"},
+        client_scene_version=1,
+        idempotency_key="story-custom-action",
+    )
+
+    event_types = [event["event_type"] for event in response.events]
+    assert event_types[:2] == ["turn_started", "user_turn"]
+    assert "choice_selected" not in event_types
+    assert service.list_branches(session.id) == []
 
 
 @pytest.mark.asyncio

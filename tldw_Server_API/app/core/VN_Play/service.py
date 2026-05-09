@@ -14,7 +14,9 @@ from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
 from tldw_Server_API.app.core.VN_Play.constants import (
+    ERROR_CHOICE_NOT_ALLOWED,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_INVALID_CHOICE_ID,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
     EVENT_CHOICE_PRESENTED,
@@ -31,6 +33,8 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_VISUAL_DIRECTIVE_REQUESTED,
     EVENT_USER_TURN,
     EVENT_MODEL_TURN_PARSE_FAILED,
+    MODE_FREEFORM,
+    MODE_STORY,
     TURN_STATUS_ABANDONED,
     TURN_STATUS_COMPLETED,
     TURN_STATUS_MODEL_CALLING,
@@ -289,10 +293,40 @@ class VNPlayService:
             return self._response_for_existing_turn(existing, request_payload_hash)
 
         session = self.get_session(session_id)
+        persisted_scene_state = self.repo.get_scene_state(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
         if session.scene_version != client_scene_version:
             raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
         if session.active_turn_request_id is not None:
             raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+        _validate_turn_input_for_mode(session, input_payload)
+
+        selected_choice: dict[str, Any] | None = None
+        parent_choice_event_id: int | None = None
+        branch_path: list[dict[str, Any]] | None = None
+        events_before_input = self.repo.list_events(session_id)
+        if session.mode == MODE_STORY and choice_id is not None:
+            selected_choice = _selected_visible_choice(persisted_scene_state, choice_id)
+            parent_choice_event_id = _parent_choice_event_id(
+                events_before_input,
+                _optional_int(
+                    persisted_scene_state.get("last_event_id")
+                    if persisted_scene_state is not None
+                    else None
+                ),
+                choice_id,
+            )
+            branch_path = _branch_path_for_choice(
+                selected_choice,
+                scene_version=client_scene_version,
+                choice_presented_event_id=parent_choice_event_id,
+            )
+            input_payload = {
+                "choice_id": choice_id,
+                "choice": selected_choice,
+            }
 
         turn_request = self.repo.create_turn_request(
             session_id=session_id,
@@ -311,12 +345,28 @@ class VNPlayService:
         if not lock_acquired:
             return self._abandon_conflicting_turn(turn_request, session_id)
 
-        turn_events = self._append_accepted_turn_events(
-            session_id=session_id,
-            turn_request_id=int(turn_request["id"]),
-            input_payload=input_payload,
-            client_scene_version=client_scene_version,
-        )
+        if selected_choice is not None:
+            persisted_choice = self.repo.record_story_choice_selection(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                turn_request_id=int(turn_request["id"]),
+                client_scene_version=client_scene_version,
+                selected_choice=selected_choice,
+                parent_event_id=parent_choice_event_id,
+                branch_label=_choice_text(selected_choice),
+                branch_path=branch_path,
+            )
+            turn_events = [
+                persisted_choice["turn_started"],
+                persisted_choice["choice_selected"],
+            ]
+        else:
+            turn_events = self._append_accepted_turn_events(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                input_payload=input_payload,
+                client_scene_version=client_scene_version,
+            )
         scene_state = derive_scene_state(self.repo.list_events(session_id))
         context = VNPlayTurnContext(
             session=session,
@@ -881,6 +931,112 @@ class VNPlayService:
             scene_version=state.scene_version,
             warnings=state.warnings,
         )
+
+
+def _validate_turn_input_for_mode(
+    session: VNPlaySession,
+    input_payload: Mapping[str, Any],
+) -> None:
+    if session.mode == MODE_FREEFORM and "choice_id" in input_payload:
+        raise VNPlayTurnError(ERROR_CHOICE_NOT_ALLOWED)
+    if session.mode == MODE_STORY and "input_text" in input_payload:
+        raise VNPlayTurnError(ERROR_CHOICE_NOT_ALLOWED)
+
+
+def _selected_visible_choice(
+    state: Mapping[str, Any] | None,
+    choice_id: str,
+) -> dict[str, Any]:
+    raw_choices = state.get("visible_choices") if state is not None else []
+    choices = _list_of_dicts(raw_choices)
+    for choice in choices:
+        if str(choice.get("id")) == choice_id:
+            return choice
+    raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+
+
+def _latest_restore_sequence(events: Sequence[Mapping[str, Any]]) -> int:
+    latest = 0
+    for event in events:
+        if event.get("event_type") != EVENT_SESSION_RESTORED:
+            continue
+        sequence_number = _event_int(event, "sequence_number")
+        if sequence_number is not None:
+            latest = max(latest, sequence_number)
+    return latest
+
+
+def _parent_choice_event_id(
+    events: Sequence[Mapping[str, Any]],
+    scene_last_event_id: int | None,
+    choice_id: str,
+) -> int | None:
+    bounded_events: list[Mapping[str, Any]] = []
+    for event in events:
+        event_id = _event_int(event, "id")
+        if (
+            scene_last_event_id is not None
+            and event_id is not None
+            and event_id > scene_last_event_id
+        ):
+            continue
+        bounded_events.append(event)
+
+    restore_sequence = _latest_restore_sequence(bounded_events)
+    for event in reversed(bounded_events):
+        sequence_number = _event_int(event, "sequence_number")
+        if (
+            restore_sequence
+            and sequence_number is not None
+            and sequence_number <= restore_sequence
+        ):
+            break
+        if event.get("event_type") != EVENT_CHOICE_PRESENTED:
+            continue
+        payload = event.get("event_payload")
+        if not isinstance(payload, Mapping):
+            continue
+        raw_choices = payload.get("choices", payload.get("visible_choices", []))
+        choices = _list_of_dicts(raw_choices)
+        if any(str(choice.get("id")) == choice_id for choice in choices):
+            return _event_int(event, "id")
+    return None
+
+
+def _choice_text(choice: Mapping[str, Any]) -> str:
+    for key in ("text", "label"):
+        value = choice.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return str(choice.get("id") or "")
+
+
+def _branch_path_for_choice(
+    choice: Mapping[str, Any],
+    *,
+    scene_version: int,
+    choice_presented_event_id: int | None,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "schema_version": 1,
+            "type": "choice",
+            "choice_id": str(choice.get("id")),
+            "choice_text": _choice_text(choice),
+            "choice_presented_event_id": choice_presented_event_id,
+            "scene_version": scene_version,
+        }
+    ]
+
+
+def _event_int(event: Mapping[str, Any], key: str) -> int | None:
+    value = event.get(key)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_input_payload(
