@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-09 18:46'
-updated_date: '2026-05-09 18:58'
+updated_date: '2026-05-09 19:00'
 labels:
   - webui
   - dependencies
@@ -14,6 +14,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
+  - 'https://github.com/rmusser01/tldw_server/pull/1436'
 priority: medium
 ---
 
@@ -65,6 +66,8 @@ TypeScript baseline note: `node_modules/.bin/tsc --noEmit --project tsconfig.jso
 Bandit skipped because this slice changed TypeScript, documentation, and Backlog metadata only; no Python files were modified.
 
 Correction after rerunning the TypeScript check post-test-harness tweak: `node_modules/.bin/tsc --noEmit --project tsconfig.json --pretty false` exits 1, not 2, on the existing EmbeddingsModelSelectionConfig.tsx and lib/api/vnPlay.ts baseline errors; the task-specific filter still returns no matches.
+
+Opened PR #1436 against dev: https://github.com/rmusser01/tldw_server/pull/1436
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
