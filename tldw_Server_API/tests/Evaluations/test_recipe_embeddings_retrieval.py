@@ -5,6 +5,23 @@ from tldw_Server_API.app.core.Evaluations.recipes.embeddings_retrieval import (
 )
 
 
+def test_manifest_advertises_guided_media_scoped_rag_flow() -> None:
+    recipe = EmbeddingsRetrievalRecipe()
+
+    assert recipe.manifest.capabilities["guided_ui"] is True
+    assert recipe.manifest.capabilities["source_labeling"]["contract"] == {
+        "kind": "media_id",
+        "type": "integer",
+    }
+    assert recipe.manifest.capabilities["candidate_discovery"]["endpoint"].endswith(
+        "/recipes/embeddings_model_selection/candidates"
+    )
+    assert recipe.manifest.capabilities["apply_target"]["preview_supported"] is True
+    assert recipe.manifest.capabilities["apply_target"]["live_apply_supported"] is False
+    assert recipe.manifest.default_run_config["comparison_mode"] == "embedding_only"
+    assert recipe.manifest.default_run_config["top_k"] == 10
+
+
 def test_labeled_dataset_requires_query_ids_and_expected_ids() -> None:
     recipe = EmbeddingsRetrievalRecipe()
 
@@ -42,6 +59,31 @@ def test_unlabeled_dataset_reserves_review_sample() -> None:
     assert result["review_sample"]["required"] is True
     assert result["review_sample"]["sample_size"] == 3
     assert result["review_sample"]["sample_query_ids"] == ["q-0", "q-1", "q-2"]
+
+
+def test_validation_warns_when_guided_queries_have_no_expected_sources() -> None:
+    recipe = EmbeddingsRetrievalRecipe()
+
+    result = recipe.validate_dataset(
+        [{"query_id": "q-1", "input": "alpha query"}],
+        run_config={"guided_source_labeling": True},
+    )
+
+    assert result["valid"] is True
+    assert result["dataset_mode"] == "unlabeled"
+    assert any("expected sources" in warning for warning in result["warnings"])
+
+
+def test_validation_rejects_non_integer_expected_ids_for_media_scoped_guided_flow() -> None:
+    recipe = EmbeddingsRetrievalRecipe()
+
+    result = recipe.validate_dataset(
+        [{"query_id": "q-1", "input": "alpha query", "expected_ids": ["chunk-123"]}],
+        run_config={"source_id_contract": "media_id"},
+    )
+
+    assert result["valid"] is False
+    assert any("media id" in error.lower() for error in result["errors"])
 
 
 def test_recipe_supports_embedding_only_and_retrieval_stack_modes() -> None:
@@ -125,6 +167,10 @@ def test_build_report_emits_recommendation_slots_and_confidence_inputs() -> None
     assert "winner_margin" in report["confidence_inputs"]
     assert report["recommendation_slots"]["best_overall"]["candidate_run_id"] == "m1"
     assert report["recommendation_slots"]["best_overall"]["reason_code"] == "highest_quality_score"
+    assert report["recommendation_slots"]["best_overall"]["metadata"]["provider"] == "openai"
+    assert report["recommendation_slots"]["best_overall"]["metadata"]["model"] == "text-embedding-3-small"
+    assert report["recommendation_slots"]["best_overall"]["metadata"]["apply_eligible"] is True
+    assert "apply_warnings" in report["recommendation_slots"]["best_overall"]["metadata"]
     assert report["recommendation_slots"]["best_local"]["metadata"]["candidate_id"] == "m2"
     assert candidates_by_id["m1"]["metrics"]["recall_at_k"] > 0.0
     assert candidates_by_id["m1"]["metrics"]["quality_score"] > candidates_by_id["m2"]["metrics"]["quality_score"]
