@@ -32,11 +32,14 @@ def test_vz_linux_host_gated_workflow_is_manual_and_nightly() -> None:
     """The real VZ workflow should remain manual/nightly instead of normal CI."""
     workflow = _load_workflow()
     triggers = _workflow_triggers(workflow)
-    inputs = triggers["workflow_dispatch"]["inputs"]
 
     assert set(triggers) == {"workflow_dispatch", "schedule"}  # nosec B101
     assert "workflow_dispatch" in triggers  # nosec B101
     assert "schedule" in triggers  # nosec B101
+    workflow_dispatch = triggers["workflow_dispatch"]
+    assert isinstance(workflow_dispatch, dict)  # nosec B101
+    inputs = workflow_dispatch.get("inputs")
+    assert isinstance(inputs, dict)  # nosec B101
     assert inputs["bundle_path"]["required"] is False  # nosec B101
     assert inputs["include_failure_drills"]["required"] is False  # nosec B101
     assert inputs["include_failure_drills"]["default"] is False  # nosec B101

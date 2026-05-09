@@ -4,7 +4,7 @@ title: Add manual opt-in VZ Linux host failure drills
 status: Done
 assignee: []
 created_date: '2026-05-09 03:50'
-updated_date: '2026-05-09 03:59'
+updated_date: '2026-05-09 04:10'
 labels:
   - sandbox
   - vz_linux
@@ -50,12 +50,20 @@ Implementation approach: add a manual-only failure-drill script flag and workflo
 
 <!-- SECTION:NOTES:BEGIN -->
 Verification: python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q -> 9 passed, 1 skipped; python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q -> 13 passed; python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -m vz_linux_host_failure_drill -q -rs -> 1 skipped because TLDW_SANDBOX_VZ_LINUX_E2E is not set locally; git diff --check -> clean; Bandit on touched real-host test with B101 skipped -> 0 results.
+
+Follow-up PR review pass: verified current Qodo findings on brittle helper terminate assertion and workflow_dispatch input access before patching.
+
+Review fixes completed: the failure drill now verifies VM health before and after helper termination and only skips if helper termination cannot invalidate a still-healthy VM; workflow contract test now validates workflow_dispatch/input shape before indexing.
+
+Review verification: python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q -> 13 passed; python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q -> 9 passed, 1 skipped; python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -m vz_linux_host_failure_drill -q -rs -> 1 skipped because TLDW_SANDBOX_VZ_LINUX_E2E is not set locally; git diff --check -> clean; Bandit on touched tests with B101 skipped -> 0 results.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added manual opt-in VZ Linux host failure drills. The host smoke script and GitHub workflow now expose failure-drill wiring disabled by default, the real-host pytest module has a dedicated stale session VM replacement drill, docs describe the manual-only safety contract, and focused verification passed with the real VZ drill skipped locally due missing TLDW_SANDBOX_VZ_LINUX_E2E opt-in.
+
+PR review follow-up hardened the stale-session drill and workflow contract test. The drill now treats helper terminate false results as operational state to verify with VM health instead of a hard assertion, while still requiring the VM to be unhealthy/missing before testing fresh provisioning. The workflow test now fails with explicit shape assertions instead of a KeyError if workflow_dispatch inputs are missing.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

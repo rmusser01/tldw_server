@@ -390,8 +390,22 @@ def test_vz_linux_real_session_recreates_vm_after_helper_termination(
         first_vm_id = str(control_after_first.get("vm_id") or "").strip() if control_after_first else ""
         _expect(bool(first_vm_id), f"Expected first run VM id, got {control_after_first!r}")
 
+        status_before_terminate = helper.get_vm_status(first_vm_id)
+        _expect(
+            bool(getattr(status_before_terminate, "healthy", False)),
+            f"Expected drill VM {first_vm_id!r} healthy before termination, got {status_before_terminate!r}",
+        )
         terminated = helper.terminate_vm(first_vm_id)
-        _expect(terminated is True, f"Expected helper to terminate drill VM {first_vm_id!r}")
+        status_after_terminate = helper.get_vm_status(first_vm_id)
+        healthy_after_terminate = bool(getattr(status_after_terminate, "healthy", False))
+        if not terminated and healthy_after_terminate:
+            pytest.skip(
+                f"Could not invalidate drill VM {first_vm_id!r}; helper returned False and VM remained healthy"
+            )
+        _expect(
+            not healthy_after_terminate,
+            f"Expected drill VM {first_vm_id!r} unhealthy or missing after termination, got {status_after_terminate!r}",
+        )
 
         second = service.start_run_scaffold(
             user_id="e2e-user",
