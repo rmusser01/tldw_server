@@ -151,6 +151,96 @@ describe("useConversationContextComposition", () => {
     unmount()
   })
 
+  it("does not reuse stale preview composition after a recomposition error", async () => {
+    let rejectNextDictionaryProcess = false
+    const primitives = buildPrimitives()
+    primitives.processDictionary = vi.fn(async ({ text, dictionary_ids }) => {
+      if (rejectNextDictionaryProcess) {
+        rejectNextDictionaryProcess = false
+        throw new Error("dictionary unavailable")
+      }
+      return {
+        original_text: text,
+        processed_text: `${text}:${dictionary_ids?.join(",")}`,
+        replacements: 1,
+        iterations: 1,
+        entries_used: dictionary_ids?.map(Number) ?? []
+      }
+    })
+
+    const { result, rerender } = renderHook(
+      ({ dictionaryIds }: { dictionaryIds: number[] }) =>
+        useConversationContextComposition({
+          draftMessage: "EV",
+          selection: {
+            characterId: null,
+            worldBookIds: [],
+            dictionaryIds
+          },
+          primitives
+        }),
+      { initialProps: { dictionaryIds: [7] } }
+    )
+
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    const staleComposition = result.current.composition
+
+    rejectNextDictionaryProcess = true
+    rerender({ dictionaryIds: [8] })
+
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    expect(result.current.composition).toBeNull()
+
+    const send = await result.current.composeForSend({
+      message: "EV",
+      history: []
+    })
+
+    expect(send.composition).not.toBe(staleComposition)
+    expect(send.composition.selection.dictionaryIds).toEqual([8])
+    expect(send.requestOverrides.messageForModel).toBe("EV:8")
+  })
+
+  it("aborts obsolete preview composition requests when the draft changes", async () => {
+    const capturedSignals: AbortSignal[] = []
+    const primitives: ConversationContextPrimitiveClient = {
+      processDictionary: vi.fn((_request, options) => {
+        if (options?.signal) capturedSignals.push(options.signal)
+        return new Promise(() => undefined)
+      }) as ConversationContextPrimitiveClient["processDictionary"],
+      processWorldBookContext: vi.fn(async () => ({
+        injected_content: "",
+        entries_matched: 0,
+        tokens_used: 0,
+        books_used: 0,
+        entry_ids: [],
+        diagnostics: []
+      }))
+    }
+
+    const { rerender, unmount } = renderHook(
+      ({ message }: { message: string }) =>
+        useConversationContextComposition({
+          draftMessage: message,
+          selection: {
+            characterId: null,
+            worldBookIds: [],
+            dictionaryIds: [7]
+          },
+          primitives
+        }),
+      { initialProps: { message: "first" } }
+    )
+
+    await waitFor(() => expect(capturedSignals).toHaveLength(1))
+    expect(capturedSignals[0].aborted).toBe(false)
+
+    rerender({ message: "second" })
+
+    await waitFor(() => expect(capturedSignals[0].aborted).toBe(true))
+    unmount()
+  })
+
   it("saves selections using nested conversation context and dictionary compatibility keys", async () => {
     const updateSettings = vi.fn(async () => undefined)
     const { result } = renderHook(() =>

@@ -9,6 +9,7 @@ import {
   formatCharacterComparisonValue,
   toComparisonFilenameSegment,
   CHARACTER_COMPARISON_FIELDS,
+  type CharacterTableSortOrder,
   type CharacterComparisonRow
 } from "../utils"
 
@@ -35,7 +36,7 @@ export interface UseCharacterBulkOpsDeps {
   matchAllTags: boolean
   pageSize: number
   sortColumn: string | null
-  sortOrder: string | null
+  sortOrder: CharacterTableSortOrder
   /** From useCharacterCrud */
   bulkUndoDeleteRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
   setBulkOperationLoading: (loading: boolean) => void

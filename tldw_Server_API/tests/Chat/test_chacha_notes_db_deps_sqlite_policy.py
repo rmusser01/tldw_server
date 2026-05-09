@@ -88,6 +88,33 @@ def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(monkeyp
 
 
 @pytest.mark.unit
+def test_chacha_integrity_preflight_uses_db_management_quick_check(monkeypatch, tmp_path):
+    import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
+    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+
+    deps = importlib.reload(deps)
+    db_path = tmp_path / "ChaChaNotes.db"
+    db_path.write_text("sqlite placeholder")
+    calls: list[dict[str, object]] = []
+
+    def fake_quick_check(path, **kwargs):
+        calls.append({"path": path, **kwargs})
+        return ["ok"]
+
+    monkeypatch.setattr(sqlite_policy, "run_sqlite_quick_check", fake_quick_check)
+
+    deps._verify_existing_chacha_db_integrity(db_path)
+
+    assert calls == [
+        {
+            "path": db_path,
+            "timeout_s": 1.0,
+            "busy_timeout_ms": 1000,
+        }
+    ]
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user_id", [True, False, 0, -1])
 async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(monkeypatch, user_id):

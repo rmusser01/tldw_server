@@ -51,8 +51,10 @@ const parseContextIdKey = (key: string): RawContextIdList =>
   JSON.parse(key) as RawContextIdList
 
 const defaultPrimitives: ConversationContextPrimitiveClient = {
-  processDictionary: (request) => tldwClient.processDictionary(request),
-  processWorldBookContext: (request) => tldwClient.processWorldBookContext(request)
+  processDictionary: (request, options) =>
+    tldwClient.processDictionary(request, options),
+  processWorldBookContext: (request, options) =>
+    tldwClient.processWorldBookContext(request, options)
 }
 
 export const buildConversationContextSendOverrides = ({
@@ -142,12 +144,13 @@ export const useConversationContextComposition = ({
   )
 
   const compose = React.useCallback(
-    (message: string) =>
+    (message: string, signal?: AbortSignal) =>
       composeConversationContext({
         inputText: message,
         selection: resolvedSelection,
         inheritedWorldBookIds: resolvedInheritedWorldBookIds,
-        primitives
+        primitives,
+        signal
       }),
     [primitives, resolvedInheritedWorldBookIds, resolvedSelection]
   )
@@ -167,6 +170,7 @@ export const useConversationContextComposition = ({
       setStatus("ready")
       return next
     } catch (nextError) {
+      setComposition(null)
       setError(nextError)
       setStatus("error")
       return null
@@ -175,6 +179,7 @@ export const useConversationContextComposition = ({
 
   React.useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
     if (!enabled) {
       setStatus("idle")
       setComposition(null)
@@ -183,14 +188,15 @@ export const useConversationContextComposition = ({
     }
 
     const runComposition = () => {
-      compose(draftMessage)
+      compose(draftMessage, controller.signal)
         .then((next) => {
           if (cancelled) return
           setComposition(next)
           setStatus("ready")
         })
         .catch((nextError) => {
-          if (cancelled) return
+          if (cancelled || controller.signal.aborted) return
+          setComposition(null)
           setError(nextError)
           setStatus("error")
         })
@@ -204,6 +210,7 @@ export const useConversationContextComposition = ({
 
     return () => {
       cancelled = true
+      controller.abort()
       if (timeout !== null) clearTimeout(timeout)
     }
   }, [compose, debounceMs, draftMessage, enabled])
@@ -217,7 +224,11 @@ export const useConversationContextComposition = ({
       history: ChatHistory
     }): Promise<ConversationContextSendComposition> => {
       const activeComposition =
-        composition && message === draftMessage
+        composition &&
+        status === "ready" &&
+        error == null &&
+        message === draftMessage &&
+        composition.inputText === message
           ? composition
           : await compose(message)
       return {
@@ -229,7 +240,7 @@ export const useConversationContextComposition = ({
         })
       }
     },
-    [compose, composition, draftMessage]
+    [compose, composition, draftMessage, error, status]
   )
 
   const saveSelection = React.useCallback(

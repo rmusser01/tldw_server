@@ -56,12 +56,18 @@ export type WorldBookProcessResponse = {
   diagnostics: WorldBookProcessDiagnostic[]
 }
 
+export type ConversationContextPrimitiveOptions = {
+  signal?: AbortSignal
+}
+
 export interface ConversationContextPrimitiveClient {
   processDictionary: (
-    request: DictionaryProcessRequest
+    request: DictionaryProcessRequest,
+    options?: ConversationContextPrimitiveOptions
   ) => Promise<DictionaryProcessResponse>
   processWorldBookContext: (
-    request: WorldBookProcessRequest
+    request: WorldBookProcessRequest,
+    options?: ConversationContextPrimitiveOptions
   ) => Promise<WorldBookProcessResponse>
 }
 
@@ -75,6 +81,7 @@ export type ComposeConversationContextInput = {
   worldBookScanDepth?: number
   worldBookTokenBudget?: number
   recursiveWorldBookScanning?: boolean
+  signal?: AbortSignal
 }
 
 const normalizeSelection = (
@@ -131,7 +138,8 @@ export const composeConversationContext = async ({
   dictionaryTokenBudget,
   worldBookScanDepth,
   worldBookTokenBudget,
-  recursiveWorldBookScanning
+  recursiveWorldBookScanning,
+  signal
 }: ComposeConversationContextInput): Promise<ConversationContextComposition> => {
   const normalizedSelection = normalizeSelection(selection)
   const normalizedInheritedWorldBookIds =
@@ -163,7 +171,7 @@ export const composeConversationContext = async ({
       max_iterations: dictionaryMaxIterations,
       token_budget: dictionaryTokenBudget,
       chat_id: normalizedSelection.chatId
-    })
+    }, { signal })
     transformedInputText =
       dictionaryResult.processed_text ?? transformedInputText
 
@@ -201,7 +209,7 @@ export const composeConversationContext = async ({
       scan_depth: worldBookScanDepth,
       token_budget: worldBookTokenBudget,
       recursive_scanning: recursiveWorldBookScanning
-    })
+    }, { signal })
     const matchedWorldBookIds = new Set(
       (worldBookResult.diagnostics || [])
         .map((diagnostic) => diagnostic.world_book_id)

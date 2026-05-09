@@ -11,7 +11,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote
 
 from cachetools import LRUCache
 from fastapi import Depends, HTTPException, status
@@ -238,25 +237,22 @@ def _get_chacha_db_path_for_user(user_id: int) -> Path:
     return db_file
 
 
-def _sqlite_readonly_uri(db_path: Path) -> str:
-    return f"file:{quote(str(db_path), safe='/:')}?mode=ro"
-
-
 def _verify_existing_chacha_db_integrity(db_path: Path) -> None:
     """Run a read-only quick check before opening an existing SQLite DB for writes."""
     if not db_path.exists():
         return
 
     try:
-        with sqlite3.connect(_sqlite_readonly_uri(db_path), uri=True, timeout=1.0) as conn:
-            conn.execute("PRAGMA busy_timeout=1000")
-            rows = conn.execute("PRAGMA quick_check;").fetchall()
+        check_values = sqlite_policy.run_sqlite_quick_check(
+            db_path,
+            timeout_s=1.0,
+            busy_timeout_ms=1000,
+        )
     except sqlite3.Error as exc:
         if _is_sqlite_corruption_error(exc):
             raise ChaChaDatabaseCorruptionError(_CHACHA_CORRUPTION_ERROR_DETAIL) from exc
         raise
 
-    check_values = [str(row[0]).strip() for row in rows if row and str(row[0]).strip()]
     if check_values and all(value.lower() == "ok" for value in check_values):
         return
 

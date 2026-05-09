@@ -680,7 +680,7 @@ PR body must contain:
 
 ```markdown
 ## Change summary
-TODO: human-authored summary required before merge.
+Human-authored summary required before merge.
 
 ## What changed
 - ...
@@ -695,7 +695,7 @@ TODO: human-authored summary required before merge.
 - ...
 ```
 
-If a human-written summary has already been provided, replace the TODO with it before merge.
+If a human-written summary has already been provided, replace the placeholder with it before merge.
 
 - [ ] **Step 3: After merge, comment on #1116**
 

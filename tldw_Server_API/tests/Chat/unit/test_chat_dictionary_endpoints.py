@@ -38,6 +38,15 @@ def test_chat_dictionary_router_exposes_markdown_export_alias():
     assert "/dictionaries/{dictionary_id}/export/markdown" in paths
 
 
+def test_process_text_dictionary_ids_validation_names_dictionary_ids_field():
+    with pytest.raises(ValueError) as exc_info:
+        ProcessTextRequest.model_validate({"text": "hello", "dictionary_ids": ["nope"]})
+
+    message = str(exc_info.value)
+    assert "dictionary_ids" in message
+    assert "included_dictionary_ids" not in message
+
+
 def test_chat_dictionary_service_initializes_legacy_entries_table_without_sort_order(
     chacha_db: CharactersRAGDB,
 ):
