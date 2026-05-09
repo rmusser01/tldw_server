@@ -8,7 +8,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
 from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
     ERROR_STALE_SCENE_VERSION,
@@ -22,6 +26,9 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_STARTED,
+    EVENT_VISUAL_DIRECTIVE_APPLIED,
+    EVENT_VISUAL_DIRECTIVE_REJECTED,
+    EVENT_VISUAL_DIRECTIVE_REQUESTED,
     EVENT_USER_TURN,
     EVENT_MODEL_TURN_PARSE_FAILED,
     TURN_STATUS_ABANDONED,
@@ -184,6 +191,7 @@ class VNPlayService:
         self.repo = repo
         self.owner_user_id = owner_user_id
         self.adapter = adapter or DeterministicVNPlayTurnAdapter()
+        self._manifest_cache: dict[int, dict[str, Any]] = {}
 
     def create_session(
         self,
@@ -341,6 +349,7 @@ class VNPlayService:
             raise VNPlayTurnError(TURN_STATUS_MODEL_FAILED) from exc
 
         return self._complete_turn(
+            session=session,
             session_id=session_id,
             turn_request_id=int(turn_request["id"]),
             prior_events=turn_events,
@@ -374,6 +383,45 @@ class VNPlayService:
     def list_events(self, session_id: int) -> list[dict[str, Any]]:
         self.get_session(session_id)
         return self.repo.list_events(session_id)
+
+    def get_enriched_scene_state(self, session_id: int) -> dict[str, Any] | None:
+        session = self.get_session(session_id)
+        state = self.repo.get_scene_state(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if state is None:
+            return None
+
+        enriched = dict(state)
+        try:
+            manifest = self._build_pack_manifest(session.vn_asset_pack_id)
+        except Exception as exc:
+            logger.exception(
+                "Failed to enrich VN Play scene state from VN asset manifest: "
+                "session_id={}, pack_id={}",
+                session_id,
+                session.vn_asset_pack_id,
+            )
+            _append_enrichment_warning(enriched, exc)
+            return enriched
+
+        items_by_id = _manifest_items_by_id(manifest)
+        background_id = enriched.get("current_background_item_id")
+        if isinstance(background_id, int):
+            enriched["background"] = items_by_id.get(background_id)
+
+        depth_id = enriched.get("current_depth_item_id")
+        if isinstance(depth_id, int):
+            enriched["depth"] = items_by_id.get(depth_id)
+
+        active_sprites: list[dict[str, Any]] = []
+        for sprite in _list_of_dicts(enriched.get("active_sprite_items")):
+            item_id = sprite.get("item_id")
+            if isinstance(item_id, int) and item_id in items_by_id:
+                active_sprites.append(items_by_id[item_id])
+        enriched["active_sprites"] = active_sprites
+        return enriched
 
     def create_checkpoint(self, session_id: int, *, label: str) -> dict[str, Any]:
         self.get_session(session_id)
@@ -528,6 +576,7 @@ class VNPlayService:
     def _complete_turn(
         self,
         *,
+        session: VNPlaySession,
         session_id: int,
         turn_request_id: int,
         prior_events: Sequence[Mapping[str, Any]],
@@ -551,6 +600,15 @@ class VNPlayService:
         new_events: list[dict[str, Any]] = [dict(event) for event in prior_events]
         new_events.append(model_turn)
 
+        visual_events, visual_scene_updates, visual_warnings = self._apply_visual_directives(
+            session=session,
+            session_id=session_id,
+            turn_request_id=turn_request_id,
+            directives=result.visual_directives,
+            scene_version=next_scene_version,
+        )
+        new_events.extend(visual_events)
+
         if result.choices:
             choice_presented = self.repo.append_event(
                 session_id=session_id,
@@ -566,7 +624,9 @@ class VNPlayService:
             new_events.append(choice_presented)
 
         scene_payload = dict(result.scene_updates)
+        scene_payload.update(visual_scene_updates)
         scene_payload["scene_version"] = next_scene_version
+        all_warnings = [*result.warnings, *visual_warnings]
         if result.warnings:
             scene_payload["warnings"] = result.warnings
         scene_state_changed = self.repo.append_event(
@@ -604,7 +664,7 @@ class VNPlayService:
             status=TURN_STATUS_COMPLETED,
             scene_version=next_scene_version,
             events=new_events,
-            warnings=result.warnings,
+            warnings=all_warnings,
         )
         self.repo.update_turn_request(
             turn_request_id,
@@ -616,6 +676,140 @@ class VNPlayService:
             owner_user_id=self.owner_user_id,
         )
         return response
+
+    def _apply_visual_directives(
+        self,
+        *,
+        session: VNPlaySession,
+        session_id: int,
+        turn_request_id: int,
+        directives: Sequence[Mapping[str, Any]],
+        scene_version: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
+        if not directives:
+            return [], {}, []
+
+        events: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        scene_updates: dict[str, Any] = {}
+        sprite_items: list[dict[str, Any]] = []
+        manifest: Mapping[str, Any] | None = None
+        manifest_error: str | None = None
+        default_rejection_reason = "manifest_unavailable"
+
+        try:
+            manifest = self._build_pack_manifest(session.vn_asset_pack_id)
+        except Exception as exc:
+            logger.exception(
+                "Failed to build VN asset manifest for VN Play visual directives: "
+                "session_id={}, pack_id={}",
+                session_id,
+                session.vn_asset_pack_id,
+            )
+            manifest_error = exc.__class__.__name__
+
+        if manifest is not None:
+            try:
+                resolutions = resolve_scene_directives(
+                    manifest,
+                    directives,
+                    seed=session.seed or f"session-{session_id}",
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to resolve VN Play visual directives: session_id={}, pack_id={}",
+                    session_id,
+                    session.vn_asset_pack_id,
+                )
+                manifest_error = exc.__class__.__name__
+                default_rejection_reason = "resolver_error"
+                resolutions = []
+        else:
+            resolutions = []
+
+        for index, directive in enumerate(directives):
+            directive_payload = dict(directive)
+            events.append(
+                self.repo.append_event(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    event_type=EVENT_VISUAL_DIRECTIVE_REQUESTED,
+                    event_payload={
+                        "turn_request_id": turn_request_id,
+                        "directive": directive_payload,
+                        "scene_version": scene_version,
+                    },
+                    source="runtime",
+                )
+            )
+
+            resolution = resolutions[index] if index < len(resolutions) else None
+            if resolution is not None and resolution.applied and resolution.item is not None:
+                item = dict(resolution.item)
+                asset_type = _visual_asset_type(directive_payload, item)
+                events.append(
+                    self.repo.append_event(
+                        session_id=session_id,
+                        owner_user_id=self.owner_user_id,
+                        event_type=EVENT_VISUAL_DIRECTIVE_APPLIED,
+                        event_payload={
+                            "turn_request_id": turn_request_id,
+                            "asset_type": asset_type,
+                            "directive": directive_payload,
+                            "item": item,
+                            "scene_version": scene_version,
+                        },
+                        source="runtime",
+                    )
+                )
+                _merge_visual_item_scene_update(
+                    scene_updates,
+                    sprite_items,
+                    asset_type=asset_type,
+                    item=item,
+                )
+                continue
+
+            reason = (
+                resolution.reason
+                if resolution is not None and resolution.reason
+                else default_rejection_reason
+            )
+            warning = _visual_directive_warning(
+                directive_payload,
+                reason=reason,
+                scene_version=scene_version,
+                error_type=manifest_error,
+            )
+            warnings.append(warning)
+            events.append(
+                self.repo.append_event(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    event_type=EVENT_VISUAL_DIRECTIVE_REJECTED,
+                    event_payload={
+                        "turn_request_id": turn_request_id,
+                        "directive": directive_payload,
+                        **warning,
+                    },
+                    source="runtime",
+                )
+            )
+
+        if sprite_items:
+            scene_updates["active_sprite_items"] = sprite_items
+        return events, scene_updates, warnings
+
+    def _build_pack_manifest(self, pack_id: int) -> dict[str, Any]:
+        manifest = self._manifest_cache.get(pack_id)
+        if manifest is None:
+            manifest_response = VNAssetPackService(
+                self.repo.db,
+                owner_user_id=self.owner_user_id,
+            ).build_manifest(pack_id)
+            manifest = manifest_response.model_dump()
+            self._manifest_cache[pack_id] = manifest
+        return manifest
 
     def _mark_turn_failed(
         self,
@@ -706,6 +900,93 @@ def _normalize_input_payload(
     if choice_id is not None:
         return {"choice_id": choice_id}
     return {"custom_action": dict(custom_action or {})}
+
+
+def _visual_asset_type(
+    directive: Mapping[str, Any],
+    item: Mapping[str, Any],
+) -> str:
+    raw_asset_type = directive.get("asset_type") or item.get("asset_type")
+    if not isinstance(raw_asset_type, str):
+        return ""
+    normalized = raw_asset_type.strip().lower()
+    if normalized in {"background", "backgrounds"}:
+        return "background"
+    if normalized in {"depth", "depth_companion", "depth_companions"}:
+        return "depth_companion"
+    if normalized in {"sprite", "sprites"}:
+        return "sprite"
+    if normalized in {"cg", "cgs"}:
+        return "cg"
+    return normalized
+
+
+def _merge_visual_item_scene_update(
+    scene_updates: dict[str, Any],
+    sprite_items: list[dict[str, Any]],
+    *,
+    asset_type: str,
+    item: Mapping[str, Any],
+) -> None:
+    item_id = item.get("item_id")
+    if asset_type == "background" and isinstance(item_id, int):
+        scene_updates["current_background_item_id"] = item_id
+        depth_item_id = item.get("depth_companion_item_id")
+        if isinstance(depth_item_id, int):
+            scene_updates["current_depth_item_id"] = depth_item_id
+    elif asset_type == "depth_companion" and isinstance(item_id, int):
+        scene_updates["current_depth_item_id"] = item_id
+    elif asset_type == "sprite":
+        sprite_items.append(dict(item))
+
+
+def _visual_directive_warning(
+    directive: Mapping[str, Any],
+    *,
+    reason: str,
+    scene_version: int,
+    error_type: str | None = None,
+) -> dict[str, Any]:
+    warning: dict[str, Any] = {
+        "code": "visual_directive_rejected",
+        "reason": reason,
+        "scene_version": scene_version,
+    }
+    asset_type = directive.get("asset_type")
+    if isinstance(asset_type, str):
+        warning["asset_type"] = asset_type
+    slot_key = directive.get("slot_key")
+    if isinstance(slot_key, str):
+        warning["slot_key"] = slot_key
+    if error_type:
+        warning["error_type"] = error_type
+    return warning
+
+
+def _manifest_items_by_id(manifest: Mapping[str, Any]) -> dict[int, dict[str, Any]]:
+    assets = manifest.get("assets")
+    if not isinstance(assets, Mapping):
+        return {}
+
+    items_by_id: dict[int, dict[str, Any]] = {}
+    for collection in assets.values():
+        for item in _list_of_dicts(collection):
+            item_id = item.get("item_id")
+            if isinstance(item_id, int):
+                items_by_id[item_id] = item
+    return items_by_id
+
+
+def _append_enrichment_warning(state: dict[str, Any], exc: Exception) -> None:
+    warnings = list(state.get("warnings") or [])
+    warnings.append(
+        {
+            "code": "scene_asset_enrichment_failed",
+            "reason": "manifest_unavailable",
+            "error_type": exc.__class__.__name__,
+        }
+    )
+    state["warnings"] = warnings
 
 
 def _payload_hash(payload: Mapping[str, Any]) -> str:

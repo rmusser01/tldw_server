@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_SESSION_RESTORED,
     EVENT_SESSION_STARTED,
     EVENT_TURN_FAILED,
+    EVENT_VISUAL_DIRECTIVE_APPLIED,
     EVENT_VISUAL_DIRECTIVE_REJECTED,
 )
 from tldw_Server_API.app.core.VN_Play.models import SceneState
@@ -41,6 +42,8 @@ def derive_scene_state(events: Iterable[Mapping[str, Any]]) -> SceneState:
             if isinstance(snapshot, Mapping):
                 _apply_scene_snapshot(state, snapshot)
             _apply_scene_version(state, payload)
+        elif event_type == EVENT_VISUAL_DIRECTIVE_APPLIED:
+            _apply_visual_directive_applied(state, payload)
         elif event_type == EVENT_VISUAL_DIRECTIVE_REJECTED:
             state.warnings.append(_warning_from_payload("visual_directive_rejected", payload))
             _apply_scene_version(state, payload)
@@ -99,6 +102,25 @@ def _apply_choice_presented(state: SceneState, payload: Mapping[str, Any]) -> No
     _apply_scene_version(state, payload)
 
 
+def _apply_visual_directive_applied(state: SceneState, payload: Mapping[str, Any]) -> None:
+    item = payload.get("item")
+    if not isinstance(item, Mapping):
+        _apply_scene_version(state, payload)
+        return
+
+    item_payload = dict(item)
+    item_id = item_payload.get("item_id")
+    asset_type = _asset_type_from_payload(payload, item_payload)
+    if asset_type == "background" and isinstance(item_id, int):
+        state.current_background_item_id = item_id
+    elif asset_type == "depth_companion" and isinstance(item_id, int):
+        state.current_depth_item_id = item_id
+    elif asset_type == "sprite":
+        state.active_sprite_items.append(item_payload)
+
+    _apply_scene_version(state, payload)
+
+
 def _apply_scene_snapshot(state: SceneState, snapshot: Mapping[str, Any]) -> None:
     _apply_int_field(
         state,
@@ -124,6 +146,23 @@ def _apply_scene_snapshot(state: SceneState, snapshot: Mapping[str, Any]) -> Non
     _apply_int_field(state, "transcript_cursor", snapshot, "transcript_cursor")
     _append_payload_warnings(state, snapshot, replace=True)
     _apply_scene_version(state, snapshot)
+
+
+def _asset_type_from_payload(
+    payload: Mapping[str, Any],
+    item_payload: Mapping[str, Any],
+) -> str:
+    raw_asset_type = payload.get("asset_type") or item_payload.get("asset_type")
+    if not isinstance(raw_asset_type, str):
+        return ""
+    normalized = raw_asset_type.strip().lower()
+    if normalized in {"background", "backgrounds"}:
+        return "background"
+    if normalized in {"depth", "depth_companion", "depth_companions"}:
+        return "depth_companion"
+    if normalized in {"sprite", "sprites"}:
+        return "sprite"
+    return normalized
 
 
 def _apply_text_field(state: SceneState, field_name: str, payload: Mapping[str, Any]) -> None:

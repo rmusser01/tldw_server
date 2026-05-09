@@ -20,7 +20,10 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Play.models import TurnResult
+from tldw_Server_API.app.core.VN_Play.service import VNPlayService, VNPlayTurnContext
 
 
 @pytest.fixture
@@ -136,6 +139,61 @@ def _create_pack(
     return pack.id
 
 
+class _VisualDirectiveAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        return TurnResult(
+            narrative_text="The library appears.",
+            dialogue=[{"speaker": "Narrator", "text": "The library appears."}],
+            visual_directives=[
+                {"asset_type": "background", "labels": {"location": "library"}},
+                {"asset_type": "sprite", "labels": {"emotion": "happy"}},
+            ],
+            scene_updates={"location_key": "library"},
+        )
+
+
+def _create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
+    character_id = _add_character(chacha_db, name="Visual Mira")
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(
+        owner_user_id=42,
+        primary_character_id=character_id,
+        title="Visual Mira - Archive Pack",
+    )
+    background_slot = repo.create_slot(
+        pack_id=int(pack["id"]),
+        asset_type="background",
+        slot_key="background.library",
+        labels={"location": "library"},
+    )
+    sprite_slot = repo.create_slot(
+        pack_id=int(pack["id"]),
+        asset_type="sprite",
+        slot_key="sprite.happy",
+        labels={"emotion": "happy"},
+    )
+    background_item = repo.create_item(
+        pack_id=int(pack["id"]),
+        slot_id=int(background_slot["id"]),
+        generated_file_id=2001,
+        mime_type="image/png",
+        review_status="approved",
+    )
+    sprite_item = repo.create_item(
+        pack_id=int(pack["id"]),
+        slot_id=int(sprite_slot["id"]),
+        generated_file_id=2002,
+        mime_type="image/png",
+        review_status="approved",
+    )
+    return (
+        character_id,
+        int(pack["id"]),
+        int(background_item["id"]),
+        int(sprite_item["id"]),
+    )
+
+
 def test_turn_request_requires_exactly_one_input_field() -> None:
     VNPlayTurnRequest(input_text="hello", client_scene_version=0, idempotency_key="k")
 
@@ -183,6 +241,45 @@ def test_create_session_endpoint_returns_scene_state(
     body = response.json()
     assert body["mode"] == "freeform"
     assert body["scene_state"]["scene_version"] == 0
+
+
+@pytest.mark.asyncio
+async def test_session_response_includes_resolved_scene_assets(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id, pack_id, background_item_id, sprite_item_id = _create_visual_pack(chacha_db)
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=_VisualDirectiveAdapter(),
+    )
+    session = service.create_session(
+        mode="freeform",
+        title="Visual library",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        seed="seed-1",
+    )
+    await service.submit_turn(
+        session.id,
+        input_text="Look around",
+        client_scene_version=0,
+        idempotency_key="visual-api-turn-1",
+    )
+
+    response = client.get(f"/api/v1/vn-play/sessions/{session.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scene_state"]["background"]["item_id"] == background_item_id
+    assert body["scene_state"]["background"]["content_url"].endswith(
+        f"/items/{background_item_id}/content"
+    )
+    assert body["scene_state"]["active_sprites"][0]["item_id"] == sprite_item_id
+    assert body["scene_state"]["active_sprites"][0]["content_url"].endswith(
+        f"/items/{sprite_item_id}/content"
+    )
 
 
 def test_setup_options_returns_selector_safe_character_and_pack(

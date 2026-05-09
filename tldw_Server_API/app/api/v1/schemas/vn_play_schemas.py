@@ -112,6 +112,9 @@ class VNPlaySceneStateResponse(BaseModel):
     session_id: StrictInt
     owner_user_id: StrictInt
     last_event_id: int | None = None
+    background: dict[str, Any] | None = None
+    depth: dict[str, Any] | None = None
+    active_sprites: list[dict[str, Any]] = Field(default_factory=list)
     current_background_item_id: int | None = None
     current_depth_item_id: int | None = None
     active_sprite_items: list[dict[str, Any]] = Field(default_factory=list)

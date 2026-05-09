@@ -153,6 +153,8 @@ Every turn request must include:
 
 The runtime stores turn request keys before model work starts. If the same key and same request payload are submitted again, the stored turn status or completed response is replayed. If the same key is reused with a different payload, the API returns `409 idempotency_key_conflict`.
 
+Model `visual_directives` are resolved by the backend against the session's approved VN asset-pack manifest. Resolved assets update scene state and unresolved directives remain warning-only: the text/model turn can still complete, while the runtime records a rejection event with a stable reason such as `asset_not_found` or `manifest_unavailable`.
+
 Freeform turn:
 
 ```bash
@@ -248,6 +250,20 @@ Model or parse failures are recorded as turn/event state and returned as `502 mo
 - `session_restored`
 
 The current scene state includes background/depth item ids, active sprite item payloads, location, mood, time of day, weather, visible choices, transcript cursor, scene version, and warnings.
+
+When a session has resolved visual state, scene responses also include render-ready asset payloads:
+
+- `background`: approved background asset payload for `current_background_item_id`, including `item_id`, `slot_key`, `content_url`, labels, dimensions, and storage metadata where available.
+- `depth`: approved depth companion payload for `current_depth_item_id`, when present.
+- `active_sprites`: approved sprite asset payloads for the current character staging.
+
+Visual directive event behavior:
+
+- `visual_directive_requested`: appended for each model/runtime visual directive considered by the backend.
+- `visual_directive_applied`: appended when the directive resolves to an approved manifest item; replay uses this to restore background, depth, and sprite state.
+- `visual_directive_rejected`: appended when the directive cannot be resolved safely. The event payload includes `code=visual_directive_rejected`, `reason`, the original directive context, and `scene_version`.
+
+Custom frontends should prefer `scene_state.background`, `scene_state.depth`, and `scene_state.active_sprites` from VN Play responses instead of calling VN asset-pack internals directly for runtime rendering.
 
 ## Checkpoints And Restore
 
