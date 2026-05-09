@@ -6,14 +6,21 @@ import { Link } from "react-router-dom"
 import type { PersonaBuddySummary } from "@/types/persona-buddy"
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 
+import {
+  getPersonaVisualDiagnosticToneClassName,
+  type PersonaVisualDiagnostic
+} from "./personaVisualDiagnostics"
+
 type BuddyShellPopoverProps = {
   buddySummary: PersonaBuddySummary
   personaId?: string | null
+  visualDiagnostic?: PersonaVisualDiagnostic | null
 }
 
 export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   buddySummary,
-  personaId = null
+  personaId = null,
+  visualDiagnostic = null
 }) => {
   const { t } = useTranslation("common")
   const normalizedPersonaId = String(personaId ?? "").trim()
@@ -38,6 +45,16 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
       {buddySummary.role_summary ? (
         <div className="mt-1 text-xs leading-5 text-text-muted">
           {buddySummary.role_summary}
+        </div>
+      ) : null}
+      {visualDiagnostic ? (
+        <div
+          data-testid="persona-buddy-visual-diagnostic-detail"
+          data-severity={visualDiagnostic.severity}
+          className={`mt-3 rounded-lg border px-2.5 py-2 text-xs leading-5 ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
+        >
+          <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
+          <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}
       {visualsRoute ? (

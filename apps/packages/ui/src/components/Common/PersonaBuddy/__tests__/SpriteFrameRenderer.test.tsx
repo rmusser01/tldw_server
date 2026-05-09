@@ -191,4 +191,75 @@ describe("SpriteFrameRenderer", () => {
     expect(screen.getByText("Buddy")).toBeInTheDocument()
     expect(onRenderError).toHaveBeenCalledWith("missing_animation")
   })
+
+  it("calls onRenderError when the resolved frame asset is missing", () => {
+    const onRenderError = vi.fn()
+    render(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={{}}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(onRenderError).toHaveBeenCalledWith("missing_asset")
+  })
+
+  it("clears onRenderError when a previous render failure becomes renderable", () => {
+    const onRenderError = vi.fn()
+    const view = render(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={{}}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(onRenderError).toHaveBeenLastCalledWith("missing_asset")
+
+    view.rerender(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={assets}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(onRenderError).toHaveBeenLastCalledWith(null)
+    expect(currentFrame()).toHaveAttribute("src", expect.stringContaining("/assets/idle-1.png"))
+  })
+
+  it("reports unsupported regions before trying to render them", () => {
+    const onRenderError = vi.fn()
+    render(
+      <SpriteFrameRenderer
+        manifest={baseManifest({
+          animations: {
+            idle: {
+              frames: [
+                {
+                  asset_id: "idle-1",
+                  region: { x: 0, y: 0, width: 0, height: 32 }
+                }
+              ]
+            }
+          }
+        })}
+        assets={assets}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(onRenderError).toHaveBeenCalledWith("unsupported_region")
+  })
 })
