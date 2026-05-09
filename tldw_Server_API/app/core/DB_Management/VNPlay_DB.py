@@ -9,6 +9,8 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
+STORY_BRANCH_LABEL_MAX_LENGTH = 160
+
 
 VN_PLAY_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS vn_play_sessions (
@@ -596,9 +598,9 @@ class VNPlayRepository:
         client_scene_version: int,
         selected_choice: Mapping[str, Any],
         parent_event_id: int | None,
-        expected_scene_last_event_id: int | None = None,
         branch_label: str | None,
         branch_path: Sequence[Any] | None,
+        expected_scene_last_event_id: int | None = None,
     ) -> dict[str, dict[str, Any]]:
         self._ensure_schema_initialized()
         choice = dict(selected_choice)
@@ -649,6 +651,8 @@ class VNPlayRepository:
             )
             if not _choice_id_is_visible(visible_choices, choice.get("id")):
                 raise RuntimeError("choice_not_visible")
+            bounded_branch_label = _bounded_branch_label(branch_label)
+            bounded_branch_path = _bounded_branch_path(branch_path)
 
             branch_cursor = conn.execute(
                 """
@@ -665,8 +669,8 @@ class VNPlayRepository:
                     session_id,
                     owner_user_id,
                     parent_event_id,
-                    branch_label,
-                    _json_dump(list(branch_path or [])),
+                    bounded_branch_label,
+                    _json_dump(bounded_branch_path),
                 ),
             )
             branch_id = int(branch_cursor.lastrowid)
@@ -1294,6 +1298,26 @@ def _decode_branch(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["branch_path"] = _json_loads(data.pop("branch_path_json"), [])
     return data
+
+
+def _bounded_branch_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)[:STORY_BRANCH_LABEL_MAX_LENGTH]
+
+
+def _bounded_branch_path(value: Sequence[Any] | None) -> list[Any]:
+    bounded_path: list[Any] = []
+    for item in list(value or []):
+        if not isinstance(item, Mapping):
+            bounded_path.append(item)
+            continue
+        next_item = dict(item)
+        choice_text = next_item.get("choice_text")
+        if choice_text is not None:
+            next_item["choice_text"] = str(choice_text)[:STORY_BRANCH_LABEL_MAX_LENGTH]
+        bounded_path.append(next_item)
+    return bounded_path
 
 
 def _decode_checkpoint(row: Any) -> dict[str, Any]:

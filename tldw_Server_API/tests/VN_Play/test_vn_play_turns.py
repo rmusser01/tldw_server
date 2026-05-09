@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any
 
@@ -8,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play import adapters as vn_play_adapters
+from tldw_Server_API.app.core.VN_Play.constants import STORY_BRANCH_LABEL_MAX_LENGTH
 from tldw_Server_API.app.core.VN_Play.models import (
     SceneState,
     TurnResult,
@@ -197,6 +199,8 @@ def create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
 def create_story_session_with_visible_choice(
     service: VNPlayService,
     repo: VNPlayRepository,
+    *,
+    choice_text: str = "Open the door",
 ) -> VNPlaySession:
     session = service.create_session(
         mode="story",
@@ -212,7 +216,7 @@ def create_story_session_with_visible_choice(
         owner_user_id=42,
         event_type="choice_presented",
         event_payload={
-            "choices": [{"id": "open", "text": "Open the door"}],
+            "choices": [{"id": "open", "text": choice_text}],
             "scene_version": 1,
         },
         source="runtime",
@@ -221,7 +225,7 @@ def create_story_session_with_visible_choice(
         session_id=session.id,
         owner_user_id=42,
         last_event_id=int(choice_presented["id"]),
-        visible_choices=[{"id": "open", "text": "Open the door"}],
+        visible_choices=[{"id": "open", "text": choice_text}],
         scene_version=1,
     )
     repo.update_session(session.id, {"scene_version": 1}, owner_user_id=42)
@@ -289,6 +293,91 @@ async def test_story_choice_creates_branch_and_choice_selected_before_model(
         {"id": "inside", "text": "Step inside"},
         {"id": "wait", "text": "Wait outside"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_story_choice_branch_labels_are_bounded(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=DeterministicVNPlayTurnAdapter(),
+    )
+    long_choice_text = "Open " + ("the sealed archive door " * 20)
+    session = create_story_session_with_visible_choice(
+        service,
+        repo,
+        choice_text=long_choice_text,
+    )
+
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-choice-long-label",
+    )
+
+    branch = service.list_branches(session.id)[0]
+    expected_label = long_choice_text[:STORY_BRANCH_LABEL_MAX_LENGTH]
+    assert branch["branch_label"] == expected_label
+    assert branch["branch_path"][0]["choice_text"] == expected_label
+
+
+@pytest.mark.asyncio
+async def test_freeform_turn_defers_full_event_history_until_after_input_events(
+    service: VNPlayService,
+    ready_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_list_events = service.repo.list_events
+    unbounded_event_counts: list[int] = []
+
+    def tracking_list_events(
+        session_id: int,
+        *,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if after_sequence is None and limit is None:
+            cursor = service.repo.db.execute_query(
+                "SELECT COUNT(*) AS count FROM vn_play_events WHERE session_id = ?",
+                (session_id,),
+            )
+            unbounded_event_counts.append(int(cursor.fetchone()["count"]))
+        return original_list_events(
+            session_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
+    monkeypatch.setattr(service.repo, "list_events", tracking_list_events)
+
+    await service.submit_turn(
+        ready_session.id,
+        input_text="Look around",
+        client_scene_version=0,
+        idempotency_key="freeform-query-deferral",
+    )
+
+    assert unbounded_event_counts
+    assert unbounded_event_counts[0] >= 3
+
+
+def test_story_choice_repository_signature_keeps_required_params_first() -> None:
+    parameters = list(
+        inspect.signature(
+            VNPlayRepository.record_story_choice_selection,
+        ).parameters
+    )
+
+    assert parameters.index("branch_label") < parameters.index(
+        "expected_scene_last_event_id"
+    )
+    assert parameters.index("branch_path") < parameters.index(
+        "expected_scene_last_event_id"
+    )
 
 
 @pytest.mark.asyncio

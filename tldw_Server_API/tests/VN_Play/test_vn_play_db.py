@@ -8,6 +8,8 @@ from tldw_Server_API.app.core.DB_Management.VNPlay_DB import (
     ensure_vn_play_tables,
 )
 
+STORY_BRANCH_LABEL_MAX_LENGTH = 160
+
 
 @pytest.fixture
 def chacha_db() -> Generator[CharactersRAGDB, None, None]:
@@ -250,6 +252,70 @@ def test_record_story_choice_selection_creates_branch_event_turn_and_state(
     assert updated_turn["status"] == "model_calling"
     assert updated_turn["turn_started_event_id"] == result["turn_started"]["id"]
     assert updated_turn["input_event_id"] == result["choice_selected"]["id"]
+
+
+def test_record_story_choice_selection_bounds_branch_metadata(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Door",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    long_choice_text = "Open " + ("the sealed archive door " * 20)
+    choice_presented = repo.append_event(
+        session_id=session["id"],
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": long_choice_text}],
+            "scene_version": 1,
+        },
+    )
+    repo.set_scene_state(
+        session_id=session["id"],
+        owner_user_id=42,
+        last_event_id=choice_presented["id"],
+        visible_choices=[{"id": "open", "text": long_choice_text}],
+        scene_version=1,
+    )
+    repo.update_session(session["id"], {"scene_version": 1}, owner_user_id=42)
+    turn = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="choice-long",
+        request_payload_hash="hash-choice-long",
+        base_scene_version=1,
+    )
+
+    result = repo.record_story_choice_selection(
+        session_id=session["id"],
+        owner_user_id=42,
+        turn_request_id=turn["id"],
+        client_scene_version=1,
+        selected_choice={"id": "open", "text": long_choice_text},
+        parent_event_id=choice_presented["id"],
+        branch_label=long_choice_text,
+        branch_path=[
+            {
+                "schema_version": 1,
+                "type": "choice",
+                "choice_id": "open",
+                "choice_text": long_choice_text,
+                "choice_presented_event_id": choice_presented["id"],
+                "scene_version": 1,
+            }
+        ],
+        expected_scene_last_event_id=choice_presented["id"],
+    )
+
+    expected_label = long_choice_text[:STORY_BRANCH_LABEL_MAX_LENGTH]
+    assert result["branch"]["branch_label"] == expected_label
+    assert result["branch"]["branch_path"][0]["choice_text"] == expected_label
 
 
 def test_record_story_choice_selection_rejects_choice_not_visible_without_mutations(

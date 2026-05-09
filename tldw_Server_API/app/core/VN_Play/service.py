@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_MODEL_TURN_PARSE_FAILED,
     MODE_FREEFORM,
     MODE_STORY,
+    STORY_BRANCH_LABEL_MAX_LENGTH,
     TURN_STATUS_ABANDONED,
     TURN_STATUS_COMPLETED,
     TURN_STATUS_MODEL_CALLING,
@@ -309,8 +310,8 @@ class VNPlayService:
         parent_choice_event_id: int | None = None
         expected_scene_last_event_id: int | None = None
         branch_path: list[dict[str, Any]] | None = None
-        events_before_input = self.repo.list_events(session_id)
         if session.mode == MODE_STORY and choice_id is not None:
+            events_before_input = self.repo.list_events(session_id)
             selected_choice = _selected_visible_choice(persisted_scene_state, choice_id)
             expected_scene_last_event_id = _optional_int(
                 persisted_scene_state.get("last_event_id")
@@ -1134,8 +1135,8 @@ def _choice_text(choice: Mapping[str, Any]) -> str:
     for key in ("text", "label"):
         value = choice.get(key)
         if isinstance(value, str) and value:
-            return value
-    return str(choice.get("id") or "")
+            return value[:STORY_BRANCH_LABEL_MAX_LENGTH]
+    return str(choice.get("id") or "")[:STORY_BRANCH_LABEL_MAX_LENGTH]
 
 
 def _branch_path_for_choice(
