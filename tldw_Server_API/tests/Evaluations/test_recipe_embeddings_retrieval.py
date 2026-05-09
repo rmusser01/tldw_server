@@ -7,17 +7,30 @@ from tldw_Server_API.app.core.Evaluations.recipes.embeddings_retrieval import (
 
 def test_manifest_advertises_guided_media_scoped_rag_flow() -> None:
     recipe = EmbeddingsRetrievalRecipe()
+    source_labeling = recipe.manifest.capabilities["source_labeling"]
+    candidate_discovery = recipe.manifest.capabilities["candidate_discovery"]
+    apply_target = recipe.manifest.capabilities["apply_target"]
 
     assert recipe.manifest.capabilities["guided_ui"] is True
-    assert recipe.manifest.capabilities["source_labeling"]["contract"] == {
+    assert source_labeling["supported"] is True
+    assert source_labeling["source_id_contract"] == {
         "kind": "media_id",
         "type": "integer",
     }
-    assert recipe.manifest.capabilities["candidate_discovery"]["endpoint"].endswith(
+    assert candidate_discovery["endpoint"].endswith(
         "/recipes/embeddings_model_selection/candidates"
     )
-    assert recipe.manifest.capabilities["apply_target"]["preview_supported"] is True
-    assert recipe.manifest.capabilities["apply_target"]["live_apply_supported"] is False
+    assert set(candidate_discovery["runnable_statuses"]) == {
+        "ready",
+        "missing_key",
+        "disallowed_provider",
+        "disallowed_model",
+        "quota_risk",
+        "unknown",
+    }
+    assert apply_target["preview_supported"] is True
+    assert apply_target["live_apply_supported"] is False
+    assert apply_target["config_keys"] == ["embedding_provider", "embedding_model"]
     assert recipe.manifest.default_run_config["comparison_mode"] == "embedding_only"
     assert recipe.manifest.default_run_config["top_k"] == 10
 

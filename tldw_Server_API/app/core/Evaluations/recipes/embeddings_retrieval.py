@@ -38,12 +38,13 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             "rag_embedding_selection": True,
             "media_scoped_execution": True,
             "source_labeling": {
-                "contract": {"kind": "media_id", "type": "integer"},
+                "supported": True,
+                "source_id_contract": {"kind": "media_id", "type": "integer"},
                 "advanced_manual_ids": True,
             },
             "candidate_discovery": {
                 "endpoint": "/api/v1/evaluations/recipes/embeddings_model_selection/candidates",
-                "statuses": [
+                "runnable_statuses": [
                     "ready",
                     "missing_key",
                     "disallowed_provider",
@@ -56,7 +57,7 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
                 "preview_supported": True,
                 "live_apply_supported": False,
                 "config_section": "Embeddings",
-                "keys": ["embedding_provider", "embedding_model"],
+                "config_keys": ["embedding_provider", "embedding_model"],
             },
         },
         default_run_config={
