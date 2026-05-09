@@ -11,6 +11,33 @@ import {
   getBadgeVariantForDesignSystemSeverity,
   type BadgeVariant
 } from "@/components/ui/primitives"
+import type { ConnectionUxState } from "@/types/connection"
+
+const stateKeyForConnectionUxState = (
+  uxState: ConnectionUxState
+): DesignSystemStateKey => {
+  switch (uxState) {
+    case "testing":
+      return "retrying"
+    case "connected_ok":
+    case "demo_mode":
+      return "ready"
+    case "connected_degraded":
+      return "degraded"
+    case "error_auth":
+      return "auth_required"
+    case "error_unreachable":
+      return "unavailable"
+    case "unconfigured":
+    case "configuring_url":
+    case "configuring_auth":
+      return "setup_required"
+    default: {
+      const exhaustive: never = uxState
+      return exhaustive
+    }
+  }
+}
 
 /**
  * Compact connection status indicator with icon and color for accessibility.
@@ -24,7 +51,7 @@ import {
  */
 export const StatusDot = () => {
   const { t } = useTranslation(["sidepanel"])
-  const { mode, isConnectedUx, isChecking, isConfigOrError } =
+  const { uxState, mode, isConnectedUx, isChecking, isConfigOrError } =
     useConnectionUxState()
   const { checkOnce } = useConnectionActions()
 
@@ -47,6 +74,12 @@ export const StatusDot = () => {
         "Connected to your tldw server"
       )
     }
+    if (uxState === "error_unreachable") {
+      return t(
+        "sidepanel:header.connection.failed",
+        "Connection failed. Click to retry."
+      )
+    }
     if (isConfigOrError) {
       return t(
         "sidepanel:header.connection.unconfigured",
@@ -61,7 +94,10 @@ export const StatusDot = () => {
 
   const handleClick = () => {
     if (isChecking) return
-    if (!isConnectedUx && !isConfigOrError) {
+    if (
+      uxState === "error_unreachable" ||
+      (!isConnectedUx && !isConfigOrError)
+    ) {
       // Retry connection
       void checkOnce()
     }
@@ -84,12 +120,7 @@ export const StatusDot = () => {
     )
   }
 
-  const connectionStateKey: DesignSystemStateKey = (() => {
-    if (isChecking) return "retrying"
-    if (isConnectedUx) return "ready"
-    if (isConfigOrError) return "setup_required"
-    return "unavailable"
-  })()
+  const connectionStateKey = stateKeyForConnectionUxState(uxState)
   const connectionState = getDesignSystemState(connectionStateKey)
   const badgeVariant: BadgeVariant =
     isConnectedUx && mode === "demo"

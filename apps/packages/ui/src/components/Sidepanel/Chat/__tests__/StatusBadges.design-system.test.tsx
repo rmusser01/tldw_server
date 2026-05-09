@@ -3,18 +3,36 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { getDesignSystemState } from "@/design-system"
+import {
+  getDesignSystemState,
+  type DesignSystemStateKey
+} from "@/design-system"
+import type { ConnectionState, ConnectionUxState } from "@/types/connection"
 import { SaveStatusIcon } from "../SaveStatusIcon"
 import { StatusDot } from "../StatusDot"
 
+type ConnectionUxHookState = {
+  uxState: ConnectionUxState
+  mode: ConnectionState["mode"]
+  errorKind: ConnectionState["errorKind"]
+  configStep: ConnectionState["configStep"]
+  hasCompletedFirstRun: boolean
+  isConnectedUx: boolean
+  isChecking: boolean
+  isConfigOrError: boolean
+}
+
 const connectionState = vi.hoisted(() => ({
   ux: {
-    uxState: "connected",
-    mode: "full",
+    uxState: "connected_ok",
+    mode: "normal",
+    errorKind: "none",
+    configStep: "none",
+    hasCompletedFirstRun: true,
     isConnectedUx: true,
     isChecking: false,
     isConfigOrError: false
-  },
+  } as ConnectionUxHookState,
   checkOnce: vi.fn()
 }))
 
@@ -52,87 +70,127 @@ vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => notificationMock
 }))
 
+const connectedUxStates: ConnectionUxState[] = [
+  "connected_ok",
+  "connected_degraded",
+  "demo_mode"
+]
+
+const configOrErrorUxStates: ConnectionUxState[] = [
+  "unconfigured",
+  "configuring_url",
+  "configuring_auth",
+  "error_unreachable",
+  "error_auth"
+]
+
+const makeConnectionUxState = ({
+  uxState,
+  mode = uxState === "demo_mode" ? "demo" : "normal",
+  errorKind = uxState === "error_auth"
+    ? "auth"
+    : uxState === "error_unreachable"
+      ? "unreachable"
+      : uxState === "connected_degraded"
+        ? "partial"
+        : "none",
+  configStep = uxState === "configuring_url"
+    ? "url"
+    : uxState === "configuring_auth"
+      ? "auth"
+      : "none",
+  hasCompletedFirstRun = true
+}: {
+  uxState: ConnectionUxState
+  mode?: ConnectionState["mode"]
+  errorKind?: ConnectionState["errorKind"]
+  configStep?: ConnectionState["configStep"]
+  hasCompletedFirstRun?: boolean
+}): ConnectionUxHookState => ({
+  uxState,
+  mode,
+  errorKind,
+  configStep,
+  hasCompletedFirstRun,
+  isConnectedUx: connectedUxStates.includes(uxState),
+  isChecking: uxState === "testing",
+  isConfigOrError: configOrErrorUxStates.includes(uxState)
+})
+
+const statusDotCases = [
+  [
+    "connected",
+    makeConnectionUxState({ uxState: "connected_ok" }),
+    "ready",
+    "success",
+    "Connected to your tldw server"
+  ],
+  [
+    "degraded connection",
+    makeConnectionUxState({ uxState: "connected_degraded" }),
+    "degraded",
+    "warning",
+    "Connected to your tldw server"
+  ],
+  [
+    "checking",
+    makeConnectionUxState({ uxState: "testing" }),
+    "retrying",
+    "info",
+    "Checking connection to your tldw server…"
+  ],
+  [
+    "demo",
+    makeConnectionUxState({ uxState: "demo_mode" }),
+    "ready",
+    "demo",
+    "Demo mode: explore with a sample workspace."
+  ],
+  [
+    "unconfigured setup",
+    makeConnectionUxState({ uxState: "unconfigured" }),
+    "setup_required",
+    "warning",
+    "Not connected. Open Settings to configure."
+  ],
+  [
+    "configuring auth setup",
+    makeConnectionUxState({ uxState: "configuring_auth" }),
+    "setup_required",
+    "warning",
+    "Not connected. Open Settings to configure."
+  ],
+  [
+    "auth error",
+    makeConnectionUxState({ uxState: "error_auth" }),
+    "auth_required",
+    "warning",
+    "Not connected. Open Settings to configure."
+  ],
+  [
+    "unreachable error",
+    makeConnectionUxState({ uxState: "error_unreachable" }),
+    "unavailable",
+    "danger",
+    "Connection failed. Click to retry."
+  ]
+] satisfies Array<[
+  string,
+  ConnectionUxHookState,
+  DesignSystemStateKey,
+  string,
+  string
+]>
+
 describe("Chat status design-system badges", () => {
   beforeEach(() => {
-    connectionState.ux = {
-      uxState: "connected",
-      mode: "full",
-      isConnectedUx: true,
-      isChecking: false,
-      isConfigOrError: false
-    }
+    connectionState.ux = makeConnectionUxState({ uxState: "connected_ok" })
     connectionState.checkOnce.mockReset()
     notificationMock.warning.mockReset()
     vi.clearAllMocks()
   })
 
-  it.each([
-    [
-      "connected",
-      {
-        uxState: "connected",
-        mode: "full",
-        isConnectedUx: true,
-        isChecking: false,
-        isConfigOrError: false
-      },
-      "ready",
-      "success",
-      "Connected to your tldw server"
-    ],
-    [
-      "checking",
-      {
-        uxState: "checking",
-        mode: "full",
-        isConnectedUx: false,
-        isChecking: true,
-        isConfigOrError: false
-      },
-      "retrying",
-      "info",
-      "Checking connection to your tldw server…"
-    ],
-    [
-      "demo",
-      {
-        uxState: "connected",
-        mode: "demo",
-        isConnectedUx: true,
-        isChecking: false,
-        isConfigOrError: false
-      },
-      "ready",
-      "demo",
-      "Demo mode: explore with a sample workspace."
-    ],
-    [
-      "setup issue",
-      {
-        uxState: "error_config",
-        mode: "full",
-        isConnectedUx: false,
-        isChecking: false,
-        isConfigOrError: true
-      },
-      "setup_required",
-      "warning",
-      "Not connected. Open Settings to configure."
-    ],
-    [
-      "retryable failure",
-      {
-        uxState: "failed",
-        mode: "full",
-        isConnectedUx: false,
-        isChecking: false,
-        isConfigOrError: false
-      },
-      "unavailable",
-      "danger",
-      "Connection failed. Click to retry."
-    ]
-  ])(
+  it.each(statusDotCases)(
     "renders %s connection status through the design-system state registry",
     (_label, uxState, stateKey, variant, accessibleName) => {
       connectionState.ux = uxState
@@ -152,13 +210,7 @@ describe("Chat status design-system badges", () => {
   )
 
   it("preserves retry behavior for retryable connection failures", () => {
-    connectionState.ux = {
-      uxState: "failed",
-      mode: "full",
-      isConnectedUx: false,
-      isChecking: false,
-      isConfigOrError: false
-    }
+    connectionState.ux = makeConnectionUxState({ uxState: "error_unreachable" })
 
     render(<StatusDot />)
 
@@ -172,13 +224,7 @@ describe("Chat status design-system badges", () => {
   })
 
   it("disables retry while checking the connection", () => {
-    connectionState.ux = {
-      uxState: "checking",
-      mode: "full",
-      isConnectedUx: false,
-      isChecking: true,
-      isConfigOrError: false
-    }
+    connectionState.ux = makeConnectionUxState({ uxState: "testing" })
 
     render(<StatusDot />)
 
@@ -215,13 +261,7 @@ describe("Chat status design-system badges", () => {
   })
 
   it("keeps configured-but-unavailable status colors aligned with the Badge variant", () => {
-    connectionState.ux = {
-      uxState: "error_config",
-      mode: "full",
-      isConnectedUx: false,
-      isChecking: false,
-      isConfigOrError: true
-    }
+    connectionState.ux = makeConnectionUxState({ uxState: "configuring_url" })
 
     render(<StatusDot />)
 
