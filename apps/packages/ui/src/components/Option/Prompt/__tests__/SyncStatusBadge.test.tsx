@@ -77,6 +77,19 @@ describe("SyncStatusBadge", () => {
     expect(badge).toHaveAttribute("data-ds-variant", "secondary")
   })
 
+  it("does not resolve design-system badge state for compact icon-only badges", () => {
+    const { container } = render(
+      <SyncStatusBadge
+        syncStatus="pending"
+        sourceSystem="workspace"
+        compact
+      />
+    )
+
+    expect(getDesignSystemState).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-ds-component="Badge"]')).toBeNull()
+  })
+
   it("invokes onClick when rendered as compact interactive badge", async () => {
     const user = userEvent.setup()
     const onClick = vi.fn()

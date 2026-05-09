@@ -139,6 +139,62 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("allows status-badge adapters that render Badge inside returned map callbacks", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge({ items }) {
+          const state = getDesignSystemState("ready")
+
+          return (
+            <div>
+              {items.map((item) => (
+                <Badge key={item.id} variant="success">{state.label}</Badge>
+              ))}
+            </div>
+          )
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+  })
+
+  it("still flags status-badge adapters when Badge appears only in an event handler", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge() {
+          const state = getDesignSystemState("ready")
+
+          return (
+            <button onClick={() => <Badge variant="success">{state.label}</Badge>}>
+              Ready
+            </button>
+          )
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+  })
+
   it("still flags status-badge adapters that return Badge without state registry mapping", () => {
     const findings = analyze(
       "src/components/Common/StatusBadge.tsx",

@@ -854,6 +854,9 @@ function returnedExpressionContainsJsxTag(expression, localNames) {
     }
 
     if (node !== unwrapped && isFunctionLikeNode(node)) {
+      if (isReturnedCollectionRenderCallback(node)) {
+        ts.forEachChild(node, visit)
+      }
       return
     }
 
@@ -878,6 +881,23 @@ function returnedExpressionContainsJsxTag(expression, localNames) {
 
   visit(unwrapped)
   return found
+}
+
+function isReturnedCollectionRenderCallback(functionNode) {
+  const parent = functionNode.parent
+
+  if (!parent || !ts.isCallExpression(parent)) {
+    return false
+  }
+
+  const isArgument = parent.arguments.some(
+    (argument) => argument === functionNode
+  )
+  if (!isArgument || !ts.isPropertyAccessExpression(parent.expression)) {
+    return false
+  }
+
+  return parent.expression.name.text === "map"
 }
 
 function unwrapReturnedExpression(expression) {

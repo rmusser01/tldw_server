@@ -109,8 +109,6 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
 
   const statusConfig = getStatusConfig()
   const sourceConfig = getSourceConfig()
-  const state = getDesignSystemState(statusConfig.stateKey)
-  const badgeVariant = getBadgeVariantForDesignSystemSeverity(state.severity)
   const showRetry = syncStatus === "pending" && typeof onRetry === "function"
 
   const retryButton = showRetry ? (
@@ -158,6 +156,9 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
       </Tooltip>
     )
   }
+
+  const state = getDesignSystemState(statusConfig.stateKey)
+  const badgeVariant = getBadgeVariantForDesignSystemSeverity(state.severity)
 
   return (
     <div className="inline-flex items-center gap-1">
