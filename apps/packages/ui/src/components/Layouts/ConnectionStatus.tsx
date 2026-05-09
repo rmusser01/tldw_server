@@ -3,13 +3,40 @@ import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { ConnectionPhase } from "@/types/connection"
-import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import {
+  getDesignSystemState,
+  type DesignSystemSeverity,
+  type DesignSystemStateKey
+} from "@/design-system"
 import {
   Badge,
   getBadgeVariantForDesignSystemSeverity
 } from "@/components/ui/primitives"
 
 type StatusKind = "unknown" | "ok" | "fail"
+
+const SEVERITY_STYLES = {
+  success: {
+    bg: "border-success/30 bg-success/10",
+    text: "text-success"
+  },
+  error: {
+    bg: "border-danger/30 bg-danger/10",
+    text: "text-danger"
+  },
+  warning: {
+    bg: "border-warn/30 bg-warn/10",
+    text: "text-warn"
+  },
+  info: {
+    bg: "border-primary/30 bg-primary/10",
+    text: "text-primary"
+  },
+  neutral: {
+    bg: "border-border bg-surface2",
+    text: "text-text-muted"
+  }
+} satisfies Record<DesignSystemSeverity, { bg: string; text: string }>
 
 interface ConnectionStatusProps {
   /** Custom click handler (defaults to navigating to /settings/health) */
@@ -82,21 +109,9 @@ export function ConnectionStatus({
     }
   }
 
-  const statusBgClass = {
-    success: "border-success/30 bg-success/10",
-    error: "border-danger/30 bg-danger/10",
-    warning: "border-warn/30 bg-warn/10",
-    info: "border-primary/30 bg-primary/10",
-    neutral: "border-border bg-surface2"
-  }[coreState.severity]
-
-  const statusTextClass = {
-    success: "text-success",
-    error: "text-danger",
-    warning: "text-warn",
-    info: "text-primary",
-    neutral: "text-text-muted"
-  }[coreState.severity]
+  const severityStyles = SEVERITY_STYLES[coreState.severity]
+  const statusBgClass = severityStyles.bg
+  const statusTextClass = severityStyles.text
 
   return (
     <button
