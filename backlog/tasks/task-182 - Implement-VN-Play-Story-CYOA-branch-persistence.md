@@ -1,10 +1,10 @@
 ---
 id: TASK-182
 title: Implement VN Play Story/CYOA branch persistence
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 19:24'
-updated_date: '2026-05-09 20:17'
+updated_date: '2026-05-09 20:19'
 labels:
   - vn-play
   - story-mode
@@ -32,7 +32,7 @@ Implement issue #1434 using the reviewed design spec and implementation plan. Pe
 - [x] #2 Accepted Story choices atomically create a branch row, append turn_started and choice_selected, update the turn request, and persist scene state with active_branch_node_id set and visible_choices cleared before adapter/model work.
 - [x] #3 Story retry-last-turn only retries failed model/parse/abandoned attempts using the failed turn request input_event_id and does not append duplicate choice_selected or create a new branch.
 - [x] #4 VN Play API tests and docs cover Story choice branch behavior, branch_path list shape, invalid_choice_id, choice_not_allowed, retry_last_turn_not_failed, and failure-only retry semantics.
-- [ ] #5 Focused VN Play tests, Bandit on touched backend scope, and diff hygiene are run and recorded.
+- [x] #5 Focused VN Play tests, Bandit on touched backend scope, and diff hygiene are run and recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -45,14 +45,24 @@ Task 2 complete after review fix: wired Story choice validation into submit_turn
 Task 3 complete: rewrote retry_last_turn to create a new retry turn request from the latest retryable input-bearing failed request, reuse the original input_event_id, avoid appending duplicate user_turn/choice_selected events, and keep Story branch rows unchanged during retry. Added retry regression coverage for failed Story choices and completed Story choices. Verification: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q passed with 22 passed, 5 warnings; Bandit wrote /tmp/bandit_vn_play_story_retry_task3_after_wrap.json with zero findings; git diff --check was clean. Commit: f44612490.
 
 Task 4 complete: added API-level coverage for Story choice branch state in turn responses, invalid_choice_id on unknown Story choices, retry_last_turn_not_failed after completed Story turns, and branch_path list shape from GET /branches. Updated Docs/API-related/VN_PLAY_API.md with Story choice validation, non-branching Story custom_action, choice_selected payload, branch_path list shape, stable Story errors, and failure-only retry semantics. Endpoint code did not need changes because generic VNPlayTurnError already maps to HTTP 400 and conflict/model failures remain separately mapped. Verification: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q passed with 23 passed, 5 warnings; git diff --check was clean. Commit: cdda06011.
+
+Task 5 closeout verification complete: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q passed with 59 passed, 5 warnings; Bandit wrote /tmp/bandit_vn_play_story_branch.json with zero findings across VNPlay_DB.py, service.py, constants.py, and vn_play.py; git diff --check was clean. Known skips/blockers: none.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+Implemented server-authoritative VN Play Story/CYOA branch persistence for issue #1434. The backend now validates Story choices against persisted visible choices, records accepted choices atomically as branch metadata plus turn_started/choice_selected events before model work, persists active_branch_node_id/cleared visible choices in scene state, and keeps Story custom_action non-branching. Retry-last-turn is now failure-only and rebuilds model context from the failed request's stored input_event_id, so failed Story choice retries reuse the original branch instead of appending duplicate choice_selected events or creating branch duplicates.
+
+Added focused repository, service, state, and API coverage for valid/invalid Story choices, branch path list shape, pre-model scene state, mode validation, retry semantics, and endpoint-visible errors. Updated Docs/API-related/VN_PLAY_API.md to document choice validation, choice_selected payloads, branch_path shape, Story error codes, and failure-only retry behavior.
+
+Verification: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q passed with 59 passed, 5 warnings. Bandit on VNPlay_DB.py, service.py, constants.py, and vn_play.py wrote /tmp/bandit_vn_play_story_branch.json with zero findings. git diff --check was clean. Known skips/blockers: none.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

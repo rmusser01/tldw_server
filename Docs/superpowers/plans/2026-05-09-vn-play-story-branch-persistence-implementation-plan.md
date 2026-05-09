@@ -645,7 +645,7 @@ git commit -m "Document VN Play story branch API behavior"
 - Modify: Backlog task for the implementation work.
 - No runtime files unless verification finds a defect.
 
-- [ ] **Step 1: Run full focused VN Play tests**
+- [x] **Step 1: Run full focused VN Play tests**
 
 Run:
 
@@ -661,7 +661,7 @@ python -m pytest \
 
 Expected: all focused VN Play tests pass.
 
-- [ ] **Step 2: Run Bandit on touched backend scope**
+- [x] **Step 2: Run Bandit on touched backend scope**
 
 Run:
 
@@ -678,7 +678,7 @@ python -m bandit \
 
 Expected: no new findings in touched code. If existing baseline findings appear, inspect and document whether they are pre-existing or introduced.
 
-- [ ] **Step 3: Run diff hygiene**
+- [x] **Step 3: Run diff hygiene**
 
 Run:
 
@@ -688,7 +688,7 @@ git diff --check
 
 Expected: no whitespace or conflict-marker issues.
 
-- [ ] **Step 4: Update implementation Backlog task**
+- [x] **Step 4: Update implementation Backlog task**
 
 Record:
 
@@ -697,7 +697,7 @@ Record:
 - Any known skips or blockers.
 - Final summary with what changed and why.
 
-- [ ] **Step 5: Final commit**
+- [x] **Step 5: Final commit**
 
 Run:
 
