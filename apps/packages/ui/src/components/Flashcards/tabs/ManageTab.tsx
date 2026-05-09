@@ -23,8 +23,6 @@ import {
   Typography
 } from "antd"
 import { Filter, Plus, LayoutList, List as ListIcon, Keyboard, Check, CheckCheck } from "lucide-react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -66,6 +64,11 @@ import {
   getDeckDescendantIds
 } from "../utils/deck-display"
 import {
+  formatFlashcardAbsoluteDateTime,
+  formatFlashcardRelativeTime,
+  isFlashcardTimestampBefore
+} from "../utils/date-display"
+import {
   formatFlashcardsUiErrorMessage,
   mapFlashcardsUiError
 } from "../utils/error-taxonomy"
@@ -80,8 +83,6 @@ import {
   type Flashcard,
   type FlashcardUpdate
 } from "@/services/flashcards"
-
-dayjs.extend(relativeTime)
 
 const { Text } = Typography
 
@@ -2047,6 +2048,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             const compactSchedule = compactSchedulingLabels(item)
             const expandedSchedule = expandedSchedulingLabels(item)
             const sourceMeta = getFlashcardSourceMeta(item)
+            const dueRelativeLabel = item.due_at
+              ? formatFlashcardRelativeTime(item.due_at)
+              : null
+            const dueAbsoluteLabel = item.due_at
+              ? formatFlashcardAbsoluteDateTime(item.due_at)
+              : null
+            const isDue = item.due_at
+              ? isFlashcardTimestampBefore(item.due_at)
+              : false
             return (
             <List.Item
               data-testid={`flashcard-item-${item.uuid}`}
@@ -2088,7 +2098,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   title={
                     <div className="flex items-center gap-2">
                       {/* Due status indicator */}
-                      {item.due_at && dayjs(item.due_at).isBefore(dayjs()) && (
+                      {isDue && (
                         <Tooltip title={t("option:flashcards.dueNow", { defaultValue: "Due now" })}>
                           <span className="inline-block w-2 h-2 rounded-full bg-success" />
                         </Tooltip>
@@ -2112,7 +2122,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         )}
                         {item.due_at && (
                           <span className="text-text-subtle">
-                            {dayjs(item.due_at).fromNow()}
+                            {dueRelativeLabel ?? item.due_at}
                           </span>
                         )}
                         {sourceMeta && (
@@ -2229,8 +2239,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         {item.due_at && (
                           <Tag color="green">
                             {t("option:flashcards.due", { defaultValue: "Due" })}:{" "}
-                            {dayjs(item.due_at).fromNow()} (
-                            {dayjs(item.due_at).format("YYYY-MM-DD HH:mm")})
+                            {dueRelativeLabel ?? item.due_at} (
+                            {dueAbsoluteLabel ?? item.due_at})
                           </Tag>
                         )}
                         <Tooltip

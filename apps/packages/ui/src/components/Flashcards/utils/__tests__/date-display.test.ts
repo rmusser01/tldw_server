@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
   formatFlashcardAbsoluteDateTime,
+  formatFlashcardLongDateTime,
   formatFlashcardRelativeTime,
   formatFlashcardTimestampWithRelative,
+  isFlashcardTimestampBefore,
   parseFlashcardTimestamp
 } from "../date-display"
 
@@ -15,6 +17,14 @@ describe("flashcard date display utilities", () => {
     const value = new Date(2026, 1, 20, 9, 5).toISOString()
 
     expect(formatFlashcardAbsoluteDateTime(value)).toBe("2026-02-20 09:05")
+  })
+
+  it("formats long local absolute timestamps for next-due labels", () => {
+    const value = new Date(2026, 1, 18, 9, 5).toISOString()
+
+    expect(formatFlashcardLongDateTime(value, { locale: "en-US" })).toBe(
+      "Wednesday, February 18 at 9:05 AM"
+    )
   })
 
   it.each([
@@ -90,5 +100,14 @@ describe("flashcard date display utilities", () => {
       relative: "a day ago",
       timestamp
     })
+  })
+
+  it.each([
+    [new Date(2026, 1, 18, 11, 59).toISOString(), true],
+    [new Date(2026, 1, 18, 12, 0).toISOString(), false],
+    [new Date(2026, 1, 18, 12, 1).toISOString(), false],
+    ["invalid-date", false]
+  ])("checks whether %s is before the reference time", (value, expected) => {
+    expect(isFlashcardTimestampBefore(value, STABLE_NOW_MS)).toBe(expected)
   })
 })

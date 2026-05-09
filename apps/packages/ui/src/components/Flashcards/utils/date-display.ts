@@ -6,6 +6,9 @@ const HOURS_TO_MS = 60 * MINUTES_TO_MS
 const DAYS_TO_MS = 24 * HOURS_TO_MS
 const MONTHS_TO_MS = 30 * DAYS_TO_MS
 const YEARS_TO_MS = 365 * DAYS_TO_MS
+type FlashcardLongDateTimeOptions = {
+  locale?: string | string[]
+}
 
 export interface FlashcardTimestampDisplay {
   absolute: string
@@ -49,6 +52,41 @@ const formatFlashcardAbsoluteDateTimeFromMs = (timestamp: number): string => {
 export const formatFlashcardAbsoluteDateTime = (value: unknown): string | null => {
   const timestamp = parseFlashcardTimestamp(value)
   return timestamp == null ? null : formatFlashcardAbsoluteDateTimeFromMs(timestamp)
+}
+
+const formatFlashcardLongDateTimeFromMs = (
+  timestamp: number,
+  options?: FlashcardLongDateTimeOptions
+): string => {
+  return new Intl.DateTimeFormat(options?.locale, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(timestamp))
+}
+
+export const formatFlashcardLongDateTime = (
+  value: unknown,
+  options?: FlashcardLongDateTimeOptions
+): string | null => {
+  const timestamp = parseFlashcardTimestamp(value)
+  return timestamp == null ? null : formatFlashcardLongDateTimeFromMs(timestamp, options)
+}
+
+export const isFlashcardTimestampBefore = (
+  value: unknown,
+  referenceMs?: number
+): boolean => {
+  const timestamp = parseFlashcardTimestamp(value)
+  if (timestamp == null) return false
+  const reference =
+    typeof referenceMs === "number" && Number.isFinite(referenceMs)
+      ? referenceMs
+      : Date.now()
+
+  return timestamp < reference
 }
 
 const formatFlashcardRelativeTimeFromMs = (

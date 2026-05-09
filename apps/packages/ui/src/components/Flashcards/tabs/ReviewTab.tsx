@@ -14,8 +14,6 @@ import {
   Typography
 } from "antd"
 import { X, Minus, Check, Star, Calendar, Undo2 } from "lucide-react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -51,6 +49,10 @@ import {
 } from "../components"
 import { RecentStudySessions } from "../components/RecentStudySessions"
 import { calculateIntervals } from "../utils/calculateIntervals"
+import {
+  formatFlashcardLongDateTime,
+  formatFlashcardRelativeTime
+} from "../utils/date-display"
 import { formatCardType } from "../utils/model-type-labels"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
 import { buildReviewUndoState } from "../utils/review-undo"
@@ -71,8 +73,6 @@ import {
 } from "@/services/studySuggestions"
 import { buildQuizAssessmentRouteFromFlashcards } from "@/services/tldw/quiz-flashcards-handoff"
 import { useFlashcardsShortcutHintDensity } from "../hooks/useFlashcardsShortcutHintDensity"
-
-dayjs.extend(relativeTime)
 
 const { Text, Title } = Typography
 
@@ -213,6 +213,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
   const nextDueInfo = nextDueQuery.data
+  const nextDueRelativeLabel = nextDueInfo?.nextDueAt
+    ? formatFlashcardRelativeTime(nextDueInfo.nextDueAt)
+    : null
+  const nextDueAbsoluteLabel = nextDueInfo?.nextDueAt
+    ? formatFlashcardLongDateTime(nextDueInfo.nextDueAt)
+    : null
   const cramQueue = cramQueueQuery.data || []
   const cramQueueCard =
     reviewMode === "cram" && cramQueueIndex < cramQueue.length
@@ -543,11 +549,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           }
         }, 10000) // 10 second undo window
 
-        const dueLabel = reviewResult.due_at
-          ? dayjs(reviewResult.due_at).fromNow()
-          : t("option:flashcards.nextReviewUnknown", {
-              defaultValue: "soon"
-            })
+        const dueLabel =
+          (reviewResult.due_at
+            ? formatFlashcardRelativeTime(reviewResult.due_at)
+            : null) ??
+          t("option:flashcards.nextReviewUnknown", {
+            defaultValue: "soon"
+          })
         const intervalLabel =
           reviewResult.interval_days === 1
             ? t("option:flashcards.intervalOneDay", { defaultValue: "1 day" })
@@ -1689,12 +1697,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                             <Text strong>
                               {t("option:flashcards.nextDueAt", {
                                 defaultValue: "Next review: {{time}}",
-                                time: dayjs(nextDueInfo.nextDueAt).fromNow()
+                                time: nextDueRelativeLabel ?? nextDueInfo.nextDueAt
                               })}
                             </Text>
                           </div>
                           <Text type="secondary" className="text-xs mt-1 block">
-                            {dayjs(nextDueInfo.nextDueAt).format("dddd, MMMM D [at] h:mm A")}
+                            {nextDueAbsoluteLabel ?? nextDueInfo.nextDueAt}
                             {" · "}
                             {t("option:flashcards.nextDueCardCount", {
                               defaultValue: "{{count}} cards due",
