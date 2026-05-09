@@ -739,7 +739,7 @@ git commit -m "feat: persist persona visual packs"
 - Modify: `tldw_Server_API/app/core/Persona/visuals.py`
 - Test: `tldw_Server_API/tests/Persona/test_persona_visuals_core.py`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Add tests for:
 
@@ -772,7 +772,7 @@ def test_service_deactivate_reverts_to_derived_buddy(tmp_path: Path) -> None:
 
 Use `tmp_path` and monkeypatch `DatabasePaths.get_user_persona_visuals_dir` if needed.
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -782,7 +782,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test
 
 Expected: FAIL because `PersonaVisualService` does not exist.
 
-- [ ] **Step 3: Implement service constants and exceptions**
+- [x] **Step 3: Implement service constants and exceptions**
 
 In `visual_service.py`:
 
@@ -805,7 +805,7 @@ class PersonaVisualServiceError(RuntimeError):
         self.detail = detail or code
 ```
 
-- [ ] **Step 4: Implement service methods**
+- [x] **Step 4: Implement service methods**
 
 Add:
 
@@ -830,7 +830,7 @@ Implementation notes:
 - Sanitize persona and pack path components; never trust user-supplied filename as a path.
 - Ensure `add_uploaded_asset` verifies the pack belongs to `persona_id` and `user_id` before writing bytes.
 
-- [ ] **Step 5: Run service tests**
+- [x] **Step 5: Run service tests**
 
 Run:
 
@@ -840,7 +840,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
