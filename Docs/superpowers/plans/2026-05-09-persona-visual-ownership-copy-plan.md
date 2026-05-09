@@ -30,18 +30,18 @@
 
 **Tests:** `VisualPackEditor.test.tsx` copy assertion.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Add a failing test in `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx` that renders an active pack and expects:
+- [x] Add a failing test in `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx` that renders an active pack and expects:
   - `Assets are user-owned`
   - `attached to Garden Helper by default`
   - `stored as manifests`
   - `The active pack is the one Persona Buddy renders now`
-- [ ] Run:
+- [x] Run:
   `./node_modules/.bin/vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "explains visual pack ownership"`
   Expected: FAIL because the copy does not exist yet.
-- [ ] Update `VisualPackEditor.tsx` near the pack header/selector with the compact ownership help block.
-- [ ] Re-run the focused test.
+- [x] Update `VisualPackEditor.tsx` near the pack header/selector with the compact ownership help block.
+- [x] Re-run the focused test.
   Expected: PASS.
 
 ## Stage 2: Import/Export And Review Copy
@@ -52,18 +52,18 @@
 
 **Tests:** `VisualPackEditor.test.tsx` copy assertion.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Add a failing test in `VisualPackEditor.test.tsx` that expects visible helper copy for:
+- [x] Add a failing test in `VisualPackEditor.test.tsx` that expects visible helper copy for:
   - import preview validates a portable archive before changing this persona
   - commit import creates or updates a reviewed pack
   - export downloads a portable archive and does not publish to a shared library
   - generated candidates stay in review until accepted
-- [ ] Run:
+- [x] Run:
   `./node_modules/.bin/vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "clarifies import export and generated candidate review"`
   Expected: FAIL because the copy does not exist yet.
-- [ ] Add the helper copy to the existing import/export/generated-candidate sections in `VisualPackEditor.tsx`.
-- [ ] Re-run the focused test.
+- [x] Add the helper copy to the existing import/export/generated-candidate sections in `VisualPackEditor.tsx`.
+- [x] Re-run the focused test.
   Expected: PASS.
 
 ## Stage 3: Documentation
@@ -74,9 +74,9 @@
 
 **Tests:** docs grep check.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Create `Docs/Code_Documentation/Persona_Visual_Packs.md` with sections:
+- [x] Create `Docs/Code_Documentation/Persona_Visual_Packs.md` with sections:
   - Ownership model
   - Active versus available packs
   - Manifest-backed pack format
@@ -84,7 +84,7 @@
   - Generated candidates and review
   - Export archives and future portability
   - Scope: Persona/Buddy, not VN/CYOA
-- [ ] Run:
+- [x] Run:
   `rg -n "user-owned|attached to one persona|manifest|active pack|import preview|generated candidates|not VN|CYOA" Docs/Code_Documentation/Persona_Visual_Packs.md`
   Expected: all required phrases are present.
 
@@ -96,15 +96,15 @@
 
 **Tests:** Focused Vitest, docs grep, diff hygiene. Bandit is not required if only docs and TSX copy/tests are touched; record the skip reason.
 
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] Run focused Vitest:
+- [x] Run focused Vitest:
   `./node_modules/.bin/vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
-- [ ] Run docs grep:
+- [x] Run docs grep:
   `rg -n "user-owned|attached to one persona|manifest|active pack|import preview|generated candidates|not VN|CYOA" Docs/Code_Documentation/Persona_Visual_Packs.md`
-- [ ] Run diff hygiene:
+- [x] Run diff hygiene:
   `git diff --check`
-- [ ] Update TASK-189 acceptance criteria, notes, verification, and final summary.
+- [x] Update TASK-189 acceptance criteria, notes, verification, and final summary.
 - [ ] Commit with:
   `git commit -m "docs: clarify persona visual pack ownership"`
 - [ ] Push and open a PR against `dev` linked to #1429.

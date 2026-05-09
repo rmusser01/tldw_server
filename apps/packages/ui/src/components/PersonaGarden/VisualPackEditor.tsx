@@ -1355,6 +1355,27 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             <span className="text-text-muted">{`v${selectedPack.version ?? 1}`}</span>
           </div>
         ) : null}
+        {selectedPack ? (
+          <div
+            data-testid="persona-visual-ownership-copy"
+            className="mt-3 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
+          >
+            <div className="font-medium text-text">
+              How Persona Visual packs work
+            </div>
+            <div className="mt-1">
+              Assets are user-owned and attached to{" "}
+              {selectedPersonaName || selectedPersonaId} by default. Packs are
+              stored as manifests with referenced assets, so they can be edited,
+              exported, imported, and later duplicated or shared without changing
+              the core format.
+            </div>
+            <div className="mt-1">
+              The active pack is the one Persona Buddy renders now; other packs
+              stay available for editing or review.
+            </div>
+          </div>
+        ) : null}
         {packHealthDiagnostic ? (
           <div
             data-testid="persona-visual-pack-health"
@@ -1443,6 +1464,22 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           <div className="rounded-lg border border-border bg-surface p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
               Portability
+            </div>
+            <div
+              data-testid="persona-visual-portability-copy"
+              className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
+            >
+              <div>
+                Import preview validates a portable pack archive before it changes
+                this persona.
+              </div>
+              <div>
+                Commit import creates or updates a reviewed pack for this persona.
+              </div>
+              <div>
+                Export downloads a portable archive and does not publish to a shared
+                library.
+              </div>
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
               <div className="rounded border border-border bg-bg p-2">
@@ -2051,6 +2088,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               <Button size="small" onClick={() => void loadCandidates()}>
                 {candidatesLoading ? loadingLabel : refreshLabel}
               </Button>
+            </div>
+            <div
+              data-testid="persona-visual-generation-review-copy"
+              className="mt-2 text-xs leading-5 text-text-muted"
+            >
+              Generated candidates stay in review until accepted. Accepting a
+              candidate updates this pack's manifest and assets; activation remains
+              the explicit pack-level action.
             </div>
             <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_minmax(120px,160px)_auto]">
               <label className="text-xs text-text-muted">

@@ -269,6 +269,121 @@ describe("VisualPackEditor", () => {
     expect(health).toHaveClass("text-danger")
   })
 
+  it("explains visual pack ownership and active pack semantics", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const ownership = await screen.findByTestId("persona-visual-ownership-copy")
+    expect(ownership).toHaveTextContent("Assets are user-owned")
+    expect(ownership).toHaveTextContent("attached to Garden Helper by default")
+    expect(ownership).toHaveTextContent("stored as manifests")
+    expect(ownership).toHaveTextContent(
+      "The active pack is the one Persona Buddy renders now"
+    )
+  })
+
+  it("clarifies import export and generated candidate review semantics", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const portability = await screen.findByTestId("persona-visual-portability-copy")
+    expect(portability).toHaveTextContent(
+      "Import preview validates a portable pack archive before it changes this persona"
+    )
+    expect(portability).toHaveTextContent(
+      "Commit import creates or updates a reviewed pack"
+    )
+    expect(portability).toHaveTextContent(
+      "Export downloads a portable archive and does not publish to a shared library"
+    )
+
+    expect(screen.getByTestId("persona-visual-generation-review-copy")).toHaveTextContent(
+      "Generated candidates stay in review until accepted"
+    )
+  })
+
   it("loads pack list, creates a draft pack, and uploads the selected asset role", async () => {
     let packs: any[] = []
     const uploadedAssets: any[] = []
