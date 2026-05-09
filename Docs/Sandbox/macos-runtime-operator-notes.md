@@ -413,6 +413,22 @@ helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
 same-session VM reuse, verifies recovery diagnostics plus dry-run
 reconciliation repair planning, and stops the helper on exit.
 
+Manual failure drills are opt-in and remain disabled for default smoke and
+scheduled host-gated runs. To include them, pass:
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
+  --bundle /path/to/canonical/bundle \
+  --entitlements /path/to/helper.entitlements \
+  --include-failure-drills
+```
+
+The manual drills currently cover a drill-owned stale session VM after
+helper-side VM termination and stale session-control VM state after the smoke
+harness stops and restarts its helper process through a private restart lease.
+They do not cover host reboot, launchd bootstrap/load behavior, broad helper
+crash classes, networking changes, or destructive repair generalization.
+
 The recovery smoke is non-destructive. It seeds an isolated test-store stale VZ
 session-control row, verifies `/api/v1/sandbox/admin/macos-diagnostics` style
 reconciliation and `recovery_summary` output through the service layer, then

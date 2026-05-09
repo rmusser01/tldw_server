@@ -105,9 +105,10 @@ session controls, or run image-store cleanup.
 Manual failure drills are separate from the default smoke. When a maintainer
 starts the workflow with `include_failure_drills=true`, the delegated smoke
 script runs additional tests that may invalidate VMs created by those tests. The
-current drill terminates only the session VM recorded by the drill's own
-session-control row, then verifies the next same-session command provisions a
-fresh VM and completes. Scheduled runs must not enable these drills by default.
+current drills terminate only the session VM recorded by the drill's own
+session-control row and restart only the helper process owned by the smoke
+harness restart lease. They then verify the next same-session command provisions
+a fresh VM and completes. Scheduled runs must not enable these drills by default.
 
 ## Expected Skips And Non-Blocking Conditions
 
@@ -142,6 +143,9 @@ prepared host and fails one of the accepted runtime guarantees:
   helper/template readiness passes
 - a manually requested failure drill cannot replace a drill-owned stale session
   VM after helper-side termination
+- a manually requested helper restart drill cannot replace stale session-control
+  VM state after the helper process is stopped and restarted through the smoke
+  harness restart lease
 - cleanup leaves the helper process or accepted socket path behind
 - helper protocol mismatch is introduced without a matching compatibility plan
 - artifacts/logs are not uploaded when the job fails
