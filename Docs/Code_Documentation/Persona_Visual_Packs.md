@@ -52,8 +52,8 @@ Import is staged:
    persona.
 2. The preview reports bundle metadata, warnings, conflicts, and the proposed
    commit plan.
-3. Commit import creates or updates a reviewed pack for the persona after the
-   preview succeeds.
+3. Commit import creates a reviewed draft pack for the persona after the preview
+   succeeds.
 
 Committed imports remain reviewable and do not automatically activate. Users
 still choose when a valid pack should become the active pack.

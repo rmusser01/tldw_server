@@ -263,8 +263,10 @@ describe("VisualPackEditor", () => {
     )
 
     const health = await screen.findByTestId("persona-visual-pack-health")
-    expect(health).toHaveTextContent("Visual asset is missing")
-    expect(health).toHaveTextContent("asset-b")
+    await waitFor(() => {
+      expect(health).toHaveTextContent("Visual asset is missing")
+      expect(health).toHaveTextContent("asset-b")
+    })
     expect(health).toHaveClass("border-danger/30")
     expect(health).toHaveClass("text-danger")
   })
@@ -373,7 +375,7 @@ describe("VisualPackEditor", () => {
       "Import preview validates a portable pack archive before it changes this persona"
     )
     expect(portability).toHaveTextContent(
-      "Commit import creates or updates a reviewed pack"
+      "Commit import creates a reviewed draft pack"
     )
     expect(portability).toHaveTextContent(
       "Export downloads a portable archive and does not publish to a shared library"

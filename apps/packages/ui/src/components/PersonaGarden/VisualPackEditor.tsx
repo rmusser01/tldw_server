@@ -1361,18 +1361,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             className="mt-3 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
           >
             <div className="font-medium text-text">
-              How Persona Visual packs work
+              {t("sidepanel:personaGarden.visuals.ownershipTitle", {
+                defaultValue: "How Persona Visual packs work"
+              })}
             </div>
             <div className="mt-1">
-              Assets are user-owned and attached to{" "}
-              {selectedPersonaName || selectedPersonaId} by default. Packs are
-              stored as manifests with referenced assets, so they can be edited,
-              exported, imported, and later duplicated or shared without changing
-              the core format.
+              {t("sidepanel:personaGarden.visuals.ownershipDescription", {
+                defaultValue: `Assets are user-owned and attached to ${selectedPersonaName || selectedPersonaId} by default. Packs are stored as manifests with referenced assets, so they can be edited, exported, imported, and later duplicated or shared without changing the core format.`
+              })}
             </div>
             <div className="mt-1">
-              The active pack is the one Persona Buddy renders now; other packs
-              stay available for editing or review.
+              {t("sidepanel:personaGarden.visuals.activePackDescription", {
+                defaultValue:
+                  "The active pack is the one Persona Buddy renders now; other packs stay available for editing or review."
+              })}
             </div>
           </div>
         ) : null}
@@ -1470,15 +1472,22 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
             >
               <div>
-                Import preview validates a portable pack archive before it changes
-                this persona.
+                {t("sidepanel:personaGarden.visuals.importPreviewHelp", {
+                  defaultValue:
+                    "Import preview validates a portable pack archive before it changes this persona."
+                })}
               </div>
               <div>
-                Commit import creates or updates a reviewed pack for this persona.
+                {t("sidepanel:personaGarden.visuals.importCommitHelp", {
+                  defaultValue:
+                    "Commit import creates a reviewed draft pack for this persona."
+                })}
               </div>
               <div>
-                Export downloads a portable archive and does not publish to a shared
-                library.
+                {t("sidepanel:personaGarden.visuals.exportHelp", {
+                  defaultValue:
+                    "Export downloads a portable archive and does not publish to a shared library."
+                })}
               </div>
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
@@ -2093,9 +2102,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               data-testid="persona-visual-generation-review-copy"
               className="mt-2 text-xs leading-5 text-text-muted"
             >
-              Generated candidates stay in review until accepted. Accepting a
-              candidate updates this pack's manifest and assets; activation remains
-              the explicit pack-level action.
+              {t("sidepanel:personaGarden.visuals.generationReviewHelp", {
+                defaultValue:
+                  "Generated candidates stay in review until accepted. Accepting a candidate updates this pack's manifest and assets; activation remains the explicit pack-level action."
+              })}
             </div>
             <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_minmax(120px,160px)_auto]">
               <label className="text-xs text-text-muted">

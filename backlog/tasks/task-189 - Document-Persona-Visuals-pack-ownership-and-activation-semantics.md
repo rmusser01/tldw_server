@@ -4,7 +4,7 @@ title: Document Persona Visuals pack ownership and activation semantics
 status: Done
 assignee: []
 created_date: '2026-05-09 20:13'
-updated_date: '2026-05-09 20:41'
+updated_date: '2026-05-09 20:51'
 labels:
   - WebUI
   - Persona
@@ -46,6 +46,12 @@ Created from GitHub issue #1429 after PR #1439 merged and tracker #1428 was upda
 Implemented Persona Visuals editor ownership copy, portability copy, generated-candidate review copy, and Persona Visual Packs code documentation. Verification: focused Vitest passed, docs grep passed, git diff --check passed. Bandit skipped because this change only touches TSX copy/tests and Markdown documentation; no Python code was changed.
 
 PR opened for review: https://github.com/rmusser01/tldw_server/pull/1447. The PR body links issue #1429 for closeout on merge and keeps the human-authored Change summary placeholder required by the AI-generated PR merge policy.
+
+Review fix plan for PR #1447: wrap the newly added VisualPackEditor helper copy in existing sidepanel i18n t() calls; correct import-commit wording from creates-or-updates to reviewed draft/new draft to match target_mode=create_new; update the copy assertions and Persona Visual Packs docs to match; re-run focused Vitest, docs grep, diff hygiene, and record results.
+
+PR review fixes completed: new VisualPackEditor helper copy now uses sidepanel i18n t() calls; import commit wording now says it creates a reviewed draft pack to match target_mode=create_new; docs and tests were updated. Verification: focused Vitest passed, docs grep passed, git diff --check passed. Bandit remains skipped because only TSX copy/tests and Markdown docs changed.
+
+Additional test reliability cleanup: the existing health diagnostic assertion now waits for the selected pack manifest to settle before checking the missing-asset diagnostic, avoiding the transient default-manifest state observed during final verification. Re-run verification passed after this cleanup.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
