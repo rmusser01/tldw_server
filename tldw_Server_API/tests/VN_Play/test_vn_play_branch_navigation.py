@@ -248,11 +248,55 @@ def test_replay_cap_emits_stable_warning_payload() -> None:
         replay_limit=1,
     )
 
-    assert [event["id"] for event in filtered] == []
+    assert [event["id"] for event in filtered] == [3]
     assert warnings
     assert warnings[0]["code"] == "branch_interval_replay_limit_exceeded"
     assert warnings[0]["severity"] == "warning"
     assert warnings[0]["recoverable"] is True
+
+
+def test_replay_cap_preserves_events_derived_before_the_cap() -> None:
+    events = [
+        _event(3, 3, "choice_selected", {"branch_node_id": 10}),
+        _event(4, 4, "model_turn", {"text": "Derived before cap."}),
+        _event(5, 5, "model_turn", {"text": "Beyond cap."}),
+    ]
+
+    filtered, warnings = filter_branch_events(
+        branch_id=10,
+        branches=_door_branches(),
+        events=events,
+        replay_limit=2,
+    )
+
+    assert [event["id"] for event in filtered] == [3, 4]
+    assert warnings
+    assert warnings[0]["code"] == "branch_interval_replay_limit_exceeded"
+    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["recoverable"] is True
+
+
+def test_ambiguous_replay_fallback_emits_frontend_safe_warning() -> None:
+    events = [
+        _event(3, 3, "choice_selected", {"choice_id": "open"}),
+        _event(4, 4, "model_turn", {"text": "Cannot attribute this event."}),
+    ]
+
+    filtered, warnings = filter_branch_events(
+        branch_id=10,
+        branches=_door_branches(),
+        events=events,
+    )
+
+    assert filtered == []
+    assert warnings
+    warning = warnings[0]
+    assert warning["code"] == "branch_interval_replay_ambiguous"
+    assert warning["severity"] == "warning"
+    assert warning["recoverable"] is True
+    assert warning["event_id"] == 4
+    assert "Traceback" not in str(warning)
+    assert "Exception" not in str(warning)
 
 
 def test_warning_payloads_are_frontend_safe() -> None:

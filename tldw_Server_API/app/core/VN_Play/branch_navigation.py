@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
 
 _WARNING_PARENT_BRANCH_UNRESOLVED = "parent_branch_unresolved"
 _WARNING_ACTIVE_BRANCH_UNRESOLVED = "active_branch_unresolved"
+_WARNING_BRANCH_INTERVAL_REPLAY_AMBIGUOUS = "branch_interval_replay_ambiguous"
 
 
 def build_branch_navigation(
@@ -251,28 +252,45 @@ def _event_branch_ids(
     if not missing_branch_tags:
         return event_branch_ids, warnings
 
-    if len(ordered_events) > max(0, replay_limit):
+    bounded_replay_events = ordered_events[: max(0, replay_limit)]
+    if len(ordered_events) > len(bounded_replay_events):
         warnings.append(
             _warning(
                 ERROR_BRANCH_INTERVAL_REPLAY_LIMIT_EXCEEDED,
                 message="Branch interval replay was capped before all untagged events could be derived.",
             )
         )
-        return event_branch_ids, warnings
 
     active_branch_id: int | None = None
-    for event in ordered_events:
+    branch_change_ambiguous = False
+    for event in bounded_replay_events:
         event_type = _text_value(event.get("event_type")) or ""
         payload = _event_payload(event)
         if event_type == EVENT_CHOICE_SELECTED:
-            active_branch_id = _int_value(payload.get("branch_node_id"))
+            active_branch_id = _int_value(event.get("branch_node_id"))
+            if active_branch_id is None:
+                active_branch_id = _int_value(payload.get("branch_node_id"))
+            branch_change_ambiguous = active_branch_id is None
         elif event_type == EVENT_SESSION_RESTORED:
             restored_branch_id = _restored_active_branch_id(payload)
             active_branch_id = restored_branch_id
+            branch_change_ambiguous = active_branch_id is None
 
         identity = _event_identity(event)
         if identity not in event_branch_ids and active_branch_id is not None:
             event_branch_ids[identity] = active_branch_id
+        elif (
+            identity not in event_branch_ids
+            and branch_change_ambiguous
+            and event_type not in {EVENT_CHOICE_SELECTED, EVENT_SESSION_RESTORED}
+        ):
+            warnings.append(
+                _warning(
+                    _WARNING_BRANCH_INTERVAL_REPLAY_AMBIGUOUS,
+                    message="Branch interval replay could not attribute an untagged event.",
+                    event_id=_int_value(event.get("id")),
+                )
+            )
 
     return event_branch_ids, warnings
 
