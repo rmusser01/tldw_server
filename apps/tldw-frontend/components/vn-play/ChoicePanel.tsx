@@ -1,6 +1,11 @@
 import React, { FormEvent, useState } from 'react';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
+import {
+  createVNPlayIdempotencyKey,
+  getVNPlayErrorInfo,
+  isRecoverableVNPlayConflict,
+} from '@web/components/vn-play/runtime';
 import { submitVNPlayTurn } from '@web/lib/api/vnPlay';
 import type { VNPlayChoice, VNPlayTurnResponse } from '@web/types/vn-play';
 
@@ -10,11 +15,6 @@ export interface ChoicePanelProps {
   sessionId: number;
   onError?: (error: unknown) => void;
   onTurn: (response: VNPlayTurnResponse) => void;
-}
-
-function idempotencyKey(prefix: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
 export default function ChoicePanel({
@@ -36,11 +36,12 @@ export default function ChoicePanel({
       const response = await submitVNPlayTurn(sessionId, {
         choice_id: choiceId,
         client_scene_version: sceneVersion,
-        idempotency_key: idempotencyKey('choice'),
+        idempotency_key: createVNPlayIdempotencyKey('choice'),
       });
       onTurn(response);
     } catch (turnError) {
-      setError(turnError instanceof Error ? turnError.message : 'Failed to submit choice');
+      const errorInfo = getVNPlayErrorInfo(turnError);
+      setError(isRecoverableVNPlayConflict(turnError) ? null : errorInfo.message);
       onError?.(turnError);
     } finally {
       setSubmittingChoiceId(null);
@@ -58,12 +59,13 @@ export default function ChoicePanel({
       const response = await submitVNPlayTurn(sessionId, {
         custom_action: { text },
         client_scene_version: sceneVersion,
-        idempotency_key: idempotencyKey('action'),
+        idempotency_key: createVNPlayIdempotencyKey('action'),
       });
       setCustomAction('');
       onTurn(response);
     } catch (turnError) {
-      setError(turnError instanceof Error ? turnError.message : 'Failed to submit action');
+      const errorInfo = getVNPlayErrorInfo(turnError);
+      setError(isRecoverableVNPlayConflict(turnError) ? null : errorInfo.message);
       onError?.(turnError);
     } finally {
       setIsSubmittingAction(false);

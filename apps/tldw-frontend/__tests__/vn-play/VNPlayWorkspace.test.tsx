@@ -300,6 +300,7 @@ describe('VNPlayWorkspace', () => {
         idempotency_key: expect.stringMatching(/^restore-/),
       }));
     });
+    expect(mocks.getVNPlaySession).not.toHaveBeenCalled();
     expect(await screen.findByText('Scene version')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
   });

@@ -5,6 +5,11 @@ import { Button } from '@web/components/ui/Button';
 import ChoicePanel from '@web/components/vn-play/ChoicePanel';
 import DialoguePanel from '@web/components/vn-play/DialoguePanel';
 import NewSessionDialog from '@web/components/vn-play/NewSessionDialog';
+import {
+  createVNPlayIdempotencyKey,
+  getVNPlayErrorInfo,
+  isRecoverableVNPlayConflict,
+} from '@web/components/vn-play/runtime';
 import SceneInspector from '@web/components/vn-play/SceneInspector';
 import SceneStage from '@web/components/vn-play/SceneStage';
 import SessionList, { VNPlayModeFilter } from '@web/components/vn-play/SessionList';
@@ -42,11 +47,6 @@ function isVNPlayChoice(choice: VNPlayChoice | Record<string, unknown>): choice 
     typeof choice.id === 'string' &&
     typeof choice.text === 'string'
   );
-}
-
-function idempotencyKey(prefix: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
 function recoveryCopy(status: string | null): string | null {
@@ -172,22 +172,26 @@ export default function VNPlayWorkspace() {
     }
   }, []);
 
-  const reloadSelectedSession = useCallback(async (sessionId: number) => {
-    const [nextSession, nextEvents, nextCheckpoints, nextBranches] = await Promise.all([
-      getVNPlaySession(sessionId),
+  const reloadSessionCollections = useCallback(async (sessionId: number) => {
+    const [nextEvents, nextCheckpoints, nextBranches] = await Promise.all([
       listVNPlayEvents(sessionId),
       listVNPlayCheckpoints(sessionId),
       listVNPlayBranches(sessionId),
     ]);
+    setEvents(nextEvents);
+    setCheckpoints(nextCheckpoints);
+    setBranches(nextBranches);
+  }, []);
+
+  const reloadSelectedSession = useCallback(async (sessionId: number) => {
+    const nextSession = await getVNPlaySession(sessionId);
     setSelectedSession(nextSession);
     setSessions((previous) =>
       previous.map((session) => (session.id === nextSession.id ? nextSession : session))
     );
-    setEvents(nextEvents);
-    setCheckpoints(nextCheckpoints);
-    setBranches(nextBranches);
+    await reloadSessionCollections(sessionId);
     return nextSession;
-  }, []);
+  }, [reloadSessionCollections]);
 
   const handleTurn = useCallback(async (response: VNPlayTurnResponse) => {
     if (!selectedSession) return;
@@ -256,25 +260,26 @@ export default function VNPlayWorkspace() {
   }, [reloadSelectedSession, selectedSession]);
 
   const handleTurnError = useCallback(async (turnError: unknown) => {
-    const status = typeof turnError === 'object' && turnError !== null && 'status' in turnError
-      ? Number((turnError as { status?: number }).status)
-      : undefined;
-    const detail = turnError instanceof Error ? turnError.message : String(turnError);
-    const isConflict = status === 409 || /stale_scene_version|turn_in_progress/i.test(detail);
+    const errorInfo = getVNPlayErrorInfo(turnError);
+    const isConflict = isRecoverableVNPlayConflict(turnError);
 
     if (isConflict && selectedSession) {
-      setTurnStatus(/turn_in_progress/i.test(detail) ? 'turn_in_progress' : 'stale_scene_version');
+      setTurnStatus(
+        errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)
+          ? 'turn_in_progress'
+          : 'stale_scene_version'
+      );
       setError(null);
       try {
         await reloadSelectedSession(selectedSession.id);
       } catch {
-        setError(detail);
+        setError(errorInfo.message);
       }
       return;
     }
 
     setTurnStatus('turn_failed');
-    setError(detail);
+    setError(errorInfo.message);
   }, [reloadSelectedSession, selectedSession]);
 
   const selectedMode = selectedSession ? sessionModeLabel(selectedSession.mode) : null;
@@ -290,14 +295,9 @@ export default function VNPlayWorkspace() {
     setIsCreatingCheckpoint(true);
     setError(null);
     try {
-      const currentSceneVersion =
-        selectedSession.scene_state?.scene_version ??
-        selectedSession.current_scene?.scene_version ??
-        selectedSession.scene_version ??
-        0;
       await createVNPlayCheckpoint(selectedSession.id, {
         label,
-        scene_version: currentSceneVersion,
+        scene_version: sceneVersion,
       });
       await reloadSelectedSession(selectedSession.id);
     } catch (checkpointError) {
@@ -305,7 +305,7 @@ export default function VNPlayWorkspace() {
     } finally {
       setIsCreatingCheckpoint(false);
     }
-  }, [reloadSelectedSession, selectedSession]);
+  }, [reloadSelectedSession, sceneVersion, selectedSession]);
 
   const handleRestoreCheckpoint = useCallback(async (checkpointId: number) => {
     if (!selectedSession) return;
@@ -315,19 +315,19 @@ export default function VNPlayWorkspace() {
     try {
       const restored = await restoreVNPlaySession(selectedSession.id, {
         checkpoint_id: checkpointId,
-        idempotency_key: idempotencyKey('restore'),
+        idempotency_key: createVNPlayIdempotencyKey('restore'),
       });
       setSelectedSession(restored);
       setSessions((previous) =>
         previous.map((session) => (session.id === restored.id ? restored : session))
       );
-      await reloadSelectedSession(selectedSession.id);
+      await reloadSessionCollections(selectedSession.id);
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : 'Failed to restore checkpoint');
     } finally {
       setRestoringCheckpointId(null);
     }
-  }, [reloadSelectedSession, selectedSession]);
+  }, [reloadSessionCollections, selectedSession]);
 
   const handleRetryLastTurn = useCallback(async () => {
     if (!selectedSession) return;
@@ -335,14 +335,9 @@ export default function VNPlayWorkspace() {
     setIsRetryingTurn(true);
     setError(null);
     try {
-      const currentSceneVersion =
-        selectedSession.scene_state?.scene_version ??
-        selectedSession.current_scene?.scene_version ??
-        selectedSession.scene_version ??
-        0;
       const response = await retryLastVNPlayTurn(selectedSession.id, {
-        client_scene_version: currentSceneVersion,
-        idempotency_key: idempotencyKey('retry'),
+        client_scene_version: sceneVersion,
+        idempotency_key: createVNPlayIdempotencyKey('retry'),
       });
       await handleTurn(response);
     } catch (retryError) {
@@ -350,7 +345,7 @@ export default function VNPlayWorkspace() {
     } finally {
       setIsRetryingTurn(false);
     }
-  }, [handleTurn, selectedSession]);
+  }, [handleTurn, sceneVersion, selectedSession]);
 
   return (
     <main className="min-h-screen bg-bg text-text">

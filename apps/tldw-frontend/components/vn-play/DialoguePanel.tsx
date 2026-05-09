@@ -1,6 +1,11 @@
 import React, { FormEvent, useMemo, useState } from 'react';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
+import {
+  createVNPlayIdempotencyKey,
+  getVNPlayErrorInfo,
+  isRecoverableVNPlayConflict,
+} from '@web/components/vn-play/runtime';
 import { submitVNPlayTurn } from '@web/lib/api/vnPlay';
 import type { VNPlayEvent, VNPlayMode, VNPlayTurnResponse } from '@web/types/vn-play';
 
@@ -16,11 +21,6 @@ export interface DialoguePanelProps {
 interface DialogueLine {
   speaker: string;
   text: string;
-}
-
-function idempotencyKey(prefix: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
 function latestDialogue(events: VNPlayEvent[]): DialogueLine[] {
@@ -70,17 +70,13 @@ export default function DialoguePanel({
       const response = await submitVNPlayTurn(sessionId, {
         input_text: trimmed,
         client_scene_version: sceneVersion,
-        idempotency_key: idempotencyKey('freeform'),
+        idempotency_key: createVNPlayIdempotencyKey('freeform'),
       });
       setInputText('');
       onTurn(response);
     } catch (turnError) {
-      const status = typeof turnError === 'object' && turnError !== null && 'status' in turnError
-        ? Number((turnError as { status?: number }).status)
-        : undefined;
-      const detail = turnError instanceof Error ? turnError.message : String(turnError);
-      const isRecoverableConflict = status === 409 || /stale_scene_version|turn_in_progress/i.test(detail);
-      setError(isRecoverableConflict ? null : detail || 'Failed to submit turn');
+      const errorInfo = getVNPlayErrorInfo(turnError);
+      setError(isRecoverableVNPlayConflict(turnError) ? null : errorInfo.message);
       onError?.(turnError);
     } finally {
       setIsSubmitting(false);
