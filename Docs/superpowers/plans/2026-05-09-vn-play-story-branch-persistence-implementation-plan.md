@@ -443,7 +443,7 @@ git commit -m "Persist VN Play story choice branches before model calls"
 - Modify: `tldw_Server_API/app/core/VN_Play/service.py`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_turns.py`
 
-- [ ] **Step 1: Write failing retry tests**
+- [x] **Step 1: Write failing retry tests**
 
 Add tests:
 
@@ -491,7 +491,7 @@ async def test_retry_completed_story_choice_is_not_failed(
         await service.retry_last_turn(session.id, client_scene_version=2, idempotency_key="retry-completed")
 ```
 
-- [ ] **Step 2: Run retry tests and verify they fail**
+- [x] **Step 2: Run retry tests and verify they fail**
 
 Run:
 
@@ -505,7 +505,7 @@ python -m pytest \
 
 Expected: fail because retry currently searches only `user_turn` events and resubmits through `submit_turn()`.
 
-- [ ] **Step 3: Add repository helper for latest failed turn**
+- [x] **Step 3: Add repository helper for latest failed turn**
 
 In `VNPlay_DB.py`, add a method like:
 
@@ -526,7 +526,7 @@ It should return the newest turn request for the session/owner where:
 
 Order by `updated_at DESC, id DESC`.
 
-- [ ] **Step 4: Rewrite `retry_last_turn()`**
+- [x] **Step 4: Rewrite `retry_last_turn()`**
 
 In `service.py`:
 
@@ -550,7 +550,7 @@ In `service.py`:
 - Build adapter context from original input payload plus current replayed state.
 - Complete/fail using existing completion/failure paths.
 
-- [ ] **Step 5: Run retry and full service tests**
+- [x] **Step 5: Run retry and full service tests**
 
 Run:
 
@@ -561,7 +561,7 @@ python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q
 
 Expected: all service turn tests pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 Run:
 
