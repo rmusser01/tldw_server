@@ -439,11 +439,14 @@ ownership checks, or complex-domain packages that should stay on the
   src/components/Option/DataTables/__tests__/EditableCell.date.test.tsx
   --maxWorkers=1` from `apps/packages/ui` first failed on the existing invalid
   date rendering and Ant Design DatePicker editor, then passed after the native
-  date helper/input implementation. `bun run lint` from `apps/tldw-frontend`
-  passed with the existing 131-warning baseline, and `git diff --check` passed.
-  Full `apps/packages/ui` TypeScript still exits 2 on existing repo-wide
-  baseline errors outside this slice; filtering those diagnostics for
-  `EditableCell` and `DataTables` returned no matches.
+  date helper/input implementation. PR review follow-up added regression
+  coverage for numeric timestamps, epoch zero, malformed date-prefix strings,
+  and change-then-blur single-commit behavior; the focused suite now passes
+  with 7 tests. `bun run lint` from `apps/tldw-frontend` passed with the
+  existing 131-warning baseline, and `git diff --check` passed. Full
+  `apps/packages/ui` TypeScript still exits 2 on existing repo-wide baseline
+  errors outside this slice; filtering those diagnostics for `EditableCell`
+  and `DataTables` returned no matches.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,

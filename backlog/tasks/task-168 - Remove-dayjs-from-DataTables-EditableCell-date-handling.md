@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-09 16:49'
-updated_date: '2026-05-09 17:01'
+updated_date: '2026-05-09 17:12'
 labels:
   - webui
   - dependencies
@@ -55,12 +55,16 @@ Exact shared UI dayjs package-import scan now reports 6 lines: Media/FilterPanel
 Bandit skipped because this slice touches TypeScript, tests, docs, and Backlog metadata only; no Python files changed.
 
 Opened PR #1424 against dev: https://github.com/rmusser01/tldw_server/pull/1424
+
+PR #1424 review follow-up: addressed Gemini/Qodo date-cell findings by removing the change-time finish call, relying on blur/Enter for date edit commits, handling numeric timestamps including 0, and validating date-prefix strings before truncation. Added regression coverage for numeric timestamps, epoch zero, malformed date-prefix values, and change-then-blur single-commit behavior.
+
+Review-fix verification: `bunx vitest run src/components/Option/DataTables/__tests__/EditableCell.date.test.tsx --maxWorkers=1` now passes with 7 tests. `git diff --check` exits 0. Exact shared UI dayjs package-import scan remains 6 expected lines. `bun run lint` from apps/tldw-frontend exits 0 with the existing 131-warning baseline. Filtered shared UI TypeScript diagnostics for `EditableCell|DataTables` returned no matches.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Removed dayjs from the DataTables EditableCell date path by replacing display formatting with native Date handling and replacing the Ant Design DatePicker editor with an accessible native date input. Added focused EditableCell date tests and updated the WebUI dependency audit to record the shared UI dayjs import count dropping from 7 to 6 while keeping the remaining DatePicker/Dayjs surfaces deferred.
+Removed dayjs from the DataTables EditableCell date path by replacing display formatting with native Date handling and replacing the Ant Design DatePicker editor with an accessible native date input. PR review follow-up removed change-time double commits, added numeric timestamp and malformed date-prefix handling, expanded focused tests to 7 cases, and kept the dependency audit at 6 remaining shared UI dayjs imports for deferred DatePicker/Dayjs surfaces.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -16,18 +16,57 @@ interface EditableCellProps {
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/
 
+const hasDateValue = (value: unknown): boolean =>
+  value !== null && value !== undefined && value !== ""
+
+const isLeapYear = (year: number): boolean =>
+  year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0)
+
+const isValidDateParts = (year: string, month: string, day: string): boolean => {
+  const numericYear = Number(year)
+  const numericMonth = Number(month)
+  const numericDay = Number(day)
+  const daysInMonth = [
+    31,
+    isLeapYear(numericYear) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31
+  ]
+
+  return (
+    numericMonth >= 1 &&
+    numericMonth <= 12 &&
+    numericDay >= 1 &&
+    numericDay <= daysInMonth[numericMonth - 1]
+  )
+}
+
 const toDateOnlyString = (value: unknown): string | null => {
-  if (!value) return null
+  if (!hasDateValue(value)) return null
 
   if (typeof value === "string") {
     const dateOnlyMatch = value.match(DATE_ONLY_PATTERN)
     if (dateOnlyMatch) {
       const [, year, month, day] = dateOnlyMatch
+      if (!isValidDateParts(year, month, day)) return null
       return `${year}-${month}-${day}`
     }
   }
 
-  const date = value instanceof Date ? value : new Date(String(value))
+  const date =
+    value instanceof Date
+      ? value
+      : typeof value === "number"
+        ? new Date(value)
+        : new Date(String(value))
   if (Number.isNaN(date.getTime())) return null
 
   const year = date.getFullYear()
@@ -120,7 +159,7 @@ export const EditableCell: React.FC<EditableCellProps> = ({
         )
 
       case "date":
-        if (value) {
+        if (hasDateValue(value)) {
           return toDateOnlyString(value) ?? String(value)
         }
         return String(value)
@@ -178,9 +217,7 @@ export const EditableCell: React.FC<EditableCellProps> = ({
             aria-label={columnName}
             value={toDateOnlyString(editValue) ?? ""}
             onChange={(event) => {
-              const newValue = event.target.value || null
-              setEditValue(newValue)
-              onFinishEdit(newValue)
+              setEditValue(event.target.value || null)
             }}
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
