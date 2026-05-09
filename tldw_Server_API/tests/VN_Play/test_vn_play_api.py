@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.models import TurnResult
-from tldw_Server_API.app.core.VN_Play.service import VNPlayService
+from tldw_Server_API.app.core.VN_Play.service import VNPlayService, VNPlayTurnContext
 
 
 @pytest.fixture
@@ -140,7 +140,7 @@ def _create_pack(
 
 
 class _VisualDirectiveAdapter:
-    async def generate_turn(self, context):
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
         return TurnResult(
             narrative_text="The library appears.",
             dialogue=[{"speaker": "Narrator", "text": "The library appears."}],

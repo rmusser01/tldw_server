@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
@@ -189,6 +191,7 @@ class VNPlayService:
         self.repo = repo
         self.owner_user_id = owner_user_id
         self.adapter = adapter or DeterministicVNPlayTurnAdapter()
+        self._manifest_cache: dict[int, dict[str, Any]] = {}
 
     def create_session(
         self,
@@ -392,12 +395,14 @@ class VNPlayService:
 
         enriched = dict(state)
         try:
-            manifest_response = VNAssetPackService(
-                self.repo.db,
-                owner_user_id=self.owner_user_id,
-            ).build_manifest(session.vn_asset_pack_id)
-            manifest = manifest_response.model_dump()
+            manifest = self._build_pack_manifest(session.vn_asset_pack_id)
         except Exception as exc:
+            logger.exception(
+                "Failed to enrich VN Play scene state from VN asset manifest: "
+                "session_id={}, pack_id={}",
+                session_id,
+                session.vn_asset_pack_id,
+            )
             _append_enrichment_warning(enriched, exc)
             return enriched
 
@@ -415,8 +420,6 @@ class VNPlayService:
             item_id = sprite.get("item_id")
             if isinstance(item_id, int) and item_id in items_by_id:
                 active_sprites.append(items_by_id[item_id])
-            elif not isinstance(item_id, int):
-                active_sprites.append(sprite)
         enriched["active_sprites"] = active_sprites
         return enriched
 
@@ -695,13 +698,15 @@ class VNPlayService:
         default_rejection_reason = "manifest_unavailable"
 
         try:
-            manifest_response = VNAssetPackService(
-                self.repo.db,
-                owner_user_id=self.owner_user_id,
-            ).build_manifest(session.vn_asset_pack_id)
-            manifest = manifest_response.model_dump()
+            manifest = self._build_pack_manifest(session.vn_asset_pack_id)
         except Exception as exc:
-            manifest_error = str(exc) or exc.__class__.__name__
+            logger.exception(
+                "Failed to build VN asset manifest for VN Play visual directives: "
+                "session_id={}, pack_id={}",
+                session_id,
+                session.vn_asset_pack_id,
+            )
+            manifest_error = exc.__class__.__name__
 
         if manifest is not None:
             try:
@@ -711,7 +716,12 @@ class VNPlayService:
                     seed=session.seed or f"session-{session_id}",
                 )
             except Exception as exc:
-                manifest_error = str(exc) or exc.__class__.__name__
+                logger.exception(
+                    "Failed to resolve VN Play visual directives: session_id={}, pack_id={}",
+                    session_id,
+                    session.vn_asset_pack_id,
+                )
+                manifest_error = exc.__class__.__name__
                 default_rejection_reason = "resolver_error"
                 resolutions = []
         else:
@@ -769,7 +779,7 @@ class VNPlayService:
                 directive_payload,
                 reason=reason,
                 scene_version=scene_version,
-                error=manifest_error,
+                error_type=manifest_error,
             )
             warnings.append(warning)
             events.append(
@@ -789,6 +799,17 @@ class VNPlayService:
         if sprite_items:
             scene_updates["active_sprite_items"] = sprite_items
         return events, scene_updates, warnings
+
+    def _build_pack_manifest(self, pack_id: int) -> dict[str, Any]:
+        manifest = self._manifest_cache.get(pack_id)
+        if manifest is None:
+            manifest_response = VNAssetPackService(
+                self.repo.db,
+                owner_user_id=self.owner_user_id,
+            ).build_manifest(pack_id)
+            manifest = manifest_response.model_dump()
+            self._manifest_cache[pack_id] = manifest
+        return manifest
 
     def _mark_turn_failed(
         self,
@@ -924,7 +945,7 @@ def _visual_directive_warning(
     *,
     reason: str,
     scene_version: int,
-    error: str | None = None,
+    error_type: str | None = None,
 ) -> dict[str, Any]:
     warning: dict[str, Any] = {
         "code": "visual_directive_rejected",
@@ -937,8 +958,8 @@ def _visual_directive_warning(
     slot_key = directive.get("slot_key")
     if isinstance(slot_key, str):
         warning["slot_key"] = slot_key
-    if error:
-        warning["error"] = error
+    if error_type:
+        warning["error_type"] = error_type
     return warning
 
 
@@ -962,7 +983,7 @@ def _append_enrichment_warning(state: dict[str, Any], exc: Exception) -> None:
         {
             "code": "scene_asset_enrichment_failed",
             "reason": "manifest_unavailable",
-            "error": str(exc) or exc.__class__.__name__,
+            "error_type": exc.__class__.__name__,
         }
     )
     state["warnings"] = warnings

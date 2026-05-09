@@ -66,6 +66,8 @@ Plan file: Docs/superpowers/plans/2026-05-09-vn-play-visual-directives-runtime-i
 - Added scene replay and API enrichment so frontends can render `background`, `depth`, and `active_sprites` from VN Play responses.
 - Rejected directives are warning-only and auditable; resolver exceptions are converted into `resolver_error` rejection warnings.
 - Enriched `active_sprites` is derived from the current approved manifest and does not fall back to stale sprite payloads when an item is no longer approved.
+- Reopened for PR #1432 review fixes covering annotation cleanup, safe warning payloads, approved-only sprite enrichment, and manifest build reuse.
+- Addressed PR #1432 review comments by adding type hints to new test adapters/helpers, simplifying manifest alias key de-duping, logging full visual-resolution exceptions server-side while returning only `error_type`, making enriched sprite payloads approved-manifest-only, and reusing the manifest within a service request lifecycle.
 <!-- SECTION:NOTES:END -->
 
 ## Verification
@@ -74,10 +76,19 @@ Plan file: Docs/superpowers/plans/2026-05-09-vn-play-visual-directives-runtime-i
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q` - `47 passed, 5 warnings`
 - `git diff --check` - passed
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/VN_Play tldw_Server_API/app/api/v1/endpoints/vn_play.py tldw_Server_API/app/api/v1/schemas/vn_play_schemas.py -f json -o /tmp/bandit_vn_play_visual_directives.json` - passed with 0 findings
+- Review-fix targeted tests:
+  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_turns.py::test_turn_records_resolver_error_without_failing_text_turn tldw_Server_API/tests/VN_Play/test_vn_play_turns.py::test_scene_enrichment_reuses_turn_manifest_cache tldw_Server_API/tests/VN_Play/test_vn_play_turns.py::test_scene_enrichment_omits_sprites_missing_from_approved_manifest tldw_Server_API/tests/VN_Play/test_vn_play_turns.py::test_scene_enrichment_warning_uses_safe_error_type -q` - `4 passed, 5 warnings`
+  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_assets.py::test_resolver_supports_manifest_collection_aliases tldw_Server_API/tests/VN_Play/test_vn_play_api.py::test_session_response_includes_resolved_scene_assets -q` - `2 passed, 5 warnings`
+- Review-fix full verification:
+  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q` - `49 passed, 5 warnings`
+  - `git diff --check` - passed
+  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/VN_Play tldw_Server_API/app/api/v1/endpoints/vn_play.py tldw_Server_API/app/api/v1/schemas/vn_play_schemas.py -f json -o /tmp/bandit_vn_play_visual_directives_review_fixes.json` - passed with 0 findings
 <!-- SECTION:VERIFICATION:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Resolved VN Play visual directives against approved VN asset-pack manifests during turn completion. The backend now emits requested applied and rejected visual directive events, persists replayable scene asset state, enriches VN Play API scene responses with render-ready approved asset payloads, keeps visual misses warning-only, and documents the runtime contract for custom frontends.
+
+Review follow-up tightened the implementation by keeping frontend warning payloads non-sensitive, logging full exception details server-side, enforcing approved-only sprite enrichment, reusing the manifest within the request-scoped service, and adding missing type annotations on new tests.
 <!-- SECTION:FINAL_SUMMARY:END -->

@@ -92,11 +92,7 @@ def _collection_keys_for_asset_type(asset_type: Any) -> list[str] | None:
 
     normalized = asset_type.strip().lower()
     aliases = _ASSET_TYPE_COLLECTION_ALIASES.get(normalized, (asset_type,))
-    keys: list[str] = []
-    for key in (*aliases, asset_type):
-        if key not in keys:
-            keys.append(key)
-    return keys
+    return list(dict.fromkeys((*aliases, asset_type)))
 
 
 def _is_approved_item(item: Mapping[str, Any]) -> bool:

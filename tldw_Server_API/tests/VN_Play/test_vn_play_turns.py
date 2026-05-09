@@ -1,12 +1,18 @@
-from collections.abc import Generator
+from collections.abc import Generator, Mapping, Sequence
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play import adapters as vn_play_adapters
-from tldw_Server_API.app.core.VN_Play.models import SceneState, TurnResult
+from tldw_Server_API.app.core.VN_Play.models import (
+    SceneState,
+    TurnResult,
+    VisualDirectiveResolution,
+)
 from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, parse_model_turn
 from tldw_Server_API.app.core.VN_Play.service import (
     DeterministicVNPlayTurnAdapter,
@@ -38,7 +44,7 @@ def service(chacha_db: CharactersRAGDB) -> VNPlayService:
 @pytest.fixture
 def service_with_failing_adapter(chacha_db: CharactersRAGDB) -> VNPlayService:
     class FailingAdapter:
-        async def generate_turn(self, context):
+        async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
             raise RuntimeError("provider unavailable")
 
     repo = VNPlayRepository.initialized(chacha_db)
@@ -75,7 +81,7 @@ def make_turn_context(mode: str = "freeform") -> VNPlayTurnContext:
 
 
 class VisualDirectiveAdapter:
-    async def generate_turn(self, context):
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
         return TurnResult(
             narrative_text="The library appears.",
             dialogue=[{"speaker": "Narrator", "text": "The library appears."}],
@@ -88,7 +94,7 @@ class VisualDirectiveAdapter:
 
 
 class MissingVisualDirectiveAdapter:
-    async def generate_turn(self, context):
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
         return TurnResult(
             narrative_text="The library remains quiet.",
             dialogue=[{"speaker": "Narrator", "text": "The library remains quiet."}],
@@ -294,7 +300,12 @@ async def test_turn_records_resolver_error_without_failing_text_turn(
         seed="seed-1",
     )
 
-    def fail_resolution(*args, **kwargs):
+    def fail_resolution(
+        manifest: Mapping[str, Any],
+        directives: Sequence[Mapping[str, Any]],
+        *,
+        seed: str,
+    ) -> list[VisualDirectiveResolution]:
         raise RuntimeError("resolver exploded")
 
     monkeypatch.setattr(
@@ -318,8 +329,52 @@ async def test_turn_records_resolver_error_without_failing_text_turn(
     assert len(rejected_events) == 2
     assert rejected_events[0]["event_payload"]["reason"] == "resolver_error"
     assert rejected_events[0]["event_payload"]["directive"]["asset_type"] == "background"
-    assert response.warnings[0]["error"] == "resolver exploded"
+    assert response.warnings[0]["error_type"] == "RuntimeError"
+    assert "error" not in response.warnings[0]
     assert service.get_session(session.id).active_turn_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_scene_enrichment_reuses_turn_manifest_cache(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    character_id, pack_id, _, _ = create_visual_pack(chacha_db)
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=VisualDirectiveAdapter(),
+    )
+    session = service.create_session(
+        mode="freeform",
+        title="Library night",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        seed="seed-1",
+    )
+    build_calls: list[int] = []
+    original_build_manifest = VNAssetPackService.build_manifest
+
+    def counted_build_manifest(
+        self: VNAssetPackService,
+        requested_pack_id: int,
+    ) -> Any:
+        build_calls.append(requested_pack_id)
+        return original_build_manifest(self, requested_pack_id)
+
+    monkeypatch.setattr(VNAssetPackService, "build_manifest", counted_build_manifest)
+
+    await service.submit_turn(
+        session.id,
+        input_text="Look around",
+        client_scene_version=0,
+        idempotency_key="cached-manifest-turn-1",
+    )
+    state = service.get_enriched_scene_state(session.id)
+
+    assert state is not None
+    assert state["background"] is not None
+    assert build_calls == [pack_id]
 
 
 @pytest.mark.asyncio
@@ -351,11 +406,47 @@ async def test_scene_enrichment_omits_sprites_missing_from_approved_manifest(
         review_status="rejected",
     )
 
-    state = service.get_enriched_scene_state(session.id)
+    fresh_service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=VisualDirectiveAdapter(),
+    )
+    state = fresh_service.get_enriched_scene_state(session.id)
 
     assert state is not None
     assert state["active_sprite_items"][0]["item_id"] == sprite_item_id
     assert state["active_sprites"] == []
+
+
+def test_scene_enrichment_warning_uses_safe_error_type(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    character_id, pack_id, _, _ = create_visual_pack(chacha_db)
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=VisualDirectiveAdapter(),
+    )
+    session = service.create_session(
+        mode="freeform",
+        title="Library night",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        seed="seed-1",
+    )
+
+    def fail_manifest(self: VNAssetPackService, requested_pack_id: int) -> object:
+        raise RuntimeError("/private/path/secret.db")
+
+    monkeypatch.setattr(VNAssetPackService, "build_manifest", fail_manifest)
+
+    state = service.get_enriched_scene_state(session.id)
+
+    assert state is not None
+    assert state["warnings"][0]["reason"] == "manifest_unavailable"
+    assert state["warnings"][0]["error_type"] == "RuntimeError"
+    assert "error" not in state["warnings"][0]
 
 
 @pytest.mark.asyncio
