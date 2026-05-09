@@ -2116,6 +2116,60 @@ Result: `37 passed`.
 
 Bandit is not applicable to this frontend-only slice; no Python production code changed.
 
+## Task 16: Import Commit Job Flow
+
+**Status:** Complete
+
+**Goal:** Add the PR #1135-style commit step that turns a reviewed persona visual import preview into a new draft pack through a Jobs-backed `import_commit` operation.
+
+**Implementation Notes:**
+
+- Added `persona_visual_pack_import_commit` job helpers, payload builder, batch group, idempotency key, and enqueue helper.
+- Added `PersonaVisualPackImporter` to validate a completed preview, re-check archive checksum/fingerprint, create a new draft pack for the target persona, import present archive asset bytes through `PersonaVisualService`, and remap source asset IDs before persisting the manifest.
+- Extended the portability worker to route import-commit jobs, update portability progress, mark previews imported, and fail closed when the preview is incomplete or scoped incorrectly.
+- Added API schemas and routes to start an import commit from a completed preview and poll persona/user-scoped commit status.
+
+**Verification:**
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py \
+  tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
+  -q --tb=short
+```
+
+Result: `28 passed, 5 warnings`.
+
+Broader persona visual backend regression:
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visual_service.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py \
+  tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
+  -q --tb=short
+```
+
+Result: `39 passed, 5 warnings`.
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r \
+  tldw_Server_API/app/core/Persona/visual_jobs.py \
+  tldw_Server_API/app/core/Persona/visual_jobs_worker.py \
+  tldw_Server_API/app/core/Persona/visual_portability/importer.py \
+  tldw_Server_API/app/api/v1/endpoints/persona.py \
+  tldw_Server_API/app/api/v1/schemas/persona.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py \
+  tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
+  -s B101 -f json -o /tmp/bandit_persona_visual_import_commit.json
+```
+
+Result: no findings. `B101` was skipped for test assertions.
+
 ## Final Verification Gate
 
 Before declaring implementation complete, run:

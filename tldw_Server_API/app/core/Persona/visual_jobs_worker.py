@@ -23,11 +23,15 @@ from tldw_Server_API.app.core.Persona.visual_jobs import (
     PERSONA_VISUALS_DOMAIN,
     PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
     PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE,
+    PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
     PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
     persona_visual_generation_queue,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
     PersonaVisualPackExporter,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.importer import (
+    PersonaVisualPackImporter,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.models import (
     PersonaVisualPackExportOptions,
@@ -159,6 +163,8 @@ class PersonaVisualPortabilityWorker:
             return await self.handle_export_pack(payload, job=job)
         if job_type == PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE:
             return await self.handle_import_preview(payload, job=job)
+        if job_type == PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE:
+            return await self.handle_import_commit(payload, job=job)
         raise ValueError(f"unsupported_persona_visual_portability_job_type:{job_type}")
 
     async def handle_export_pack(
@@ -377,6 +383,103 @@ class PersonaVisualPortabilityWorker:
             "status": "previewed",
             "preview_id": preview_id,
             "archive_path": str(archive_path),
+        }
+
+    async def handle_import_commit(
+        self,
+        payload: dict[str, Any],
+        *,
+        job: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        user_id = _payload_text(payload, "user_id")
+        preview_id = _payload_text(payload, "preview_id")
+        portability_job_id = _payload_text(payload, "portability_job_id", default="")
+        target_persona_id = _payload_text(payload, "target_persona_id")
+        trust_mode = _payload_text(payload, "trust_mode", default="untrusted_import")
+        target_mode = _payload_text(payload, "target_mode", default="create_new")
+        if not user_id or not preview_id or not target_persona_id:
+            raise ValueError("invalid_persona_visual_import_commit_payload")
+
+        preview = self._repo.get_import_preview(preview_id, owner_user_id=user_id)
+        if preview is None:
+            raise ValueError("persona_visual_pack_import_preview_not_found")
+        portability_job = (
+            self._repo.get_portability_job(portability_job_id, owner_user_id=user_id)
+            if portability_job_id
+            else self._repo.get_portability_job_by_job_id(str((job or {}).get("id") or ""), owner_user_id=user_id)
+        )
+        if (
+            portability_job is None
+            or str(portability_job.get("operation") or "") != "import_commit"
+            or str(portability_job.get("preview_id") or "") != preview_id
+            or str(portability_job.get("persona_id") or "") != target_persona_id
+        ):
+            raise ValueError("persona_visual_pack_import_commit_job_not_found")
+
+        job_id = str(portability_job["job_id"])
+        self._repo.update_portability_job(
+            job_id,
+            {"status": "processing", "stage": "revalidating_preview"},
+            owner_user_id=user_id,
+        )
+
+        def _progress(stage: str, progress: dict[str, Any]) -> None:
+            self._repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": stage, "progress": progress},
+                owner_user_id=user_id,
+            )
+
+        try:
+            result = await asyncio.to_thread(
+                lambda: PersonaVisualPackImporter(
+                    db=self._db,
+                    repo=self._repo,
+                    user_id=user_id,
+                ).import_preview(
+                    preview_id=preview_id,
+                    target_persona_id=target_persona_id,
+                    trust_mode=trust_mode,
+                    target_mode=target_mode,
+                    progress=_progress,
+                )
+            )
+        except Exception as exc:
+            self._repo.update_portability_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "import_commit_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            raise
+
+        self._repo.update_import_preview(
+            preview_id,
+            {"status": "imported", "stage": "imported"},
+            owner_user_id=user_id,
+        )
+        self._repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "persona_id": target_persona_id,
+                "pack_id": result["pack_id"],
+                "progress": {
+                    "pack_id": result["pack_id"],
+                    "asset_count": len(result.get("created_records", {}).get("asset_ids", [])),
+                },
+            },
+            owner_user_id=user_id,
+        )
+        return {
+            **result,
+            "portability_job_id": str(portability_job["id"]),
+            "job_id": job_id,
         }
 
     def _resolve_export_staging_root(self, user_id: str) -> Path:

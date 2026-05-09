@@ -85,6 +85,8 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualDeactivateResponse,
     PersonaVisualGenerationJobResponse,
     PersonaVisualGenerationRequest,
+    PersonaVisualImportCommitRequest,
+    PersonaVisualImportCommitStartResponse,
     PersonaVisualImportPreviewResponse,
     PersonaVisualImportPreviewStartResponse,
     PersonaVisualManifestUpdate,
@@ -137,6 +139,7 @@ from tldw_Server_API.app.core.Persona.buddy import (
 from tldw_Server_API.app.core.Persona.visual_jobs import (
     create_generate_candidate_job,
     create_visual_pack_export_job,
+    create_visual_pack_import_commit_job,
     create_visual_pack_import_preview_job,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
@@ -2187,6 +2190,34 @@ def _compose_persona_visual_import_preview_response(
         error_code=preview.get("error_code") or portability_job.get("error_code"),
         error_message=preview.get("error_message") or portability_job.get("error_message"),
         expires_at=preview.get("expires_at") or portability_job.get("expires_at"),
+    )
+
+
+def _compose_persona_visual_import_commit_response(
+    *,
+    portability_job: dict[str, Any],
+    job: dict[str, Any] | None,
+    persona_id: str,
+) -> PersonaVisualPortabilityJobResponse:
+    visual_status = str(portability_job["status"])
+    job_status = visual_status or str((job or {}).get("status") or "queued")
+    return PersonaVisualPortabilityJobResponse(
+        job_id=str(portability_job["job_id"]),
+        portability_job_id=str(portability_job["id"]),
+        operation=str(portability_job["operation"]),
+        persona_id=persona_id,
+        pack_id=portability_job.get("pack_id"),
+        status=job_status,
+        visual_status=visual_status,
+        stage=str(portability_job["stage"]),
+        progress=_persona_visual_json_field(portability_job, "progress_json", {}),
+        warnings=_persona_visual_json_field(portability_job, "warnings_json", []),
+        archive_sha256=portability_job.get("archive_sha256"),
+        canonical_payload_fingerprint=portability_job.get("canonical_payload_fingerprint"),
+        download_url=None,
+        error_code=portability_job.get("error_code"),
+        error_message=portability_job.get("error_message"),
+        expires_at=portability_job.get("expires_at"),
     )
 
 
@@ -4276,6 +4307,142 @@ async def get_persona_visual_pack_import_preview(
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona visual pack import preview") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/import-previews/{preview_id}/commit",
+    response_model=PersonaVisualImportCommitStartResponse,
+    tags=["persona"],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def start_persona_visual_pack_import_commit(
+    persona_id: str,
+    preview_id: str,
+    payload: PersonaVisualImportCommitRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportCommitStartResponse:
+    """Queue a reviewed import preview for commit into a new draft visual pack."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.get_import_preview,
+            preview_id,
+            owner_user_id=user_id,
+        )
+        if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
+            raise HTTPException(status_code=404, detail="import_preview_not_found")
+        if str(preview.get("status") or "") != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_completed",
+            )
+
+        request_id = str(payload.request_id or uuid.uuid4().hex)
+        job = await _run_persona_db_call(
+            create_visual_pack_import_commit_job,
+            jobs_manager,
+            user_id=user_id,
+            preview_id=str(preview["id"]),
+            portability_job_id="",
+            request_id=request_id,
+            target_persona_id=persona_id,
+            trust_mode=payload.trust_mode,
+            target_mode=payload.target_mode,
+        )
+        job_id = str(job.get("id") or "")
+        portability_job = await _run_persona_db_call(
+            repo.create_portability_job,
+            owner_user_id=user_id,
+            job_id=job_id,
+            operation="import_commit",
+            status=str(job.get("status") or "queued"),
+            stage="queued",
+            persona_id=persona_id,
+            preview_id=str(preview["id"]),
+            archive_path=preview.get("archive_path"),
+            archive_sha256=preview.get("archive_sha256"),
+            canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+            progress={
+                "request_id": request_id,
+                "trust_mode": payload.trust_mode,
+                "target_mode": payload.target_mode,
+            },
+        )
+        return PersonaVisualImportCommitStartResponse(
+            job_id=job_id,
+            portability_job_id=str(portability_job["id"]),
+            operation="import_commit",
+            preview_id=str(preview["id"]),
+            target_persona_id=persona_id,
+            status=str(job.get("status") or portability_job["status"]),
+            stage=str(portability_job["stage"]),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="start persona visual pack import commit") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/imports/{job_id}",
+    response_model=PersonaVisualPortabilityJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack_import_commit_status(
+    persona_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPortabilityJobResponse:
+    """Return import-commit status for the current user and target persona."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if (
+            portability_job is None
+            or str(portability_job.get("operation") or "") != "import_commit"
+            or str(portability_job.get("persona_id") or "") != persona_id
+        ):
+            raise HTTPException(status_code=404, detail="import_commit_not_found")
+        return _compose_persona_visual_import_commit_response(
+            portability_job=portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, job_id),
+            persona_id=persona_id,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack import commit") from exc
 
 
 @router.post(

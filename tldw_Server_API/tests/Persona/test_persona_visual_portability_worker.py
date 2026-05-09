@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_jobs import (
     PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE,
+    PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
     PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
@@ -20,6 +21,9 @@ from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
 )
 from tldw_Server_API.app.core.Persona.visual_portability.models import (
     PersonaVisualPackExportOptions,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.preview import (
+    PersonaVisualPackImportPreviewer,
 )
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 
@@ -337,3 +341,168 @@ async def test_persona_visual_import_preview_worker_updates_preview_without_muta
     assert updated_job["status"] == "completed"
     assert updated_job["stage"] == "completed"
     assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id="user-1") == packs_before
+
+
+@pytest.mark.asyncio
+async def test_persona_visual_import_commit_worker_creates_pack_and_remaps_assets(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualPortabilityWorker,
+    )
+
+    persona_id, pack, source_asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    export_result = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(
+        persona_id=persona_id,
+        pack_id=str(pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=export_result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-1",
+        status="completed",
+        stage="completed",
+        archive_path=str(export_result.archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        proposed_plan=preview_result["proposed_plan"],
+    )
+    portability_job = repo.create_portability_job(
+        owner_user_id="user-1",
+        job_id="job-commit-1",
+        operation="import_commit",
+        status="queued",
+        stage="queued",
+        preview_id=str(preview["id"]),
+        persona_id=persona_id,
+    )
+    worker = PersonaVisualPortabilityWorker(db=db_instance, repo=repo)
+
+    result = await worker.handle_job_async(
+        {
+            "id": "job-commit-1",
+            "job_type": PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+            "owner_user_id": "user-1",
+            "payload": {
+                "user_id": "user-1",
+                "preview_id": str(preview["id"]),
+                "portability_job_id": str(portability_job["id"]),
+                "request_id": "req-commit",
+                "target_persona_id": persona_id,
+                "trust_mode": "untrusted_import",
+                "target_mode": "create_new",
+            },
+        }
+    )
+
+    updated_job = repo.get_portability_job(str(portability_job["id"]), owner_user_id="user-1")
+    imported_pack = db_instance.get_persona_visual_pack(
+        pack_id=result["pack_id"],
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    imported_assets = db_instance.list_persona_visual_assets(
+        pack_id=result["pack_id"],
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    assert result["status"] == "imported"
+    assert imported_pack is not None
+    assert imported_pack["id"] != pack["id"]
+    assert imported_pack["status"] == "draft"
+    assert len(imported_assets) == 1
+    assert imported_assets[0]["id"] != source_asset["id"]
+    assert imported_pack["manifest"]["animations"]["idle"]["frames"][0]["asset_id"] == imported_assets[0]["id"]
+    assert updated_job is not None
+    assert updated_job["status"] == "completed"
+    assert updated_job["stage"] == "completed"
+    assert updated_job["pack_id"] == imported_pack["id"]
+
+
+@pytest.mark.asyncio
+async def test_persona_visual_import_commit_worker_rejects_incomplete_preview(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualPortabilityWorker,
+    )
+
+    persona_id, pack, _source_asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    export_result = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(
+        persona_id=persona_id,
+        pack_id=str(pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-1",
+        status="queued",
+        archive_path=str(export_result.archive_path),
+        target_persona_id=persona_id,
+    )
+    portability_job = repo.create_portability_job(
+        owner_user_id="user-1",
+        job_id="job-commit-1",
+        operation="import_commit",
+        status="queued",
+        stage="queued",
+        preview_id=str(preview["id"]),
+        persona_id=persona_id,
+    )
+    worker = PersonaVisualPortabilityWorker(db=db_instance, repo=repo)
+
+    with pytest.raises(ValueError, match="import_preview_not_completed"):
+        await worker.handle_job_async(
+            {
+                "id": "job-commit-1",
+                "job_type": PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+                "owner_user_id": "user-1",
+                "payload": {
+                    "user_id": "user-1",
+                    "preview_id": str(preview["id"]),
+                    "portability_job_id": str(portability_job["id"]),
+                    "request_id": "req-commit",
+                    "target_persona_id": persona_id,
+                    "trust_mode": "untrusted_import",
+                    "target_mode": "create_new",
+                },
+            }
+        )
+
+    assert len(db_instance.list_persona_visual_packs(persona_id=persona_id, user_id="user-1")) == 1

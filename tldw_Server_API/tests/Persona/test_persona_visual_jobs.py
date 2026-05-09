@@ -173,6 +173,46 @@ def test_create_persona_visual_pack_import_preview_job_uses_archive_digest() -> 
     }
 
 
+def test_create_persona_visual_pack_import_commit_job_uses_preview_group() -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+        create_visual_pack_import_commit_job,
+        visual_pack_import_commit_idempotency_key,
+    )
+
+    manager = FakeJobsManager()
+
+    job = create_visual_pack_import_commit_job(
+        manager,
+        user_id="user-1",
+        preview_id="preview-1",
+        portability_job_id="commit-row-1",
+        request_id="request-1",
+        target_persona_id="persona-2",
+        trust_mode="untrusted_import",
+        target_mode="create_new",
+    )
+
+    expected_key = visual_pack_import_commit_idempotency_key(
+        user_id="user-1",
+        preview_id="preview-1",
+        request_id="request-1",
+    )
+    assert job["queue"] == "default"
+    assert job["job_type"] == PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE
+    assert job["batch_group"] == "persona_visuals:user:user-1:portability:import-commit:preview-1:request-1"
+    assert job["idempotency_key"] == expected_key
+    assert manager.created[0]["payload"] == {
+        "user_id": "user-1",
+        "preview_id": "preview-1",
+        "portability_job_id": "commit-row-1",
+        "request_id": "request-1",
+        "target_persona_id": "persona-2",
+        "trust_mode": "untrusted_import",
+        "target_mode": "create_new",
+    }
+
+
 @pytest.fixture()
 def persona_visual_db(tmp_path: Path):
     db = CharactersRAGDB(tmp_path / "persona_visual_jobs.sqlite", client_id="persona-visual-jobs-tests")

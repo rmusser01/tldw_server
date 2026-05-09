@@ -553,6 +553,146 @@ def test_import_preview_status_is_scoped(persona_db: CharactersRAGDB) -> None:
     assert denied.status_code == 404
 
 
+def test_start_import_commit_creates_jobs_backed_portability_row(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Commit Persona")
+        archive_path = tmp_path / "commit.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["job_id"] == "9001"
+    assert body["operation"] == "import_commit"
+    assert body["preview_id"] == preview["id"]
+    assert body["target_persona_id"] == persona_id
+    assert body["status"] == "queued"
+    assert body["stage"] == "queued"
+    assert manager.created[0]["job_type"] == PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE
+    row = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert row is not None
+    assert row["operation"] == "import_commit"
+    assert row["preview_id"] == preview["id"]
+    assert row["persona_id"] == persona_id
+
+
+def test_import_commit_status_is_scoped(persona_db: CharactersRAGDB, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Commit Status Persona")
+        archive_path = tmp_path / "commit-status.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+        )
+        started = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "trusted_restore", "target_mode": "create_new"},
+        )
+        assert started.status_code == 202, started.text
+        job_id = started.json()["job_id"]
+        imported_pack = _create_visual_pack(client, persona_id, title="Imported Pack")
+        repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "pack_id": imported_pack["id"],
+                "progress": {"asset_count": 1},
+            },
+            owner_user_id="1",
+        )
+
+        status_response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/imports/{job_id}"
+        )
+
+    assert status_response.status_code == 200, status_response.text
+    body = status_response.json()
+    assert body["status"] == "completed"
+    assert body["pack_id"] == imported_pack["id"]
+    assert body["progress"] == {"asset_count": 1}
+
+    with _client_for_user(2, persona_db) as other_client:
+        denied = other_client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/imports/{job_id}"
+        )
+
+    assert denied.status_code == 404
+
+
+def test_start_import_commit_rejects_incomplete_preview(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Incomplete Import Commit Persona")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="queued",
+            archive_path=str(tmp_path / "not-ready.tldw-persona-vpack"),
+            target_persona_id=persona_id,
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert manager.created == []
+
+
 def test_deactivate_visual_pack_reverts_to_derived_buddy(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Deactivate Visual API Persona")

@@ -27,7 +27,7 @@ PersonaVisualRendererType = Literal["sprite_frames", "sprite_sheet", "static_ima
 PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview", "generated_candidate"]
 PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
 PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
-PersonaVisualPortabilityOperation = Literal["export", "import_preview"]
+PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",
@@ -186,6 +186,22 @@ class PersonaVisualImportPreviewResponse(BaseModel):
     error_code: str | None = None
     error_message: str | None = None
     expires_at: str | None = None
+
+
+class PersonaVisualImportCommitRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=120)
+    trust_mode: Literal["trusted_restore", "untrusted_import"] = "untrusted_import"
+    target_mode: Literal["create_new"] = "create_new"
+
+
+class PersonaVisualImportCommitStartResponse(BaseModel):
+    job_id: str
+    portability_job_id: str
+    operation: Literal["import_commit"]
+    preview_id: str
+    target_persona_id: str
+    status: str
+    stage: str
 
 
 class PersonaVisualCandidateResponse(BaseModel):
