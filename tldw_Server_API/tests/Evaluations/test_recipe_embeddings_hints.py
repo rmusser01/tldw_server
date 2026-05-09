@@ -41,8 +41,8 @@ def test_candidate_hints_mark_disallowed_provider(monkeypatch) -> None:
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_simplified_embeddings_config",
         lambda: {
-            "default_provider": "openai",
-            "default_model": "text-embedding-3-small",
+            "default_provider": "huggingface",
+            "default_model": "BAAI/bge-small-en-v1.5",
             "providers": [{"name": "huggingface", "models": ["BAAI/bge-small-en-v1.5"]}],
         },
     )
@@ -70,7 +70,7 @@ def test_candidate_hints_mark_disallowed_model(monkeypatch) -> None:
         "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_simplified_embeddings_config",
         lambda: {
             "default_provider": "openai",
-            "default_model": "text-embedding-3-small",
+            "default_model": "legacy-embedding",
             "providers": [{"name": "openai", "models": ["legacy-embedding"], "api_key": "sk-test"}],
         },
     )
@@ -171,6 +171,31 @@ def test_candidate_hints_mark_missing_key_for_remote_provider(monkeypatch) -> No
     assert result["candidates"][0]["status"] == "missing_key"
 
 
+def test_candidate_hints_include_current_model_when_provider_models_drift(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_simplified_embeddings_config",
+        lambda: {
+            "default_provider": "huggingface",
+            "default_model": "BAAI/bge-small-en-v1.5",
+            "providers": [],
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_providers",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_models",
+        lambda: None,
+    )
+
+    result = build_embedding_recipe_candidate_hints(user=None)
+
+    assert result["candidates"][0]["provider"] == "huggingface"
+    assert result["candidates"][0]["model"] == "BAAI/bge-small-en-v1.5"
+    assert result["candidates"][0]["default"] is True
+
+
 def test_apply_preview_resolves_slot_to_copy_config(monkeypatch) -> None:
     class FakeService:
         def get_report(self, _run_id):
@@ -210,6 +235,43 @@ def test_apply_preview_resolves_slot_to_copy_config(monkeypatch) -> None:
     assert preview["apply_available"] is False
     assert preview["proposed"]["provider"] == "openai"
     assert preview["copy_config"]["Embeddings"]["embedding_model"] == "text-embedding-3-small"
+
+
+def test_apply_preview_blocks_slot_without_candidate_run_id(monkeypatch) -> None:
+    class FakeService:
+        def get_report(self, _run_id):
+            return {
+                "run": {
+                    "run_id": "recipe-run-1",
+                    "recipe_id": "embeddings_model_selection",
+                    "status": RunStatus.COMPLETED,
+                    "metadata": {},
+                },
+                "recommendation_slots": {
+                    "best_overall": {
+                        "candidate_run_id": None,
+                        "metadata": {
+                            "provider": "openai",
+                            "model": "text-embedding-3-small",
+                            "apply_eligible": True,
+                        },
+                    }
+                },
+            }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_current_embedding_config",
+        lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
+    )
+
+    preview = build_embedding_recipe_apply_preview(
+        FakeService(),
+        run_id="recipe-run-1",
+        slot_name="best_overall",
+    )
+
+    assert preview["apply_eligible"] is False
+    assert "candidate_run_id" in preview["blocked_reason"]
 
 
 def test_apply_preview_blocks_candidate_run_id_mismatch() -> None:

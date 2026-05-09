@@ -190,6 +190,9 @@ def build_embedding_recipe_apply_preview(
             f"'{slot_candidate_run_id or 'none'}'."
         )
         return response
+    if not slot_candidate_run_id:
+        response["blocked_reason"] = "Recommendation slot metadata is missing candidate_run_id."
+        return response
 
     metadata = _object_to_dict(slot.get("metadata") or {})
     provider = _clean_optional(metadata.get("provider"))
@@ -335,11 +338,9 @@ def _dedupe_with_current_first(
         ),
         None,
     )
-    if matching_candidate is None:
-        return candidates
-
-    matching_candidate["default"] = True
-    ordered: list[dict[str, object]] = [matching_candidate]
+    current_candidate = matching_candidate or current
+    current_candidate["default"] = True
+    ordered: list[dict[str, object]] = [current_candidate]
     seen: set[tuple[str, str]] = set()
     for candidate in ordered + candidates:
         if candidate is None:
@@ -351,7 +352,7 @@ def _dedupe_with_current_first(
         if key in seen:
             continue
         seen.add(key)
-        if candidate is not matching_candidate:
+        if candidate is not current_candidate:
             ordered.append(candidate)
     return ordered
 

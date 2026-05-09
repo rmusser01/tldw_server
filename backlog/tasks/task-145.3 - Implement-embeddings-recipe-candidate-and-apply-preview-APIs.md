@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-09 04:42'
-updated_date: '2026-05-09 05:00'
+updated_date: '2026-05-09 05:09'
 labels:
   - evaluations
   - embeddings
@@ -51,6 +51,8 @@ Implement Task 2 from the embeddings RAG recipe implementation plan: backend hel
 Implemented Task 2 backend candidate hints and apply-preview support. Red evidence: helper pytest initially failed during collection because embeddings_recipe_hints.py did not exist; endpoint tests then failed on missing candidates/apply-preview route wiring. Green evidence: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py -q -> 29 passed, 5 warnings. Bandit: python -m bandit -r touched production files -f json -o /tmp/bandit_embeddings_recipe_task2.json -> 0 results, 0 errors. Hygiene: git diff --check -> clean.
 
 Follow-up policy semantics fix: added red tests proving non-enforced allowlists do not block candidate hints and proving model allowlist patterns only support exact or trailing-* prefix matching. Updated _classify_candidate to gate provider/model allowlist blocks on should_enforce_embedding_policy(user), and aligned _model_allowed with embeddings_abtest_service exact/trailing-star semantics. Verification: python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py -q -> 31 passed, 5 warnings. Bandit on embeddings_recipe_hints.py -> 0 results, 0 errors. git diff --check -> clean.
+
+Follow-up hardening fix: added red tests for apply preview slots missing candidate_run_id and for current/default embedding candidates missing from configured provider model lists. The red run failed with candidates empty for drifted config and apply_eligible=true for missing candidate_run_id. Fixed apply preview to block slots without candidate_run_id and fixed candidate dedupe to insert current/default first when no configured candidate matches. Verification: python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_hints.py tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py -q -> 33 passed, 5 warnings. Bandit on embeddings_recipe_hints.py -> 0 results, 0 errors. git diff --check -> clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
