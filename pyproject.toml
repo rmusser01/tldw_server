@@ -607,6 +607,7 @@ markers = [
     "sandbox_no_reload: marks sandbox tests that should not reload app.main",
     "sandbox_real_docker: marks sandbox tests that require real Docker execution paths",
     "vz_linux_host_smoke: marks opt-in Apple silicon VZ Linux host smoke tests",
+    "vz_linux_host_failure_drill: marks manual opt-in Apple silicon VZ Linux host failure drills",
     "legacy_tts: marks legacy TTS tests",
     "concurrent: marks concurrency tests",
     "streaming: marks streaming tests",

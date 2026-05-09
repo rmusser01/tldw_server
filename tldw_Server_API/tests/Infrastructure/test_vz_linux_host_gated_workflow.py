@@ -32,11 +32,15 @@ def test_vz_linux_host_gated_workflow_is_manual_and_nightly() -> None:
     """The real VZ workflow should remain manual/nightly instead of normal CI."""
     workflow = _load_workflow()
     triggers = _workflow_triggers(workflow)
+    inputs = triggers["workflow_dispatch"]["inputs"]
 
     assert set(triggers) == {"workflow_dispatch", "schedule"}  # nosec B101
     assert "workflow_dispatch" in triggers  # nosec B101
     assert "schedule" in triggers  # nosec B101
-    assert triggers["workflow_dispatch"]["inputs"]["bundle_path"]["required"] is False  # nosec B101
+    assert inputs["bundle_path"]["required"] is False  # nosec B101
+    assert inputs["include_failure_drills"]["required"] is False  # nosec B101
+    assert inputs["include_failure_drills"]["default"] is False  # nosec B101
+    assert inputs["include_failure_drills"]["type"] == "boolean"  # nosec B101
 
 
 def test_vz_linux_host_gated_workflow_targets_prepared_apple_silicon_runner() -> None:
@@ -93,6 +97,20 @@ def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     assert "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" in run_blocks  # nosec B101
 
 
+def test_vz_linux_host_gated_workflow_failure_drills_are_manual_opt_in() -> None:
+    """Failure drills should only run when manual dispatch opts in."""
+    workflow = _load_workflow()
+    job = workflow["jobs"]["vz-linux-host-gated-smoke"]
+    steps = job["steps"]
+    run_blocks = "\n".join(str(step.get("run", "")) for step in steps)
+
+    assert "include_failure_drills" in _workflow_triggers(workflow)["workflow_dispatch"]["inputs"]  # nosec B101
+    assert "TLDW_SANDBOX_VZ_INCLUDE_FAILURE_DRILLS" not in job["env"]  # nosec B101
+    assert "inputs.include_failure_drills" in run_blocks  # nosec B101
+    assert "--include-failure-drills" in run_blocks  # nosec B101
+    assert "vars.TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY" not in run_blocks  # nosec B101
+
+
 def test_vz_linux_host_gated_operator_smoke_runs_recovery_slice() -> None:
     """The delegated operator smoke should include the non-destructive recovery slice."""
     script = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
@@ -100,6 +118,15 @@ def test_vz_linux_host_gated_operator_smoke_runs_recovery_slice() -> None:
     assert "run_real_vz_linux_pytest" in script  # nosec B101
     assert "run_real_vz_linux_host_smoke" in script  # nosec B101
     assert "-m vz_linux_host_smoke" in script  # nosec B101
+
+
+def test_vz_linux_host_gated_operator_smoke_has_manual_failure_drill_slice() -> None:
+    """The operator smoke should expose failure drills without enabling them by default."""
+    script = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "--include-failure-drills" in script  # nosec B101
+    assert "run_real_vz_linux_failure_drills" in script  # nosec B101
+    assert "-m vz_linux_host_failure_drill" in script  # nosec B101
 
 
 def test_vz_linux_host_gated_acceptance_policy_requires_recovery_smoke() -> None:

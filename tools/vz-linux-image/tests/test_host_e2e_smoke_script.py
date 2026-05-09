@@ -34,6 +34,7 @@ def test_host_e2e_smoke_script_help_mentions_required_bundle() -> None:
     assert result.returncode == 0
     assert "Usage:" in result.stdout
     assert "--bundle PATH" in result.stdout
+    assert "--include-failure-drills" in result.stdout
 
 
 def test_host_e2e_smoke_script_requires_bundle() -> None:
@@ -81,7 +82,31 @@ def test_host_e2e_smoke_script_dry_run_prints_helper_and_pytest_commands(tmp_pat
     assert "test_macos_virtualization_helper_daemon_host_gated.py" in result.stdout
     assert "test_vz_linux_real_host_e2e.py" in result.stdout
     assert "-m vz_linux_host_smoke" in result.stdout
+    assert "vz_linux_host_failure_drill" not in result.stdout
     assert not serial_log_dir.exists()
+
+
+def test_host_e2e_smoke_script_dry_run_includes_failure_drills_when_requested(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--include-failure-drills",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--python",
+        sys.executable,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "-m vz_linux_host_smoke" in result.stdout
+    assert "-m vz_linux_host_failure_drill" in result.stdout
 
 
 def test_host_e2e_smoke_script_default_socket_uses_private_runtime_dir(tmp_path: Path) -> None:

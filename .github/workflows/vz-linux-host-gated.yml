@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      include_failure_drills:
+        description: Run manual-only VZ Linux failure recovery drills
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 10 * * *'
 
@@ -91,6 +96,11 @@ jobs:
           case "${TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN:-false}" in
             1|true|TRUE|True|yes|YES|Yes)
               args+=(--skip-sign)
+              ;;
+          esac
+          case "${{ inputs.include_failure_drills || false }}" in
+            1|true|TRUE|True|yes|YES|Yes)
+              args+=(--include-failure-drills)
               ;;
           esac
 

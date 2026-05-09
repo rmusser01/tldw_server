@@ -333,3 +333,96 @@ def test_vz_linux_real_recovery_diagnostics_dry_run_smoke(
         )
     finally:
         service._orch.delete_vz_session_control(stale_session_id)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+@pytest.mark.vz_linux_host_failure_drill
+def test_vz_linux_real_session_recreates_vm_after_helper_termination(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify a stale session VM is not reused after helper-side termination."""
+    base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", raising=False)
+
+    service = SandboxService()
+    helper = VZLinuxRunner.helper_client_cls()
+    session_id: str | None = None
+    destroyed = False
+    try:
+        session = service.create_session(
+            user_id="e2e-user",
+            spec=SessionSpec(
+                runtime=RuntimeType.vz_linux,
+                base_image=base_image,
+                network_policy="deny_all",
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"spec_version": "1.0", "runtime": "vz_linux", "base_image": base_image},
+        )
+        session_id = session.id
+
+        first = service.start_run_scaffold(
+            user_id="e2e-user",
+            spec=RunSpec(
+                session_id=session.id,
+                runtime=RuntimeType.vz_linux,
+                base_image=base_image,
+                command=["/bin/echo", "failure-drill-first"],
+                network_policy="deny_all",
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={
+                "session_id": session.id,
+                "runtime": "vz_linux",
+                "command": ["/bin/echo", "failure-drill-first"],
+            },
+        )
+        control_after_first = service._orch.get_vz_session_control(session.id)
+        _expect(first.phase == RunPhase.completed, f"Expected first run completed, got {first.phase!r}")
+        _expect(isinstance(control_after_first, dict), "Expected VZ session control after first run")
+        first_vm_id = str(control_after_first.get("vm_id") or "").strip() if control_after_first else ""
+        _expect(bool(first_vm_id), f"Expected first run VM id, got {control_after_first!r}")
+
+        terminated = helper.terminate_vm(first_vm_id)
+        _expect(terminated is True, f"Expected helper to terminate drill VM {first_vm_id!r}")
+
+        second = service.start_run_scaffold(
+            user_id="e2e-user",
+            spec=RunSpec(
+                session_id=session.id,
+                runtime=RuntimeType.vz_linux,
+                base_image=base_image,
+                command=["/bin/echo", "failure-drill-second"],
+                network_policy="deny_all",
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={
+                "session_id": session.id,
+                "runtime": "vz_linux",
+                "command": ["/bin/echo", "failure-drill-second"],
+            },
+        )
+        control_after_second = service._orch.get_vz_session_control(session.id)
+        _expect(second.phase == RunPhase.completed, f"Expected second run completed, got {second.phase!r}")
+        _expect(isinstance(control_after_second, dict), "Expected VZ session control after second run")
+        second_vm_id = str(control_after_second.get("vm_id") or "").strip() if control_after_second else ""
+        _expect(bool(second_vm_id), f"Expected second run VM id, got {control_after_second!r}")
+        _expect(
+            second_vm_id != first_vm_id,
+            f"Expected stale VM replacement after helper termination, got {first_vm_id!r}",
+        )
+
+        _expect(service.destroy_session(session.id) is True, "Expected session destruction to succeed")
+        destroyed = True
+        _expect(service._orch.get_vz_session_control(session.id) is None, "Expected VZ session control cleanup")
+    finally:
+        if session_id and not destroyed:
+            service.destroy_session(session_id)

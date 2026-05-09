@@ -15,6 +15,7 @@ PYTHON_BIN=""
 DRY_RUN=0
 SKIP_BUILD=0
 SKIP_SIGN=0
+INCLUDE_FAILURE_DRILLS=0
 HELPER_PID=""
 
 usage() {
@@ -35,6 +36,8 @@ Options:
   --python PATH          Python executable for pytest
   --skip-build           Do not build the helper even if the binary is missing
   --skip-sign            Do not codesign the helper
+  --include-failure-drills
+                         Run manual-only host failure recovery drills after baseline smoke
   --dry-run              Print commands without starting helper or VMs
   -h, --help             Show this help
 EOF
@@ -119,6 +122,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --skip-sign)
       SKIP_SIGN=1
+      shift
+      ;;
+    --include-failure-drills)
+      INCLUDE_FAILURE_DRILLS=1
       shift
       ;;
     --dry-run)
@@ -339,6 +346,10 @@ run_real_vz_linux_host_smoke() {
   run_real_vz_linux_pytest -m vz_linux_host_smoke -q -rs
 }
 
+run_real_vz_linux_failure_drills() {
+  run_real_vz_linux_pytest -m vz_linux_host_failure_drill -q -rs
+}
+
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "dry-run: printing host smoke commands without starting helper or VMs"
 fi
@@ -354,3 +365,6 @@ run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket
 run_real_vz_linux_host_smoke
+if [[ "${INCLUDE_FAILURE_DRILLS}" -eq 1 ]]; then
+  run_real_vz_linux_failure_drills
+fi
