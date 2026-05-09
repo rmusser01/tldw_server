@@ -5261,6 +5261,7 @@ export class TldwApiClientBase {
     text: string
     token_budget?: number
     dictionary_id?: number | string
+    dictionary_ids?: Array<number | string>
     max_iterations?: number
     chat_id?: string
   }): Promise<any> {

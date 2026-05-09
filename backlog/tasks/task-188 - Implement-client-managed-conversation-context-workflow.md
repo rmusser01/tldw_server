@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-09 20:05'
-updated_date: '2026-05-09 20:14'
+updated_date: '2026-05-09 20:21'
 labels:
   - implementation
   - frontend
@@ -32,7 +32,7 @@ Execute the approved client-managed Conversation Context implementation plan. Th
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Server primitive tests cover explicit worldbook processing without character context, ordered dictionary processing, conversationContext settings preservation, and invalid asset ID domain errors
-- [ ] #2 Client context composer assembles preview and send payload from server primitives without a monolithic backend context-preview endpoint
+- [x] #2 Client context composer assembles preview and send payload from server primitives without a monolithic backend context-preview endpoint
 - [ ] #3 Composer popover replaces or evolves the existing chat-composer character picker and keeps character selection as one slot
 - [ ] #4 Worldbooks and dictionaries remain conversation-scoped and usable without a selected character
 - [ ] #5 Targeted pytest, Vitest, Playwright/browser checks, Bandit touched-scope scan, and git diff checks are recorded or concrete skips documented
@@ -48,6 +48,8 @@ Execute the approved client-managed Conversation Context implementation plan. Th
 
 <!-- SECTION:NOTES:BEGIN -->
 Task 1 backend primitive hardening complete. Added integration coverage for explicit worldbook processing without a character, ordered dictionary_ids processing, conversationContext settings preservation, and invalid worldbook/dictionary ID domain errors. Implemented dictionary_ids on /api/v1/chat/dictionaries/process, explicit ID validation, ordered processing, and worldbook missing-ID validation. Verification: pytest tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py -v (4 passed); pytest tldw_Server_API/tests/Chat/unit/test_chat_dictionary_endpoints.py -q (54 passed); bandit touched backend paths -> 0 findings; git diff --check -> clean.
+
+Task 2 client composer core complete. Added typed conversation-context models, settings normalization for nested conversationContext plus legacy chat_dictionary_ids fallback/mirror, and a pure composer that calls dictionary processing before worldbook processing and returns shared previewSections/providerMessages from one composition object. Verification: bunx vitest run ../packages/ui/src/services/conversation-context/__tests__/conversationContextComposer.test.ts ../packages/ui/src/services/conversation-context/__tests__/conversationContextSettings.test.ts --config vitest.config.ts (8 passed); bunx tsc --noEmit -p ../packages/ui/tsconfig.json --pretty false (passed); git diff --check (clean).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
