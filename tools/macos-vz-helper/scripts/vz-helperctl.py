@@ -28,15 +28,18 @@ DEFAULT_HELPER = HELPER_PACKAGE_DIR / ".build" / "debug" / "macos-vz-helper"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-try:
-    from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
-        EXPECTED_HELPER_PROTOCOL_VERSION,
-    )
-except ModuleNotFoundError as exc:
-    missing_name = str(exc.name or "")
-    if missing_name != "tldw_Server_API" and not missing_name.startswith("tldw_Server_API."):
-        raise
+if sys.version_info < (3, 10):
     EXPECTED_HELPER_PROTOCOL_VERSION = "1"
+else:
+    try:
+        from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+            EXPECTED_HELPER_PROTOCOL_VERSION,
+        )
+    except ModuleNotFoundError as exc:
+        missing_name = str(exc.name or "")
+        if missing_name != "tldw_Server_API" and not missing_name.startswith("tldw_Server_API."):
+            raise
+        EXPECTED_HELPER_PROTOCOL_VERSION = "1"
 
 
 INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
@@ -325,6 +328,7 @@ def smoke_helper(
     helper_path: Path | None = None,
     entitlements_path: Path | None = None,
     python_path: Path | None = None,
+    include_failure_drills: bool = False,
     dry_run: bool = False,
 ) -> CheckResult:
     argv = [str(host_smoke_script_path()), "--bundle", str(bundle_path)]
@@ -338,6 +342,8 @@ def smoke_helper(
         argv.extend(["--entitlements", str(entitlements_path)])
     if python_path is not None:
         argv.extend(["--python", str(python_path)])
+    if include_failure_drills:
+        argv.append("--include-failure-drills")
     if dry_run:
         argv.append("--dry-run")
     code = run_command(argv, dry_run=dry_run)
@@ -1379,6 +1385,7 @@ def _smoke_command(args: argparse.Namespace) -> int:
         helper_path=Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
         entitlements_path=Path(args.entitlements) if args.entitlements else None,
         python_path=Path(args.python) if args.python else None,
+        include_failure_drills=args.include_failure_drills,
         dry_run=args.dry_run,
     )
     if not result.ok:
@@ -1449,6 +1456,7 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--helper", "--helper-path", dest="helper_path")
     smoke.add_argument("--entitlements")
     smoke.add_argument("--python")
+    smoke.add_argument("--include-failure-drills", action="store_true")
     smoke.add_argument("--dry-run", action="store_true")
     smoke.set_defaults(func=_smoke_command)
 
