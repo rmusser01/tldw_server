@@ -3,6 +3,11 @@ import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { ConnectionPhase } from "@/types/connection"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import {
+  Badge,
+  getBadgeVariantForDesignSystemSeverity
+} from "@/components/ui/primitives"
 
 type StatusKind = "unknown" | "ok" | "fail"
 
@@ -37,6 +42,22 @@ export function ConnectionStatus({
           ? "fail"
           : "unknown"
 
+  const stateKeyForCoreStatus = (status: StatusKind): DesignSystemStateKey => {
+    if (phase === ConnectionPhase.UNCONFIGURED) {
+      return "setup_required"
+    }
+    if (status === "ok") {
+      return "ready"
+    }
+    if (status === "fail") {
+      return "unavailable"
+    }
+    return "retrying"
+  }
+
+  const coreStateKey = stateKeyForCoreStatus(coreStatus)
+  const coreState = getDesignSystemState(coreStateKey)
+
   const statusLabelForCore = (status: StatusKind): string => {
     if (phase === ConnectionPhase.UNCONFIGURED) {
       return t(
@@ -61,19 +82,21 @@ export function ConnectionStatus({
     }
   }
 
-  const statusBgClass =
-    coreStatus === "ok"
-      ? "border-success/30 bg-success/10"
-      : coreStatus === "fail"
-        ? "border-danger/30 bg-danger/10"
-        : "border-border bg-surface2"
+  const statusBgClass = {
+    success: "border-success/30 bg-success/10",
+    error: "border-danger/30 bg-danger/10",
+    warning: "border-warn/30 bg-warn/10",
+    info: "border-primary/30 bg-primary/10",
+    neutral: "border-border bg-surface2"
+  }[coreState.severity]
 
-  const statusTextClass =
-    coreStatus === "ok"
-      ? "text-success"
-      : coreStatus === "fail"
-        ? "text-danger"
-        : "text-text-muted"
+  const statusTextClass = {
+    success: "text-success",
+    error: "text-danger",
+    warning: "text-warn",
+    info: "text-primary",
+    neutral: "text-text-muted"
+  }[coreState.severity]
 
   return (
     <button
@@ -105,7 +128,7 @@ export function ConnectionStatus({
         )
       }
     >
-      <StatusDot status={coreStatus} />
+      <StatusDot status={coreStatus} stateKey={coreStateKey} />
       {showLabel && (
         <span className={statusTextClass}>
           {statusLabelForCore(coreStatus)}
@@ -118,19 +141,31 @@ export function ConnectionStatus({
 /**
  * Simple status dot indicator with animation for unknown state
  */
-export function StatusDot({ status }: { status: StatusKind }) {
+export function StatusDot({
+  status,
+  stateKey
+}: {
+  status: StatusKind
+  stateKey: DesignSystemStateKey
+}) {
+  const state = getDesignSystemState(stateKey)
+
   return (
-    <span
-      data-testid="connection-status-dot"
-      aria-hidden
-      className={`inline-block h-2 w-2 rounded-full ${
-        status === "ok"
-          ? "bg-success"
-          : status === "fail"
-            ? "bg-danger"
-            : "bg-text-subtle animate-pulse"
-      }`}
-    />
+    <Badge
+      data-testid="connection-status-dot-badge"
+      variant={getBadgeVariantForDesignSystemSeverity(state.severity)}
+      size="sm"
+      outline
+      className="gap-0 px-1 py-1 leading-none"
+    >
+      <span
+        data-testid="connection-status-dot"
+        aria-hidden
+        className={`inline-block h-2 w-2 rounded-full bg-current ${
+          status === "unknown" ? "animate-pulse" : ""
+        }`}
+      />
+    </Badge>
   )
 }
 
