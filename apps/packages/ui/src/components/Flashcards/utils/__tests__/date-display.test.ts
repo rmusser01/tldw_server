@@ -22,7 +22,7 @@ describe("flashcard date display utilities", () => {
   it("formats long local absolute timestamps for next-due labels", () => {
     const value = new Date(2026, 1, 18, 9, 5).toISOString()
 
-    expect(formatFlashcardLongDateTime(value)).toBe(
+    expect(formatFlashcardLongDateTime(value, { locale: "en-US" })).toBe(
       "Wednesday, February 18 at 9:05 AM"
     )
   })

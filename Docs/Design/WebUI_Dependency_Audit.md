@@ -224,7 +224,7 @@ This audit does not remove packages or rewrite runtime code.
   Flashcards Review/Manage display formatting and Ant Design `Dayjs`
   value-contract surfaces.
 - TASK-164 removed `dayjs` relative/absolute display formatting from
-  Flashcards ReviewTab and ManageTab by extending the shared native Date
+  Flashcards ReviewTab and ManageTab by extending the shared native Date/Intl
   helpers used by FlashcardEditDrawer. The shared UI `dayjs` import count
   dropped from 11 to 7 while leaving the package declared for Ant Design
   `Dayjs` value-contract surfaces.
@@ -423,6 +423,8 @@ ownership checks, or complex-domain packages that should stay on the
   the existing warning baseline, and `git diff --check` passed. The shared UI
   TypeScript check still fails on existing repo-wide test/service baseline
   errors outside this slice.
+- 2026-05-09 TASK-164 review follow-up: replaced manual English weekday/month
+  arrays in the long Flashcards date label helper with `Intl.DateTimeFormat`.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,
