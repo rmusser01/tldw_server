@@ -137,3 +137,129 @@ def test_matrix_slot_creation_supports_multi_hop_dependencies(chacha_db: Charact
     slots_by_key = {slot["slot_key"]: slot for slot in slots}
     assert slots_by_key["depth.interior"]["depends_on_slot_id"] == slots_by_key["background.interior"]["id"]
     assert slots_by_key["trim.depth.interior"]["depends_on_slot_id"] == slots_by_key["depth.interior"]["id"]
+
+
+def test_list_packs_for_setup_applies_owner_query_and_bounded_pagination(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    repo.create_pack(
+        owner_user_id=42,
+        primary_character_id=character_id,
+        title="Archive Alpha",
+        description="Station archive pack.",
+    )
+    repo.create_pack(
+        owner_user_id=42,
+        primary_character_id=character_id,
+        title="Archive Beta",
+        description="Secondary archive pack.",
+    )
+    repo.create_pack(
+        owner_user_id=7,
+        primary_character_id=character_id,
+        title="Archive Other Owner",
+    )
+
+    rows, has_more = repo.list_packs_for_setup(
+        owner_user_id=42,
+        query="archive",
+        limit=1,
+        offset=0,
+    )
+
+    assert [row["title"] for row in rows] == ["Archive Alpha"]
+    assert has_more is True
+
+    next_rows, next_has_more = repo.list_packs_for_setup(
+        owner_user_id=42,
+        query="archive",
+        limit=1,
+        offset=1,
+    )
+
+    assert [row["title"] for row in next_rows] == ["Archive Beta"]
+    assert next_has_more is False
+
+
+def test_latest_completed_import_provenance_by_pack_ids_uses_latest_completed_row(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(
+        owner_user_id=42,
+        primary_character_id=character_id,
+        title="Imported Pack",
+    )
+    other_pack = repo.create_pack(
+        owner_user_id=7,
+        primary_character_id=character_id,
+        title="Other Owner Pack",
+    )
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="preview-job",
+        status="completed",
+        archive_path="test-artifacts/preview.vnpack",
+    )
+    repo.create_import_journal(
+        owner_user_id=42,
+        preview_id=int(preview["id"]),
+        job_id="older-completed",
+        status="completed",
+        stage="completed",
+        trust_mode="trusted_restore",
+        target_mode="create_new",
+        target_pack_id=int(pack["id"]),
+        completed_at="2026-05-08T00:00:00Z",
+    )
+    repo.create_import_journal(
+        owner_user_id=42,
+        preview_id=int(preview["id"]),
+        job_id="failed-newer",
+        status="failed",
+        stage="failed",
+        trust_mode="trusted_restore",
+        target_mode="create_new",
+        target_pack_id=int(pack["id"]),
+        completed_at="2026-05-10T00:00:00Z",
+    )
+    repo.create_import_journal(
+        owner_user_id=42,
+        preview_id=int(preview["id"]),
+        job_id="newer-completed",
+        status="completed",
+        stage="completed",
+        trust_mode="untrusted_import",
+        target_mode="create_new",
+        target_pack_id=int(pack["id"]),
+        completed_at="2026-05-09T00:00:00Z",
+    )
+    other_preview = repo.create_import_preview(
+        owner_user_id=7,
+        job_id="other-preview",
+        status="completed",
+        archive_path="test-artifacts/other.vnpack",
+    )
+    repo.create_import_journal(
+        owner_user_id=7,
+        preview_id=int(other_preview["id"]),
+        job_id="other-owner",
+        status="completed",
+        stage="completed",
+        trust_mode="trusted_restore",
+        target_mode="create_new",
+        target_pack_id=int(other_pack["id"]),
+        completed_at="2026-05-10T00:00:00Z",
+    )
+
+    provenance = repo.latest_completed_import_provenance_by_pack_ids(
+        owner_user_id=42,
+        pack_ids=[int(pack["id"]), int(other_pack["id"])],
+    )
+
+    assert set(provenance) == {int(pack["id"])}
+    assert provenance[int(pack["id"])]["job_id"] == "newer-completed"
+    assert provenance[int(pack["id"])]["trust_mode"] == "untrusted_import"

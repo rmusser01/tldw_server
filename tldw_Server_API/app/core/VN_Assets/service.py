@@ -132,6 +132,21 @@ class VNAssetPackService:
             for pack in self.repo.list_packs(owner_user_id=self.owner_user_id)
         ]
 
+    def list_packs_for_setup(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[VNAssetPackResponse], bool]:
+        rows, has_more = self.repo.list_packs_for_setup(
+            owner_user_id=self.owner_user_id,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        return [self._pack_response(pack) for pack in rows], has_more
+
     def get_pack(self, pack_id: int) -> VNAssetPackResponse:
         return self._pack_response(self._require_pack(pack_id))
 

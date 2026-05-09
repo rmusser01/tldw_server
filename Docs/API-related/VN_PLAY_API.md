@@ -19,6 +19,7 @@ Linked chat is read-only in V1. `linked_chat_id` may be stored as session contex
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `GET` | `/setup-options` | Return backend-computed character and asset pack setup selectors. |
 | `POST` | `/sessions` | Create a Freeform or Story session. |
 | `GET` | `/sessions` | List the current user's non-deleted sessions. |
 | `GET` | `/sessions/{session_id}` | Get one session with current scene state. |
@@ -31,6 +32,36 @@ Linked chat is read-only in V1. `linked_chat_id` may be stored as session contex
 | `GET` | `/sessions/{session_id}/checkpoints` | List checkpoints. |
 | `POST` | `/sessions/{session_id}/restore` | Restore a checkpoint. |
 | `GET` | `/sessions/{session_id}/branches` | List branch metadata. |
+
+## Setup Options
+
+`GET /setup-options` returns a bounded, selector-safe setup contract for WebUI and custom frontend session creation. The backend owns character option shaping, VN asset pack readiness fanout, compatibility classification, content-rating warnings, trust provenance, warning severity, and empty-state hints.
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/vn-play/setup-options?mode=story&selected_character_id=42&content_rating=general" \
+  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+```
+
+Supported query parameters:
+
+- `mode`: optional `freeform` or `story`.
+- `character_query` / `pack_query`: optional selector search text.
+- `character_limit` / `pack_limit`: bounded page sizes, default `25`, maximum `100`.
+- `character_offset` / `pack_offset`: zero-based selector offsets.
+- `selected_character_id`: optional active character; included as `selected_character` even when outside the current character page.
+- `content_rating`: intended session content rating, default `general`.
+
+The response includes:
+
+- `characters`: selector-safe character rows with `id`, `name`, `description_preview`, `tags`, `favorite`, `deleted`, and `has_image`; full prompts and image bytes are not embedded.
+- `asset_packs`: bounded pack rows with readiness, compatibility, trust, warning summary, and `recommended` metadata.
+- `pagination`: separate character and pack pagination metadata. Pack readiness is computed only for returned pack rows.
+- `empty_states`: scoped hints such as `no_characters`, `no_asset_packs`, `no_ready_packs`, `no_compatible_packs`, or `selected_character_not_found`.
+- `defaults`: optional unambiguous defaults for frontend convenience.
+
+High-risk warning summaries require frontend acknowledgement before submit, but V1 keeps `POST /sessions` compatible and does not enforce setup acknowledgement server-side. Clients that accept high-risk warnings should persist acknowledgement metadata in `settings.setup_acknowledgements`.
 
 ## Create A Session
 

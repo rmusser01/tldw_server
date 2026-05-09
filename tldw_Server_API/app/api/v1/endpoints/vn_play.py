@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
@@ -16,9 +16,11 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlayRestoreRequest,
     VNPlayRetryTurnRequest,
     VNPlaySceneStateResponse,
+    VNPlayMode,
     VNPlaySessionCreate,
     VNPlaySessionResponse,
     VNPlaySessionUpdate,
+    VNPlaySetupOptionsResponse,
     VNPlayTurnRequest,
     VNPlayTurnResponse,
 )
@@ -31,6 +33,11 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_TURN_IN_PROGRESS,
     TURN_STATUS_MODEL_FAILED,
     TURN_STATUS_PARSE_FAILED,
+)
+from tldw_Server_API.app.core.VN_Play.setup_options import (
+    DEFAULT_SETUP_LIMIT,
+    MAX_SETUP_LIMIT,
+    build_vn_play_setup_options,
 )
 from tldw_Server_API.app.core.VN_Play.service import (
     VNPlayConflictError,
@@ -54,15 +61,49 @@ def _service(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> VNPlayService:
+    owner_user_id = _owner_user_id(current_user)
+    return VNPlayService(
+        repo=VNPlayRepository.initialized(db),
+        owner_user_id=owner_user_id,
+    )
+
+
+def _owner_user_id(current_user: User) -> int:
     owner_user_id = current_user.id_int
     if owner_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="invalid_user_id",
         )
-    return VNPlayService(
-        repo=VNPlayRepository.initialized(db),
-        owner_user_id=owner_user_id,
+    return owner_user_id
+
+
+@router.get("/setup-options", response_model=VNPlaySetupOptionsResponse)
+def setup_options(
+    mode: str | None = Query(default=None, pattern="^(freeform|story)$"),
+    character_query: str | None = Query(default=None, max_length=200),
+    pack_query: str | None = Query(default=None, max_length=200),
+    character_limit: int = Query(default=DEFAULT_SETUP_LIMIT, ge=1, le=MAX_SETUP_LIMIT),
+    character_offset: int = Query(default=0, ge=0),
+    pack_limit: int = Query(default=DEFAULT_SETUP_LIMIT, ge=1, le=MAX_SETUP_LIMIT),
+    pack_offset: int = Query(default=0, ge=0),
+    selected_character_id: int | None = Query(default=None, ge=1),
+    content_rating: str | None = Query(default="general", min_length=1, max_length=100),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> VNPlaySetupOptionsResponse:
+    return build_vn_play_setup_options(
+        db=db,
+        owner_user_id=_owner_user_id(current_user),
+        mode=cast(VNPlayMode | None, mode),
+        character_query=character_query,
+        pack_query=pack_query,
+        character_limit=character_limit,
+        character_offset=character_offset,
+        pack_limit=pack_limit,
+        pack_offset=pack_offset,
+        selected_character_id=selected_character_id,
+        content_rating=content_rating,
     )
 
 
