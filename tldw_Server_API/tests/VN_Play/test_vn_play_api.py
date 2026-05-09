@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints.vn_play import router as vn_play_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetPackCreate,
+    VNAssetReadinessResponse,
     VNAssetReviewRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
@@ -214,6 +215,106 @@ def test_setup_options_returns_selector_safe_character_and_pack(
     assert "image_base64" not in body["characters"][0]
 
 
+def test_setup_options_uses_lightweight_character_selector_queries(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+
+    def fail_full_character_query(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("setup options should not load full character rows")
+
+    def query_selector_rows(
+        self: CharactersRAGDB,
+        *,
+        query: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        return (
+            [
+                {
+                    "id": character_id,
+                    "name": "Mira",
+                    "description": "A careful archivist.",
+                    "tags": ["guide", "archive"],
+                    "extensions": {"tldw": {"favorite": True}},
+                    "deleted": False,
+                    "has_image": True,
+                }
+            ],
+            1,
+        )
+
+    def get_selector_row(
+        self: CharactersRAGDB,
+        selected_character_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        assert selected_character_id == character_id
+        return {
+            "id": character_id,
+            "name": "Mira",
+            "description": "A careful archivist.",
+            "tags": ["guide", "archive"],
+            "extensions": {"tldw": {"favorite": True}},
+            "deleted": False,
+            "has_image": True,
+        }
+
+    monkeypatch.setattr(CharactersRAGDB, "query_character_cards", fail_full_character_query)
+    monkeypatch.setattr(CharactersRAGDB, "get_character_card_by_id", fail_full_character_query)
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "query_character_setup_options",
+        query_selector_rows,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "get_character_setup_option_by_id",
+        get_selector_row,
+        raising=False,
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/setup-options?selected_character_id={character_id}"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selected_character"]["has_image"] is True
+    assert body["characters"][0]["favorite"] is True
+
+
+def test_setup_options_description_preview_respects_max_length(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    long_description = " ".join(["archivist"] * 40)
+    chacha_db.update_character_card(
+        character_id,
+        {"description": long_description},
+        expected_version=1,
+    )
+
+    response = client.get("/api/v1/vn-play/setup-options")
+
+    assert response.status_code == 200
+    description_preview = response.json()["characters"][0]["description_preview"]
+    assert description_preview.endswith("...")
+    assert len(description_preview) <= 160
+
+
 def test_setup_options_preserves_selected_character_outside_page(
     client: TestClient,
     chacha_db: CharactersRAGDB,
@@ -387,6 +488,104 @@ def test_setup_options_evaluates_readiness_only_for_returned_pack_page(
     assert second_pack_id not in readiness_calls
     assert readiness_calls == [first_pack_id]
     assert body["pagination"]["asset_packs"]["has_more"] is True
+
+
+def test_setup_options_pack_listing_does_not_compute_planned_output_count(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+
+    def fail_planned_output_count(self: VNAssetPackService, pack_id: int) -> int:
+        raise AssertionError("setup pack listing should not scan slots for planned counts")
+
+    monkeypatch.setattr(
+        VNAssetPackService,
+        "_planned_output_count",
+        fail_planned_output_count,
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/setup-options?selected_character_id={character_id}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["asset_packs"][0]["title"] == "Mira - Archive Pack"
+
+
+def test_setup_options_missing_required_assets_warning_uses_structured_errors(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+
+    def readiness_with_false_positive_text(
+        self: VNAssetPackService,
+        pack_id: int,
+    ) -> VNAssetReadinessResponse:
+        return VNAssetReadinessResponse(
+            ready=True,
+            status="ready",
+            warnings=["Required assets are present, none are missing."],
+            errors=[],
+        )
+
+    monkeypatch.setattr(
+        VNAssetPackService,
+        "get_readiness",
+        readiness_with_false_positive_text,
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/setup-options?selected_character_id={character_id}"
+    )
+
+    assert response.status_code == 200
+    warning_codes = {
+        warning["code"]
+        for warning in response.json()["asset_packs"][0]["warning_summary"]["warnings"]
+    }
+    assert "pack_missing_required_assets" not in warning_codes
+
+    def readiness_with_structured_missing_required_slot(
+        self: VNAssetPackService,
+        pack_id: int,
+    ) -> VNAssetReadinessResponse:
+        return VNAssetReadinessResponse(
+            ready=False,
+            status="not_ready",
+            warnings=[],
+            errors=["required_slot_not_ready:123"],
+        )
+
+    monkeypatch.setattr(
+        VNAssetPackService,
+        "get_readiness",
+        readiness_with_structured_missing_required_slot,
+    )
+
+    structured_response = client.get(
+        f"/api/v1/vn-play/setup-options?selected_character_id={character_id}"
+    )
+
+    assert structured_response.status_code == 200
+    structured_warning_codes = {
+        warning["code"]
+        for warning in structured_response.json()["asset_packs"][0]["warning_summary"]["warnings"]
+    }
+    assert "pack_missing_required_assets" in structured_warning_codes
 
 
 def test_setup_options_degrades_when_pack_readiness_fails(

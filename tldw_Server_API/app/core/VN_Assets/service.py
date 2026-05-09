@@ -145,7 +145,10 @@ class VNAssetPackService:
             limit=limit,
             offset=offset,
         )
-        return [self._pack_response(pack) for pack in rows], has_more
+        return [
+            self._pack_response(pack, include_planned_output_count=False)
+            for pack in rows
+        ], has_more
 
     def get_pack(self, pack_id: int) -> VNAssetPackResponse:
         return self._pack_response(self._require_pack(pack_id))
@@ -829,7 +832,12 @@ class VNAssetPackService:
             current_slot = self._require_slot_in_pack(pack_id, current_id)
             current_id = current_slot["depends_on_slot_id"]
 
-    def _pack_response(self, row: Mapping[str, Any]) -> VNAssetPackResponse:
+    def _pack_response(
+        self,
+        row: Mapping[str, Any],
+        *,
+        include_planned_output_count: bool = True,
+    ) -> VNAssetPackResponse:
         pack_id = int(row["id"])
         return VNAssetPackResponse(
             id=pack_id,
@@ -848,7 +856,11 @@ class VNAssetPackService:
             default_dimensions=_loads_optional_json(row["default_dimensions_json"]),
             style_lock=_loads_optional_json(row["style_lock_json"]),
             generation_budget=_loads_optional_json(row["generation_budget_json"]),
-            planned_output_count=self._planned_output_count(pack_id),
+            planned_output_count=(
+                self._planned_output_count(pack_id)
+                if include_planned_output_count
+                else 0
+            ),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             version=int(row["version"]),

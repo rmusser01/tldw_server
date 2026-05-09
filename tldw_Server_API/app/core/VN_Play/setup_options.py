@@ -39,6 +39,13 @@ CONTENT_RATING_ORDER = {
     "mature": 2,
     "violent": 3,
 }
+REQUIRED_ASSET_READINESS_ERROR_CODES = {
+    "missing_required_asset",
+    "missing_required_assets",
+    "missing_required_runtime_asset",
+    "missing_required_slot",
+    "required_slot_not_ready",
+}
 SEVERITY_ORDER: dict[VNPlaySetupWarningSeverity, int] = {
     "info": 0,
     "warning": 1,
@@ -77,11 +84,9 @@ def build_vn_play_setup_options(
     pack_offset = max(0, int(pack_offset))
     requested_rating = _normalized_rating(content_rating or "general")
 
-    character_rows, character_total = db.query_character_cards(
+    character_rows, character_total = db.query_character_setup_options(
         query=character_query,
         include_deleted=False,
-        sort_by="name",
-        sort_order="asc",
         limit=character_limit,
         offset=character_offset,
     )
@@ -153,6 +158,7 @@ def build_vn_play_setup_options(
 
 
 def _bounded_limit(value: int) -> int:
+    """Clamp client-provided setup page sizes to the supported API bounds."""
     return max(1, min(MAX_SETUP_LIMIT, int(value)))
 
 
@@ -160,15 +166,22 @@ def _selected_character_option(
     db: CharactersRAGDB,
     selected_character_id: int | None,
 ) -> VNPlaySetupCharacterOption | None:
+    """Return the selected character selector row even when it is off-page."""
     if selected_character_id is None:
         return None
-    row = db.get_character_card_by_id(int(selected_character_id))
+    row = db.get_character_setup_option_by_id(int(selected_character_id))
     if row is None:
         return None
     return _character_option(row)
 
 
 def _character_option(row: dict[str, Any]) -> VNPlaySetupCharacterOption:
+    """Serialize a lightweight character row into selector-safe API shape."""
+    has_image = (
+        bool(row.get("has_image"))
+        if "has_image" in row
+        else bool(row.get("image") or row.get("image_base64"))
+    )
     return VNPlaySetupCharacterOption(
         id=int(row["id"]),
         name=str(row.get("name") or f"Character {row['id']}"),
@@ -176,7 +189,7 @@ def _character_option(row: dict[str, Any]) -> VNPlaySetupCharacterOption:
         tags=_string_list(row.get("tags")),
         favorite=_character_favorite(row.get("extensions")),
         deleted=bool(row.get("deleted", False)),
-        has_image=bool(row.get("image") or row.get("image_base64")),
+        has_image=has_image,
     )
 
 
@@ -189,6 +202,7 @@ def _asset_pack_option(
     provenance: dict[str, Any] | None,
     provenance_lookup_failed: bool,
 ) -> VNPlaySetupAssetPackOption:
+    """Serialize pack setup state with readiness, compatibility, and warnings."""
     readiness = _readiness_for_pack(asset_service, pack.id)
     warnings: list[VNPlaySetupWarning] = []
     if readiness is None:
@@ -206,7 +220,7 @@ def _asset_pack_option(
             warnings.append(_warning("pack_not_ready", "high_risk"))
         if readiness_errors:
             warnings.append(_warning("pack_has_readiness_errors", "high_risk"))
-        if _missing_required_assets(readiness_status, readiness_warnings, readiness_errors):
+        if _missing_required_assets(readiness_errors):
             warnings.append(_warning("pack_missing_required_assets", "high_risk"))
 
     compatibility = _compatibility(pack, selected_character)
@@ -255,6 +269,7 @@ def _latest_import_provenance(
     asset_service: VNAssetPackService,
     packs: list[VNAssetPackResponse],
 ) -> tuple[dict[int, dict[str, Any]], bool]:
+    """Return latest completed import provenance for listed packs when available."""
     pack_ids = [pack.id for pack in packs]
     if not pack_ids:
         return {}, False
@@ -275,6 +290,7 @@ def _readiness_for_pack(
     asset_service: VNAssetPackService,
     pack_id: int,
 ) -> VNAssetReadinessResponse | None:
+    """Return pack readiness, degrading to ``None`` when the check fails."""
     try:
         return asset_service.get_readiness(pack_id)
     except Exception as exc:
@@ -286,6 +302,7 @@ def _compatibility(
     pack: VNAssetPackResponse,
     selected_character: VNPlaySetupCharacterOption | None,
 ) -> VNPlaySetupCompatibility:
+    """Derive selected-character compatibility for one asset pack."""
     if selected_character is None:
         return VNPlaySetupCompatibility(status="unknown", reason_codes=["no_selected_character"])
     if pack.primary_character_id == selected_character.id:
@@ -300,6 +317,7 @@ def _content_rating_warning(
     pack_rating: str | None,
     requested_rating: str | None,
 ) -> VNPlaySetupWarning | None:
+    """Return a warning when pack and requested content ratings differ."""
     normalized_pack = _normalized_rating(pack_rating)
     normalized_requested = _normalized_rating(requested_rating)
     if normalized_pack == normalized_requested:
@@ -320,6 +338,7 @@ def _trust_for_provenance(
     *,
     lookup_failed: bool,
 ) -> tuple[VNPlaySetupTrustLevel, VNPlaySetupTrustSource]:
+    """Map import-journal provenance into setup trust level and source labels."""
     if lookup_failed:
         return "unknown", "unknown"
     if provenance is None:
@@ -334,6 +353,7 @@ def _warning(
     code: str,
     severity: VNPlaySetupWarningSeverity,
 ) -> VNPlaySetupWarning:
+    """Build a warning payload with acknowledgement semantics from severity."""
     return VNPlaySetupWarning(
         code=code,
         severity=severity,
@@ -345,6 +365,7 @@ def _warning(
 def _warning_summary(
     warnings: list[VNPlaySetupWarning],
 ) -> VNPlaySetupWarningSummary:
+    """Summarize warning severity and acknowledgement requirements."""
     if not warnings:
         return VNPlaySetupWarningSummary()
     highest = max(warnings, key=lambda warning: SEVERITY_ORDER[warning.severity]).severity
@@ -363,6 +384,7 @@ def _setup_defaults(
     characters: list[VNPlaySetupCharacterOption],
     asset_packs: list[VNPlaySetupAssetPackOption],
 ) -> VNPlaySetupDefaults:
+    """Choose conservative setup defaults from selected and recommended options."""
     default_character_id = selected_character.id if selected_character is not None else None
     if default_character_id is None and len(characters) == 1:
         default_character_id = characters[0].id
@@ -389,6 +411,7 @@ def _empty_states(
     selected_character_id: int | None,
     selected_character: VNPlaySetupCharacterOption | None,
 ) -> list[VNPlaySetupEmptyState]:
+    """Build scoped empty-state hints for selector pages and filters."""
     states: list[VNPlaySetupEmptyState] = []
     if character_total == 0:
         states.append(
@@ -456,6 +479,7 @@ def _empty_states(
 def _sort_pack_options(
     packs: list[VNPlaySetupAssetPackOption],
 ) -> list[VNPlaySetupAssetPackOption]:
+    """Sort packs with recommended and compatible options first without reordering ties."""
     def sort_key(indexed_pack: tuple[int, VNPlaySetupAssetPackOption]) -> tuple[int, int]:
         index, pack = indexed_pack
         if pack.recommended:
@@ -471,21 +495,23 @@ def _sort_pack_options(
     return [pack for _, pack in sorted(enumerate(packs), key=sort_key)]
 
 
-def _missing_required_assets(
-    readiness_status: str,
-    readiness_warnings: list[str],
-    readiness_errors: list[str],
-) -> bool:
-    haystack = " ".join([readiness_status, *readiness_warnings, *readiness_errors]).lower()
-    return "missing" in haystack and "required" in haystack
+def _missing_required_assets(readiness_errors: list[str]) -> bool:
+    """Return true only for structured missing-required readiness error codes."""
+    for error in readiness_errors:
+        code = str(error).split(":", 1)[0].strip().lower()
+        if code in REQUIRED_ASSET_READINESS_ERROR_CODES:
+            return True
+    return False
 
 
 def _normalized_rating(value: str | None) -> str:
+    """Normalize empty or mixed-case content ratings for comparisons."""
     normalized = (value or "general").strip().lower()
     return normalized or "general"
 
 
 def _preview_text(value: Any, *, max_length: int = 160) -> str | None:
+    """Return compact preview text whose final length stays within ``max_length``."""
     if value is None:
         return None
     text = " ".join(str(value).split())
@@ -493,10 +519,13 @@ def _preview_text(value: Any, *, max_length: int = 160) -> str | None:
         return None
     if len(text) <= max_length:
         return text
-    return text[: max_length - 1].rstrip() + "..."
+    if max_length <= 3:
+        return text[:max_length]
+    return text[: max_length - 3].rstrip() + "..."
 
 
 def _string_list(value: Any) -> list[str]:
+    """Normalize stored JSON, iterable, or scalar tag values into strings."""
     if value is None:
         return []
     raw_values: list[Any]
@@ -514,6 +543,7 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _character_favorite(extensions: Any) -> bool:
+    """Extract the setup favorite flag from known extension locations."""
     if extensions is None:
         return False
     parsed = extensions
@@ -531,8 +561,10 @@ def _character_favorite(extensions: Any) -> bool:
 
 
 def _has_query(value: str | None) -> bool:
+    """Return whether a query parameter contains non-whitespace text."""
     return bool((value or "").strip())
 
 
 def _utc_now_iso() -> str:
+    """Return the current UTC timestamp in API-friendly ISO-8601 form."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
