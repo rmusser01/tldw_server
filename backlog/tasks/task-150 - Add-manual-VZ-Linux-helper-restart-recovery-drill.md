@@ -4,7 +4,7 @@ title: Add manual VZ Linux helper restart recovery drill
 status: In Progress
 assignee: []
 created_date: '2026-05-09 04:26'
-updated_date: '2026-05-09 04:35'
+updated_date: '2026-05-09 04:43'
 labels:
   - sandbox
   - vz_linux
@@ -23,6 +23,8 @@ documentation:
   - Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md
   - Docs/Sandbox/macos-runtime-operator-notes.md
   - Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md
+  - >-
+    Docs/superpowers/plans/2026-05-09-vz-linux-helper-restart-recovery-drill-implementation-plan.md
 priority: medium
 ---
 
@@ -55,6 +57,8 @@ Created design spec: Docs/superpowers/specs/2026-05-09-vz-linux-helper-restart-r
 Design self-review completed. Reviewed the spec for lifecycle ownership, private pid-file cleanup, direct pytest safety, default scheduled CI behavior, and scope creep. The design intentionally avoids host reboot automation, launchd bootstrap/install, networking changes, and broad repair generalization. Bandit is not applicable for this design-only checkpoint.
 
 Design hardening review found implementation-risk gaps and patched the spec before planning: pid-file lease must live under the private socket directory, use lstat/regular-file and positive-PID validation, verify process command matches the helper before signaling, bound helper-stop waits, avoid arbitrary socket deletion, add wrapper pass-through coverage for vz-helperctl smoke --include-failure-drills, and document the old-VM/orphan assumption as a separate follow-up risk.
+
+Implementation plan added at Docs/superpowers/plans/2026-05-09-vz-linux-helper-restart-recovery-drill-implementation-plan.md. Pre-execution plan review patched three implementation hazards before coding: require ProcessLookupError for replacement helper cleanup checks, include the signal import for SIGTERM, and validate env strings before constructing Path objects so missing helper lease env cannot collapse to the current directory.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
