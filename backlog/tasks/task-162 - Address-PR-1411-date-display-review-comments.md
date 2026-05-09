@@ -1,11 +1,11 @@
 ---
 id: TASK-162
 title: Address PR 1411 date-display review comments
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-09 06:15'
-updated_date: '2026-05-09 06:31'
+updated_date: '2026-05-09 06:33'
 labels:
   - webui
   - dependencies
@@ -35,7 +35,7 @@ Address actionable review feedback on PR #1411 for the FlashcardEditDrawer dayjs
 - [x] #1 FlashcardEditDrawer scheduling metadata test no longer falls back to an empty expected timestamp string before includes() assertions.
 - [x] #2 Flashcards date-display helpers correctly treat pre-2001 millisecond timestamps as milliseconds and avoid re-parsing an already-normalized timestamp in the combined absolute/relative helper.
 - [x] #3 Focused date-display and FlashcardEditDrawer scheduling metadata tests cover the review regressions and pass.
-- [ ] #4 PR #1411 actionable review threads are replied to and resolved after the fix is pushed.
+- [x] #4 PR #1411 actionable review threads are replied to and resolved after the fix is pushed.
 - [x] #5 Diff hygiene, focused import scan, lint or baseline rationale, and Bandit skip/run rationale are recorded.
 <!-- AC:END -->
 
@@ -49,12 +49,20 @@ Verification so far: red Vitest run failed on the new pre-2001 millisecond times
 Additional CodeRabbit review pass: removed `React.useMemo` around `dueAtDisplay` and `lastReviewedDisplay` so relative labels are recomputed on render, changed numeric timestamp detection to compare `Math.abs(value)` against the seconds cutoff, and added regression coverage for pre-1970 numeric second and millisecond timestamps. Verification after this pass: red Vitest failed for the new pre-1970 millisecond case before implementation; after the fix, focused Vitest passed with 2 files and 25 tests, `git diff --check` passed, Flashcards component/utils dayjs scan returned no matches, broader shared-ui dayjs scan remains the known 11-line baseline, `bun run lint` exited 0 with the existing 131-warning baseline, and the narrow TypeScript diagnostic filter for `date-display`, `FlashcardEditDrawer.tsx`, and `FlashcardEditDrawer.scheduling-metadata` returned no matches.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Addressed all actionable PR #1411 review comments on the FlashcardEditDrawer native date cleanup. The scheduling metadata test no longer uses an empty-string fallback before `includes()` assertions; it asserts formatted labels are non-null and fails early if formatting returns null. The shared date-display helper now uses a safer 10_000_000_000 epoch-seconds cutoff, compares numeric timestamp magnitude with `Math.abs`, and formats combined absolute/relative labels from the already-normalized millisecond timestamp instead of re-parsing. `FlashcardEditDrawer` also computes relative display labels directly on render instead of memoizing output from a helper that depends on `Date.now()`.
+
+Regression coverage now includes numeric epoch seconds, pre-2001 millisecond timestamps, pre-1970 epoch seconds, and pre-1970 millisecond timestamps. Verification: the new pre-2001 and pre-1970 millisecond regressions failed before implementation, then the focused Vitest suite passed with 2 files and 25 tests. `git diff --check` passed. The Flashcards component/utils dayjs import scan returned no matches; the broader shared-ui scan remains at the known 11-line baseline outside this slice. `bun run lint` in `apps/tldw-frontend` exited 0 with the existing 131-warning baseline. Full `apps/packages/ui` TypeScript still exits 2 on unrelated baseline diagnostics, while the narrow diagnostic filter for touched files returned no matches. Bandit was not run because this task touched TypeScript/frontend tests and Backlog metadata only, not Python code. Qodo and CodeRabbit actionable review threads were replied to and resolved after the final push.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
