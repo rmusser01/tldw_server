@@ -222,6 +222,8 @@ CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_job_id
     ON vn_pack_import_journal(job_id);
 CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_status
     ON vn_pack_import_journal(status);
+CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_target_pack_id
+    ON vn_pack_import_journal(target_pack_id);
 CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_fingerprint
     ON vn_pack_import_journal(canonical_payload_fingerprint);
 """
@@ -766,6 +768,82 @@ class VNAssetPacksRepository:
             )
         return [dict(row) for row in cursor.fetchall()]
 
+    def list_packs_for_setup(
+        self,
+        *,
+        owner_user_id: int,
+        query: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return one bounded setup page before readiness fanout."""
+        self._ensure_schema_initialized()
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+
+        filters = ["deleted = 0", "owner_user_id = ?"]
+        params: list[Any] = [owner_user_id]
+        normalized_query = (query or "").strip().lower()
+        if normalized_query:
+            like_value = f"%{normalized_query}%"
+            filters.append(
+                "("
+                "LOWER(COALESCE(title, '')) LIKE ? OR "
+                "LOWER(COALESCE(description, '')) LIKE ?"
+                ")"
+            )
+            params.extend([like_value, like_value])
+
+        params.extend([normalized_limit + 1, normalized_offset])
+        where_clause = " AND ".join(filters)
+        cursor = self.db.execute_query(
+            f"""
+            SELECT * FROM vn_asset_packs
+            WHERE {where_clause}
+            ORDER BY id ASC
+            LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple(params),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        return rows[:normalized_limit], len(rows) > normalized_limit
+
+    def latest_completed_import_provenance_by_pack_ids(
+        self,
+        *,
+        owner_user_id: int,
+        pack_ids: list[int],
+    ) -> dict[int, dict[str, Any]]:
+        """Return latest completed import journal rows for the requested packs."""
+        self._ensure_schema_initialized()
+        normalized_pack_ids = sorted({int(pack_id) for pack_id in pack_ids})
+        if not normalized_pack_ids:
+            return {}
+
+        placeholders = ",".join("?" for _ in normalized_pack_ids)
+        cursor = self.db.execute_query(
+            f"""
+            SELECT * FROM vn_pack_import_journal
+            WHERE owner_user_id = ?
+              AND status = 'completed'
+              AND target_pack_id IN ({placeholders})
+            ORDER BY
+              target_pack_id ASC,
+              COALESCE(completed_at, updated_at, created_at) DESC,
+              id DESC
+            """,  # nosec B608
+            (owner_user_id, *normalized_pack_ids),
+        )
+        provenance: dict[int, dict[str, Any]] = {}
+        for row in cursor.fetchall():
+            journal = dict(row)
+            target_pack_id = journal.get("target_pack_id")
+            if target_pack_id is None:
+                continue
+            pack_id = int(target_pack_id)
+            provenance.setdefault(pack_id, journal)
+        return provenance
+
     def update_pack(self, pack_id: int, fields: Mapping[str, Any]) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
         json_fields = {
@@ -892,19 +970,29 @@ class VNAssetPacksRepository:
                 slot_ids_by_key[str(spec["slot_key"])] = slot_id
                 created_slot_ids.append(slot_id)
 
-            for spec in pending_dependent_specs:
-                parent_slot_key = str(spec["depends_on_slot_key"])
-                depends_on_slot_id = slot_ids_by_key.get(parent_slot_key)
-                if depends_on_slot_id is None:
+            while pending_dependent_specs:
+                unresolved_specs: list[Mapping[str, Any]] = []
+                resolved_count = 0
+                for spec in pending_dependent_specs:
+                    parent_slot_key = str(spec["depends_on_slot_key"])
+                    depends_on_slot_id = slot_ids_by_key.get(parent_slot_key)
+                    if depends_on_slot_id is None:
+                        unresolved_specs.append(spec)
+                        continue
+                    slot_kwargs = _slot_insert_kwargs(spec)
+                    slot_kwargs["depends_on_slot_id"] = depends_on_slot_id
+                    slot_id = self._insert_slot_row(
+                        conn,
+                        pack_id=pack_id,
+                        **slot_kwargs,
+                    )
+                    slot_ids_by_key[str(spec["slot_key"])] = slot_id
+                    created_slot_ids.append(slot_id)
+                    resolved_count += 1
+
+                if resolved_count == 0:
                     raise ValueError("dependent_slot_not_found")
-                slot_kwargs = _slot_insert_kwargs(spec)
-                slot_kwargs["depends_on_slot_id"] = depends_on_slot_id
-                slot_id = self._insert_slot_row(
-                    conn,
-                    pack_id=pack_id,
-                    **slot_kwargs,
-                )
-                created_slot_ids.append(slot_id)
+                pending_dependent_specs = unresolved_specs
 
         return [
             slot

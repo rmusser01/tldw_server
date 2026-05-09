@@ -23604,6 +23604,8 @@ for _character_store_method in (
     "get_character_card_by_name",
     "list_character_cards",
     "query_character_cards",
+    "query_character_setup_options",
+    "get_character_setup_option_by_id",
     "_normalize_character_tags_for_operation",
     "_apply_character_tag_operation_to_list",
     "manage_character_tags",

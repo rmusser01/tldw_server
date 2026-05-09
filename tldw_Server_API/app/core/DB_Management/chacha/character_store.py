@@ -508,6 +508,111 @@ class CharacterStore:
             logger.error(f"Database error querying character cards: {e}")
             raise
 
+    def query_character_setup_options(
+        self,
+        *,
+        query: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """
+        Query lightweight character selector rows for setup screens.
+
+        The returned rows intentionally omit image BLOBs and large prompt fields.
+        ``has_image`` is computed in SQL so callers can render image affordances
+        without materializing the stored image bytes.
+        """
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        normalized_query = (query or "").strip().lower()
+        params: list[Any] = []
+        filters: list[str] = []
+        deleted_false = "FALSE" if self._db.backend_type == BackendType.POSTGRESQL else "0"
+
+        if normalized_query:
+            like_value = f"%{normalized_query}%"
+            filters.append(
+                "("
+                "LOWER(COALESCE(cc.name, '')) LIKE ? OR "
+                "LOWER(COALESCE(cc.description, '')) LIKE ? OR "
+                "LOWER(COALESCE(cc.personality, '')) LIKE ? OR "
+                "LOWER(COALESCE(cc.scenario, '')) LIKE ? OR "
+                "LOWER(COALESCE(cc.system_prompt, '')) LIKE ?"
+                ")"
+            )
+            params.extend([like_value, like_value, like_value, like_value, like_value])
+
+        deleted_filter = "1=1" if include_deleted else f"cc.deleted = {deleted_false}"
+        base_query = f"FROM character_cards cc WHERE {deleted_filter}"  # nosec B608
+        if filters:
+            base_query += " AND " + " AND ".join(filters)
+
+        total_query = f"SELECT COUNT(1) AS total {base_query}"  # nosec B608
+        data_query = (
+            "SELECT "
+            "cc.id, cc.name, cc.description, cc.tags, cc.extensions, cc.deleted, "
+            "CASE WHEN cc.image IS NOT NULL THEN 1 ELSE 0 END AS has_image "
+            f"{base_query} "
+            "ORDER BY LOWER(COALESCE(cc.name, '')) ASC, cc.id ASC "
+            "LIMIT ? OFFSET ?"
+        )
+
+        try:
+            total_cursor = self._db.execute_query(total_query, tuple(params))
+            total_row = total_cursor.fetchone()
+            if total_row is None:
+                total = 0
+            elif isinstance(total_row, dict):
+                total = int(total_row.get("total", 0))
+            else:
+                try:
+                    total = int(total_row["total"])  # sqlite Row / adapter row
+                except _CHACHA_NONCRITICAL_EXCEPTIONS:
+                    total = int(total_row[0]) if len(total_row) > 0 else 0
+
+            data_params = [*params, normalized_limit, normalized_offset]
+            data_cursor = self._db.execute_query(data_query, tuple(data_params))
+            rows = data_cursor.fetchall()
+            return [
+                self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
+                for row in rows
+                if row
+            ], total
+        except CharactersRAGDBError as e:
+            logger.error(f"Database error querying character setup options: {e}")
+            raise
+
+    def get_character_setup_option_by_id(
+        self,
+        character_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """
+        Retrieve one lightweight character selector row by ID.
+
+        This mirrors ``get_character_card_by_id`` ownership/deleted semantics
+        while omitting image bytes and prompt-heavy columns for setup-option
+        callers that only need selector-safe metadata.
+        """
+        query = (
+            "SELECT "
+            "id, name, description, tags, extensions, deleted, "
+            "CASE WHEN image IS NOT NULL THEN 1 ELSE 0 END AS has_image "
+            "FROM character_cards WHERE id = ?"
+        )
+        params: tuple[Any, ...] = (character_id,)
+        if not include_deleted:
+            query += f" AND deleted = {self._deleted_literal(False)}"
+        try:
+            cursor = self._db.execute_query(query, params)
+            row = cursor.fetchone()
+            return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
+        except CharactersRAGDBError as e:
+            logger.error(f"Database error fetching character setup option ID {character_id}: {e}")
+            raise
+
     # ------------------------------------------------------------------
     # Tag normalisation helpers
     # ------------------------------------------------------------------

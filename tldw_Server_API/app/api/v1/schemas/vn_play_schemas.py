@@ -16,6 +16,11 @@ VNPlayMode = Literal["freeform", "story"]
 VNPlaySessionStatus = Literal["active", "paused", "completed", "archived", "failed"]
 VNPlayTrustLevel = Literal["local", "trusted_restore", "untrusted_import", "mixed"]
 VNPlayLinkedChatMode = Literal["read_only_context"]
+VNPlaySetupTrustLevel = Literal["local", "trusted_restore", "untrusted_import", "unknown"]
+VNPlaySetupTrustSource = Literal["local_pack", "latest_import_journal", "unknown"]
+VNPlaySetupWarningSeverity = Literal["info", "warning", "high_risk"]
+VNPlaySetupCompatibilityStatus = Literal["compatible", "different_character", "unknown"]
+VNPlaySetupEmptyStateScope = Literal["global", "filter", "page"]
 VNPlayTurnStatus = Literal[
     "pending",
     "model_calling",
@@ -152,6 +157,106 @@ class VNPlaySessionResponse(BaseModel):
     deleted: bool = False
 
 
+class VNPlaySetupCharacterOption(BaseModel):
+    """Selector-safe character metadata for VN Play setup."""
+
+    id: StrictInt
+    name: StrictStr
+    description_preview: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    favorite: StrictBool = False
+    deleted: StrictBool = False
+    has_image: StrictBool = False
+
+
+class VNPlaySetupCompatibility(BaseModel):
+    """Compatibility summary between a setup character and asset pack."""
+
+    status: VNPlaySetupCompatibilityStatus
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class VNPlaySetupWarning(BaseModel):
+    """Stable setup warning for frontend acknowledgement flows."""
+
+    code: StrictStr
+    severity: VNPlaySetupWarningSeverity
+    message: StrictStr
+    requires_acknowledgement: StrictBool = False
+
+
+class VNPlaySetupWarningSummary(BaseModel):
+    """Aggregate warning metadata for one setup option."""
+
+    highest_severity: VNPlaySetupWarningSeverity = "info"
+    requires_acknowledgement: StrictBool = False
+    warnings: list[VNPlaySetupWarning] = Field(default_factory=list)
+
+
+class VNPlaySetupAssetPackOption(BaseModel):
+    """Asset pack setup option with backend-computed readiness and warnings."""
+
+    id: StrictInt
+    title: StrictStr
+    primary_character_id: StrictInt
+    content_rating: StrictStr
+    status: StrictStr
+    trust_level: VNPlaySetupTrustLevel
+    trust_source: VNPlaySetupTrustSource
+    ready: StrictBool
+    readiness_status: StrictStr
+    readiness_warnings: list[str] = Field(default_factory=list)
+    readiness_errors: list[str] = Field(default_factory=list)
+    compatibility: VNPlaySetupCompatibility
+    warning_summary: VNPlaySetupWarningSummary
+    recommended: StrictBool = False
+
+
+class VNPlaySetupDefaults(BaseModel):
+    """Optional unambiguous defaults for creating a VN Play session."""
+
+    mode: VNPlayMode | None = None
+    character_id: int | None = None
+    asset_pack_id: int | None = None
+    content_rating: str | None = None
+
+
+class VNPlaySetupPagination(BaseModel):
+    """Pagination metadata for setup option selectors."""
+
+    limit: StrictInt = Field(..., ge=1)
+    offset: StrictInt = Field(..., ge=0)
+    has_more: StrictBool
+    total: int | None = Field(default=None, ge=0)
+
+
+class VNPlaySetupEmptyState(BaseModel):
+    """Scoped empty state hint for setup clients."""
+
+    code: StrictStr
+    scope: VNPlaySetupEmptyStateScope
+    message: StrictStr
+
+
+class VNPlaySetupPaginationSet(BaseModel):
+    """Pagination metadata for both setup selectors."""
+
+    characters: VNPlaySetupPagination
+    asset_packs: VNPlaySetupPagination
+
+
+class VNPlaySetupOptionsResponse(BaseModel):
+    """Aggregated VN Play setup options for API and custom frontend clients."""
+
+    characters: list[VNPlaySetupCharacterOption] = Field(default_factory=list)
+    selected_character: VNPlaySetupCharacterOption | None = None
+    asset_packs: list[VNPlaySetupAssetPackOption] = Field(default_factory=list)
+    defaults: VNPlaySetupDefaults = Field(default_factory=VNPlaySetupDefaults)
+    pagination: VNPlaySetupPaginationSet
+    empty_states: list[VNPlaySetupEmptyState] = Field(default_factory=list)
+    generated_at: StrictStr
+
+
 class VNPlayTurnRequest(BaseModel):
     """Request body for advancing a VN Play session by one turn."""
 
@@ -265,6 +370,20 @@ __all__ = [
     "VNPlaySessionCreate",
     "VNPlaySessionResponse",
     "VNPlaySessionUpdate",
+    "VNPlaySetupAssetPackOption",
+    "VNPlaySetupCharacterOption",
+    "VNPlaySetupCompatibility",
+    "VNPlaySetupDefaults",
+    "VNPlaySetupEmptyState",
+    "VNPlaySetupEmptyStateScope",
+    "VNPlaySetupOptionsResponse",
+    "VNPlaySetupPagination",
+    "VNPlaySetupPaginationSet",
+    "VNPlaySetupTrustLevel",
+    "VNPlaySetupTrustSource",
+    "VNPlaySetupWarning",
+    "VNPlaySetupWarningSeverity",
+    "VNPlaySetupWarningSummary",
     "VNPlayTurnRequest",
     "VNPlayTurnResponse",
     "VNPlayEventType",
