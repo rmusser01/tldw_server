@@ -131,6 +131,10 @@ def filter_branch_events(
     if include_descendants:
         branch_ids.update(_descendant_ids(branch_id, branch_index["parents"]))
 
+    bounded_limit = max(0, limit)
+    if bounded_limit == 0:
+        return [], warnings
+
     filtered: list[dict[str, Any]] = []
     for event in _ordered_events(events):
         sequence_number = _int_value(event.get("sequence_number"))
@@ -143,7 +147,7 @@ def filter_branch_events(
         event_branch_id = event_branch_ids.get(_event_identity(event))
         if event_branch_id in branch_ids:
             filtered.append(dict(event))
-        if len(filtered) >= max(0, limit):
+        if len(filtered) >= bounded_limit:
             break
     return filtered, warnings
 
@@ -366,9 +370,14 @@ def _restore_payload(
     choice_point = None
     if branch.get("parent_event_id") is not None:
         choice_point = {"event_id": branch.get("parent_event_id")}
+    default_target = None
+    if branch_latest is not None:
+        default_target = BRANCH_RESTORE_TARGET_LATEST
+    elif choice_point is not None:
+        default_target = BRANCH_RESTORE_TARGET_CHOICE_POINT
     return {
         "supported": branch_latest is not None or choice_point is not None,
-        "default_target": BRANCH_RESTORE_TARGET_LATEST,
+        "default_target": default_target,
         "target_names": [
             BRANCH_RESTORE_TARGET_LATEST,
             BRANCH_RESTORE_TARGET_CHOICE_POINT,

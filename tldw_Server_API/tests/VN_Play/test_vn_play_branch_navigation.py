@@ -171,6 +171,27 @@ def test_navigation_separates_direct_and_subtree_event_ranges() -> None:
     assert parent["restore"]["targets"]["branch_latest"]["sequence_number"] == 4
 
 
+def test_navigation_restore_defaults_to_choice_point_when_latest_unavailable() -> None:
+    navigation = build_branch_navigation(
+        session={"id": 1, "mode": "story", "scene_version": 1},
+        branches=[
+            _branch(
+                10,
+                parent_event_id=2,
+                branch_label="Open the door",
+                branch_path=[_choice_step("open", event_id=2, scene_version=1)],
+            )
+        ],
+        events=[],
+        scene_state={"active_branch_node_id": None, "last_event_id": 2, "scene_version": 1},
+    )
+
+    restore = navigation["branches"][0]["restore"]
+    assert restore["default_target"] == "choice_point"
+    assert restore["targets"]["branch_latest"] is None
+    assert restore["targets"]["choice_point"] == {"event_id": 2}
+
+
 def test_filter_branch_events_returns_direct_branch_events_only() -> None:
     events = [
         _event(3, 3, "choice_selected", {"branch_node_id": 10}, 10),
@@ -187,6 +208,23 @@ def test_filter_branch_events_returns_direct_branch_events_only() -> None:
     )
 
     assert [event["id"] for event in filtered] == [3, 4]
+    assert warnings == []
+
+
+def test_filter_branch_events_with_zero_limit_returns_no_events() -> None:
+    events = [
+        _event(3, 3, "choice_selected", {"branch_node_id": 10}, 10),
+        _event(4, 4, "model_turn", {}, 10),
+    ]
+
+    filtered, warnings = filter_branch_events(
+        branch_id=10,
+        branches=_door_branches(),
+        events=events,
+        limit=0,
+    )
+
+    assert filtered == []
     assert warnings == []
 
 
