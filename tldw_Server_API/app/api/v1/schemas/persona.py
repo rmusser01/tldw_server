@@ -117,6 +117,25 @@ class PersonaVisualGenerationJobResponse(BaseModel):
     status: str | None = None
 
 
+class PersonaVisualGenerationReadinessResponse(BaseModel):
+    """Preflight state for queueing Persona visual generation jobs.
+
+    ``available`` is true only when the Jobs worker is enabled and the
+    selected or default image backend can resolve to an instantiable adapter.
+    ``reasons`` contains machine-readable blockers for setup UI copy.
+    """
+
+    available: bool
+    worker_enabled: bool
+    queue: str
+    image_backend_available: bool
+    default_backend: str | None = None
+    requested_backend: str | None = None
+    requested_backend_available: bool | None = None
+    enabled_backends: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class PersonaVisualPackExportRequest(BaseModel):
     request_id: str | None = Field(default=None, max_length=120)
     strict: bool = False

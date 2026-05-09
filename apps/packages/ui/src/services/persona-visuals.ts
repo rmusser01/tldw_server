@@ -9,6 +9,7 @@ import type {
   PersonaVisualDeactivateResponse,
   PersonaVisualGenerationJobResponse,
   PersonaVisualGenerationRequest,
+  PersonaVisualGenerationReadinessResponse,
   PersonaVisualImportCommitRequest,
   PersonaVisualImportCommitStartResponse,
   PersonaVisualImportPreviewResponse,
@@ -221,6 +222,19 @@ export async function createPersonaVisualGenerationJob(
       method: "POST",
       body: payload
     }
+  )
+}
+
+export async function getPersonaVisualGenerationReadiness(
+  personaId: string,
+  packId: string,
+  backend?: string | null
+): Promise<PersonaVisualGenerationReadinessResponse> {
+  const query = backend?.trim()
+    ? `?backend=${encodeURIComponent(backend.trim())}`
+    : ""
+  return fetchPersonaVisualJson<PersonaVisualGenerationReadinessResponse>(
+    packPath(personaId, packId, `/generation-readiness${query}`)
   )
 }
 

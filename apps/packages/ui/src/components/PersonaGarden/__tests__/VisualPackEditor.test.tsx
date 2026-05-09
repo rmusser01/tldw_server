@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -47,6 +47,14 @@ const okBinaryResponse = (payload: ArrayBuffer) =>
     data: payload,
     json: async () => payload
   })
+
+const deferredResponse = <T,>() => {
+  let resolve: (value: T) => void = () => undefined
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
 
 const parseJsonBody = (body: unknown): any => {
   if (typeof body === "string") return JSON.parse(body)
@@ -108,6 +116,18 @@ const visualAssets = [
     height: 128
   }
 ]
+
+const readyGenerationReadiness = {
+  available: true,
+  worker_enabled: true,
+  queue: "generation",
+  image_backend_available: true,
+  default_backend: "openrouter",
+  requested_backend: null,
+  requested_backend_available: null,
+  enabled_backends: ["openrouter"],
+  reasons: []
+}
 
 describe("VisualPackEditor", () => {
   beforeEach(() => {
@@ -606,6 +626,12 @@ describe("VisualPackEditor", () => {
         return okResponse({ candidates: [candidate] })
       }
       if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-jobs" &&
         method === "POST"
       ) {
@@ -663,6 +689,232 @@ describe("VisualPackEditor", () => {
           call.includes("/visual-packs/pack-1/candidates/candidate-1/review")
         )
       ).toHaveLength(2)
+    )
+  })
+
+  it("disables visual generation when the Jobs worker is unavailable", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          ...readyGenerationReadiness,
+          available: false,
+          worker_enabled: false,
+          reasons: ["jobs_worker_disabled"]
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const readiness = await screen.findByTestId("persona-visual-generation-readiness")
+    expect(readiness).toHaveTextContent("Generation worker is not enabled.")
+    expect(readiness).toHaveTextContent("Jobs queue: generation")
+
+    fireEvent.change(screen.getByTestId("persona-visual-generation-prompt-input"), {
+      target: { value: "make an idle pose" }
+    })
+
+    expect(screen.getByTestId("persona-visual-generation-enqueue-button")).toBeDisabled()
+    expect(calls).not.toContain(
+      "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-jobs"
+    )
+  })
+
+  it("disables visual generation when no image provider is configured", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          ...readyGenerationReadiness,
+          available: false,
+          image_backend_available: false,
+          default_backend: null,
+          enabled_backends: [],
+          reasons: ["image_backend_unavailable"]
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const readiness = await screen.findByTestId("persona-visual-generation-readiness")
+    expect(readiness).toHaveTextContent("No image generation provider is configured.")
+    expect(readiness).toHaveTextContent("Enable an image backend before queueing a Persona Buddy visual generation job.")
+
+    fireEvent.change(screen.getByTestId("persona-visual-generation-prompt-input"), {
+      target: { value: "make an idle pose" }
+    })
+
+    expect(screen.getByTestId("persona-visual-generation-enqueue-button")).toBeDisabled()
+    expect(calls).not.toContain(
+      "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-jobs"
+    )
+  })
+
+  it("ignores stale generation readiness responses after switching packs", async () => {
+    const delayedPackOneReadiness = deferredResponse<Awaited<ReturnType<typeof okResponse>>>()
+    const packOne = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const packTwo = {
+      ...packOne,
+      id: "pack-2",
+      title: "Second pack",
+      manifest: structuredClone(baseManifest)
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([packOne, packTwo])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-2/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return delayedPackOneReadiness.promise
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-2/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          ...readyGenerationReadiness,
+          available: false,
+          image_backend_available: false,
+          default_backend: null,
+          enabled_backends: [],
+          reasons: ["image_backend_unavailable"]
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-1")
+    )
+    fireEvent.change(screen.getByTestId("persona-visual-pack-select"), {
+      target: { value: "pack-2" }
+    })
+
+    const readiness = await screen.findByTestId("persona-visual-generation-readiness")
+    expect(readiness).toHaveTextContent("No image generation provider is configured.")
+
+    await act(async () => {
+      delayedPackOneReadiness.resolve(await okResponse(readyGenerationReadiness))
+      await delayedPackOneReadiness.promise
+    })
+
+    expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-2")
+    expect(screen.getByTestId("persona-visual-generation-readiness")).toHaveTextContent(
+      "No image generation provider is configured."
     )
   })
 
