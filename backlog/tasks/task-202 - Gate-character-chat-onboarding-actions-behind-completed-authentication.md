@@ -4,7 +4,7 @@ title: Gate character-chat onboarding actions behind completed authentication
 status: Done
 assignee: []
 created_date: '2026-05-09 22:56'
-updated_date: '2026-05-09 23:02'
+updated_date: '2026-05-09 23:04'
 labels:
   - webui
   - ux
@@ -36,6 +36,8 @@ Implementation: removed the disabled character-chat action lane from the unauthe
 Verification: bunx vitest run src/routes/__tests__/core-route-identity.test.tsx src/components/Option/Onboarding/__tests__/OnboardingConnectForm.success-screen.guard.test.tsx src/utils/__tests__/onboarding-route-intent.test.ts --maxWorkers=1 --no-file-parallelism passed 15/15; git diff --check passed; Chromium browser check of first-run character-chat route after readiness timeout reported laneCount=0 headingCount=1 credentialFields=2 and saved output/playwright/character-chat-first-run-pre-auth-no-lane-dismissed.png.
 
 Bandit: skipped because touched implementation/test files are TypeScript frontend files, not Python.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1470
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
