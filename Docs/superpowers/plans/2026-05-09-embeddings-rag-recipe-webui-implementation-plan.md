@@ -16,6 +16,12 @@
 - Tracking task: `TASK-145`
 - Planning task: `TASK-145.1`
 
+## Execution Status
+
+- Tasks 1-6 completed for the preview/copy-config V1.
+- Task 7 is deferred behind explicit live config mutation approval and tracked as `TASK-145.8`.
+- Shipped behavior: guided embeddings recipe setup, server-owned candidate readiness, recommendation-first results, and server-normalized apply preview with copy-config fallback. Live config mutation is not included.
+
 ## Pre-Implementation Rules
 
 - Do all code work in a clean feature worktree, not the dirty main checkout.
