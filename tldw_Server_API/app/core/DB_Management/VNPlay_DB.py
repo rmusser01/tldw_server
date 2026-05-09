@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -726,6 +726,185 @@ class VNPlayRepository:
                     (value, action_id, owner_user_id, owner_user_id),
                 )
         return self.get_session_action(action_id, owner_user_id=owner_user_id)
+
+    def commit_session_restore_action(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_id: int,
+        event_payload: Mapping[str, Any],
+        scene_state: Mapping[str, Any],
+        scene_version: int,
+        response_payload_factory: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        branch_node_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Atomically persist a restore event, scene state, session state, and action response."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            active_session = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_sessions
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND deleted = 0
+                  AND active_session_action_id = ?
+                """,
+                (session_id, owner_user_id, action_id),
+            ).fetchone()
+            if active_session is None:
+                raise RuntimeError("session_action_lock_not_active")
+
+            event_id = _insert_event(
+                conn,
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                event_type="session_restored",
+                event_payload=event_payload,
+                source="runtime",
+                branch_node_id=branch_node_id,
+            )
+            conn.execute(
+                """
+                INSERT INTO vn_play_scene_state (
+                    session_id,
+                    owner_user_id,
+                    last_event_id,
+                    current_background_item_id,
+                    current_depth_item_id,
+                    active_sprite_items_json,
+                    location_key,
+                    mood,
+                    time_of_day,
+                    weather,
+                    active_branch_node_id,
+                    visible_choices_json,
+                    transcript_cursor,
+                    scene_version,
+                    warnings_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    owner_user_id = excluded.owner_user_id,
+                    last_event_id = excluded.last_event_id,
+                    current_background_item_id = excluded.current_background_item_id,
+                    current_depth_item_id = excluded.current_depth_item_id,
+                    active_sprite_items_json = excluded.active_sprite_items_json,
+                    location_key = excluded.location_key,
+                    mood = excluded.mood,
+                    time_of_day = excluded.time_of_day,
+                    weather = excluded.weather,
+                    active_branch_node_id = excluded.active_branch_node_id,
+                    visible_choices_json = excluded.visible_choices_json,
+                    transcript_cursor = excluded.transcript_cursor,
+                    scene_version = excluded.scene_version,
+                    warnings_json = excluded.warnings_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    event_id,
+                    scene_state.get("current_background_item_id"),
+                    scene_state.get("current_depth_item_id"),
+                    _json_dump(list(scene_state.get("active_sprite_items") or [])),
+                    scene_state.get("location_key"),
+                    scene_state.get("mood"),
+                    scene_state.get("time_of_day"),
+                    scene_state.get("weather"),
+                    scene_state.get("active_branch_node_id"),
+                    _json_dump(list(scene_state.get("visible_choices") or [])),
+                    scene_state.get("transcript_cursor"),
+                    scene_version,
+                    _json_dump(list(scene_state.get("warnings") or [])),
+                ),
+            )
+            session_cursor = conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET scene_version = ?,
+                    active_session_action_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND active_session_action_id = ?
+                """,
+                (scene_version, session_id, owner_user_id, action_id),
+            )
+            if session_cursor.rowcount != 1:
+                raise RuntimeError("session_action_lock_not_active")
+
+            restore_event_row = conn.execute(
+                "SELECT * FROM vn_play_events WHERE id = ?",
+                (event_id,),
+            ).fetchone()
+            session_row = conn.execute(
+                "SELECT * FROM vn_play_sessions WHERE id = ? AND owner_user_id = ?",
+                (session_id, owner_user_id),
+            ).fetchone()
+            scene_state_row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_scene_state
+                WHERE session_id = ? AND owner_user_id = ?
+                """,
+                (session_id, owner_user_id),
+            ).fetchone()
+            event_rows = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_events
+                WHERE session_id = ?
+                ORDER BY sequence_number ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            branch_rows = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_branches
+                WHERE session_id = ? AND owner_user_id = ?
+                ORDER BY id ASC
+                """,
+                (session_id, owner_user_id),
+            ).fetchall()
+            if restore_event_row is None or session_row is None or scene_state_row is None:
+                raise RuntimeError("session_restore_action_state_not_found")
+
+            response_payload = dict(
+                response_payload_factory(
+                    {
+                        "restore_event": _decode_event(restore_event_row),
+                        "session": _decode_session(session_row),
+                        "scene_state": _decode_scene_state(scene_state_row),
+                        "events": [_decode_event(row) for row in event_rows],
+                        "branches": [_decode_branch(row) for row in branch_rows],
+                    }
+                )
+            )
+            action_cursor = conn.execute(
+                """
+                UPDATE vn_play_session_actions
+                SET status = ?,
+                    response_payload_json = ?,
+                    error_json = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND session_id = ?
+                  AND owner_user_id = ?
+                """,
+                (
+                    "completed",
+                    _json_dump(response_payload),
+                    action_id,
+                    session_id,
+                    owner_user_id,
+                ),
+            )
+            if action_cursor.rowcount != 1:
+                raise RuntimeError("session_action_not_found")
+            return response_payload
 
     def get_turn_request(self, turn_request_id: int) -> dict[str, Any] | None:
         self._ensure_schema_initialized()

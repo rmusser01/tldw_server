@@ -9,7 +9,10 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play import adapters as vn_play_adapters
-from tldw_Server_API.app.core.VN_Play.constants import STORY_BRANCH_LABEL_MAX_LENGTH
+from tldw_Server_API.app.core.VN_Play.constants import (
+    BRANCH_RESTORE_TARGET_CHOICE_POINT,
+    STORY_BRANCH_LABEL_MAX_LENGTH,
+)
 from tldw_Server_API.app.core.VN_Play.models import (
     SceneState,
     TurnResult,
@@ -901,6 +904,401 @@ async def test_duplicate_completed_turn_returns_stored_response(
 
     assert second.turn_request_id == first.turn_request_id
     assert second.events == first.events
+
+
+@pytest.mark.asyncio
+async def test_branch_latest_restore_advances_scene_version_and_replays_duplicate(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-latest-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+    pre_restore_target_event_id = service.get_branch_navigation(session.id)["branches"][
+        0
+    ]["event_range"]["latest_event_id"]
+    events_before = service.list_events(session.id)
+    restore_events_before = [
+        event for event in events_before if event["event_type"] == "session_restored"
+    ]
+
+    first = service.restore_branch(
+        session.id,
+        branch_id=int(branch["id"]),
+        client_scene_version=2,
+        idempotency_key="restore-latest-open",
+    )
+    second = service.restore_branch(
+        session.id,
+        branch_id=int(branch["id"]),
+        client_scene_version=2,
+        idempotency_key="restore-latest-open",
+    )
+
+    assert first["status"] == "completed"
+    assert second == {**first, "replayed": True}
+    assert first["scene_version"] == 3
+    assert first["target_event_id"] == pre_restore_target_event_id
+    restore_events_after = [
+        event for event in service.list_events(session.id) if event["event_type"] == "session_restored"
+    ]
+    assert len(restore_events_after) == len(restore_events_before) + 1
+    assert service.get_session(session.id).scene_version == 3
+
+
+@pytest.mark.asyncio
+async def test_choice_point_restore_returns_parent_choices_and_parent_branch(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session, first_branch, second_branch = await create_two_level_story_branches(
+        service,
+        repo,
+    )
+
+    response = service.restore_branch(
+        session.id,
+        branch_id=int(second_branch["id"]),
+        client_scene_version=3,
+        idempotency_key="restore-choice-point-inside",
+        target=BRANCH_RESTORE_TARGET_CHOICE_POINT,
+    )
+
+    assert response["status"] == "completed"
+    assert response["target"] == "choice_point"
+    assert response["scene_version"] == 4
+    assert response["current_scene"]["visible_choices"] == [
+        {"id": "inside", "text": "Step inside"},
+        {"id": "wait", "text": "Wait outside"},
+    ]
+    assert response["current_scene"]["active_branch_node_id"] == first_branch["id"]
+    assert response["current_scene"]["active_branch_node_id"] != second_branch["id"]
+    assert response["branch_navigation"]["active_branch_node_id"] == first_branch["id"]
+
+
+@pytest.mark.asyncio
+async def test_branch_restore_rejects_stale_scene_version(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-stale-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+
+    with pytest.raises(VNPlayConflictError, match="stale_scene_version"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=1,
+            idempotency_key="restore-stale-open",
+        )
+
+
+@pytest.mark.asyncio
+async def test_branch_restore_rejects_active_turn(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-active-turn-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+    turn = repo.create_turn_request(
+        session_id=session.id,
+        owner_user_id=42,
+        idempotency_key="active-turn-marker",
+        request_payload_hash="active-turn-marker",
+        base_scene_version=2,
+    )
+    repo.update_session(
+        session.id,
+        {"active_turn_request_id": int(turn["id"])},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayConflictError, match="turn_in_progress"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=2,
+            idempotency_key="restore-active-turn",
+        )
+
+
+@pytest.mark.asyncio
+async def test_branch_restore_rejects_active_restore_action(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-active-action-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+    action = repo.create_session_action(
+        session_id=session.id,
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="active-restore-marker",
+        request_payload_hash="active-restore-marker",
+    )
+    repo.update_session(
+        session.id,
+        {"active_session_action_id": int(action["id"])},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayConflictError, match="restore_action_in_progress"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=2,
+            idempotency_key="restore-active-action",
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_submission_rejects_active_restore_action(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    action = service.repo.create_session_action(
+        session_id=ready_session.id,
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="active-restore-before-turn",
+        request_payload_hash="active-restore-before-turn",
+    )
+    service.repo.update_session(
+        ready_session.id,
+        {"active_session_action_id": int(action["id"])},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayConflictError, match="restore_action_in_progress"):
+        await service.submit_turn(
+            ready_session.id,
+            input_text="Hello",
+            client_scene_version=0,
+            idempotency_key="turn-during-restore",
+        )
+
+
+@pytest.mark.asyncio
+async def test_branch_restore_same_key_different_target_conflicts(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-conflict-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+    service.restore_branch(
+        session.id,
+        branch_id=int(branch["id"]),
+        client_scene_version=2,
+        idempotency_key="restore-conflict-key",
+    )
+
+    with pytest.raises(VNPlayConflictError, match="idempotency_key_conflict"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=2,
+            idempotency_key="restore-conflict-key",
+            target=BRANCH_RESTORE_TARGET_CHOICE_POINT,
+        )
+
+
+def test_branch_restore_rejects_freeform_session(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    with pytest.raises(VNPlayConflictError, match="branch_restore_not_allowed"):
+        service.restore_branch(
+            ready_session.id,
+            branch_id=1,
+            client_scene_version=0,
+            idempotency_key="restore-freeform",
+        )
+
+
+def test_branch_restore_target_failure_clears_active_restore_action(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(repo=repo, owner_user_id=42)
+    session = create_story_session_with_visible_choice(service, repo)
+    branch = repo.create_branch(
+        session_id=session.id,
+        owner_user_id=42,
+        parent_event_id=None,
+        branch_label="Detached",
+        branch_path=[{"choice_id": "detached", "choice_text": "Detached"}],
+    )
+
+    with pytest.raises(VNPlayConflictError, match="branch_restore_target_unavailable"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=1,
+            idempotency_key="restore-detached-choice-point",
+            target=BRANCH_RESTORE_TARGET_CHOICE_POINT,
+        )
+
+    assert service.get_session(session.id).active_session_action_id is None
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_restore_duplicate_same_key_replays_response(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    await service.submit_turn(
+        ready_session.id,
+        input_text="First",
+        client_scene_version=0,
+        idempotency_key="checkpoint-replay-first",
+    )
+    checkpoint = service.create_checkpoint(ready_session.id, label="First")
+    await service.submit_turn(
+        ready_session.id,
+        input_text="Second",
+        client_scene_version=1,
+        idempotency_key="checkpoint-replay-second",
+    )
+
+    first = service.restore_checkpoint(
+        ready_session.id,
+        int(checkpoint["id"]),
+        idempotency_key="checkpoint-replay",
+    )
+    second = service.restore_checkpoint(
+        ready_session.id,
+        int(checkpoint["id"]),
+        idempotency_key="checkpoint-replay",
+    )
+
+    assert first["status"] == "completed"
+    assert second == {**first, "replayed": True}
+    restore_events = [
+        event for event in service.list_events(ready_session.id) if event["event_type"] == "session_restored"
+    ]
+    assert len(restore_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_restore_same_key_different_checkpoint_conflicts(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    await service.submit_turn(
+        ready_session.id,
+        input_text="First",
+        client_scene_version=0,
+        idempotency_key="checkpoint-conflict-first",
+    )
+    first_checkpoint = service.create_checkpoint(ready_session.id, label="First")
+    await service.submit_turn(
+        ready_session.id,
+        input_text="Second",
+        client_scene_version=1,
+        idempotency_key="checkpoint-conflict-second",
+    )
+    second_checkpoint = service.create_checkpoint(ready_session.id, label="Second")
+    service.restore_checkpoint(
+        ready_session.id,
+        int(first_checkpoint["id"]),
+        idempotency_key="checkpoint-conflict",
+    )
+
+    with pytest.raises(VNPlayConflictError, match="idempotency_key_conflict"):
+        service.restore_checkpoint(
+            ready_session.id,
+            int(second_checkpoint["id"]),
+            idempotency_key="checkpoint-conflict",
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_restore_advances_scene_version_by_one(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    await service.submit_turn(
+        ready_session.id,
+        input_text="First",
+        client_scene_version=0,
+        idempotency_key="checkpoint-version-first",
+    )
+    checkpoint = service.create_checkpoint(ready_session.id, label="First")
+    await service.submit_turn(
+        ready_session.id,
+        input_text="Second",
+        client_scene_version=1,
+        idempotency_key="checkpoint-version-second",
+    )
+
+    response = service.restore_checkpoint(
+        ready_session.id,
+        int(checkpoint["id"]),
+        idempotency_key="checkpoint-version",
+    )
+
+    assert response["scene_version"] == 3
+    assert response["current_scene"]["scene_version"] == 3
+    assert service.get_session(ready_session.id).scene_version == 3
 
 
 @pytest.mark.asyncio
