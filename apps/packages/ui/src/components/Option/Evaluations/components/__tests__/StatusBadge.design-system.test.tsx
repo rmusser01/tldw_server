@@ -21,6 +21,17 @@ describe("Evaluations StatusBadge design-system adapter", () => {
     }
   )
 
+  it("renders unknown statuses through the shared Badge fallback", () => {
+    const status = "mystery-state" as RunStatus
+    const { container } = render(<StatusBadge status={status} />)
+
+    expect(screen.getByText(status)).toBeInTheDocument()
+    expect(screen.getByText("Empty")).toBeInTheDocument()
+    expect(
+      container.querySelector('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+  })
+
   it("preserves the running status spinner affordance", () => {
     const { container } = render(<StatusBadge status="running" />)
 
