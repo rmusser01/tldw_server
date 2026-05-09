@@ -3610,6 +3610,67 @@ describe("CharactersManager first-use onboarding", () => {
     expect(setSelectedCharacterMock).toHaveBeenLastCalledWith(null)
   }, 30000)
 
+  it("keeps row chat intent local when a stale selected model exists before the model catalog resolves", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "intent-stale-model",
+      name: "Stale Model Character",
+      system_prompt: "Keep the stale model path local.",
+      greeting: "Still here.",
+      description: "Row chat stale model blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return ["stale-chat-model", vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({
+          data: undefined,
+          status: "pending",
+          isPending: true,
+          isLoading: true
+        })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chat as Stale Model Character" })
+    )
+
+    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "intent-stale-model",
+        name: "Stale Model Character"
+      })
+    )
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as Stale Model Character"
+      )
+    ).toBeInTheDocument()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
+  }, 30000)
+
   it("opens quick chat from gallery preview actions", async () => {
     const user = userEvent.setup()
     const characterRecord = {
