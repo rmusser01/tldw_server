@@ -1,10 +1,10 @@
 ---
 id: TASK-180
 title: Improve Persona Visuals generation setup and unavailable-provider states
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 19:16'
-updated_date: '2026-05-09 19:26'
+updated_date: '2026-05-09 19:29'
 labels:
   - WebUI
   - Persona
@@ -14,6 +14,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1428'
   - 'https://github.com/rmusser01/tldw_server/issues/1431'
+  - 'https://github.com/rmusser01/tldw_server/pull/1439'
 priority: medium
 ---
 
@@ -51,12 +52,18 @@ Implemented the Persona Visuals generation readiness slice for issue #1431 in wo
 Verification: Vitest focused Persona visual suite passed (VisualPackEditor, personaVisualGenerationReadiness, personaVisualDiagnostics, SpriteFrameRenderer): 34 tests passed. Pytest Persona visual API suite passed: 24 tests passed. Bandit on touched backend endpoint/schema files reported zero findings. Package-wide tsc currently fails on existing unrelated baseline errors; grep of tsc output for touched files found no errors in VisualPackEditor/persona-visuals/personaVisualGenerationReadiness.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented PR #1439 for issue #1431. The slice adds a pack-scoped Persona Visuals generation readiness API, WebUI service/types, a tested readiness classifier, and VisualPackEditor setup-state rendering/gating for disabled Jobs worker and missing image provider states. Generation enqueue remains available when readiness is available, and generated candidates still go through the review workflow. Verification recorded in implementation notes; package-wide TypeScript still has unrelated baseline failures, with no errors found in the touched Persona Visuals files.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
