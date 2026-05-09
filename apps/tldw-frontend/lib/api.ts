@@ -144,7 +144,8 @@ function appendParams(url: string, params?: ApiRequestConfig['params']): string 
     return url;
   }
 
-  const isAbsolute = /^https?:\/\//i.test(url);
+  const isAbsolute = /^[a-z][a-z\d+\-.]*:\/\//i.test(url);
+  const isProtocolRelative = url.startsWith('//');
   const parsed = new URL(url, isAbsolute ? undefined : 'http://tldw.local');
 
   for (const [key, value] of Object.entries(params)) {
@@ -158,11 +159,15 @@ function appendParams(url: string, params?: ApiRequestConfig['params']): string 
     return parsed.toString();
   }
 
+  if (isProtocolRelative) {
+    return parsed.toString().replace(/^http:/i, '');
+  }
+
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
 function joinUrl(baseURL: string | undefined, url: string, params?: ApiRequestConfig['params']): string {
-  if (/^https?:\/\//i.test(url)) {
+  if (/^[a-z][a-z\d+\-.]*:\/\//i.test(url) || url.startsWith('//')) {
     return appendParams(url, params);
   }
 
@@ -175,6 +180,11 @@ function joinUrl(baseURL: string | undefined, url: string, params?: ApiRequestCo
 function serializeBody(data: unknown, headers: Headers): BodyInit | undefined {
   if (data === undefined || data === null) {
     return undefined;
+  }
+
+  if (typeof FormData !== 'undefined' && data instanceof FormData) {
+    headers.delete('Content-Type');
+    return data;
   }
 
   if (isBodyInit(data)) {
@@ -199,7 +209,7 @@ function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
 
   // Bearer token (multi-user JWT auth)
   const token = localStorage.getItem('access_token');
-  if (token) {
+  if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
@@ -212,7 +222,7 @@ function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
 
   // X-API-KEY (single-user mode convenience)
   const xApiKey = getApiKey();
-  if (xApiKey) {
+  if (xApiKey && !headers.has('X-API-KEY')) {
     headers.set('X-API-KEY', xApiKey);
   }
 
@@ -302,7 +312,8 @@ async function parseResponseBody<T>(response: Response, responseType?: ApiReques
   }
 
   const contentType = response.headers.get('Content-Type') || '';
-  if (contentType.toLowerCase().includes('application/json')) {
+  const isJsonHeader = contentType.toLowerCase().includes('application/json');
+  if (responseType === 'json' || isJsonHeader) {
     try {
       return JSON.parse(text) as T;
     } catch {
@@ -314,6 +325,37 @@ async function parseResponseBody<T>(response: Response, responseType?: ApiReques
   }
 
   return text as T;
+}
+
+function coerceErrorBody(body: unknown): ApiErrorResponse {
+  if (body && typeof body === 'object') {
+    return body as ApiErrorResponse;
+  }
+  if (body === undefined || body === null || body === '') {
+    return {};
+  }
+  return { detail: String(body) };
+}
+
+async function parseErrorBody(response: Response): Promise<ApiErrorResponse> {
+  if (response.status === 204 || response.status === 205) {
+    return {};
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return coerceErrorBody(JSON.parse(text));
+  } catch {
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.toLowerCase().includes('application/json')) {
+      return {};
+    }
+    return { detail: text };
+  }
 }
 
 function retryAfterFromHeaders(headers: Headers): number | undefined {
@@ -414,7 +456,10 @@ async function request<T = unknown>(
   data?: unknown,
   config: ApiRequestConfig = {}
 ): Promise<ApiResponse<T>> {
-  const headers = normalizeHeaders(config.headers);
+  const headers = normalizeHeaders(api.defaults.headers);
+  normalizeHeaders(config.headers).forEach((value, key) => {
+    headers.set(key, value);
+  });
   const body = serializeBody(data, headers);
   const baseURL = config.baseURL ?? api.defaults.baseURL;
   const requestUrl = joinUrl(baseURL, url, config.params);
@@ -449,7 +494,43 @@ async function request<T = unknown>(
   }
 
   abort.cleanup();
-  captureSessionIdFromHeaders(response.headers);
+  captureSessionIdFromHeaders(headersToRecord(response.headers));
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized();
+    }
+
+    const errorBody = await parseErrorBody(response);
+    const detail = errorBody.detail || errorBody.message;
+    if (
+      response.status === 403 &&
+      detail &&
+      typeof detail === 'string' &&
+      detail.toLowerCase().includes('csrf')
+    ) {
+      const message = 'CSRF validation failed. Refresh the page and try again.';
+      recordFailure(requestConfig, {
+        status: response.status,
+        responseBody: errorBody,
+        errorMessage: message,
+      });
+      throw new Error(message);
+    }
+
+    const retryAfter = retryAfterFromHeaders(response.headers);
+    const message = detail || response.statusText || 'An unexpected error occurred';
+    recordFailure(requestConfig, {
+      status: response.status,
+      responseBody: errorBody,
+      errorMessage: message,
+    });
+    throw new ApiError(message, {
+      status: response.status,
+      detail,
+      retryAfter,
+    });
+  }
 
   let responseBody: T;
   try {
@@ -462,42 +543,6 @@ async function request<T = unknown>(
       });
     }
     throw error;
-  }
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      handleUnauthorized();
-    }
-
-    const errorBody = (responseBody || {}) as ApiErrorResponse;
-    const detail = errorBody.detail || errorBody.message;
-    if (
-      response.status === 403 &&
-      detail &&
-      typeof detail === 'string' &&
-      detail.toLowerCase().includes('csrf')
-    ) {
-      const message = 'CSRF validation failed. Refresh the page and try again.';
-      recordFailure(requestConfig, {
-        status: response.status,
-        responseBody,
-        errorMessage: message,
-      });
-      throw new Error(message);
-    }
-
-    const retryAfter = retryAfterFromHeaders(response.headers);
-    const message = detail || response.statusText || 'An unexpected error occurred';
-    recordFailure(requestConfig, {
-      status: response.status,
-      responseBody,
-      errorMessage: message,
-    });
-    throw new ApiError(message, {
-      status: response.status,
-      detail,
-      retryAfter,
-    });
   }
 
   const apiResponse: ApiResponse<T> = {

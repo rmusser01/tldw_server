@@ -1,6 +1,34 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const ORIGINAL_ENV = { ...process.env }
+const ORIGINAL_WINDOW_LOCATION = window.location
+
+function setWindowLocation(href: string) {
+  let current = new URL(href)
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      get hash() {
+        return current.hash
+      },
+      get href() {
+        return current.href
+      },
+      set href(nextHref: string) {
+        current = new URL(nextHref, current.href)
+      },
+      get origin() {
+        return current.origin
+      },
+      get pathname() {
+        return current.pathname
+      },
+      get search() {
+        return current.search
+      }
+    }
+  })
+}
 
 function jsonResponse(
   body: unknown,
@@ -52,6 +80,7 @@ describe("fetch-backed WebUI api client", () => {
     delete process.env.NEXT_PUBLIC_API_BEARER
     delete process.env.NEXT_PUBLIC_X_API_KEY
     process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    setWindowLocation("http://localhost:3000/chat")
     localStorage.setItem(
       "tldw-session-id",
       JSON.stringify({ id: "sess-existing", timestamp: Date.now() })
@@ -61,6 +90,13 @@ describe("fetch-backed WebUI api client", () => {
   afterEach(() => {
     vi.useRealTimers()
     process.env = { ...ORIGINAL_ENV }
+  })
+
+  afterAll(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: ORIGINAL_WINDOW_LOCATION
+    })
   })
 
   it("uses fetch with mutable baseURL, JSON bodies, auth, CSRF, session headers, credentials, and history", async () => {
@@ -117,6 +153,29 @@ describe("fetch-backed WebUI api client", () => {
     )
   })
 
+  it("merges default headers before applying request-specific overrides", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ dismissed: true }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient, default: api } = await loadApiModule()
+    api.defaults.headers["X-Default"] = "default-value"
+    api.defaults.headers["X-Override"] = "default-value"
+
+    await expect(
+      apiClient.post("/notifications/1/dismiss", undefined, {
+        headers: {
+          "X-Override": "request-value"
+        }
+      })
+    ).resolves.toEqual({ dismissed: true })
+
+    const { init, headers } = getFetchCall(fetchMock)
+    expect(init.body).toBeUndefined()
+    expect(headers.get("Content-Type")).toBe("application/json")
+    expect(headers.get("X-Default")).toBe("default-value")
+    expect(headers.get("X-Override")).toBe("request-value")
+  })
+
   it("omits forced content type and cookie credentials for FormData with X-API-KEY auth", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ uploaded: true }))
     vi.stubGlobal("fetch", fetchMock)
@@ -139,6 +198,65 @@ describe("fetch-backed WebUI api client", () => {
     expect(headers.get("Content-Type")).toBeNull()
     expect(headers.get("X-API-KEY")).toBe("single-user-key")
     expect(headers.get("X-CSRF-Token")).toBeNull()
+  })
+
+  it("preserves caller-provided authorization and api key headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    vi.stubGlobal("fetch", fetchMock)
+    localStorage.setItem("access_token", "jwt-token")
+    localStorage.setItem("apiKey", "stored-api-key")
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(
+      apiClient.get("/delegated", {
+        headers: {
+          Authorization: "Bearer caller-token",
+          "X-API-KEY": "caller-api-key"
+        }
+      })
+    ).resolves.toEqual({ ok: true })
+
+    const { headers } = getFetchCall(fetchMock)
+    expect(headers.get("Authorization")).toBe("Bearer caller-token")
+    expect(headers.get("X-API-KEY")).toBe("caller-api-key")
+  })
+
+  it("preserves protocol-relative URLs when appending query params", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(
+      apiClient.get("//cdn.example.test/resource", {
+        params: {
+          q: "search",
+          page: 2
+        }
+      })
+    ).resolves.toEqual({ ok: true })
+
+    const { url } = getFetchCall(fetchMock)
+    expect(url).toBe("//cdn.example.test/resource?q=search&page=2")
+  })
+
+  it("parses explicit JSON response types even when content type is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain"
+        }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(
+      apiClient.get("/mislabelled-json", { responseType: "json" })
+    ).resolves.toEqual({ ok: true })
   })
 
   it("maps API error payloads and retry-after headers to ApiError", async () => {
@@ -186,6 +304,58 @@ describe("fetch-backed WebUI api client", () => {
 
     await expect(apiClient.post("/notes", { text: "x" })).rejects.toThrow(
       "CSRF validation failed. Refresh the page and try again."
+    )
+  })
+
+  it("extracts JSON error details before applying success response types", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ detail: "Download denied" }, { status: 403 })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(
+      apiClient.get("/exports/archive", { responseType: "arraybuffer" })
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      detail: "Download denied",
+      message: "Download denied"
+    })
+  })
+
+  it("clears auth state and redirects on unauthorized responses with malformed bodies", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("{not-json", {
+        status: 401,
+        statusText: "Unauthorized",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    localStorage.setItem("access_token", "jwt-token")
+    localStorage.setItem("user", JSON.stringify({ username: "alice" }))
+    setWindowLocation("http://localhost:3000/chat")
+
+    const { apiClient } = await loadApiModule()
+
+    await expect(apiClient.get("/protected")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401
+    })
+    expect(localStorage.getItem("access_token")).toBeNull()
+    expect(localStorage.getItem("user")).toBeNull()
+    expect(window.location.href).toBe("http://localhost:3000/login")
+    expect(storedRequestHistory()[0]).toEqual(
+      expect.objectContaining({
+        method: "GET",
+        url: "/protected",
+        status: 401,
+        ok: false
+      })
     )
   })
 

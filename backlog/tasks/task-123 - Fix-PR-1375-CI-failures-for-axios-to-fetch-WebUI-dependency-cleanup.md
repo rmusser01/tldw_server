@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-08 13:29'
-updated_date: '2026-05-08 13:41'
+updated_date: '2026-05-08 17:25'
 labels:
   - ci
   - webui
@@ -38,6 +38,8 @@ Resolve the current PR #1375 GitHub Actions failures after the axios-to-fetch We
 - [x] #6 CI Admin steps bypass the global xdist `PYTEST_ADDOPTS` setting and run serially to avoid worker-level lifespan hangs.
 - [x] #7 actionlint accepts the repository's self-hosted `vz-linux` runner label.
 - [x] #8 PR #1375 branch is pushed after fixes are verified.
+- [x] #9 Unresolved PR review comments on the fetch-backed API client are fixed with focused regression coverage.
+- [x] #10 The ElevenLabs speech request path uses the shared fetch helper without changing the public speech response contract.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -54,6 +56,7 @@ Resolve the current PR #1375 GitHub Actions failures after the axios-to-fetch We
 9. Update CI so the Admin module clears the global xdist `PYTEST_ADDOPTS` while the rest of the heavy suite keeps xdist.
 10. Fix the fresh actionlint failure by configuring the self-hosted runner labels used by the VZ Linux host-gated workflow.
 11. Stage, commit, push the PR branch, then refresh PR #1375 checks and record results in the Backlog task.
+12. Address the current PR review surface: default header merging, per-request auth header preservation, protocol-relative URLs, explicit JSON responseType parsing, error-body parsing before success responseType handling, session header normalization, and ElevenLabs helper consolidation.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -72,12 +75,18 @@ CI xdist follow-up: local Admin with xdist reproduced the CI shape as worker-lev
 Final verification: focused Admin route files passed with 13 passed tests in 9.86s after the nosec-only Bandit comments; `git diff --check` passed; Bandit on the touched Admin test files with `-s B101` produced 0 findings in `/tmp/bandit_task123_admin.json`.
 
 Fresh PR check follow-up after pushing `b4dd21847`: workflows are now starting instead of staying globally waiting, but `Lint Workflows (actionlint)` failed on the existing self-hosted label `vz-linux` in `.github/workflows/vz-linux-host-gated.yml`. Added `.github/actionlint.yaml` with the custom self-hosted labels and made the actionlint workflow pass that config explicitly. Local actionlint v1.7.12 against the same targeted workflow set passed with the new config.
+
+PR review follow-up scope: live GraphQL review threads on PR #1375 showed unresolved feedback for API default header merging, request-specific auth header clobbering, protocol-relative URL support, explicit `responseType: "json"`, error response parsing before binary/success response parsing, `captureSessionIdFromHeaders()` input normalization, a 401 cleanup/redirect regression test, and routing `generateSpeech()` through the shared ElevenLabs fetch helper.
+
+PR review follow-up verification: the new WebUI API client regression tests first failed on the current implementation for the default headers, auth override, protocol-relative URL, explicit JSON responseType, binary error detail, and malformed 401 cleanup cases. After fixes, `bunx vitest run lib/__tests__/api-client.fetch.test.ts ../packages/ui/src/services/__tests__/elevenlabs.test.ts` passed 18 tests. `bun run lint -- lib/api.ts lib/__tests__/api-client.fetch.test.ts ../packages/ui/src/services/elevenlabs.ts ../packages/ui/src/services/__tests__/elevenlabs.test.ts` exited 0 with existing project warnings; the shared UI paths are outside that command's base path, so `apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/services/elevenlabs.ts apps/packages/ui/src/services/__tests__/elevenlabs.test.ts` was run with the repo-pinned ESLint and exited 0. `git diff --check` passed. Bandit is not applicable to this TypeScript-only follow-up.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Stabilized PR #1375 CI by keeping the axios-to-fetch WebUI/Notes fixes and addressing the follow-on full-suite Admin timeout. Converted three route-level Admin test files away from full `TestClient` lifespan use, updated the GitHub Actions Admin module step to clear global xdist settings so Admin runs serially, and configured actionlint for the existing VZ Linux self-hosted runner labels. This keeps parallelism for the rest of the suite while avoiding worker-level app lifespan hangs in Admin.
+
+Addressed the follow-on PR review threads by restoring axios-like default header merging, preserving request-specific auth headers, supporting protocol-relative URLs, forcing explicit JSON parsing, parsing error bodies before success responseType handling, normalizing response headers for session capture, and routing ElevenLabs speech generation through the shared fetch helper.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

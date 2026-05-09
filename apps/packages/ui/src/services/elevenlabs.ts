@@ -13,6 +13,8 @@ const DEFAULT_ELEVENLABS_TIMEOUT_MS = 10_000;
 
 type ElevenLabsRequestOptions = {
   timeoutMs?: number;
+  responseType?: 'json' | 'text' | 'arrayBuffer' | 'arraybuffer';
+  includeBrowserTransportFailure?: boolean;
 };
 
 function createTimeoutSignal(timeoutMs: number): {
@@ -80,7 +82,13 @@ async function fetchElevenLabs<T>(
     });
   } catch (error) {
     timeout.cleanup();
-    if (isTimeoutLikeFetchFailure(error, timeout.didTimeout(), true)) {
+    if (
+      isTimeoutLikeFetchFailure(
+        error,
+        timeout.didTimeout(),
+        options?.includeBrowserTransportFailure ?? true
+      )
+    ) {
       throw new Error('ElevenLabs request timed out');
     }
     throw error;
@@ -91,7 +99,16 @@ async function fetchElevenLabs<T>(
     throw new Error(`ElevenLabs request failed with status ${response.status}`);
   }
 
-  return response.json() as Promise<T>;
+  switch (options?.responseType ?? 'json') {
+    case 'arrayBuffer':
+    case 'arraybuffer':
+      return response.arrayBuffer() as Promise<T>;
+    case 'text':
+      return response.text() as Promise<T>;
+    case 'json':
+    default:
+      return response.json() as Promise<T>;
+  }
 }
 
 export const getVoices = async (
@@ -135,30 +152,19 @@ export const generateSpeech = async (
     payload.voice_settings = { speed }
   }
 
-  const timeout = createTimeoutSignal(DEFAULT_ELEVENLABS_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(`${BASE_URL}/text-to-speech/${voiceId}`, {
+  return fetchElevenLabs<ArrayBuffer>(
+    `/text-to-speech/${voiceId}`,
+    apiKey,
+    {
       method: 'POST',
       headers: {
-        'xi-api-key': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
-      signal: timeout.signal,
-    });
-  } catch (error) {
-    timeout.cleanup();
-    if (isTimeoutLikeFetchFailure(error, timeout.didTimeout())) {
-      throw new Error('ElevenLabs request timed out');
+    },
+    {
+      responseType: 'arrayBuffer',
+      includeBrowserTransportFailure: false,
     }
-    throw error;
-  }
-  timeout.cleanup();
-
-  if (!response.ok) {
-    throw new Error(`ElevenLabs request failed with status ${response.status}`);
-  }
-
-  return response.arrayBuffer();
+  );
 };
