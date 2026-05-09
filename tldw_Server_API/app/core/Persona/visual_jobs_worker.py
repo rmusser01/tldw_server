@@ -3,11 +3,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+    PersonaVisualPortabilityRepository,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
@@ -17,7 +22,18 @@ from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as 
 from tldw_Server_API.app.core.Persona.visual_jobs import (
     PERSONA_VISUALS_DOMAIN,
     PERSONA_VISUAL_GENERATE_CANDIDATE_JOB_TYPE,
+    PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE,
+    PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
     persona_visual_generation_queue,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
+    PersonaVisualPackExporter,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.models import (
+    PersonaVisualPackExportOptions,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.preview import (
+    PersonaVisualPackImportPreviewer,
 )
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 
@@ -122,6 +138,253 @@ class PersonaVisualGenerationWorker:
         }
 
 
+class PersonaVisualPortabilityWorker:
+    """Run persona visual pack export and import-preview Jobs."""
+
+    def __init__(
+        self,
+        *,
+        db: CharactersRAGDB,
+        repo: PersonaVisualPortabilityRepository | None = None,
+        export_staging_root: Path | None = None,
+    ) -> None:
+        self._db = db
+        self._repo = repo or PersonaVisualPortabilityRepository.initialized(db)
+        self._export_staging_root = Path(export_staging_root) if export_staging_root is not None else None
+
+    async def handle_job_async(self, job: dict[str, Any]) -> dict[str, Any]:
+        job_type = str(job.get("job_type") or "")
+        payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+        if job_type == PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE:
+            return await self.handle_export_pack(payload, job=job)
+        if job_type == PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE:
+            return await self.handle_import_preview(payload, job=job)
+        raise ValueError(f"unsupported_persona_visual_portability_job_type:{job_type}")
+
+    async def handle_export_pack(
+        self,
+        payload: dict[str, Any],
+        *,
+        job: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        user_id = _payload_text(payload, "user_id")
+        persona_id = _payload_text(payload, "persona_id")
+        pack_id = _payload_text(payload, "pack_id")
+        portability_job_id = _payload_text(payload, "portability_job_id", default="")
+        if not user_id or not persona_id or not pack_id:
+            raise ValueError("invalid_persona_visual_pack_export_payload")
+
+        portability_job = (
+            self._repo.get_portability_job(portability_job_id, owner_user_id=user_id)
+            if portability_job_id
+            else self._repo.get_portability_job_by_job_id(str((job or {}).get("id") or ""), owner_user_id=user_id)
+        )
+        if (
+            portability_job is None
+            or str(portability_job.get("operation") or "") != "export"
+            or str(portability_job.get("persona_id") or "") != persona_id
+            or str(portability_job.get("pack_id") or "") != pack_id
+        ):
+            raise ValueError("persona_visual_pack_portability_job_not_found")
+
+        job_id = str(portability_job["job_id"])
+        self._repo.update_portability_job(
+            job_id,
+            {"status": "processing", "stage": "collecting_metadata", "progress": {"pack_id": pack_id}},
+            owner_user_id=user_id,
+        )
+
+        def _progress(stage: str, progress: dict[str, Any]) -> None:
+            self._repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": stage, "progress": progress},
+                owner_user_id=user_id,
+            )
+
+        try:
+            exporter = PersonaVisualPackExporter(
+                db=self._db,
+                user_id=user_id,
+                staging_root=self._resolve_export_staging_root(user_id),
+            )
+            result = await asyncio.to_thread(
+                lambda: exporter.export_pack(
+                    persona_id=persona_id,
+                    pack_id=pack_id,
+                    options=_export_options(payload.get("options")),
+                    progress=_progress,
+                )
+            )
+        except Exception as exc:
+            self._repo.update_portability_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "export_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            raise
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        self._repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "archive_path": str(result.archive_path),
+                "archive_sha256": result.archive_sha256,
+                "canonical_payload_fingerprint": result.canonical_payload_fingerprint,
+                "warnings": result.warnings,
+                "progress": {"file_size_bytes": result.file_size_bytes},
+                "expires_at": expires_at,
+            },
+            owner_user_id=user_id,
+        )
+        return {
+            "status": "exported",
+            "persona_id": persona_id,
+            "pack_id": pack_id,
+            "portability_job_id": str(portability_job["id"]),
+            "archive_path": str(result.archive_path),
+            "archive_sha256": result.archive_sha256,
+            "canonical_payload_fingerprint": result.canonical_payload_fingerprint,
+            "file_size_bytes": result.file_size_bytes,
+            "warnings": result.warnings,
+        }
+
+    async def handle_import_preview(
+        self,
+        payload: dict[str, Any],
+        *,
+        job: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        user_id = _payload_text(payload, "user_id")
+        preview_id = _payload_text(payload, "preview_id")
+        if not user_id or not preview_id:
+            raise ValueError("invalid_persona_visual_import_preview_payload")
+
+        preview = self._repo.get_import_preview(preview_id, owner_user_id=user_id)
+        if preview is None:
+            raise ValueError("persona_visual_pack_import_preview_not_found")
+
+        job_id = str(preview.get("job_id") or (job or {}).get("id") or "")
+        portability_job = self._repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
+        archive_path = Path(
+            _payload_text(payload, "archive_path", default=str(preview.get("archive_path") or ""))
+        )
+        if not archive_path.is_file():
+            raise ValueError("persona_visual_pack_import_archive_not_found")
+
+        self._repo.update_import_preview(
+            preview_id,
+            {"status": "processing", "stage": "validating_archive", "archive_path": str(archive_path)},
+            owner_user_id=user_id,
+        )
+        if portability_job is not None:
+            self._repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": "validating_archive"},
+                owner_user_id=user_id,
+            )
+
+        def _progress(stage: str, progress: dict[str, Any]) -> None:
+            if portability_job is None:
+                return
+            self._repo.update_portability_job(
+                job_id,
+                {"status": "processing", "stage": stage, "progress": progress},
+                owner_user_id=user_id,
+            )
+
+        target_persona_id = _payload_text(
+            payload,
+            "target_persona_id",
+            default=str(preview.get("target_persona_id") or ""),
+        ) or None
+        try:
+            result = await asyncio.to_thread(
+                lambda: PersonaVisualPackImportPreviewer().create_preview(
+                    archive_path=archive_path,
+                    owner_user_id=user_id,
+                    target_persona_id=target_persona_id,
+                    progress=_progress,
+                )
+            )
+        except Exception as exc:
+            self._repo.update_import_preview(
+                preview_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "import_preview_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=user_id,
+            )
+            if portability_job is not None:
+                self._repo.update_portability_job(
+                    job_id,
+                    {
+                        "status": "failed",
+                        "stage": "failed",
+                        "error_code": "import_preview_failed",
+                        "error_message": str(exc),
+                    },
+                    owner_user_id=user_id,
+                )
+            raise
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        self._repo.update_import_preview(
+            preview_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "archive_sha256": result["archive_sha256"],
+                "canonical_payload_fingerprint": result["canonical_payload_fingerprint"],
+                "schema_version": result["schema_version"],
+                "bundle_summary": result["bundle_summary"],
+                "validation_warnings": result["validation_warnings"],
+                "conflicts": result["conflicts"],
+                "proposed_plan": result["proposed_plan"],
+                "quota_estimate": result["quota_estimate"],
+                "required_choices": result["required_choices"],
+                "target_warnings": result["target_warnings"],
+                "expires_at": expires_at,
+            },
+            owner_user_id=user_id,
+        )
+        if portability_job is not None:
+            self._repo.update_portability_job(
+                job_id,
+                {
+                    "status": "completed",
+                    "stage": "completed",
+                    "archive_path": str(archive_path),
+                    "archive_sha256": result["archive_sha256"],
+                    "canonical_payload_fingerprint": result["canonical_payload_fingerprint"],
+                    "warnings": result["validation_warnings"],
+                    "progress": result["bundle_summary"],
+                    "expires_at": expires_at,
+                },
+                owner_user_id=user_id,
+            )
+        return {
+            **result,
+            "status": "previewed",
+            "preview_id": preview_id,
+            "archive_path": str(archive_path),
+        }
+
+    def _resolve_export_staging_root(self, user_id: str) -> Path:
+        if self._export_staging_root is not None:
+            return self._export_staging_root
+        return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_packs"
+
+
 async def run_persona_visual_generation_worker(stop_event: asyncio.Event | None = None) -> None:
     worker_id = (os.getenv("PERSONA_VISUAL_GENERATION_WORKER_ID") or f"persona-visuals-{os.getpid()}").strip()
     queue = persona_visual_generation_queue()
@@ -181,7 +444,36 @@ async def run_persona_visual_generation_worker(stop_event: asyncio.Event | None 
                 await stop_watcher
 
 
+def _payload_text(payload: dict[str, Any], key: str, *, default: str | None = None) -> str:
+    value = payload.get(key, default)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _export_options(value: Any) -> PersonaVisualPackExportOptions:
+    options = value if isinstance(value, dict) else {}
+    return PersonaVisualPackExportOptions(
+        strict=_bool_option(options.get("strict"), default=False),
+        include_full_provenance=_bool_option(options.get("include_full_provenance"), default=False),
+        warn_for_sharing=_bool_option(options.get("warn_for_sharing"), default=True),
+    )
+
+
+def _bool_option(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
 __all__ = [
     "PersonaVisualGenerationWorker",
+    "PersonaVisualPortabilityWorker",
     "run_persona_visual_generation_worker",
 ]

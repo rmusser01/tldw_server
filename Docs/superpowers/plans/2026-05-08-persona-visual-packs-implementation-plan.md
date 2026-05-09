@@ -1983,7 +1983,52 @@ Expected: no new findings in production code. Test-only `assert` findings may be
 
 Record verification and the next slice in `TASK-126.1`, then commit.
 
-Next slice: add Jobs-backed API endpoints and frontend review UX that mirror PR #1135's export job, import preview, import commit, status polling, cleanup, and portability panel flows.
+Next slice: add persistent portability records and worker handlers before exposing API/frontend flows.
+
+## Task 13: Portability Persistence And Worker Handlers
+
+**Status:** Complete
+
+**Goal:** Add PR #1135-style persistent bookkeeping and worker handlers for persona visual pack export and import-preview jobs.
+
+**Implementation Notes:**
+
+- Added `PersonaVisualPortabilityRepository` with SQLite-backed tables for persona visual portability jobs and import previews.
+- Stored operation/status/stage/progress, archive checksum/fingerprint, warnings, errors, target persona, validation summary, proposed import plan, quota estimate, required choices, and target warnings.
+- Added `PersonaVisualPortabilityWorker` as a separate handler from generation jobs, keeping image generation and pack portability concerns isolated.
+- Export worker now resolves the portability row, runs `PersonaVisualPackExporter`, writes the archive, and updates status/checksum/fingerprint/progress.
+- Import-preview worker now resolves the preview row, validates the archive via `PersonaVisualPackImportPreviewer`, updates preview and job records, and preserves the no-mutation preview contract.
+
+**Verification:**
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q
+```
+
+Result: `3 passed, 5 warnings`.
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visual_service.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q
+```
+
+Result: `19 passed, 5 warnings`.
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r \
+  tldw_Server_API/app/core/DB_Management/PersonaVisualPortability_DB.py \
+  tldw_Server_API/app/core/Persona/visual_jobs_worker.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py \
+  -s B101 -f json -o /tmp/bandit_persona_visual_portability_worker.json
+```
+
+Result: no findings. `B101` was skipped for test assertions.
+
+Next slice: expose Jobs-backed API endpoints and frontend review UX that mirror PR #1135's export job, import preview, status polling, cleanup, and portability panel flows.
 
 ## Final Verification Gate
 
