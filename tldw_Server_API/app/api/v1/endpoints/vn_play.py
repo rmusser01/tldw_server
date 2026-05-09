@@ -303,10 +303,7 @@ def _turn_response(
 
 
 def _scene_state(service: VNPlayService, session_id: int) -> dict[str, Any] | None:
-    return service.repo.get_scene_state(
-        session_id,
-        owner_user_id=service.owner_user_id,
-    )
+    return service.get_enriched_scene_state(session_id)
 
 
 def _http_error_for_service_exception(exc: Exception) -> HTTPException:

@@ -9,6 +9,19 @@ from typing import Any
 from tldw_Server_API.app.core.VN_Play.models import VisualDirectiveResolution
 
 
+_ASSET_TYPE_COLLECTION_ALIASES: dict[str, tuple[str, ...]] = {
+    "background": ("backgrounds", "background"),
+    "backgrounds": ("backgrounds", "background"),
+    "sprite": ("sprites", "sprite"),
+    "sprites": ("sprites", "sprite"),
+    "depth": ("depth_companions", "depth_companion", "depth"),
+    "depth_companion": ("depth_companions", "depth_companion", "depth"),
+    "depth_companions": ("depth_companions", "depth_companion", "depth"),
+    "cg": ("cgs", "cg"),
+    "cgs": ("cgs", "cg"),
+}
+
+
 def resolve_visual_directive(
     manifest: Mapping[str, Any],
     directive: Mapping[str, Any],
@@ -60,14 +73,30 @@ def _iter_manifest_items(
     if not isinstance(assets, Mapping):
         return []
 
-    if isinstance(asset_type, str) and asset_type:
-        items = assets.get(asset_type, [])
-        return _list_of_dicts(items)
+    collection_keys = _collection_keys_for_asset_type(asset_type)
+    if collection_keys is not None:
+        items: list[dict[str, Any]] = []
+        for collection_key in collection_keys:
+            items.extend(_list_of_dicts(assets.get(collection_key, [])))
+        return items
 
     all_items: list[dict[str, Any]] = []
     for items in assets.values():
         all_items.extend(_list_of_dicts(items))
     return all_items
+
+
+def _collection_keys_for_asset_type(asset_type: Any) -> list[str] | None:
+    if not isinstance(asset_type, str) or not asset_type.strip():
+        return None
+
+    normalized = asset_type.strip().lower()
+    aliases = _ASSET_TYPE_COLLECTION_ALIASES.get(normalized, (asset_type,))
+    keys: list[str] = []
+    for key in (*aliases, asset_type):
+        if key not in keys:
+            keys.append(key)
+    return keys
 
 
 def _is_approved_item(item: Mapping[str, Any]) -> bool:
