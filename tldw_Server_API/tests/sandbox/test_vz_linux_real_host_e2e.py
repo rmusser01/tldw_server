@@ -6,7 +6,7 @@ import platform
 import signal
 import socket
 import stat
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from pathlib import Path
@@ -121,7 +121,7 @@ def _require_helper_restart_lease() -> _HelperRestartLease:
 
 
 def _lookup_process_command(pid: int) -> str | None:
-    completed = subprocess.run(  # nosec B603,B607
+    completed = subprocess.run(  # nosec B603, B607
         ["ps", "-p", str(pid), "-o", "command="],
         check=False,
         capture_output=True,

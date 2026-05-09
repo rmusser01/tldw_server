@@ -2015,6 +2015,7 @@ def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
     pid_file.parent.mkdir(mode=0o700)
     pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
     removed = []
     lookups = []
 
@@ -2029,11 +2030,13 @@ def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
         pid_file,
         socket_path=socket_path,
         process_lookup=process_lookup,
+        process_killer=lambda pid: killed.append(pid),
         socket_identity_reader=lambda path: identity,
         socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(killed, [1234])
     CASE.assertEqual(removed, [(socket_path, identity)])
 
 
