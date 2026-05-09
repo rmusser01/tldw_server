@@ -4,7 +4,7 @@ title: Implement VN Play branch navigation API
 status: In Progress
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-09 22:24'
+updated_date: '2026-05-09 22:42'
 labels:
   - vn-play
   - api
@@ -28,7 +28,7 @@ Implement GitHub issue #1463 from the reviewed design spec and saved implementat
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Pure branch navigation read model derives active path, parent branch ids, direct/subtree event ranges, and stable warning payloads.
+- [x] #1 Pure branch navigation read model derives active path, parent branch ids, direct/subtree event ranges, and stable warning payloads.
 - [ ] #2 Repository persists session restore actions, enforces restore idempotency, and shares a session mutation gate with turn requests.
 - [ ] #3 Service exposes branch navigation, branch-aware event filtering, branch restore, and checkpoint restore idempotency while preserving existing Freeform and Story turn behavior.
 - [ ] #4 API exposes branch-navigation and branch restore endpoints, extends events filtering compatibly, maps stable errors, and documents the contract.
@@ -54,6 +54,8 @@ Initial sequence:
 
 <!-- SECTION:NOTES:BEGIN -->
 Preflight completed on rebased branch codex/vn-play-branch-navigation-api at origin/dev 8e52700d0 plus local planning commits. Focused VN Play baseline run: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 71 passed, 5 warnings in 19.26s.
+
+Task 1 complete after subagent implementation plus review loop. Commits: a8eca8712 Add VN Play branch navigation read model; f2bb5b56d Fix VN Play branch replay warnings; 83de8625f Handle VN Play branch navigation edge cases. Spec review passed after replay cap and ambiguous attribution fixes. Code-quality review passed after limit=0 and restore default-target fixes. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_branch_navigation.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py -q => 16 passed, 5 warnings; git diff --check => exit 0.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
