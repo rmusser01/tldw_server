@@ -8,7 +8,8 @@ Status: Draft audit for issue #1346
 - GitHub issue: https://github.com/rmusser01/tldw_server/issues/1346
 - Design spec: ../superpowers/specs/2026-05-07-webui-dependency-trimming-design.md
 - Parent design task: TASK-100
-- Backlog task: TASK-104
+- Audit task: TASK-104
+- Lockfile follow-up task: TASK-134
 
 ## Scope
 
@@ -38,6 +39,7 @@ This audit does not remove packages or rewrite runtime code.
 | `replace-later` | Replacement is plausible but needs its own PR. |
 | `defer-design` | Needs a separate design before replacement. |
 | `investigate-lockfile` | Needs lockfile or ownership confirmation before action. |
+| `removed` | Direct declaration was removed by a completed follow-up; row retained for audit history. |
 
 ## Dependency Inventory
 
@@ -84,7 +86,7 @@ This audit does not remove packages or rewrite runtime code.
 | `@types/pubsub-js` | `web:devDependencies`, `extension:devDependencies` | 0 | none found | tooling/dev declaration only | tooling/dev | `remove-now` | Low; no import/config/package-script evidence in scanned roots. | Small lockfile/install reduction. | Quick cleanup removal PR. |
 | `@types/react` | `web:devDependencies`, `shared-ui:devDependencies`, `extension:devDependencies` | 0 | none found | tooling/dev declaration only | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `@types/react-dom` | `web:devDependencies`, `shared-ui:devDependencies`, `extension:devDependencies` | 0 | none found | tooling/dev declaration only | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
-| `@types/react-syntax-highlighter` | `web:devDependencies` | 0 | none found | tooling/dev declaration only | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
+| `@types/react-syntax-highlighter` | none after TASK-134 | 0 | none found | removed WebUI dev declaration | tooling/dev | `removed` | Low; type package had no source/config/script evidence and belonged to the removed `react-syntax-highlighter` declaration. | One direct dev declaration and its lockfile record removed. | TASK-134 complete |
 | `@types/turndown` | `web:devDependencies`, `extension:devDependencies` | 0 | none found | tooling/dev declaration only | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `@typescript-eslint/eslint-plugin` | `web:devDependencies` | 1 | apps/tldw-frontend/eslint.config.mjs | web config/script | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `@typescript-eslint/parser` | `web:devDependencies` | 1 | apps/tldw-frontend/eslint.config.mjs | web config/script | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
@@ -149,11 +151,11 @@ This audit does not remove packages or rewrite runtime code.
 | `react-markdown` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Common/Markdown.tsx, apps/packages/ui/src/components/Flashcards/components/FlashcardMarkdownSnippet.tsx, apps/packages/ui/src/components/Knowledge/QASearchTab/GeneratedAnswerCard.tsx, apps/packages/ui/src/components/Option/ACPPlayground/ACPChatPanel.tsx | shared UI | markdown/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `react-pdf` | `web:dependencies`, `shared-ui:peerDependencies` | 5 | apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx, apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfPage.tsx, apps/packages/ui/src/components/DocumentWorkspace/LeftSidebar/PagesTab.tsx, apps/packages/ui/src/hooks/document-workspace/usePdfSearch.ts | shared UI | document/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `react-router-dom` | `shared-ui:peerDependencies`, `extension:dependencies` | 383 | apps/packages/ui/src/components/Common/ChatSidebar.tsx, apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx, apps/packages/ui/src/components/Common/CommandPalette.tsx, apps/packages/ui/src/components/Common/CommandPaletteHost.tsx | shared UI, shared UI tests, web tests, web app | frontend/runtime | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
-| `react-syntax-highlighter` | `web:dependencies` | 0 | none found | web app declaration only | markdown/rendering | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in markdown/rendering behavior. Confirm direct-vs-transitive ownership and code-block rendering coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/markdown-domain investigation slice. |
-| `react-toastify` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 0 | none found | web app, shared UI, extension impact declaration only | frontend/runtime | `investigate-lockfile` | Low/medium; source usage is absent or indirect, but dependency graph or scripts need confirmation. | Small if removable; avoid manifest churn until confirmed. | Lockfile/manifest investigation slice. |
+| `react-syntax-highlighter` | none after TASK-134 | 0 | none found | removed WebUI declaration | markdown/rendering | `removed` | Medium; markdown code-block rendering is covered by active `rehype-highlight` and `prism-react-renderer` declarations, with no direct package evidence for this library. | One direct runtime declaration removed; `react-syntax-highlighter`, `lowlight`, `refractor`, and old highlight/prism records dropped from the lockfile. | TASK-134 complete |
+| `react-toastify` | none after TASK-134 | 0 | none found | removed WebUI, shared UI, and extension declarations | frontend/runtime | `removed` | Low/medium; no source/config/script evidence across WebUI, shared UI, or extension surfaces. | Three direct declarations removed; both React Toastify lockfile records dropped. | TASK-134 complete |
 | `rehype-highlight` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Option/ACPPlayground/ACPChatPanel.tsx | shared UI | markdown/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `rehype-katex` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Common/Markdown.tsx | shared UI | markdown/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
-| `rehype-mathjax` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | markdown/rendering | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in markdown/math rendering behavior. Confirm direct-vs-transitive ownership and MathJax coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/markdown-domain investigation slice. |
+| `rehype-mathjax` | none after TASK-134 | 0 | none found | removed WebUI and extension declarations | markdown/rendering | `removed` | Medium; active markdown math rendering uses `remark-math` plus `rehype-katex`, and MathJax had no direct package evidence. | Two direct declarations removed; MathJax/jsdom-related lockfile records dropped. | TASK-134 complete |
 | `remark-gfm` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Common/Markdown.tsx, apps/packages/ui/src/components/Flashcards/components/FlashcardMarkdownSnippet.tsx, apps/packages/ui/src/components/Knowledge/QASearchTab/GeneratedAnswerCard.tsx, apps/packages/ui/src/components/Option/ACPPlayground/ACPChatPanel.tsx | shared UI | markdown/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `remark-math` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Common/Markdown.tsx | shared UI | markdown/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `stream-browserify` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | polyfill/shim | `remove-now` | Low; no import/config/package-script evidence in scanned roots. | Small lockfile/install reduction. | Quick cleanup removal PR. |
@@ -161,15 +163,30 @@ This audit does not remove packages or rewrite runtime code.
 | `tailwindcss` | `web:dependencies`, `extension:devDependencies` | 2 | apps/extension/postcss.config.js, apps/tldw-frontend/postcss.config.mjs | styling config/build | styling/build | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `turndown` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 2 | apps/packages/ui/src/parser/amazon.ts, apps/packages/ui/src/parser/default.ts | shared UI | parser/conversion | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `typescript` | `web:devDependencies`, `extension:devDependencies` | 3 | apps/extension/scripts/verify-openapi-client-paths.mjs | extension tests/config, package scripts | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
-| `unist-util-visit` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | markdown/rendering | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in markdown AST traversal behavior. Confirm direct-vs-transitive ownership and markdown plugin coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/markdown-domain investigation slice. |
+| `unist-util-visit` | none after TASK-134 | 0 | none found | removed WebUI and extension declarations | markdown/rendering | `removed` | Medium; no direct package evidence, but markdown packages still own it transitively where needed. | Two direct declarations removed; package remains only as markdown transitive ownership. | TASK-134 complete |
 | `vite` | `web:devDependencies`, `extension:devDependencies` | 0 | none found; likely framework/toolchain dependency for Vitest/WXT rather than runtime package evidence | tooling/dev declaration only | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `vitest` | `web:devDependencies`, `shared-ui:devDependencies` | 1498 | apps/extension/tests/e2e/setup/build-extension.test.ts, apps/extension/tests/e2e/utils/extension-build.test.ts, apps/extension/tests/e2e/utils/extension-paths.test.ts, apps/extension/tests/e2e/utils/extension.launch.test.ts | extension tests/config, shared UI tests, web tests, web config/script, web app, package scripts | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `wxt` | `shared-ui:peerDependencies`, `extension:devDependencies` | 58 | apps/extension/scripts/wxt-prepare.mjs, apps/extension/wxt.config.ts, apps/packages/ui/src/components/Common/CharacterSelect.tsx, apps/packages/ui/src/components/Common/ChatSidebar/ServerChatList.tsx | extension tests/config, shared UI, shared UI tests, web tests, web app, package scripts | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `xterm` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 7 | apps/packages/ui/src/ambient.d.ts, apps/packages/ui/src/components/Option/ACPPlayground/ACPWorkspacePanel.tsx, apps/tldw-frontend/__tests__/extension/entry-shell-performance.test.ts | shared UI, web tests | editor/terminal | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
-| `zod` | `web:dependencies` | 0 | none found | web app declaration only | schema validation | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in schema validation behavior. Confirm direct-vs-transitive ownership and runtime schema coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/schema-domain investigation slice. |
+| `zod` | none after TASK-134 | 0 | none found | removed WebUI declaration | schema validation | `removed` | Medium; no WebUI runtime schema usage was found, while tooling packages still own their transitive Zod needs. | One direct runtime declaration removed; `zod` remains only through tooling transitives. | TASK-134 complete |
 | `zustand` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 83 | apps/packages/ui/src/components/Common/ChatSidebar/ServerChatList.tsx, apps/packages/ui/src/components/Common/Settings/ActorPopout.tsx, apps/packages/ui/src/components/Common/Settings/CurrentChatModelSettings.tsx, apps/packages/ui/src/components/Folders/FolderPicker.tsx | shared UI, shared UI tests, web tests, web app | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 
 ## Ranked Follow-Up Queue
+
+### Completed Follow-Ups
+
+- TASK-134 removed unused direct declarations for `react-syntax-highlighter`,
+  `@types/react-syntax-highlighter`, `react-toastify`, `rehype-mathjax`,
+  `unist-util-visit`, and `zod` after confirming no current WebUI, shared UI,
+  or extension source/config/script references. `unist-util-visit` and `zod`
+  remain in `apps/bun.lock` only as transitive dependencies owned by markdown
+  and tooling packages. Measured against `origin/dev`, the three scanned
+  manifests went from 270 to 260 direct declaration entries, with all 10
+  candidate declaration entries removed.
+- TASK-134 retained `@dnd-kit/abstract`, `@dnd-kit/dom`, and `@tiptap/pm` in
+  direct manifests. The DnD packages are still owned by the active
+  `@dnd-kit/react`/helpers graph, and Tiptap packages declare `@tiptap/pm` as
+  a peer/runtime dependency.
 
 ### Quick Cleanup Candidates
 
@@ -185,8 +202,8 @@ This audit does not remove packages or rewrite runtime code.
 ### Deferred Design Candidates
 
 - Icon-stack consolidation: `lucide-react`, `@heroicons/react`, `@ant-design/icons`, and `react-icons` are active visible UI dependencies and should be handled with a visual/design pass.
-- PDF, ePub, document rendering, rich text editor, Mermaid, KaTeX, markdown, parser, graph/layout, OCR, tokenizer, schema, Monaco, Tiptap, and archive packages with active evidence are kept or deferred rather than replaced with hand-rolled browser code. Zero-evidence complex declarations are marked `investigate-lockfile` before any manifest edit.
-- DnD package declarations with no direct import evidence, such as `@dnd-kit/abstract` and `@dnd-kit/dom`, should be checked against the DnD package graph before manifest edits.
+- PDF, ePub, document rendering, rich text editor, Mermaid, KaTeX, markdown, parser, graph/layout, OCR, tokenizer, schema, Monaco, Tiptap, and archive packages with active evidence are kept or deferred rather than replaced with hand-rolled browser code. Remaining zero-evidence complex declarations should keep using the `investigate-lockfile` path before any manifest edit.
+- DnD package declarations with no direct import evidence, such as `@dnd-kit/abstract` and `@dnd-kit/dom`, are retained after TASK-134 because the current lockfile still routes active DnD packages through the DnD abstract/dom graph.
 
 ### Explicit Keeps
 
@@ -239,8 +256,37 @@ This audit does not remove packages or rewrite runtime code.
   `apps/tldw-frontend/scripts/copy-pdf-worker.mjs` and the shared PDF viewer's
   runtime worker/version reference in
   `apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx`.
-- Bandit: skipped for this slice because changes are documentation and Backlog
-  task metadata only; no Python or runtime code was modified.
+- 2026-05-07 Bandit: skipped for the initial audit slice because changes were
+  documentation and Backlog task metadata only; no Python or runtime code was
+  modified.
+- 2026-05-08 TASK-134 lockfile follow-up: confirmed no exact source, config,
+  script, or manifest references remained for `react-syntax-highlighter`,
+  `@types/react-syntax-highlighter`, `react-toastify`, `rehype-mathjax`,
+  `unist-util-visit`, or `zod` after direct manifest removal. Regenerated
+  `apps/bun.lock` with `bun install`; the lockfile removed the direct
+  `react-toastify`, `react-syntax-highlighter`, and `rehype-mathjax` trees.
+  `unist-util-visit` and `zod` remain only through markdown/tooling transitives.
+- 2026-05-08 TASK-134 impact deltas, measured against `origin/dev`: direct
+  declaration entries across `apps/tldw-frontend/package.json`,
+  `apps/extension/package.json`, and `apps/packages/ui/package.json` changed
+  from 270 to 260 (-10). The removed candidate declaration entries changed
+  from 10 to 0 (-10) across 6 unique package names. `apps/bun.lock` changed
+  from 536,939 bytes to 518,386 bytes (-18,553), from 4,641 lines to 4,473
+  lines (-168), and from 2,156 package records to 2,077 package records (-79).
+- 2026-05-08 TASK-134 retained-package check: `@dnd-kit/abstract` and
+  `@dnd-kit/dom` remain in the lockfile through active `@dnd-kit/collision`,
+  `@dnd-kit/helpers`, and `@dnd-kit/react` dependencies. `@tiptap/pm` remains
+  declared because current Tiptap packages list it as a peer/runtime dependency.
+- 2026-05-08 TASK-134 verification: `bun install --frozen-lockfile` from
+  `apps`, `bun run compile` from `apps/extension`,
+  `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` from
+  `apps/tldw-frontend`, `bun run lint` from `apps/tldw-frontend`,
+  `bunx vitest run --changed=origin/dev` from `apps/tldw-frontend`, and
+  `git diff --check` all exited 0. The Vitest changed-file probe reported no
+  matching test files for this manifest-only change.
+- Bandit: skipped for TASK-134 because the slice changed TypeScript package
+  manifests, `apps/bun.lock`, documentation, and Backlog metadata only; no
+  Python files were modified.
 
 ## Known Skips And Blockers
 
