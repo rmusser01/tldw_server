@@ -270,7 +270,7 @@ describe("VisualPackEditor", () => {
     )
     expect(emptyState).toHaveTextContent("Create a draft visual pack first.")
     expect(emptyState).toHaveTextContent(
-      "After a draft exists, upload frames, map states, import packs, queue generation, review candidates, and activate a valid pack."
+      "After a draft exists, upload frames, map states, import or export packs, queue generation, review candidates, and activate a valid pack."
     )
     expect(emptyState).not.toHaveTextContent("VN")
     expect(emptyState).not.toHaveTextContent("CYOA")

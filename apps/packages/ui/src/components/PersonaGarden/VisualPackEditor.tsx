@@ -1056,8 +1056,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               Create a draft visual pack first.
             </div>
             <div className="mt-1">
-              After a draft exists, upload frames, map states, import packs,
-              queue generation, review candidates, and activate a valid pack.
+              After a draft exists, upload frames, map states, import or export
+              packs, queue generation, review candidates, and activate a valid pack.
             </div>
           </div>
         ) : null}
