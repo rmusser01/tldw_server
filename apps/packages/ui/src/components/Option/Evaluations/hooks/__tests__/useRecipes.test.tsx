@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   getRecipeRunUserErrorMessage,
+  useApplyRecipeRecommendation,
   useCreateRecipeRun,
   useEmbeddingRecipeCandidates,
   usePreviewRecipeRecommendationApply
 } from "../useRecipes"
 import {
+  applyRecipeRecommendation,
   createRecipeRun,
   getEmbeddingRecipeCandidates,
   previewRecipeRecommendationApply
@@ -55,6 +57,7 @@ vi.mock("@/services/evaluations", async () => {
     getRecipeLaunchReadiness: noopAsync,
     getRecipeRunReport: noopAsync,
     listRecipeManifests: noopAsync,
+    applyRecipeRecommendation: vi.fn(),
     previewRecipeRecommendationApply: vi.fn(),
     validateRecipeDataset: noopAsync
   }
@@ -291,6 +294,56 @@ describe("useRecipes", () => {
           slotName: "best_overall"
         })
       ).rejects.toThrow("blocked")
+    })
+  })
+
+  it("posts live apply requests through the hook with confirmation fields", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+
+    vi.mocked(applyRecipeRecommendation).mockResolvedValue({
+      ok: true,
+      data: {
+        run_id: "recipe-run-1",
+        recipe_id: "embeddings_model_selection",
+        slot_name: "best_overall",
+        candidate_run_id: "arm-1",
+        apply_eligible: true,
+        apply_available: true,
+        applied: true,
+        backup_path: "/tmp/config.txt.bak",
+        audit_ref: "embedding_recipe_apply_audit",
+        current: {},
+        proposed: {},
+        affected_config: {},
+        copy_config: {},
+        warnings: []
+      }
+    } as any)
+
+    const { result } = renderHook(() => useApplyRecipeRecommendation(), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        runId: "recipe-run-1",
+        slotName: "best_overall",
+        candidateRunId: "arm-1",
+        confirmedProvider: "openai",
+        confirmedModel: "text-embedding-3-small"
+      })
+    })
+
+    expect(applyRecipeRecommendation).toHaveBeenCalledWith("recipe-run-1", {
+      slot_name: "best_overall",
+      candidate_run_id: "arm-1",
+      confirmed_provider: "openai",
+      confirmed_model: "text-embedding-3-small"
     })
   })
 })

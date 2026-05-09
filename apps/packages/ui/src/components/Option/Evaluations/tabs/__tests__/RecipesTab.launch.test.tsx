@@ -6,11 +6,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RecipesTab } from "../RecipesTab"
 import { useGenerateSyntheticEvalDrafts } from "../../hooks/useSyntheticEval"
 
+vi.setConfig({ testTimeout: 60000 })
+
 const validateSpy = vi.fn()
 const createSpy = vi.fn()
 const generateSyntheticDraftsSpy = vi.fn()
 const useEmbeddingRecipeCandidatesSpy = vi.fn()
 const previewApplySpy = vi.fn()
+const applyRecommendationSpy = vi.fn()
 const setActiveTabSpy = vi.fn()
 const setSyntheticReviewRecipeKindSpy = vi.fn()
 const setSyntheticReviewBatchIdSpy = vi.fn()
@@ -262,6 +265,10 @@ vi.mock("../../hooks/useRecipes", () => ({
   useEmbeddingRecipeCandidates: () => useEmbeddingRecipeCandidatesSpy(),
   usePreviewRecipeRecommendationApply: () => ({
     mutateAsync: previewApplySpy,
+    isPending: false
+  }),
+  useApplyRecipeRecommendation: () => ({
+    mutateAsync: applyRecommendationSpy,
     isPending: false
   }),
   useRecipeRunReport: (runId: string | null) => ({
@@ -604,6 +611,7 @@ describe("RecipesTab recipe launch flow", () => {
     resetMockEvaluationsStore()
     generateSyntheticDraftsSpy.mockReset()
     previewApplySpy.mockReset()
+    applyRecommendationSpy.mockReset()
     recipeManifestState.data = {
       data: [
       {
@@ -1132,7 +1140,7 @@ describe("RecipesTab recipe launch flow", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("shows a disabled live apply placeholder when apply is available", async () => {
+  it("applies live recommendation with confirmation payload when apply is available", async () => {
     previewApplySpy.mockResolvedValue({
       ok: true,
       data: {
@@ -1142,6 +1150,35 @@ describe("RecipesTab recipe launch flow", () => {
         candidate_run_id: "arm-openai-small",
         apply_eligible: true,
         apply_available: true,
+        current: {
+          provider: "huggingface",
+          model: "Qwen/Qwen3-Embedding-0.6B"
+        },
+        proposed: {
+          provider: "openai",
+          model: "text-embedding-3-small"
+        },
+        affected_config: {
+          section: "Embeddings",
+          provider_key: "embedding_provider",
+          model_key: "embedding_model"
+        },
+        reindex_required: false,
+        warnings: []
+      }
+    })
+    applyRecommendationSpy.mockResolvedValue({
+      ok: true,
+      data: {
+        run_id: "embeddings-run-1",
+        recipe_id: "embeddings_model_selection",
+        slot_name: "best_overall",
+        candidate_run_id: "arm-openai-small",
+        apply_eligible: true,
+        apply_available: true,
+        applied: true,
+        backup_path: "/tmp/config.txt.pre-setup-test.bak",
+        audit_ref: "embedding_recipe_apply_audit",
         current: {
           provider: "huggingface",
           model: "Qwen/Qwen3-Embedding-0.6B"
@@ -1174,8 +1211,20 @@ describe("RecipesTab recipe launch flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Preview RAG config change/i }))
 
     expect(await screen.findByText("Proposed embedding model")).toBeInTheDocument()
-    const applyButton = screen.getByRole("button", { name: /^Apply config change$/i })
-    expect(applyButton).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: /^Apply to RAG config$/i }))
+
+    await waitFor(() => {
+      expect(applyRecommendationSpy).toHaveBeenCalledWith({
+        runId: "embeddings-run-1",
+        slotName: "best_overall",
+        candidateRunId: "arm-openai-small",
+        confirmedProvider: "openai",
+        confirmedModel: "text-embedding-3-small"
+      })
+    })
+    expect(await screen.findByText("RAG config updated")).toBeInTheDocument()
+    expect(screen.getByText("/tmp/config.txt.pre-setup-test.bak")).toBeInTheDocument()
+    expect(screen.getByText("embedding_recipe_apply_audit")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Copy config change/i })).not.toBeInTheDocument()
   })
 

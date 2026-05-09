@@ -138,6 +138,7 @@ export type ClientPath =
   | "/api/v1/evaluations/webhooks"
   | "/api/v1/evaluations/recipes/embeddings_model_selection/candidates"
   | "/api/v1/evaluations/recipe-runs/{run_id}/apply-preview"
+  | "/api/v1/evaluations/recipe-runs/{run_id}/apply"
   | "/api/v1/mcp/health"
   | "/api/v1/mcp/tools"
   | "/api/v1/mcp/tool_catalogs"

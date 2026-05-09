@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, is_dataclass
+from datetime import UTC, datetime
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Setup import setup_manager
 
 RECIPE_ID = "embeddings_model_selection"
+APPLY_AUDIT_METADATA_KEY = "embedding_recipe_apply_audit"
+_EMBEDDING_CONFIG_OVERRIDE_ENV_KEYS = (
+    "EMBEDDINGS_DEFAULT_PROVIDER",
+    "EMBEDDINGS_PROVIDER",
+    "EMBEDDINGS_DEFAULT_MODEL",
+    "EMBEDDINGS_MODEL",
+)
 _LOCALISH_PROVIDERS = {
     "local",
     "local_api",
@@ -211,10 +222,19 @@ def build_embedding_recipe_apply_preview(
     if not apply_eligible:
         response["blocked_reason"] = "Recommendation slot is not eligible for apply preview."
 
+    apply_available = bool(live_apply_supported and apply_eligible)
+    override_keys = get_embedding_config_override_env_keys()
+    if apply_available and override_keys:
+        apply_available = False
+        warnings.append(
+            "Live apply is unavailable because environment variable(s) override "
+            f"the effective embeddings provider/model: {', '.join(override_keys)}."
+        )
+
     response.update(
         {
             "apply_eligible": apply_eligible,
-            "apply_available": bool(live_apply_supported and apply_eligible),
+            "apply_available": apply_available,
             "warnings": warnings,
             "current": get_current_embedding_config(),
             "proposed": {"provider": provider, "model": model},
@@ -233,6 +253,126 @@ def build_embedding_recipe_apply_preview(
         }
     )
     return response
+
+
+def apply_embedding_recipe_recommendation(
+    service: object,
+    *,
+    run_id: str,
+    slot_name: str,
+    candidate_run_id: str | None,
+    confirmed_provider: str,
+    confirmed_model: str,
+) -> dict[str, object]:
+    """Apply a completed embeddings recipe recommendation to the RAG embeddings config."""
+    preview = build_embedding_recipe_apply_preview(
+        service,
+        run_id=run_id,
+        slot_name=slot_name,
+        candidate_run_id=candidate_run_id,
+        live_apply_supported=True,
+    )
+    if preview.get("blocked_reason"):
+        raise ValueError(str(preview["blocked_reason"]))
+    if not preview.get("apply_eligible"):
+        raise ValueError("Recommendation slot is not eligible for live apply.")
+
+    proposed = _object_to_dict(preview.get("proposed") or {})
+    proposed_provider = _clean_optional(proposed.get("provider"))
+    proposed_model = _clean_optional(proposed.get("model"))
+    confirmed_provider_clean = _clean_optional(confirmed_provider)
+    confirmed_model_clean = _clean_optional(confirmed_model)
+    if not confirmed_provider_clean or not confirmed_model_clean:
+        raise ValueError("confirmed_provider and confirmed_model are required.")
+    if (
+        confirmed_provider_clean != proposed_provider
+        or confirmed_model_clean != proposed_model
+    ):
+        raise ValueError("Confirmed provider/model do not match the recommendation preview.")
+
+    override_keys = get_embedding_config_override_env_keys()
+    if override_keys:
+        raise ValueError(
+            "Cannot apply recommendation because environment variable(s) override "
+            f"the effective embeddings provider/model: {', '.join(override_keys)}."
+        )
+
+    updates = {
+        "Embeddings": {
+            "embedding_provider": proposed_provider,
+            "embedding_model": proposed_model,
+        }
+    }
+    audit_ref = APPLY_AUDIT_METADATA_KEY
+    applied_at = datetime.now(UTC).isoformat()
+    audit = {
+        "timestamp": applied_at,
+        "run_id": str(preview.get("run_id") or run_id),
+        "slot": slot_name,
+        "candidate_run_id": preview.get("candidate_run_id"),
+        "previous": preview.get("current") or {},
+        "current": preview.get("current") or {},
+        "proposed": proposed,
+        "new": None,
+        "backup_path": None,
+        "status": "pending",
+    }
+    _persist_embedding_apply_audit(service, run_id, audit)
+
+    try:
+        backup_path = setup_manager.update_config(updates, create_backup=True)
+    except Exception:
+        failed_audit = {
+            **audit,
+            "status": "failed",
+            "failed_at": datetime.now(UTC).isoformat(),
+            "failure": "config_update_failed",
+        }
+        _persist_embedding_apply_audit(service, run_id, failed_audit)
+        raise
+
+    backup_path_str = str(backup_path) if backup_path is not None else None
+    final_audit = {
+        **audit,
+        "new": proposed,
+        "backup_path": backup_path_str,
+        "status": "applied",
+        "applied_at": datetime.now(UTC).isoformat(),
+    }
+    _persist_embedding_apply_audit(service, run_id, final_audit)
+
+    logger.info(
+        "Applied embeddings recipe recommendation run_id={} slot={} candidate_run_id={}",
+        str(preview.get("run_id") or run_id),
+        slot_name,
+        preview.get("candidate_run_id"),
+    )
+    preview.update(
+        {
+            "applied": True,
+            "backup_path": backup_path_str,
+            "audit_ref": audit_ref,
+        }
+    )
+    return preview
+
+
+def _persist_embedding_apply_audit(
+    service: object,
+    run_id: str,
+    audit: dict[str, object],
+) -> None:
+    record = service.get_run(run_id)
+    metadata = dict(getattr(record, "metadata", {}) or {})
+    metadata[APPLY_AUDIT_METADATA_KEY] = audit
+    updated = getattr(service, "db").update_recipe_run(run_id, metadata=metadata)
+    if not updated:
+        raise RuntimeError("Failed to record embeddings recommendation apply audit metadata.")
+
+
+def get_embedding_config_override_env_keys() -> list[str]:
+    """Return env keys that override effective embeddings provider/model defaults."""
+    return [key for key in _EMBEDDING_CONFIG_OVERRIDE_ENV_KEYS if os.getenv(key)]
 
 
 def _candidate_from_provider_model(

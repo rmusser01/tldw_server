@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
+    get_eval_request_user,
+)
 from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecommendationSlot
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_recipes import (
@@ -14,6 +20,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import
     router as evaluations_unified_router,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_single_user_instance
+from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
 from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
     RECIPE_RUN_REUSE_ENTITY_TYPE,
@@ -538,7 +545,7 @@ async def test_embeddings_recipe_apply_preview_returns_copy_config_for_completed
     assert response.status_code == 200
     body = response.json()
     assert body["apply_eligible"] is True
-    assert body["apply_available"] is False
+    assert body["apply_available"] is True
     assert body["copy_config"]["Embeddings"] == {
         "embedding_provider": "openai",
         "embedding_model": "text-embedding-3-small",
@@ -568,6 +575,204 @@ async def test_embeddings_recipe_apply_preview_rejects_non_embeddings_recipe_run
 
     assert response.status_code == 409
     assert "not 'embeddings_model_selection'" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_apply_endpoint_updates_config_and_audits(
+    async_api_client,
+    auth_headers,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_MODEL", raising=False)
+    db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
+    run_id = db.create_recipe_run(
+        recipe_id="embeddings_model_selection",
+        recipe_version="1",
+        status=RunStatus.COMPLETED,
+        dataset_content_hash=build_dataset_content_hash(_embeddings_dataset()),
+        metadata={"owner_user_id": get_single_user_instance().id_str},
+        recommendation_slots={
+            "best_overall": RecommendationSlot(
+                candidate_run_id="arm-1",
+                metadata={
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "apply_eligible": True,
+                },
+            )
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_current_embedding_config",
+        lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
+    )
+    update_config_spy = MagicMock(return_value=Path("/tmp/config.txt.pre-setup-test.bak"))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.setup_manager.update_config",
+        update_config_spy,
+    )
+
+    response = await async_api_client.post(
+        f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
+        json={
+            "slot_name": "best_overall",
+            "candidate_run_id": "arm-1",
+            "confirmed_provider": "openai",
+            "confirmed_model": "text-embedding-3-small",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert update_config_spy.call_args.args[0] == {
+        "Embeddings": {
+            "embedding_provider": "openai",
+            "embedding_model": "text-embedding-3-small",
+        }
+    }
+    assert update_config_spy.call_args.kwargs == {"create_backup": True}
+    body = response.json()
+    assert body["applied"] is True
+    assert body["backup_path"] == "/tmp/config.txt.pre-setup-test.bak"
+    assert body["audit_ref"] == "embedding_recipe_apply_audit"
+
+    updated_run = db.get_recipe_run(run_id)
+    audit = updated_run.metadata["embedding_recipe_apply_audit"]
+    assert audit["slot"] == "best_overall"
+    assert audit["candidate_run_id"] == "arm-1"
+    assert audit["previous"] == {
+        "provider": "huggingface",
+        "model": "Qwen/Qwen3-Embedding-0.6B",
+    }
+    assert audit["proposed"] == {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+    }
+    assert audit["new"] == audit["proposed"]
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_apply_endpoint_refuses_env_override_without_mutation(
+    async_api_client,
+    auth_headers,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("EMBEDDINGS_DEFAULT_PROVIDER", "env-provider")
+    db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
+    run_id = db.create_recipe_run(
+        recipe_id="embeddings_model_selection",
+        recipe_version="1",
+        status=RunStatus.COMPLETED,
+        dataset_content_hash=build_dataset_content_hash(_embeddings_dataset()),
+        metadata={"owner_user_id": get_single_user_instance().id_str},
+        recommendation_slots={
+            "best_overall": RecommendationSlot(
+                candidate_run_id="arm-1",
+                metadata={
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "apply_eligible": True,
+                },
+            )
+        },
+    )
+    update_config_spy = MagicMock()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.setup_manager.update_config",
+        update_config_spy,
+    )
+
+    response = await async_api_client.post(
+        f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
+        json={
+            "slot_name": "best_overall",
+            "candidate_run_id": "arm-1",
+            "confirmed_provider": "openai",
+            "confirmed_model": "text-embedding-3-small",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "environment variable" in response.json()["detail"]
+    update_config_spy.assert_not_called()
+    assert "embedding_recipe_apply_audit" not in db.get_recipe_run(run_id).metadata
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_preview_read_only_user_cannot_advertise_live_apply(
+    async_api_client,
+    auth_headers,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.main import app
+
+    read_only_user = SimpleNamespace(
+        id=77,
+        id_str="reader_77",
+        roles=[],
+        permissions=[EVALS_READ],
+    )
+
+    async def _read_only_request_user():
+        return read_only_user
+
+    db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
+    run_id = db.create_recipe_run(
+        recipe_id="embeddings_model_selection",
+        recipe_version="1",
+        status=RunStatus.COMPLETED,
+        dataset_content_hash=build_dataset_content_hash(_embeddings_dataset()),
+        metadata={"owner_user_id": "reader_77"},
+        recommendation_slots={
+            "best_overall": RecommendationSlot(
+                candidate_run_id="arm-1",
+                metadata={
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "apply_eligible": True,
+                },
+            )
+        },
+    )
+    update_config_spy = MagicMock()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.setup_manager.update_config",
+        update_config_spy,
+    )
+    app.dependency_overrides[get_eval_request_user] = _read_only_request_user
+    try:
+        preview_response = await async_api_client.post(
+            f"/api/v1/evaluations/recipe-runs/{run_id}/apply-preview",
+            json={"slot_name": "best_overall", "candidate_run_id": "arm-1"},
+            headers=auth_headers,
+        )
+        apply_response = await async_api_client.post(
+            f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
+            json={
+                "slot_name": "best_overall",
+                "candidate_run_id": "arm-1",
+                "confirmed_provider": "openai",
+                "confirmed_model": "text-embedding-3-small",
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app.dependency_overrides.pop(get_eval_request_user, None)
+
+    assert preview_response.status_code == 200
+    preview_body = preview_response.json()
+    assert preview_body["apply_eligible"] is True
+    assert preview_body["apply_available"] is False
+    assert preview_body["copy_config"]["Embeddings"] == {
+        "embedding_provider": "openai",
+        "embedding_model": "text-embedding-3-small",
+    }
+    assert apply_response.status_code == 403
+    update_config_spy.assert_not_called()
 
 
 @pytest.mark.asyncio

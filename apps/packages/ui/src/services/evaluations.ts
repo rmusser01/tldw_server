@@ -291,6 +291,12 @@ export type RecipeRecommendationApplyPreviewPayload = {
   candidate_run_id?: string | null
 }
 
+export type RecipeRecommendationApplyPayload =
+  RecipeRecommendationApplyPreviewPayload & {
+    confirmed_provider: string
+    confirmed_model: string
+  }
+
 export type RecipeRecommendationApplyPreviewResponse = {
   run_id: string
   recipe_id: string
@@ -306,6 +312,13 @@ export type RecipeRecommendationApplyPreviewResponse = {
   copy_config: Record<string, Record<string, string>>
   reindex_required: boolean
 }
+
+export type RecipeRecommendationApplyResponse =
+  RecipeRecommendationApplyPreviewResponse & {
+    applied: boolean
+    backup_path?: string | null
+    audit_ref?: string | null
+  }
 
 export type SyntheticEvalDraftSample = {
   sample_id: string
@@ -644,6 +657,17 @@ export async function previewRecipeRecommendationApply(
 ) {
   return await apiSend<RecipeRecommendationApplyPreviewResponse>({
     path: `/api/v1/evaluations/recipe-runs/${encodeURIComponent(runId)}/apply-preview` as any,
+    method: "POST",
+    body: payload
+  })
+}
+
+export async function applyRecipeRecommendation(
+  runId: string,
+  payload: RecipeRecommendationApplyPayload
+) {
+  return await apiSend<RecipeRecommendationApplyResponse>({
+    path: `/api/v1/evaluations/recipe-runs/${encodeURIComponent(runId)}/apply` as any,
     method: "POST",
     body: payload
   })

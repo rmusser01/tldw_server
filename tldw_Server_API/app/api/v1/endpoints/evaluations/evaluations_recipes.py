@@ -19,8 +19,10 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
     RecipeDatasetValidationResponse,
     RecipeLaunchReadiness,
     RecipeManifest,
+    RecipeRecommendationApplyRequest,
     RecipeRecommendationApplyPreviewRequest,
     RecipeRecommendationApplyPreviewResponse,
+    RecipeRecommendationApplyResponse,
     RecipeRunCreateRequest,
     RecipeRunRecord,
 )
@@ -41,6 +43,7 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
     get_recipe_runs_service_for_user,
 )
 from tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints import (
+    apply_embedding_recipe_recommendation,
     build_embedding_recipe_apply_preview,
     build_embedding_recipe_candidate_hints,
 )
@@ -65,6 +68,28 @@ def _get_manifest_or_404(service: RecipeRunsService, recipe_id: str) -> RecipeMa
 def get_recipe_run_job_enqueuer() -> Callable[..., str]:
     """Return the callable used to enqueue recipe-run Jobs."""
     return enqueue_recipe_run
+
+
+def _user_has_eval_permission(current_user: User, permission: str) -> bool:
+    role_values = {
+        str(role).strip().lower()
+        for role in (getattr(current_user, "roles", []) or [])
+        if str(role).strip()
+    }
+    if "admin" in role_values:
+        return True
+
+    user_perm_values = {
+        str(perm).strip().lower()
+        for perm in (getattr(current_user, "permissions", []) or [])
+        if str(perm).strip()
+    }
+    return (
+        "*"
+        in user_perm_values
+        or "system.configure" in user_perm_values
+        or permission.lower() in user_perm_values
+    )
 
 
 @recipes_router.get(
@@ -327,7 +352,7 @@ async def preview_recipe_recommendation_apply(
             run_id=run_id,
             slot_name=payload.slot_name,
             candidate_run_id=payload.candidate_run_id,
-            live_apply_supported=False,
+            live_apply_supported=_user_has_eval_permission(current_user, EVALS_MANAGE),
         )
     except RecipeRunNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe run not found") from exc
@@ -343,3 +368,40 @@ async def preview_recipe_recommendation_apply(
             detail=str(preview["blocked_reason"]),
         )
     return preview
+
+
+@recipes_router.post(
+    "/recipe-runs/{run_id}/apply",
+    response_model=RecipeRecommendationApplyResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_MANAGE))],
+)
+async def apply_recipe_recommendation(
+    run_id: str,
+    payload: RecipeRecommendationApplyRequest,
+    user_ctx: str = Depends(verify_api_key),
+    current_user: User = Depends(get_eval_request_user),
+):
+    del user_ctx
+    service = _service_for_user(current_user)
+    try:
+        return apply_embedding_recipe_recommendation(
+            service,
+            run_id=run_id,
+            slot_name=payload.slot_name,
+            candidate_run_id=payload.candidate_run_id,
+            confirmed_provider=payload.confirmed_provider,
+            confirmed_model=payload.confirmed_model,
+        )
+    except RecipeRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.warning("Recipe recommendation apply failed for run {}: {}", run_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=sanitize_error_message(exc, "applying recipe recommendation"),
+        ) from exc

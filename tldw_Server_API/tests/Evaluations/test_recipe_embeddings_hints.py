@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Evaluations.recipes import embeddings_recipe_hints
 from tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints import (
     build_embedding_recipe_apply_preview,
     build_embedding_recipe_candidate_hints,
@@ -305,3 +312,203 @@ def test_apply_preview_blocks_candidate_run_id_mismatch() -> None:
 
     assert preview["apply_eligible"] is False
     assert "candidate_run_id" in preview["blocked_reason"]
+
+
+def test_apply_recommendation_updates_only_embedding_defaults_and_audits(monkeypatch) -> None:
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_MODEL", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_current_embedding_config",
+        lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
+    )
+    update_config_spy = MagicMock(return_value=Path("/tmp/config.txt.pre-setup-test.bak"))
+    monkeypatch.setattr(
+        embeddings_recipe_hints,
+        "setup_manager",
+        SimpleNamespace(update_config=update_config_spy),
+        raising=False,
+    )
+
+    class FakeDB:
+        def __init__(self) -> None:
+            self.metadata: dict[str, object] | None = None
+
+        def update_recipe_run(self, run_id: str, *, metadata: dict[str, object]) -> bool:
+            assert run_id == "recipe-run-1"
+            self.metadata = metadata
+            return True
+
+    class FakeService:
+        def __init__(self) -> None:
+            self.db = FakeDB()
+            self.run = SimpleNamespace(metadata={"owner_user_id": "user_123"})
+
+        def get_run(self, _run_id: str):
+            return self.run
+
+        def get_report(self, _run_id: str):
+            return {
+                "run": {
+                    "run_id": "recipe-run-1",
+                    "recipe_id": "embeddings_model_selection",
+                    "status": RunStatus.COMPLETED,
+                    "metadata": {},
+                },
+                "recommendation_slots": {
+                    "best_overall": {
+                        "candidate_run_id": "arm-1",
+                        "metadata": {
+                            "provider": "openai",
+                            "model": "text-embedding-3-small",
+                            "apply_eligible": True,
+                        },
+                    }
+                },
+            }
+
+    service = FakeService()
+
+    result = embeddings_recipe_hints.apply_embedding_recipe_recommendation(
+        service,
+        run_id="recipe-run-1",
+        slot_name="best_overall",
+        candidate_run_id="arm-1",
+        confirmed_provider="openai",
+        confirmed_model="text-embedding-3-small",
+    )
+
+    assert update_config_spy.call_args.args[0] == {
+        "Embeddings": {
+            "embedding_provider": "openai",
+            "embedding_model": "text-embedding-3-small",
+        }
+    }
+    assert update_config_spy.call_args.kwargs == {"create_backup": True}
+    assert result["applied"] is True
+    assert result["backup_path"] == "/tmp/config.txt.pre-setup-test.bak"
+    assert result["audit_ref"] == "embedding_recipe_apply_audit"
+    audit = service.db.metadata["embedding_recipe_apply_audit"]
+    assert audit["slot"] == "best_overall"
+    assert audit["candidate_run_id"] == "arm-1"
+    assert audit["previous"] == {
+        "provider": "huggingface",
+        "model": "Qwen/Qwen3-Embedding-0.6B",
+    }
+    assert audit["proposed"] == {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+    }
+    assert audit["new"] == audit["proposed"]
+    assert audit["backup_path"] == "/tmp/config.txt.pre-setup-test.bak"
+    assert audit["status"] == "applied"
+    assert audit["timestamp"]
+
+
+def test_apply_recommendation_requires_pending_audit_before_config_mutation(monkeypatch) -> None:
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_MODEL", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_current_embedding_config",
+        lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
+    )
+    update_config_spy = MagicMock(return_value=Path("/tmp/config.txt.pre-setup-test.bak"))
+    monkeypatch.setattr(
+        embeddings_recipe_hints,
+        "setup_manager",
+        SimpleNamespace(update_config=update_config_spy),
+        raising=False,
+    )
+
+    class FailingDB:
+        def update_recipe_run(self, run_id: str, *, metadata: dict[str, object]) -> bool:
+            assert run_id == "recipe-run-1"
+            assert metadata["embedding_recipe_apply_audit"]["status"] == "pending"
+            return False
+
+    class FakeService:
+        def __init__(self) -> None:
+            self.db = FailingDB()
+            self.run = SimpleNamespace(metadata={"owner_user_id": "user_123"})
+
+        def get_run(self, _run_id: str):
+            return self.run
+
+        def get_report(self, _run_id: str):
+            return {
+                "run": {
+                    "run_id": "recipe-run-1",
+                    "recipe_id": "embeddings_model_selection",
+                    "status": RunStatus.COMPLETED,
+                    "metadata": {},
+                },
+                "recommendation_slots": {
+                    "best_overall": {
+                        "candidate_run_id": "arm-1",
+                        "metadata": {
+                            "provider": "openai",
+                            "model": "text-embedding-3-small",
+                            "apply_eligible": True,
+                        },
+                    }
+                },
+            }
+
+    with pytest.raises(RuntimeError, match="audit metadata"):
+        embeddings_recipe_hints.apply_embedding_recipe_recommendation(
+            FakeService(),
+            run_id="recipe-run-1",
+            slot_name="best_overall",
+            candidate_run_id="arm-1",
+            confirmed_provider="openai",
+            confirmed_model="text-embedding-3-small",
+        )
+
+    update_config_spy.assert_not_called()
+
+
+def test_apply_recommendation_refuses_env_override_without_mutation(monkeypatch) -> None:
+    monkeypatch.setenv("EMBEDDINGS_MODEL", "env-selected-model")
+    update_config_spy = MagicMock()
+    monkeypatch.setattr(
+        embeddings_recipe_hints,
+        "setup_manager",
+        SimpleNamespace(update_config=update_config_spy),
+        raising=False,
+    )
+
+    class FakeService:
+        def get_report(self, _run_id: str):
+            return {
+                "run": {
+                    "run_id": "recipe-run-1",
+                    "recipe_id": "embeddings_model_selection",
+                    "status": RunStatus.COMPLETED,
+                    "metadata": {},
+                },
+                "recommendation_slots": {
+                    "best_overall": {
+                        "candidate_run_id": "arm-1",
+                        "metadata": {
+                            "provider": "openai",
+                            "model": "text-embedding-3-small",
+                            "apply_eligible": True,
+                        },
+                    }
+                },
+            }
+
+    with pytest.raises(ValueError, match="environment variable"):
+        embeddings_recipe_hints.apply_embedding_recipe_recommendation(
+            FakeService(),
+            run_id="recipe-run-1",
+            slot_name="best_overall",
+            candidate_run_id="arm-1",
+            confirmed_provider="openai",
+            confirmed_model="text-embedding-3-small",
+        )
+
+    update_config_spy.assert_not_called()

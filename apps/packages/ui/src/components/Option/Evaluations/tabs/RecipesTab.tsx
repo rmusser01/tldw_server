@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next"
 import { useDatasetsList } from "../hooks/useDatasets"
 import {
   getRecipeRunUserErrorMessage,
+  useApplyRecipeRecommendation,
   useCreateRecipeRun,
   useRecipeLaunchReadiness,
   useRecipeManifests,
@@ -334,6 +335,7 @@ export const RecipesTab: React.FC = () => {
   const validateMutation = useValidateRecipeDataset()
   const createRunMutation = useCreateRecipeRun()
   const previewApplyMutation = usePreviewRecipeRecommendationApply()
+  const applyRecommendationMutation = useApplyRecipeRecommendation()
   const { data: readinessResp, isLoading: readinessLoading } =
     useRecipeLaunchReadiness(selectedRecipeId)
   const {
@@ -538,6 +540,31 @@ export const RecipesTab: React.FC = () => {
     if (!previewApplyData?.copy_config) return
     const serialized = JSON.stringify(previewApplyData.copy_config, null, 2)
     void navigator?.clipboard?.writeText?.(serialized)
+  }
+
+  const handleApplyRecommendation = async () => {
+    if (!previewApplyData) return
+    const runId = String(previewApplyData.run_id || report?.run?.run_id || currentRunId || "").trim()
+    const proposed = (previewApplyData.proposed || {}) as Record<string, any>
+    const confirmedProvider = String(proposed.provider || "").trim()
+    const confirmedModel = String(proposed.model || "").trim()
+    if (!runId || !confirmedProvider || !confirmedModel) {
+      setPreviewApplyError("Recommendation preview is missing provider/model confirmation.")
+      return
+    }
+    try {
+      setPreviewApplyError(null)
+      const response = await applyRecommendationMutation.mutateAsync({
+        runId,
+        slotName: String(previewApplyData.slot_name || "best_overall"),
+        candidateRunId: previewApplyData.candidate_run_id || null,
+        confirmedProvider,
+        confirmedModel
+      })
+      setPreviewApplyData((response as any)?.data || response || null)
+    } catch (error: any) {
+      setPreviewApplyError(error?.message || "Unable to apply the config change.")
+    }
   }
 
   const canEnqueueRuns = launchReadiness?.can_enqueue_runs !== false
@@ -1308,6 +1335,7 @@ export const RecipesTab: React.FC = () => {
     const hasCopyConfig =
       copyConfig && typeof copyConfig === "object" && !Array.isArray(copyConfig)
     const applyAvailable = previewApplyData?.apply_available === true
+    const isApplied = previewApplyData?.applied === true
 
     return (
       <Modal
@@ -1329,13 +1357,17 @@ export const RecipesTab: React.FC = () => {
             >
               {t("common:close", { defaultValue: "Close" })}
             </Button>
-            {previewApplyData && applyAvailable ? (
-              <Button type="primary" disabled>
-                {t("evaluations:recipeApplyConfigChange", {
-                  defaultValue: "Apply config change"
+            {previewApplyData && applyAvailable && !isApplied ? (
+              <Button
+                type="primary"
+                loading={applyRecommendationMutation.isPending}
+                onClick={handleApplyRecommendation}
+              >
+                {t("evaluations:recipeApplyToRagConfig", {
+                  defaultValue: "Apply to RAG config"
                 })}
               </Button>
-            ) : previewApplyData && hasCopyConfig ? (
+            ) : previewApplyData && !applyAvailable && hasCopyConfig ? (
               <Button type="primary" onClick={handleCopyConfigChange}>
                 {t("evaluations:recipeCopyConfigChange", {
                   defaultValue: "Copy config change"
@@ -1349,6 +1381,15 @@ export const RecipesTab: React.FC = () => {
           <Alert type="error" showIcon title={previewApplyError} />
         ) : previewApplyData ? (
           <div className="space-y-4">
+            {isApplied && (
+              <Alert
+                type="success"
+                showIcon
+                title={t("evaluations:recipeRagConfigUpdated", {
+                  defaultValue: "RAG config updated"
+                })}
+              />
+            )}
             <div className="grid gap-3 md:grid-cols-2">
               <div>
                 <Text strong>Current embedding model</Text>
@@ -1366,6 +1407,26 @@ export const RecipesTab: React.FC = () => {
             <div className="text-xs text-text-muted">
               Run ID: {String(previewApplyData.run_id || "")}
             </div>
+            {isApplied && (
+              <div className="grid gap-2 text-xs md:grid-cols-2">
+                {previewApplyData.backup_path && (
+                  <div>
+                    <Text strong>Backup path</Text>
+                    <div className="mt-1 break-all">
+                      {String(previewApplyData.backup_path)}
+                    </div>
+                  </div>
+                )}
+                {previewApplyData.audit_ref && (
+                  <div>
+                    <Text strong>Audit reference</Text>
+                    <div className="mt-1 break-all">
+                      {String(previewApplyData.audit_ref)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {affectedConfig && (
               <div className="space-y-2">
                 <Text strong>Affected config keys</Text>

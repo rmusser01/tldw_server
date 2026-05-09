@@ -175,6 +175,13 @@ class RecipeRecommendationApplyPreviewRequest(BaseModel):
     candidate_run_id: str | None = None
 
 
+class RecipeRecommendationApplyRequest(RecipeRecommendationApplyPreviewRequest):
+    """Request payload for applying a recipe recommendation."""
+
+    confirmed_provider: str
+    confirmed_model: str
+
+
 class RecipeRecommendationApplyPreviewResponse(BaseModel):
     """Secret-free preview of applying a recipe recommendation."""
 
@@ -193,6 +200,14 @@ class RecipeRecommendationApplyPreviewResponse(BaseModel):
     affected_config: dict[str, str] = Field(default_factory=dict)
     copy_config: dict[str, dict[str, str]] = Field(default_factory=dict)
     reindex_required: bool = True
+
+
+class RecipeRecommendationApplyResponse(RecipeRecommendationApplyPreviewResponse):
+    """Response payload for a completed recipe recommendation apply action."""
+
+    applied: bool = False
+    backup_path: str | None = None
+    audit_ref: str | None = None
 
 
 class RecipeRunRecord(BaseModel):

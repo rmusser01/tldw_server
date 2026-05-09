@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { ApiSendResponse } from "@/services/api-send"
 import {
+  applyRecipeRecommendation,
   createRecipeRun,
   getEmbeddingRecipeCandidates,
   getRecipeLaunchReadiness,
@@ -168,6 +169,26 @@ export function usePreviewRecipeRecommendationApply() {
         await previewRecipeRecommendationApply(params.runId, {
           slot_name: params.slotName,
           candidate_run_id: params.candidateRunId ?? null
+        })
+      )
+  })
+}
+
+export function useApplyRecipeRecommendation() {
+  return useMutation({
+    mutationFn: async (params: {
+      runId: string
+      slotName: string
+      candidateRunId?: string | null
+      confirmedProvider: string
+      confirmedModel: string
+    }) =>
+      ensureOk(
+        await applyRecipeRecommendation(params.runId, {
+          slot_name: params.slotName,
+          candidate_run_id: params.candidateRunId ?? null,
+          confirmed_provider: params.confirmedProvider,
+          confirmed_model: params.confirmedModel
         })
       )
   })
