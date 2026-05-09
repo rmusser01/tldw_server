@@ -1,11 +1,11 @@
 ---
 id: TASK-184
 title: Address PR-1436 review comments
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-09 19:39'
-updated_date: '2026-05-09 19:40'
+updated_date: '2026-05-09 19:42'
 labels:
   - webui
   - dependencies
@@ -29,7 +29,7 @@ Address actionable reviewer comments on PR #1436 for the Media FilterPanel dayjs
 - [x] #2 The existing date-range display test uses timezone-stable local ISO fixtures instead of fixed UTC-noon strings.
 - [x] #3 FilterPanel.dayjs-imports.test.ts computes the scanned source root from the test file location and normalizes relative paths to forward slashes.
 - [x] #4 Focused Media FilterPanel tests pass and diff whitespace check passes after the review fixes.
-- [ ] #5 PR #1436 review threads for these findings are resolved or made outdated by the pushed fix commit.
+- [x] #5 PR #1436 review threads for these findings are resolved or made outdated by the pushed fix commit.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -56,6 +56,8 @@ Verification: focused Media FilterPanel Vitest suite passed with 12 tests; exact
 TypeScript baseline note: `node_modules/.bin/tsc --noEmit --project tsconfig.json --pretty false` still exits 2 on existing EmbeddingsModelSelectionConfig.tsx and lib/api/vnPlay.ts errors; filtering /tmp/task184_tsc.log for FilterPanel, components/Media, Media/__tests__, task-184, and task-176 returned no matches.
 
 Bandit skipped because this review-fix slice changed TypeScript/tests and Backlog metadata only; no Python files were modified.
+
+Resolved all six PR #1436 review threads after pushing a2a7761b4. Qodo's top-level review summary now reports Bugs (0), and CodeRabbit status is pass/skipped with no unresolved actionable inline threads. GitHub Actions checks are still pending, not failed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
@@ -64,6 +66,16 @@ Bandit skipped because this review-fix slice changed TypeScript/tests and Backlo
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Addressed all actionable PR #1436 review findings. The review-fix commit changes the two Media FilterPanel native date labels to the existing text-text-muted token, makes the display-value fixture timezone-stable by using isoForLocalDate local-boundary ISO values, and makes the dayjs import scan deterministic by resolving the source root from the test file directory and normalizing relative path separators.
+
+Verification: focused Media FilterPanel Vitest suite passed with 12 tests, exact dayjs import scan still returns only the four deferred ReadingList/Items imports, text-textMuted scan returned no matches, WebUI lint exited 0 with the existing 131-warning baseline, git diff --check exited 0, and the TypeScript baseline still exits 2 on unrelated EmbeddingsModelSelectionConfig.tsx/lib/api/vnPlay.ts diagnostics with no task-scope matches. Bandit was skipped because no Python files changed.
+
+PR follow-up: pushed commit a2a7761b4 to PR #1436 and resolved all six review threads. Qodo now reports Bugs (0). GitHub Actions checks were still pending at last check, with no failed checks reported.
+<!-- SECTION:FINAL_SUMMARY:END -->
