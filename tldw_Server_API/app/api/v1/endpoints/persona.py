@@ -125,6 +125,11 @@ from tldw_Server_API.app.core.Persona.buddy import (
     ensure_persona_buddy_for_profile,
 )
 from tldw_Server_API.app.core.Persona.visual_jobs import create_generate_candidate_job
+from tldw_Server_API.app.core.Persona.visuals import (
+    MAX_TRIGGER_DURATION_MS,
+    MIN_TRIGGER_DURATION_MS,
+    VISUAL_STATE_IDS,
+)
 from tldw_Server_API.app.core.Persona.visual_service import (
     PersonaVisualService,
     PersonaVisualServiceError,
@@ -1864,6 +1869,51 @@ def get_persona_visual_job_manager() -> JobManager:
     if db_path:
         return JobManager(db_path=Path(db_path))
     return JobManager()
+
+
+def _persona_visual_override_payload_from_tool_result(
+    *,
+    tool_name: str,
+    result: dict[str, Any],
+    persona_id: str,
+    session_id: str,
+) -> dict[str, Any] | None:
+    """Extract a bounded visual-state override from a successful MCP trigger result."""
+    if str(tool_name or "") != "persona_visuals.trigger_state":
+        return None
+    if not isinstance(result, dict) or result.get("ok") is False:
+        return None
+    payload = result.get("output")
+    if not isinstance(payload, dict):
+        payload = result.get("result")
+    if not isinstance(payload, dict) or payload.get("type") != "visual_state_override":
+        return None
+
+    state = str(payload.get("state") or payload.get("visual_state") or "").strip()
+    if state not in VISUAL_STATE_IDS:
+        return None
+
+    try:
+        duration_ms = int(payload.get("duration_ms", 1500))
+    except (TypeError, ValueError):
+        duration_ms = 1500
+    duration_ms = max(MIN_TRIGGER_DURATION_MS, min(MAX_TRIGGER_DURATION_MS, duration_ms))
+
+    resolved_persona_id = str(payload.get("persona_id") or persona_id or "").strip()
+    resolved_session_id = str(payload.get("session_id") or session_id or "").strip()
+    if not resolved_persona_id or not resolved_session_id:
+        return None
+
+    reason = str(payload.get("reason") or "persona_visuals.trigger_state").strip()
+    return {
+        "type": "visual_state_override",
+        "persona_id": resolved_persona_id,
+        "session_id": resolved_session_id,
+        "state": state,
+        "duration_ms": duration_ms,
+        "reason": reason or "persona_visuals.trigger_state",
+        "tool": "persona_visuals.trigger_state",
+    }
 
 
 def _persona_visual_pack_to_response(
@@ -7101,6 +7151,21 @@ async def persona_stream(
                     args=step_args,
                     why=why,
                     description=description,
+                )
+            visual_override = _persona_visual_override_payload_from_tool_result(
+                tool_name=tool_name,
+                result=result,
+                persona_id=persona_id,
+                session_id=session_id,
+            )
+            if visual_override:
+                result["visual_state_override"] = visual_override
+                await stream.send_json(
+                    {
+                        "event": "visual_state_override",
+                        **_next_ws_event_meta(session_id),
+                        **visual_override,
+                    }
                 )
             await _emit_and_persist_tool_step_result(
                 session_id=session_id,

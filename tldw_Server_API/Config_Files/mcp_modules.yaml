@@ -64,6 +64,16 @@ modules:
     max_concurrent: 10
     settings: {}
 
+  - id: persona_visuals
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.persona_visuals_module:PersonaVisualsModule
+    enabled: false
+    name: Persona Visuals
+    version: "1.0.0"
+    department: persona
+    max_concurrent: 10
+    description: Persona visual pack draft and runtime state tools
+    settings: {}
+
   - id: filesystem
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
     enabled: true

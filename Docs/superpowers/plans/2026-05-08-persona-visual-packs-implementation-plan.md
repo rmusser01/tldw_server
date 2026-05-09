@@ -1725,7 +1725,7 @@ git commit -m "feat: add persona visual generation review"
 - Modify: `tldw_Server_API/Config_Files/mcp_modules.yaml`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py`
 
-- [ ] **Step 1: Write failing MCP tests**
+- [x] **Step 1: Write failing MCP tests**
 
 Cover:
 
@@ -1738,7 +1738,7 @@ Cover:
 - Persona Live emits a `visual_state_override` WebSocket payload when a persona turn calls `persona_visuals.trigger_state`
 - frontend runtime store receives and expires the override
 
-- [ ] **Step 2: Run failing MCP tests**
+- [x] **Step 2: Run failing MCP tests**
 
 Run:
 
@@ -1748,7 +1748,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: FAIL because module does not exist.
 
-- [ ] **Step 3: Implement module tool definitions**
+- [x] **Step 3: Implement module tool definitions**
 
 In `persona_visuals_module.py`, subclass `BaseModule` and expose:
 
@@ -1762,7 +1762,7 @@ persona_visuals.enqueue_generation
 
 Use `create_tool_definition` from `modules.base`.
 
-- [ ] **Step 4: Implement context and validation**
+- [x] **Step 4: Implement context and validation**
 
 Implementation requirements:
 
@@ -1786,7 +1786,7 @@ Implementation requirements:
 - do not persist active-pack mutation for trigger-only calls
 - durable calls use `PersonaVisualService` and create drafts/review items
 
-- [ ] **Step 5: Wire Persona Live runtime propagation**
+- [x] **Step 5: Wire Persona Live runtime propagation**
 
 In `endpoints/persona.py`, update the Persona Live MCP execution path:
 
@@ -1797,7 +1797,7 @@ In `endpoints/persona.py`, update the Persona Live MCP execution path:
 
 In the frontend, `sidepanel-persona.tsx` should route that payload into `usePersonaVisualRuntimeStore.setOverride`.
 
-- [ ] **Step 6: Add disabled module config**
+- [x] **Step 6: Add disabled module config**
 
 In `mcp_modules.yaml`:
 
@@ -1809,7 +1809,7 @@ In `mcp_modules.yaml`:
     description: Persona visual pack draft and runtime state tools
 ```
 
-- [ ] **Step 7: Run MCP tests**
+- [x] **Step 7: Run MCP tests**
 
 Run:
 
@@ -1819,7 +1819,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Run:
 
