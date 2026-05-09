@@ -77,6 +77,7 @@ CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
 
 
 def _first_nonempty_env(env_keys: tuple[str, ...]) -> Optional[str]:
+    """Return the first non-empty environment value from ordered candidates."""
     for env_key in env_keys:
         value = os.getenv(env_key)
         if isinstance(value, str) and value.strip():
@@ -92,6 +93,7 @@ def _env_or_config_value(
     *,
     fallback: Optional[str] = None,
 ) -> Optional[str]:
+    """Resolve an env-first value with a single config option fallback."""
     return _first_nonempty_env(env_keys) or config_parser_object.get(section, key, fallback=fallback)
 
 
@@ -102,12 +104,10 @@ def _first_config_option_value(
     *,
     fallback: Optional[str] = None,
 ) -> Optional[str]:
+    """Return the first non-empty value from equivalent config option names."""
     sentinel = object()
     for key in keys:
-        try:
-            value = config_parser_object.get(section, key, fallback=sentinel)
-        except TypeError:
-            value = config_parser_object.get(section, key, fallback=None)
+        value = config_parser_object.get(section, key, fallback=sentinel)
         if value is sentinel or value is None:
             continue
         if isinstance(value, str) and not value.strip():
@@ -124,6 +124,7 @@ def _env_or_config_option_value(
     *,
     fallback: Optional[str] = None,
 ) -> Optional[str]:
+    """Resolve ordered env aliases before ordered config option aliases."""
     return _first_nonempty_env(env_keys) or _first_config_option_value(
         config_parser_object,
         section,

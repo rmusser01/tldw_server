@@ -1,3 +1,10 @@
+"""Naming helpers for custom OpenAI-compatible provider slots.
+
+The first slot keeps the historical provider name, env vars, and config keys.
+Slots 2 through 99 use numbered names and only resolve their own endpoint
+override env vars so one configured external endpoint cannot shadow another.
+"""
+
 from __future__ import annotations
 
 import re
@@ -8,6 +15,7 @@ CUSTOM_OPENAI_PROVIDER_MAX = 99
 
 
 def _validate_custom_openai_number(number: int) -> int:
+    """Return a supported custom provider number or raise a descriptive error."""
     if not isinstance(number, int):
         raise TypeError("Custom OpenAI provider number must be an integer")
     if number < CUSTOM_OPENAI_PROVIDER_MIN or number > CUSTOM_OPENAI_PROVIDER_MAX:
@@ -30,6 +38,7 @@ def iter_custom_openai_provider_numbers(
 
 
 def custom_openai_provider_name(number: int) -> str:
+    """Return the canonical provider id for a custom OpenAI-compatible slot."""
     number = _validate_custom_openai_number(number)
     if number == 1:
         return "custom-openai-api"
@@ -41,11 +50,13 @@ def iter_custom_openai_provider_names(
     start: int = CUSTOM_OPENAI_PROVIDER_MIN,
     stop: int = CUSTOM_OPENAI_PROVIDER_MAX,
 ) -> Iterator[str]:
+    """Yield canonical custom OpenAI provider ids for the requested range."""
     for number in iter_custom_openai_provider_numbers(start=start, stop=stop):
         yield custom_openai_provider_name(number)
 
 
 def custom_openai_section_name(number: int) -> str:
+    """Return the `app_config` section name used by a custom provider slot."""
     number = _validate_custom_openai_number(number)
     if number == 1:
         return "custom_openai_api"
@@ -53,6 +64,7 @@ def custom_openai_section_name(number: int) -> str:
 
 
 def custom_openai_aliases(number: int) -> tuple[str, ...]:
+    """Return accepted aliases that normalize to the canonical provider id."""
     number = _validate_custom_openai_number(number)
     if number == 1:
         return (
@@ -71,6 +83,7 @@ def custom_openai_aliases(number: int) -> tuple[str, ...]:
 
 
 def custom_openai_provider_number(provider: str | None) -> int | None:
+    """Resolve a provider id, alias, or config section name to its slot number."""
     raw = str(provider or "").strip().lower()
     if not raw:
         return None
@@ -110,11 +123,13 @@ def custom_openai_provider_number(provider: str | None) -> int | None:
 
 
 def custom_openai_endpoint_env_keys(number: int) -> tuple[str, ...]:
+    """Return endpoint base URL env vars for one custom provider slot."""
     number = _validate_custom_openai_number(number)
     if number == 1:
         return (
             "CUSTOM_OPENAI_API_IP",
             "CUSTOM_OPENAI_API_BASE",
+            "CUSTOM_OPENAI_API_URL",
             "CUSTOM_OPENAI_API_BASE_URL",
             "CUSTOM_OPENAI_BASE_URL",
             "CUSTOM_OPENAI_API_IP_1",
@@ -123,34 +138,36 @@ def custom_openai_endpoint_env_keys(number: int) -> tuple[str, ...]:
         return (
             "CUSTOM_OPENAI2_API_IP",
             "CUSTOM_OPENAI2_API_BASE",
+            "CUSTOM_OPENAI2_API_URL",
             "CUSTOM_OPENAI2_API_BASE_URL",
             "CUSTOM_OPENAI2_BASE_URL",
             "CUSTOM_OPENAI_API_2_IP",
             "CUSTOM_OPENAI_API_2_BASE",
+            "CUSTOM_OPENAI_API_2_URL",
             "CUSTOM_OPENAI_API_2_BASE_URL",
             "CUSTOM_OPENAI_API_IP_2",
             "CUSTOM_OPENAI_API_BASE_2",
+            "CUSTOM_OPENAI_API_URL_2",
             "CUSTOM_OPENAI_API_BASE_URL_2",
-            "CUSTOM_OPENAI_API_IP",
-            "CUSTOM_OPENAI_API_BASE",
-            "CUSTOM_OPENAI_API_BASE_URL",
-            "CUSTOM_OPENAI_BASE_URL",
-            "CUSTOM_OPENAI_API_IP_1",
         )
     return (
         f"CUSTOM_OPENAI_API_IP_{number}",
         f"CUSTOM_OPENAI_API_BASE_{number}",
+        f"CUSTOM_OPENAI_API_URL_{number}",
         f"CUSTOM_OPENAI_API_BASE_URL_{number}",
         f"CUSTOM_OPENAI{number}_API_IP",
         f"CUSTOM_OPENAI{number}_API_BASE",
+        f"CUSTOM_OPENAI{number}_API_URL",
         f"CUSTOM_OPENAI{number}_API_BASE_URL",
         f"CUSTOM_OPENAI_API_{number}_IP",
         f"CUSTOM_OPENAI_API_{number}_BASE",
+        f"CUSTOM_OPENAI_API_{number}_URL",
         f"CUSTOM_OPENAI_API_{number}_BASE_URL",
     )
 
 
 def custom_openai_api_key_env_keys(number: int) -> tuple[str, ...]:
+    """Return API-key env vars for one custom provider slot."""
     number = _validate_custom_openai_number(number)
     if number == 1:
         return (
@@ -173,6 +190,7 @@ def custom_openai_api_key_env_keys(number: int) -> tuple[str, ...]:
 
 
 def custom_openai_model_env_keys(number: int) -> tuple[str, ...]:
+    """Return default-model env vars for one custom provider slot."""
     number = _validate_custom_openai_number(number)
     if number == 1:
         return (
@@ -195,6 +213,7 @@ def custom_openai_model_env_keys(number: int) -> tuple[str, ...]:
 
 
 def custom_openai_config_option_names(number: int, suffix: str) -> tuple[str, ...]:
+    """Return config.txt option names for a slot-specific API setting suffix."""
     number = _validate_custom_openai_number(number)
     normalized_suffix = str(suffix).strip().lower()
     if not normalized_suffix:

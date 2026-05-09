@@ -452,7 +452,7 @@ def aggregate_llm_scores(llm_responses: list[str], max_score: float) -> float:
     return score
 
 
-def validate_inputs(document: str, summary: str, api_name: str, api_key: str) -> None:
+def validate_inputs(document: str, summary: str, api_name: str | None, api_key: str | None) -> None:
     """
     Validate inputs for the G-Eval function.
 
@@ -491,7 +491,9 @@ def validate_inputs(document: str, summary: str, api_name: str, api_key: str) ->
         "ollama",
         "aphrodite",
     }
-    api_provider_key = api_name.lower()
+    if not isinstance(api_name, str) or not api_name.strip():
+        raise ValueError(f"Unsupported API: {api_name}")
+    api_provider_key = api_name.strip().lower()
     if api_provider_key not in allowed_apis and custom_openai_provider_number(api_provider_key) is None:
         raise ValueError(f"Unsupported API: {api_name}")
 

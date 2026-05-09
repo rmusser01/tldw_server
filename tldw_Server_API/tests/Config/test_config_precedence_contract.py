@@ -122,7 +122,8 @@ def test_env_overrides_custom_openai_endpoint_config_values(monkeypatch):
     assert cfg["custom_openai_api_2"]["api_ip"] == "http://127.0.0.1:8002/v1"  # nosec B101
 
 
-def test_custom_openai_api_base_alias_overrides_config_value(monkeypatch):
+@pytest.mark.parametrize("alias_env", ["CUSTOM_OPENAI_API_BASE", "CUSTOM_OPENAI_API_URL"])
+def test_custom_openai_endpoint_alias_overrides_config_value(monkeypatch, alias_env):
     class FakeConfig:
         def get(self, section, key, fallback=None):
             if (section, key) == ("API", "custom_openai_api_ip"):
@@ -152,11 +153,51 @@ def test_custom_openai_api_base_alias_overrides_config_value(monkeypatch):
 
     _fake_loader.cache_clear = lambda: None
     monkeypatch.setattr(config, "load_comprehensive_config", _fake_loader)
-    monkeypatch.setenv("CUSTOM_OPENAI_API_BASE", "http://127.0.0.1:9000/v1")
+    monkeypatch.setenv(alias_env, "http://127.0.0.1:9000/v1")
 
     cfg = config.load_and_log_configs()
 
     assert cfg["custom_openai_api"]["api_ip"] == "http://127.0.0.1:9000/v1"  # nosec B101
+
+
+def test_custom_openai2_config_is_not_overridden_by_provider1_env(monkeypatch):
+    class FakeConfig:
+        def get(self, section, key, fallback=None):
+            values = {
+                ("API", "custom_openai_api_ip"): "https://provider-one.example/v1",
+                ("API", "custom_openai2_api_ip"): "https://provider-two.example/v1",
+            }
+            return values.get((section, key), fallback)
+
+        def getboolean(self, section, key, fallback=False):  # noqa: ARG002
+            return fallback
+
+        def getint(self, section, key, fallback=0):  # noqa: ARG002
+            return fallback
+
+        def getfloat(self, section, key, fallback=0.0):  # noqa: ARG002
+            return fallback
+
+        def has_section(self, section):  # noqa: ARG002
+            return False
+
+        def __contains__(self, section):  # noqa: ARG002
+            return False
+
+        def __getitem__(self, section):  # noqa: ARG002
+            return {}
+
+    def _fake_loader():
+        return FakeConfig()
+
+    _fake_loader.cache_clear = lambda: None
+    monkeypatch.setattr(config, "load_comprehensive_config", _fake_loader)
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP", "http://127.0.0.1:9001/v1")
+
+    cfg = config.load_and_log_configs()
+
+    assert cfg["custom_openai_api"]["api_ip"] == "http://127.0.0.1:9001/v1"  # nosec B101
+    assert cfg["custom_openai_api_2"]["api_ip"] == "https://provider-two.example/v1"  # nosec B101
 
 
 def test_numbered_custom_openai_endpoint_env_creates_config_section(monkeypatch):

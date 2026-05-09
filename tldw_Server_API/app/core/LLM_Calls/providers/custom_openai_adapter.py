@@ -94,6 +94,7 @@ class CustomOpenAIAdapter(ChatProvider):
         return h
 
     def _resolve_base(self, request: dict[str, Any]) -> str:
+        """Resolve the endpoint base URL from request, app config, env, or defaults."""
         override = (request or {}).get("base_url")
         if isinstance(override, str) and override.strip():
             return override.strip().rstrip("/")
@@ -108,7 +109,10 @@ class CustomOpenAIAdapter(ChatProvider):
                     base = env_val.strip()
                     break
         if not base:
-            base = self.default_base_url
+            if self.default_base_url:
+                base = self.default_base_url
+            else:
+                raise RuntimeError(f"{self.name} requires an explicit base URL")
         return str(base).rstrip("/")
 
     @staticmethod
@@ -273,10 +277,12 @@ class CustomOpenAIAdapter(ChatProvider):
 class CustomOpenAIAdapter2(CustomOpenAIAdapter):
     name = "custom-openai-api-2"
     config_section = "custom_openai_api_2"
+    default_base_url = ""
     default_base_url_env = custom_openai_endpoint_env_keys(2)
 
 
 def make_custom_openai_adapter_class(number: int) -> type[CustomOpenAIAdapter]:
+    """Create or return the adapter class for a custom OpenAI provider slot."""
     if number == 1:
         return CustomOpenAIAdapter
     if number == 2:
@@ -287,6 +293,7 @@ def make_custom_openai_adapter_class(number: int) -> type[CustomOpenAIAdapter]:
         {
             "name": custom_openai_provider_name(number),
             "config_section": custom_openai_section_name(number),
+            "default_base_url": "",
             "default_base_url_env": custom_openai_endpoint_env_keys(number),
             "__module__": __name__,
         },

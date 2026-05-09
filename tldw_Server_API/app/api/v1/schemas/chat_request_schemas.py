@@ -154,7 +154,13 @@ def get_api_keys() -> dict[str, Optional[str]]:
     # Reload config to get latest values
     current_config = load_and_log_configs() or {}
 
-    def _get_dynamic_setting(env_vars, section, key, default=""):
+    def _get_dynamic_setting(
+        env_vars: str | tuple[str, ...],
+        section: str,
+        key: str,
+        default: Optional[str] = "",
+    ) -> Optional[str]:
+        """Resolve an API key from env aliases before config-backed settings."""
         # First check environment variable
         env_candidates = (env_vars,) if isinstance(env_vars, str) else tuple(env_vars or ())
         for env_var in env_candidates:
@@ -210,8 +216,8 @@ def get_api_keys() -> dict[str, Optional[str]]:
 # use get_api_keys() / resolve_provider_api_key.
 API_KEYS = get_api_keys()
 
-# For type hinting - define explicitly
-SUPPORTED_API_ENDPOINTS = Literal[*tuple(ALL_SUPPORTED_PROVIDER_NAMES_LIST)]
+# Runtime validation below enforces provider ids; keep this Python 3.10-safe.
+SUPPORTED_API_ENDPOINTS = str
 
 
 # --- Tool Definitions ---
@@ -822,6 +828,16 @@ class ChatCompletionRequest(BaseModel):
             "mode, objective, provider boundary, and failure handling."
         ),
     )
+
+    @field_validator("api_provider")
+    @classmethod
+    def validate_api_provider(cls, value: Optional[str]) -> Optional[str]:
+        """Validate provider ids without Python 3.11-only dynamic Literal syntax."""
+        if value is None:
+            return value
+        if value in ALL_SUPPORTED_PROVIDER_NAMES_LIST:
+            return value
+        raise ValueError(f"Unsupported api_provider: {value}")
 
     # --- Standard OpenAI-like Parameters ---
     model: Optional[str] = Field(
