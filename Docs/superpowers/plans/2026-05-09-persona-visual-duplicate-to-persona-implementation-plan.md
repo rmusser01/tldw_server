@@ -1459,7 +1459,7 @@ git commit -m "Add persona visual duplicate UI"
 - Modify: `Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md`
 - Modify: `backlog/tasks/task-193 - Write-persona-visual-pack-duplicate-implementation-plan.md` only if executing this plan later in the same branch
 
-- [ ] **Step 1: Update PRD Phase 3 status**
+- [x] **Step 1: Update PRD Phase 3 status**
 
 In `Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md`, update the Phase 3 list item:
 
@@ -1473,7 +1473,7 @@ If this implementation is not merged yet, phrase it as:
 1. Duplicate pack to another persona. First implementation target: same-user draft duplication (#1450).
 ```
 
-- [ ] **Step 2: Run backend focused tests**
+- [x] **Step 2: Run backend focused tests**
 
 Run:
 
@@ -1484,7 +1484,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_manifest_asse
 
 Expected: pass.
 
-- [ ] **Step 3: Run frontend focused tests**
+- [x] **Step 3: Run frontend focused tests**
 
 Run:
 
@@ -1495,7 +1495,7 @@ bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPack
 
 Expected: pass.
 
-- [ ] **Step 4: Run Bandit on touched backend code**
+- [x] **Step 4: Run Bandit on touched backend code**
 
 Run:
 
@@ -1513,7 +1513,7 @@ python -m bandit -r \
 
 Expected: no new high or medium findings in touched code. If Bandit is not installed in the environment, document the blocker and do not claim it passed.
 
-- [ ] **Step 5: Run whitespace check**
+- [x] **Step 5: Run whitespace check**
 
 Run:
 
@@ -1523,7 +1523,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 6: Review changed files**
+- [x] **Step 6: Review changed files**
 
 Run:
 
@@ -1534,7 +1534,7 @@ git diff --stat
 
 Expected: only planned files changed.
 
-- [ ] **Step 7: Commit docs and verification notes**
+- [x] **Step 7: Commit docs and verification notes**
 
 ```bash
 git add Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md
@@ -1552,15 +1552,15 @@ git commit -m "Implement persona visual pack duplication"
 
 ## Final Acceptance Checklist
 
-- [ ] Backend duplicate service copies only manifest-referenced assets.
-- [ ] Public duplicate endpoint returns `PersonaVisualPackResponse`.
-- [ ] Same-persona duplicate is rejected.
-- [ ] Target draft is not activated automatically.
-- [ ] Source and target active packs are unchanged.
-- [ ] UI excludes the current persona from duplicate targets.
-- [ ] UI communicates that duplicates are drafts for review.
-- [ ] Tests pass:
+- [x] Backend duplicate service copies only manifest-referenced assets.
+- [x] Public duplicate endpoint returns `PersonaVisualPackResponse`.
+- [x] Same-persona duplicate is rejected.
+- [x] Target draft is not activated automatically.
+- [x] Source and target active packs are unchanged.
+- [x] UI excludes the current persona from duplicate targets.
+- [x] UI communicates that duplicates are drafts for review.
+- [x] Tests pass:
   - `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_manifest_assets.py tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q`
   - `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
-- [ ] Bandit run is recorded or blocker documented.
-- [ ] `git diff --check` passes.
+- [x] Bandit run is recorded or blocker documented.
+- [x] `git diff --check` passes.

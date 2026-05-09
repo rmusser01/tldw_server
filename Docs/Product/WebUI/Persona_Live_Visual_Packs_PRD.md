@@ -431,7 +431,8 @@ The portability model should stay aligned with PR #1135:
 
 Future work may add:
 
-1. duplicate to another persona.
+1. duplicate to another persona. First implementation target: same-user draft
+   duplication (#1450).
 2. shared user library.
 3. cross-device sync.
 4. signed community packs.
@@ -495,7 +496,8 @@ Completed Product Hardening includes:
 Phase 3 is optional future product work, not required for the current
 Persona/Buddy visual-pack baseline:
 
-1. Duplicate pack to another persona.
+1. Duplicate pack to another persona. First implementation target: same-user
+   draft duplication (#1450).
 2. Personal shared visual-pack library.
 3. Import/export polish and conflict choices.
 4. External MCP-compatible visual providers.
@@ -593,3 +595,4 @@ E2E:
 7. Issue #1410: Expose Persona Buddy visual packs in live assistant.
 8. PR #1447 / issue #1429: Persona visual pack ownership/help copy.
 9. Issue #1428: Completed Persona/Buddy visual-pack Product Hardening tracker.
+10. Issue #1450: Same-user Persona Visual pack duplicate-to-persona draft flow.
