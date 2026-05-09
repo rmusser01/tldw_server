@@ -344,4 +344,3 @@ def _preview_fingerprint(
     if isinstance(manifest_fingerprint, str) and len(manifest_fingerprint) == 64:
         return manifest_fingerprint
     return canonical_payload_fingerprint({"pack": pack, "assets": assets})
-

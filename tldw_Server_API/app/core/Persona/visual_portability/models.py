@@ -20,4 +20,3 @@ class PersonaVisualPackExportResult:
     canonical_payload_fingerprint: str
     file_size_bytes: int
     warnings: list[str]
-

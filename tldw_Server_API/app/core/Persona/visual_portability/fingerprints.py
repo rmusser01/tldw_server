@@ -111,4 +111,3 @@ def _canonical_sort_key(value: Any) -> bytes:
         semantic_key = tuple(value.get(key) for key in _LIST_SORT_KEYS)
         return canonical_json_bytes({"key": semantic_key, "value": value})
     return canonical_json_bytes(value)
-

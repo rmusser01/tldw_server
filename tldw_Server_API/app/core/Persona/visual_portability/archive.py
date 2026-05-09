@@ -116,4 +116,3 @@ def _has_windows_drive_letter(part: str) -> bool:
 def _is_zip_symlink(info: zipfile.ZipInfo) -> bool:
     unix_file_type = (info.external_attr >> 16) & 0o170000
     return unix_file_type == 0o120000
-
