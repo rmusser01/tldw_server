@@ -1,29 +1,49 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { VNPlaySession } from '@web/types/vn-play';
+import type { VNPlayBranch, VNPlayCheckpoint, VNPlaySession } from '@web/types/vn-play';
 
 const mocks = vi.hoisted(() => ({
+  createVNPlayCheckpoint: vi.fn(),
   createVNPlaySession: vi.fn(),
   getVNPlaySession: vi.fn(),
+  listVNPlayBranches: vi.fn(),
+  listVNPlayCheckpoints: vi.fn(),
   listVNPlayEvents: vi.fn(),
   listVNPlaySessions: vi.fn(),
+  restoreVNPlaySession: vi.fn(),
+  retryLastVNPlayTurn: vi.fn(),
   submitVNPlayTurn: vi.fn(),
 }));
 
 vi.mock('@web/lib/api/vnPlay', () => ({
+  createVNPlayCheckpoint: (...args: unknown[]) => mocks.createVNPlayCheckpoint(...args),
   createVNPlaySession: (...args: unknown[]) => mocks.createVNPlaySession(...args),
   getVNPlaySession: (...args: unknown[]) => mocks.getVNPlaySession(...args),
+  listVNPlayBranches: (...args: unknown[]) => mocks.listVNPlayBranches(...args),
+  listVNPlayCheckpoints: (...args: unknown[]) => mocks.listVNPlayCheckpoints(...args),
   listVNPlayEvents: (...args: unknown[]) => mocks.listVNPlayEvents(...args),
   listVNPlaySessions: (...args: unknown[]) => mocks.listVNPlaySessions(...args),
+  restoreVNPlaySession: (...args: unknown[]) => mocks.restoreVNPlaySession(...args),
+  retryLastVNPlayTurn: (...args: unknown[]) => mocks.retryLastVNPlayTurn(...args),
   submitVNPlayTurn: (...args: unknown[]) => mocks.submitVNPlayTurn(...args),
 }));
 
 import VNPlayWorkspace from '@web/components/vn-play/VNPlayWorkspace';
 
-function mockVNPlayApi({ sessions = [] }: { sessions?: VNPlaySession[] } = {}) {
+function mockVNPlayApi({
+  branches = [],
+  checkpoints = [],
+  sessions = [],
+}: {
+  branches?: VNPlayBranch[];
+  checkpoints?: VNPlayCheckpoint[];
+  sessions?: VNPlaySession[];
+} = {}) {
   mocks.listVNPlaySessions.mockResolvedValue(sessions);
   mocks.listVNPlayEvents.mockResolvedValue([]);
+  mocks.listVNPlayCheckpoints.mockResolvedValue(checkpoints);
+  mocks.listVNPlayBranches.mockResolvedValue(branches);
   mocks.getVNPlaySession.mockImplementation(async (sessionId: number) =>
     sessions.find((session) => session.id === sessionId) ?? sessions[0]
   );
@@ -55,6 +75,23 @@ function mockVNPlayApi({ sessions = [] }: { sessions?: VNPlaySession[] } = {}) {
         source: 'model',
       },
     ],
+  });
+  mocks.createVNPlayCheckpoint.mockImplementation(async (_sessionId: number, request) => ({
+    id: 7,
+    session_id: _sessionId,
+    owner_user_id: 42,
+    label: request.label,
+    scene_version: request.scene_version ?? 0,
+  }));
+  mocks.restoreVNPlaySession.mockImplementation(async (sessionId: number) =>
+    sessions.find((session) => session.id === sessionId) ?? sessions[0]
+  );
+  mocks.retryLastVNPlayTurn.mockResolvedValue({
+    turn_request_id: 11,
+    status: 'completed',
+    scene_version: 2,
+    scene_state: { scene_version: 2 },
+    events: [],
   });
 }
 
@@ -148,5 +185,174 @@ describe('VNPlayWorkspace', () => {
       }));
     });
     expect(await screen.findByText('A quiet reply.')).toBeInTheDocument();
+  });
+
+  it('loads checkpoints and branches for the selected session', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 3,
+      scene_state: { scene_version: 3 },
+    };
+    mockVNPlayApi({
+      branches: [
+        {
+          id: 4,
+          session_id: 1,
+          owner_user_id: 42,
+          branch_label: 'Door branch',
+          status: 'active',
+        },
+      ],
+      checkpoints: [
+        {
+          id: 5,
+          session_id: 1,
+          owner_user_id: 42,
+          label: 'Before the door',
+          scene_version: 2,
+        },
+      ],
+      sessions: [session],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Before the door')).toBeInTheDocument();
+    expect(screen.getByText('Door branch')).toBeInTheDocument();
+    expect(mocks.listVNPlayCheckpoints).toHaveBeenCalledWith(1);
+    expect(mocks.listVNPlayBranches).toHaveBeenCalledWith(1);
+  });
+
+  it('creates a checkpoint and refreshes recovery metadata', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'freeform',
+      title: 'Library',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 4,
+      scene_state: { scene_version: 4 },
+    };
+    mockVNPlayApi({ sessions: [session] });
+    mocks.listVNPlayCheckpoints
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 9,
+          session_id: 1,
+          owner_user_id: 42,
+          label: 'Before choosing',
+          scene_version: 4,
+        },
+      ]);
+
+    render(<VNPlayWorkspace />);
+
+    await user.type(await screen.findByLabelText('Checkpoint label'), 'Before choosing');
+    await user.click(screen.getByRole('button', { name: 'Create checkpoint' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlayCheckpoint).toHaveBeenCalledWith(1, {
+        label: 'Before choosing',
+        scene_version: 4,
+      });
+    });
+    expect(await screen.findByText('Before choosing')).toBeInTheDocument();
+  });
+
+  it('restores a checkpoint and refreshes the selected session', async () => {
+    const user = userEvent.setup();
+    const restoredSession: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 2,
+      scene_state: { scene_version: 2 },
+    };
+    mockVNPlayApi({
+      checkpoints: [
+        {
+          id: 5,
+          session_id: 1,
+          owner_user_id: 42,
+          label: 'Before the door',
+          scene_version: 2,
+        },
+      ],
+      sessions: [restoredSession],
+    });
+    mocks.restoreVNPlaySession.mockResolvedValue(restoredSession);
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /restore checkpoint: before the door/i }));
+
+    await waitFor(() => {
+      expect(mocks.restoreVNPlaySession).toHaveBeenCalledWith(1, expect.objectContaining({
+        checkpoint_id: 5,
+        idempotency_key: expect.stringMatching(/^restore-/),
+      }));
+    });
+    expect(mocks.getVNPlaySession).not.toHaveBeenCalled();
+    expect(await screen.findByText('Scene version')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
+  it('retries the last failed turn with a fresh idempotency key', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'freeform',
+      title: 'Library',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 0,
+      scene_state: { scene_version: 0 },
+    };
+    mockVNPlayApi({ sessions: [session] });
+    mocks.submitVNPlayTurn.mockRejectedValueOnce(Object.assign(new Error('parse_failed'), { status: 502 }));
+
+    render(<VNPlayWorkspace />);
+
+    await user.type(await screen.findByLabelText('Freeform input'), 'Look around');
+    await user.click(screen.getByRole('button', { name: 'Send turn' }));
+    await user.click(await screen.findByRole('button', { name: /retry last turn/i }));
+
+    await waitFor(() => {
+      expect(mocks.retryLastVNPlayTurn).toHaveBeenCalledWith(1, expect.objectContaining({
+        client_scene_version: 0,
+        idempotency_key: expect.stringMatching(/^retry-/),
+      }));
+    });
+  });
+
+  it('shows explicit recovery copy for stale scene conflicts', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'freeform',
+      title: 'Library',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 0,
+      scene_state: { scene_version: 0 },
+    };
+    mockVNPlayApi({ sessions: [session] });
+    mocks.submitVNPlayTurn.mockRejectedValueOnce(Object.assign(new Error('stale_scene_version'), { status: 409 }));
+
+    render(<VNPlayWorkspace />);
+
+    await user.type(await screen.findByLabelText('Freeform input'), 'Look around');
+    await user.click(screen.getByRole('button', { name: 'Send turn' }));
+
+    expect(await screen.findByText(/scene changed on another client/i)).toBeInTheDocument();
+    expect(screen.queryByText('stale_scene_version')).not.toBeInTheDocument();
   });
 });

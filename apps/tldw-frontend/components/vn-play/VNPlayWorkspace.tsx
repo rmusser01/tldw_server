@@ -5,16 +5,28 @@ import { Button } from '@web/components/ui/Button';
 import ChoicePanel from '@web/components/vn-play/ChoicePanel';
 import DialoguePanel from '@web/components/vn-play/DialoguePanel';
 import NewSessionDialog from '@web/components/vn-play/NewSessionDialog';
+import {
+  createVNPlayIdempotencyKey,
+  getVNPlayErrorInfo,
+  isRecoverableVNPlayConflict,
+} from '@web/components/vn-play/runtime';
 import SceneInspector from '@web/components/vn-play/SceneInspector';
 import SceneStage from '@web/components/vn-play/SceneStage';
 import SessionList, { VNPlayModeFilter } from '@web/components/vn-play/SessionList';
 import {
+  createVNPlayCheckpoint,
   createVNPlaySession,
   getVNPlaySession,
+  listVNPlayBranches,
+  listVNPlayCheckpoints,
   listVNPlayEvents,
   listVNPlaySessions,
+  restoreVNPlaySession,
+  retryLastVNPlayTurn,
 } from '@web/lib/api/vnPlay';
 import type {
+  VNPlayBranch,
+  VNPlayCheckpoint,
   VNPlayChoice,
   VNPlayEvent,
   VNPlayMode,
@@ -37,15 +49,33 @@ function isVNPlayChoice(choice: VNPlayChoice | Record<string, unknown>): choice 
   );
 }
 
+function recoveryCopy(status: string | null): string | null {
+  if (status === 'stale_scene_version') {
+    return 'Scene changed on another client. The latest state was reloaded before you continue.';
+  }
+  if (status === 'turn_in_progress') {
+    return 'A turn is already in progress for this session. Wait for it to finish, then reload if needed.';
+  }
+  if (status === 'turn_failed') {
+    return 'The last turn failed before completion. You can retry the stored turn request without duplicating the user input.';
+  }
+  return null;
+}
+
 export default function VNPlayWorkspace() {
   const [sessions, setSessions] = useState<VNPlaySession[]>([]);
   const [selectedSession, setSelectedSession] = useState<VNPlaySession | null>(null);
   const [events, setEvents] = useState<VNPlayEvent[]>([]);
+  const [checkpoints, setCheckpoints] = useState<VNPlayCheckpoint[]>([]);
+  const [branches, setBranches] = useState<VNPlayBranch[]>([]);
   const [modeFilter, setModeFilter] = useState<VNPlayModeFilter>('all');
   const [dialogMode, setDialogMode] = useState<VNPlayMode>('freeform');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingCheckpoint, setIsCreatingCheckpoint] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRetryingTurn, setIsRetryingTurn] = useState(false);
+  const [restoringCheckpointId, setRestoringCheckpointId] = useState<number | null>(null);
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,24 +110,34 @@ export default function VNPlayWorkspace() {
   useEffect(() => {
     if (!selectedSession) {
       setEvents([]);
+      setCheckpoints([]);
+      setBranches([]);
       return;
     }
 
     let cancelled = false;
-    async function loadEvents() {
+    async function loadSessionCollections() {
       try {
-        const nextEvents = await listVNPlayEvents(selectedSession.id);
+        const [nextEvents, nextCheckpoints, nextBranches] = await Promise.all([
+          listVNPlayEvents(selectedSession.id),
+          listVNPlayCheckpoints(selectedSession.id),
+          listVNPlayBranches(selectedSession.id),
+        ]);
         if (!cancelled) {
           setEvents(nextEvents);
+          setCheckpoints(nextCheckpoints);
+          setBranches(nextBranches);
         }
       } catch {
         if (!cancelled) {
           setEvents([]);
+          setCheckpoints([]);
+          setBranches([]);
         }
       }
     }
 
-    void loadEvents();
+    void loadSessionCollections();
     return () => {
       cancelled = true;
     };
@@ -121,6 +161,8 @@ export default function VNPlayWorkspace() {
       setSessions((previous) => [created, ...previous.filter((session) => session.id !== created.id)]);
       setSelectedSession(created);
       setEvents([]);
+      setCheckpoints([]);
+      setBranches([]);
       setModeFilter('all');
       setIsDialogOpen(false);
     } catch (createError) {
@@ -130,22 +172,31 @@ export default function VNPlayWorkspace() {
     }
   }, []);
 
-  const reloadSelectedSession = useCallback(async (sessionId: number) => {
-    const [nextSession, nextEvents] = await Promise.all([
-      getVNPlaySession(sessionId),
+  const reloadSessionCollections = useCallback(async (sessionId: number) => {
+    const [nextEvents, nextCheckpoints, nextBranches] = await Promise.all([
       listVNPlayEvents(sessionId),
+      listVNPlayCheckpoints(sessionId),
+      listVNPlayBranches(sessionId),
     ]);
+    setEvents(nextEvents);
+    setCheckpoints(nextCheckpoints);
+    setBranches(nextBranches);
+  }, []);
+
+  const reloadSelectedSession = useCallback(async (sessionId: number) => {
+    const nextSession = await getVNPlaySession(sessionId);
     setSelectedSession(nextSession);
     setSessions((previous) =>
       previous.map((session) => (session.id === nextSession.id ? nextSession : session))
     );
-    setEvents(nextEvents);
+    await reloadSessionCollections(sessionId);
     return nextSession;
-  }, []);
+  }, [reloadSessionCollections]);
 
   const handleTurn = useCallback(async (response: VNPlayTurnResponse) => {
     if (!selectedSession) return;
 
+    setError(null);
     setTurnStatus(response.status);
     const responseEvents = response.events ?? [];
     if (responseEvents.length > 0) {
@@ -209,23 +260,26 @@ export default function VNPlayWorkspace() {
   }, [reloadSelectedSession, selectedSession]);
 
   const handleTurnError = useCallback(async (turnError: unknown) => {
-    const status = typeof turnError === 'object' && turnError !== null && 'status' in turnError
-      ? Number((turnError as { status?: number }).status)
-      : undefined;
-    const detail = turnError instanceof Error ? turnError.message : String(turnError);
-    const isConflict = status === 409 || /stale_scene_version|turn_in_progress/i.test(detail);
+    const errorInfo = getVNPlayErrorInfo(turnError);
+    const isConflict = isRecoverableVNPlayConflict(turnError);
 
     if (isConflict && selectedSession) {
-      setTurnStatus(/turn_in_progress/i.test(detail) ? 'turn_in_progress' : 'stale_scene_version');
+      setTurnStatus(
+        errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)
+          ? 'turn_in_progress'
+          : 'stale_scene_version'
+      );
+      setError(null);
       try {
         await reloadSelectedSession(selectedSession.id);
       } catch {
-        setError(detail);
+        setError(errorInfo.message);
       }
       return;
     }
 
-    setError(detail);
+    setTurnStatus('turn_failed');
+    setError(errorInfo.message);
   }, [reloadSelectedSession, selectedSession]);
 
   const selectedMode = selectedSession ? sessionModeLabel(selectedSession.mode) : null;
@@ -233,6 +287,65 @@ export default function VNPlayWorkspace() {
     selectedSession?.scene_state ?? selectedSession?.current_scene ?? null;
   const sceneVersion = sceneState?.scene_version ?? selectedSession?.scene_version ?? 0;
   const choices = (sceneState?.visible_choices ?? []).filter(isVNPlayChoice);
+  const recoveryMessage = recoveryCopy(turnStatus);
+
+  const handleCreateCheckpoint = useCallback(async (label: string) => {
+    if (!selectedSession) return;
+
+    setIsCreatingCheckpoint(true);
+    setError(null);
+    try {
+      await createVNPlayCheckpoint(selectedSession.id, {
+        label,
+        scene_version: sceneVersion,
+      });
+      await reloadSelectedSession(selectedSession.id);
+    } catch (checkpointError) {
+      setError(checkpointError instanceof Error ? checkpointError.message : 'Failed to create checkpoint');
+    } finally {
+      setIsCreatingCheckpoint(false);
+    }
+  }, [reloadSelectedSession, sceneVersion, selectedSession]);
+
+  const handleRestoreCheckpoint = useCallback(async (checkpointId: number) => {
+    if (!selectedSession) return;
+
+    setRestoringCheckpointId(checkpointId);
+    setError(null);
+    try {
+      const restored = await restoreVNPlaySession(selectedSession.id, {
+        checkpoint_id: checkpointId,
+        idempotency_key: createVNPlayIdempotencyKey('restore'),
+      });
+      setSelectedSession(restored);
+      setSessions((previous) =>
+        previous.map((session) => (session.id === restored.id ? restored : session))
+      );
+      await reloadSessionCollections(selectedSession.id);
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : 'Failed to restore checkpoint');
+    } finally {
+      setRestoringCheckpointId(null);
+    }
+  }, [reloadSessionCollections, selectedSession]);
+
+  const handleRetryLastTurn = useCallback(async () => {
+    if (!selectedSession) return;
+
+    setIsRetryingTurn(true);
+    setError(null);
+    try {
+      const response = await retryLastVNPlayTurn(selectedSession.id, {
+        client_scene_version: sceneVersion,
+        idempotency_key: createVNPlayIdempotencyKey('retry'),
+      });
+      await handleTurn(response);
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : 'Failed to retry last turn');
+    } finally {
+      setIsRetryingTurn(false);
+    }
+  }, [handleTurn, sceneVersion, selectedSession]);
 
   return (
     <main className="min-h-screen bg-bg text-text">
@@ -264,9 +377,22 @@ export default function VNPlayWorkspace() {
             {error}
           </div>
         )}
-        {turnStatus && turnStatus !== 'completed' && (
+        {recoveryMessage && (
           <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
-            {turnStatus}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>{recoveryMessage}</span>
+              {turnStatus === 'turn_failed' && selectedSession && (
+                <Button
+                  loading={isRetryingTurn}
+                  onClick={() => void handleRetryLastTurn()}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Retry last turn
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -321,7 +447,16 @@ export default function VNPlayWorkspace() {
             </div>
 
             {selectedSession && sceneState ? (
-              <SceneInspector sceneState={sceneState} session={selectedSession} />
+              <SceneInspector
+                branches={branches}
+                checkpoints={checkpoints}
+                isCreatingCheckpoint={isCreatingCheckpoint}
+                restoringCheckpointId={restoringCheckpointId}
+                sceneState={sceneState}
+                session={selectedSession}
+                onCreateCheckpoint={handleCreateCheckpoint}
+                onRestoreCheckpoint={handleRestoreCheckpoint}
+              />
             ) : (
               <aside className="rounded-md border border-border bg-surface p-4">
                 <h2 className="mb-4 text-lg font-semibold">Runtime inspector</h2>
