@@ -1,6 +1,8 @@
 import React from "react"
 import type { PersonaSetupStep } from "@/hooks/usePersonaSetupWizard"
 import type { SetupTestOutcome } from "@/components/PersonaGarden/SetupTestAndFinishStep"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
+import type { PersonaVisualStateId } from "@/types/persona-visuals"
 import {
   coerceGovernanceContext as _coerceGovernanceContext,
   formatGovernanceDenyMessage as _formatGovernanceDenyMessage,
@@ -27,6 +29,7 @@ export type UsePersonaIncomingPayloadArgs = {
   consumeSetupHandoffAction: (action: SetupHandoffConsumedAction) => void
   emitSetupAnalyticsEvent: (event: Record<string, unknown>) => void
   liveVoiceController: { handlePayload: (payload: Record<string, unknown> | null) => void }
+  personaId?: string | null
   personaSetupWizardCurrentStep: PersonaSetupStep
   personaSetupWizardIsSetupRequired: boolean
   resolvedApprovalSnapshot: { key: string; toolName: string } | null
@@ -51,6 +54,7 @@ export const usePersonaIncomingPayload = ({
   consumeSetupHandoffAction,
   emitSetupAnalyticsEvent,
   liveVoiceController,
+  personaId,
   personaSetupWizardCurrentStep,
   personaSetupWizardIsSetupRequired,
   resolvedApprovalSnapshot,
@@ -68,6 +72,9 @@ export const usePersonaIncomingPayload = ({
   setupWizardAwaitingLiveResponseRef,
   setupWizardLastLiveTextRef,
 }: UsePersonaIncomingPayloadArgs) => {
+  const setVisualRuntimeOverride = usePersonaVisualRuntimeStore(
+    (state) => state.setOverride
+  )
   const handleIncomingPayload = React.useCallback(
     (payload: any) => {
       const eventType = String(payload?.event || payload?.type || "").toLowerCase()
@@ -77,6 +84,41 @@ export const usePersonaIncomingPayload = ({
           ? (payload as Record<string, unknown>)
           : null
       )
+
+      if (eventType === "visual_state_override") {
+        const state = String(payload?.state || payload?.visual_state || "").trim()
+        const allowedStates = new Set<PersonaVisualStateId>([
+          "idle",
+          "wake_armed",
+          "listening",
+          "thinking",
+          "speaking",
+          "tool_running",
+          "approval_needed",
+          "error",
+          "offline"
+        ])
+        if (!allowedStates.has(state as PersonaVisualStateId)) return
+        const durationMsRaw =
+          typeof payload?.duration_ms === "number"
+            ? payload.duration_ms
+            : Number.parseInt(String(payload?.duration_ms ?? "1500"), 10)
+        const durationMs = Number.isFinite(durationMsRaw)
+          ? Math.max(250, Math.min(durationMsRaw, 30_000))
+          : 1500
+        setVisualRuntimeOverride({
+          personaId: String(payload?.persona_id || personaId || ""),
+          sessionId: payload?.session_id
+            ? String(payload.session_id)
+            : sessionId
+              ? String(sessionId)
+              : null,
+          state: state as PersonaVisualStateId,
+          reason: payload?.reason ? String(payload.reason) : null,
+          expiresAt: Date.now() + durationMs
+        })
+        return
+      }
 
       if (eventType === "tool_plan") {
         const planId = String(payload?.plan_id || "")
@@ -288,10 +330,12 @@ export const usePersonaIncomingPayload = ({
       consumeSetupHandoffAction,
       emitSetupAnalyticsEvent,
       liveVoiceController,
+      personaId,
       personaSetupWizardCurrentStep,
       personaSetupWizardIsSetupRequired,
       resolvedApprovalSnapshot,
       sessionId,
+      setVisualRuntimeOverride,
     ]
   )
 

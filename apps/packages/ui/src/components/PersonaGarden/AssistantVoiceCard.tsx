@@ -14,6 +14,20 @@ import type {
   PersonaLiveVoiceRecoveryMode,
   PersonaLiveVoiceState
 } from "@/hooks/usePersonaLiveVoiceController"
+import type { PersonaVisualStateId } from "@/types/persona-visuals"
+
+export type PersonaVisualStateFeedback = {
+  state: PersonaVisualStateId
+  source:
+    | "live"
+    | "default"
+    | "override"
+    | "authored_trigger"
+    | "fallback"
+    | "error_recovery"
+  reason?: string | null
+  fallbackReason?: string | null
+}
 
 type AssistantVoiceCardProps = {
   resolvedDefaults: ResolvedPersonaVoiceDefaults
@@ -45,6 +59,7 @@ type AssistantVoiceCardProps = {
   minSilenceMs?: number
   turnStopSecs?: number
   minUtteranceSecs?: number
+  visualStateFeedback?: PersonaVisualStateFeedback
   onToggleListening: () => void
   onSendNow: () => void
   onSessionAutoResumeChange: (next: boolean) => void
@@ -99,6 +114,7 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   minSilenceMs = 250,
   turnStopSecs = 0.2,
   minUtteranceSecs = 0.4,
+  visualStateFeedback,
   onToggleListening,
   onSendNow,
   onSessionAutoResumeChange,
@@ -197,6 +213,25 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
           </div>
         </div>
       </div>
+
+      {visualStateFeedback ? (
+        <div
+          data-testid="live-visual-state-feedback"
+          className="mt-3 rounded border border-border bg-surface2 px-2 py-1.5 text-xs text-text"
+        >
+          <div className="text-text-muted">Visual state</div>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <span>{visualStateFeedback.state}</span>
+            <span>{visualStateFeedback.source}</span>
+            {visualStateFeedback.reason ? (
+              <span>{visualStateFeedback.reason}</span>
+            ) : null}
+            {visualStateFeedback.fallbackReason ? (
+              <span>{visualStateFeedback.fallbackReason}</span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
         <Checkbox

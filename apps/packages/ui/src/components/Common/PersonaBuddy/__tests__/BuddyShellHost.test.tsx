@@ -10,12 +10,18 @@ import {
   DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS,
   usePersonaBuddyShellStore
 } from "@/store/persona-buddy-shell"
+import type { PersonaBuddyRenderContext } from "@/types/persona-buddy"
 import { BuddyShellHost } from "../BuddyShellHost"
 
 const mocks = vi.hoisted(() => ({
   isDesktop: true,
   selectedAssistant: null as Record<string, unknown> | null,
   buddyShellEnabled: true
+}))
+
+const visualMocks = vi.hoisted(() => ({
+  listPersonaVisualPacks: vi.fn(),
+  getPersonaVisualPack: vi.fn()
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
@@ -41,6 +47,8 @@ vi.mock("@/hooks/useSetting", () => ({
     return [setting.defaultValue, vi.fn(), { isLoading: false }]
   }
 }))
+
+vi.mock("@/services/persona-visuals", () => visualMocks)
 
 const buildPersonaSelection = ({
   id = "persona-1",
@@ -79,6 +87,48 @@ const buildBuddySummary = (id: string, hasBuddy = true) => ({
     : null
 })
 
+const buildVisualPack = (personaId = "persona-1") => ({
+  id: "pack-1",
+  persona_id: personaId,
+  title: "Animated buddy",
+  renderer_type: "sprite_frames" as const,
+  status: "active" as const,
+  manifest: {
+    manifest_version: 1 as const,
+    renderer_type: "sprite_frames" as const,
+    states: {
+      idle: { animation_id: "idle" },
+      tool_running: { animation_id: "tool" }
+    },
+    animations: {
+      idle: {
+        frames: [{ asset_id: "idle-asset", duration_ms: 100 }]
+      },
+      tool: {
+        frames: [{ asset_id: "tool-asset", duration_ms: 100 }]
+      }
+    }
+  },
+  assets_by_id: {
+    "idle-asset": {
+      id: "idle-asset",
+      url: "/assets/idle.png",
+      mime_type: "image/png",
+      asset_role: "frame",
+      width: 24,
+      height: 24
+    },
+    "tool-asset": {
+      id: "tool-asset",
+      url: "/assets/tool.png",
+      mime_type: "image/png",
+      asset_role: "frame",
+      width: 24,
+      height: 24
+    }
+  }
+})
+
 const renderHost = ({
   root = "web",
   context,
@@ -87,26 +137,7 @@ const renderHost = ({
 }: {
   root?: "web" | "sidepanel"
   context?: {
-    surface_id: string
-    surface_active: boolean
-    active_persona_id: string | null
-    position_bucket: "web-desktop" | "sidepanel-desktop"
-    persona_source:
-      | "route-local"
-      | "route-bootstrap"
-      | "catalog"
-      | "selected-assistant-fallback"
-      | null
-    buddy_summary?: {
-      has_buddy: boolean
-      persona_name: string
-      role_summary: string | null
-      visual: {
-        species_id: string
-        silhouette_id: string
-        palette_id: string
-      } | null
-    } | null
+    [K in keyof PersonaBuddyRenderContext]: PersonaBuddyRenderContext[K]
   }
   selectedAssistant?: Record<string, unknown> | null
   isDesktop?: boolean
@@ -126,6 +157,13 @@ describe("BuddyShellHost", () => {
     mocks.isDesktop = true
     mocks.selectedAssistant = null
     mocks.buddyShellEnabled = true
+    visualMocks.listPersonaVisualPacks.mockReset()
+    visualMocks.getPersonaVisualPack.mockReset()
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [],
+      active_pack: null
+    })
+    visualMocks.getPersonaVisualPack.mockResolvedValue(null)
     document.body.innerHTML = ""
     const portalRoot = document.createElement("div")
     portalRoot.id = "tldw-portal-root"
@@ -433,5 +471,91 @@ describe("BuddyShellHost", () => {
     })
 
     expect(screen.queryByTestId("persona-buddy-dock")).not.toBeInTheDocument()
+  })
+
+  it("loads and renders the active visual pack for the active persona", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "src",
+        expect.stringContaining("/assets/idle.png")
+      )
+    })
+  })
+
+  it("maps active tool status into the tool_running visual state", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "thinking",
+        active_tool_status: "Running notes.search"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "tool_running"
+      )
+    })
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/tool.png")
+    )
+  })
+
+  it("keeps derived buddy text when active visual pack loading fails", async () => {
+    visualMocks.listPersonaVisualPacks.mockRejectedValue(new Error("offline"))
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
+    })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
   })
 })

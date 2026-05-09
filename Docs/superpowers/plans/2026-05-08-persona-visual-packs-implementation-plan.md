@@ -1316,7 +1316,7 @@ git commit -m "feat: add persona visual renderer primitives"
 - Test: `apps/packages/ui/src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx`
 - Test: `apps/packages/ui/src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx`
 
-- [ ] **Step 1: Write failing shell integration tests**
+- [x] **Step 1: Write failing shell integration tests**
 
 Add coverage:
 
@@ -1329,7 +1329,7 @@ Add coverage:
 - expired runtime override falls back to normal live state
 - live session UI exposes compact visual-state feedback with current state, source, override reason, and fallback/missing-pack status
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -1339,7 +1339,7 @@ cd apps/packages/ui && bunx vitest run src/components/Common/PersonaBuddy/__test
 
 Expected: FAIL because shell has no visual-pack integration.
 
-- [ ] **Step 3: Extend Buddy summary types**
+- [x] **Step 3: Extend Buddy summary types**
 
 In `persona-buddy.ts`, add optional:
 
@@ -1349,7 +1349,7 @@ active_visual_pack?: PersonaVisualPackSummary | null
 
 Do not require this on existing payloads.
 
-- [ ] **Step 4: Add shell visual-pack loading**
+- [x] **Step 4: Add shell visual-pack loading**
 
 In `BuddyShellHost.tsx`:
 
@@ -1359,7 +1359,7 @@ In `BuddyShellHost.tsx`:
 - keep failures non-blocking
 - pass `visualPack` and resolved visual state to `BuddyShellDock`
 
-- [ ] **Step 5: Add runtime override store**
+- [x] **Step 5: Add runtime override store**
 
 Create `persona-visual-runtime.ts` with a small Zustand store:
 
@@ -1393,7 +1393,7 @@ export const usePersonaVisualRuntimeStore = create<{
 
 In `sidepanel-persona.tsx`, handle incoming WebSocket payloads with `type === "visual_state_override"` and call `setOverride` with `Date.now() + duration_ms`.
 
-- [ ] **Step 6: Preserve fallback behavior**
+- [x] **Step 6: Preserve fallback behavior**
 
 In `BuddyShellDock.tsx`, render `SpriteFrameRenderer` only when:
 
@@ -1403,11 +1403,11 @@ In `BuddyShellDock.tsx`, render `SpriteFrameRenderer` only when:
 
 Otherwise keep the current persona name/species text.
 
-- [ ] **Step 7: Expose needed live controller status**
+- [x] **Step 7: Expose needed live controller status**
 
 If the existing `usePersonaLiveVoiceController` return object does not already expose `activeToolStatus`, `wakeArmed`, and `state`, add them without changing existing callers.
 
-- [ ] **Step 8: Add live visual-state feedback**
+- [x] **Step 8: Add live visual-state feedback**
 
 In `AssistantVoiceCard.tsx`, render a compact status row only when visual pack state is relevant to the current live session:
 
@@ -1418,7 +1418,7 @@ In `AssistantVoiceCard.tsx`, render a compact status row only when visual pack s
 
 Keep this informational and non-blocking; it should not change live voice controls.
 
-- [ ] **Step 9: Run tests**
+- [x] **Step 9: Run tests**
 
 Run:
 
@@ -1428,7 +1428,7 @@ cd apps/packages/ui && bunx vitest run src/components/Common/PersonaBuddy/__test
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 Run:
 
