@@ -191,4 +191,20 @@ describe("SpriteFrameRenderer", () => {
     expect(screen.getByText("Buddy")).toBeInTheDocument()
     expect(onRenderError).toHaveBeenCalledWith("missing_animation")
   })
+
+  it("calls onRenderError when the resolved frame asset is missing", () => {
+    const onRenderError = vi.fn()
+    render(
+      <SpriteFrameRenderer
+        manifest={baseManifest()}
+        assets={{}}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(onRenderError).toHaveBeenCalledWith("missing_asset")
+  })
 })

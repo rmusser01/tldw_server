@@ -203,6 +203,50 @@ describe("VisualPackEditor", () => {
     )
   })
 
+  it("shows selected pack health diagnostics from the shared visual pack classifier", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: [visualAssets[0]],
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const health = await screen.findByTestId("persona-visual-pack-health")
+    expect(health).toHaveTextContent("Visual asset is missing")
+    expect(health).toHaveTextContent("asset-b")
+  })
+
   it("loads pack list, creates a draft pack, and uploads the selected asset role", async () => {
     let packs: any[] = []
     const uploadedAssets: any[] = []

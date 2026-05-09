@@ -50,6 +50,10 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 import { getDesignSystemState } from "@/design-system"
+import {
+  getPrimaryPersonaVisualDiagnostic,
+  type PersonaVisualDiagnostic
+} from "../Common/PersonaBuddy/personaVisualDiagnostics"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -352,6 +356,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const validationErrors = React.useMemo(
     () => validateManifestForActivation(draftManifest),
     [draftManifest]
+  )
+  const packHealthDiagnostic: PersonaVisualDiagnostic | null = React.useMemo(
+    () =>
+      selectedPack
+        ? getPrimaryPersonaVisualDiagnostic({
+            pack: {
+              ...selectedPack,
+              manifest: draftManifest
+            },
+            visualState: "idle"
+          })
+        : null,
+    [draftManifest, selectedPack]
   )
 
   const loadPacks = React.useCallback(async (): Promise<boolean> => {
@@ -1155,6 +1172,18 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             </Tag>
             <span className="font-medium text-text">{selectedPack.title}</span>
             <span className="text-text-muted">{`v${selectedPack.version ?? 1}`}</span>
+          </div>
+        ) : null}
+        {packHealthDiagnostic ? (
+          <div
+            data-testid="persona-visual-pack-health"
+            data-severity={packHealthDiagnostic.severity}
+            className="mt-3 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
+          >
+            <div className="font-medium text-text">
+              {packHealthDiagnostic.title}
+            </div>
+            <div>{packHealthDiagnostic.message}</div>
           </div>
         ) : null}
       </div>

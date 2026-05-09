@@ -11,7 +11,11 @@ import type {
 } from "@/types/persona-visuals"
 
 import { BuddyShellPopover } from "./BuddyShellPopover"
-import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
+import type { PersonaVisualDiagnostic } from "./personaVisualDiagnostics"
+import {
+  SpriteFrameRenderer,
+  type PersonaVisualRenderError
+} from "./SpriteFrameRenderer"
 
 type BuddyShellDockProps = {
   buddySummary: PersonaBuddySummary
@@ -20,6 +24,8 @@ type BuddyShellDockProps = {
   isDormant?: boolean
   visualPack?: PersonaVisualPack | null
   visualState?: PersonaVisualStateId
+  visualDiagnostic?: PersonaVisualDiagnostic | null
+  onVisualRenderError?: (error: PersonaVisualRenderError) => void
   position: PersonaBuddyShellPosition
   onToggle: () => void
   onDragHandlePointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
@@ -47,6 +53,8 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   isDormant = false,
   visualPack = null,
   visualState = "idle",
+  visualDiagnostic = null,
+  onVisualRenderError,
   position,
   onToggle,
   onDragHandlePointerDown,
@@ -94,6 +102,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
               state={visualState}
               fallbackLabel={buddySummary.persona_name}
               className="max-h-10 max-w-10 object-contain"
+              onRenderError={onVisualRenderError}
             />
           </div>
         ) : null}
@@ -110,8 +119,23 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         </div>
       </button>
 
+      {visualDiagnostic ? (
+        <div
+          data-testid="persona-buddy-visual-diagnostic"
+          data-severity={visualDiagnostic.severity}
+          className="max-w-[220px] rounded-lg border border-border bg-bg/95 px-3 py-2 text-xs leading-5 text-text-muted shadow-sm backdrop-blur"
+        >
+          <div className="font-medium text-text">{visualDiagnostic.title}</div>
+          <div>{visualDiagnostic.message}</div>
+        </div>
+      ) : null}
+
       {isOpen && !isDormant ? (
-        <BuddyShellPopover buddySummary={buddySummary} personaId={personaId} />
+        <BuddyShellPopover
+          buddySummary={buddySummary}
+          personaId={personaId}
+          visualDiagnostic={visualDiagnostic}
+        />
       ) : null}
     </div>
   )

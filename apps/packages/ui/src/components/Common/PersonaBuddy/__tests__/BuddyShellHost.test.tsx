@@ -604,6 +604,48 @@ describe("BuddyShellHost", () => {
       expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
     })
     expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+      "Visual pack did not load"
+    )
+    expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+      "offline"
+    )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+  })
+
+  it("reports missing visual assets while preserving the buddy text fallback", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: {
+        ...visualPack,
+        assets_by_id: {
+          "idle-asset": visualPack.assets_by_id["idle-asset"]
+        }
+      }
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        active_tool_status: "Running notes.search"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+        "Visual asset is missing"
+      )
+    })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+      "tool-asset"
+    )
   })
 })

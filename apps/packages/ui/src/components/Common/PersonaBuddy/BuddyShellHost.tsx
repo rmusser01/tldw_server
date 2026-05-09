@@ -24,6 +24,11 @@ import type { PersonaVisualPack } from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
 import { BuddyShellDock } from "./BuddyShellDock"
+import {
+  getPrimaryPersonaVisualDiagnostic,
+  type PersonaVisualDiagnostic,
+  type PersonaVisualDiagnosticCode
+} from "./personaVisualDiagnostics"
 import { resolvePersonaVisualState } from "./personaVisualState"
 
 type BuddyShellHostProps = {
@@ -148,6 +153,13 @@ const resolveActivePersonaSelection = ({
 
 const hasVisualPackAssetMap = (pack: PersonaVisualPack | null): boolean =>
   Boolean(pack?.assets_by_id && Object.keys(pack.assets_by_id).length > 0)
+
+type PersonaVisualPackLoadStatus = "idle" | "loading" | "loaded" | "error"
+
+type PersonaVisualRenderErrorState = {
+  key: string
+  error: PersonaVisualDiagnosticCode
+}
 
 type BuddyShellHostInnerProps = {
   root: "web" | "sidepanel"
@@ -279,6 +291,12 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     [renderContext, selectedAssistant]
   )
   const [visualPack, setVisualPack] = React.useState<PersonaVisualPack | null>(null)
+  const [visualPackLoadStatus, setVisualPackLoadStatus] =
+    React.useState<PersonaVisualPackLoadStatus>("idle")
+  const [visualPackLoadError, setVisualPackLoadError] =
+    React.useState<unknown>(null)
+  const [visualRenderError, setVisualRenderError] =
+    React.useState<PersonaVisualRenderErrorState | null>(null)
   const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
   const clearExpiredVisualOverride = usePersonaVisualRuntimeStore(
     (state) => state.clearExpired
@@ -295,11 +313,15 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
     if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
       setVisualPack(null)
+      setVisualPackLoadStatus("idle")
+      setVisualPackLoadError(null)
       return undefined
     }
 
     let cancelled = false
     setVisualPack(null)
+    setVisualPackLoadStatus("loading")
+    setVisualPackLoadError(null)
     ;(async () => {
       try {
         const response = await listPersonaVisualPacks(activePersonaId)
@@ -312,10 +334,13 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         }
         if (!cancelled) {
           setVisualPack(activePack)
+          setVisualPackLoadStatus("loaded")
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
           setVisualPack(null)
+          setVisualPackLoadStatus("error")
+          setVisualPackLoadError(error)
         }
       }
     })()
@@ -348,6 +373,29 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       authoredTriggers: visualPack?.manifest?.authored_triggers,
       mcpRuntimeReason: applicableRuntimeOverride?.reason
     })
+  const visualRenderKey = `${resolvedPersona.activePersonaId || ""}:${
+    visualPack?.id || ""
+  }:${visualState}`
+  const activeVisualRenderError =
+    visualRenderError?.key === visualRenderKey ? visualRenderError.error : null
+  const handleVisualRenderError = React.useCallback(
+    (error: PersonaVisualDiagnosticCode) => {
+      setVisualRenderError({
+        key: visualRenderKey,
+        error
+      })
+    },
+    [visualRenderKey]
+  )
+  const visualDiagnostic: PersonaVisualDiagnostic | null =
+    getPrimaryPersonaVisualDiagnostic({
+      pack: visualPack,
+      visualState,
+      loadStatus: visualPackLoadStatus,
+      loadError: visualPackLoadError,
+      renderError: activeVisualRenderError,
+      includeNoActivePack: visualPackLoadStatus === "loaded"
+    })
   const portalRoot = ensurePortalRoot()
 
   if (!resolvedPersona.hasTargetPersona) {
@@ -376,6 +424,8 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       isDormant={isDormant}
       visualPack={visualPack}
       visualState={visualState}
+      visualDiagnostic={visualDiagnostic}
+      onVisualRenderError={handleVisualRenderError}
       position={position}
       onToggle={() => setOpen(!isOpen)}
       onDragHandlePointerDown={handleDragHandlePointerDown}
