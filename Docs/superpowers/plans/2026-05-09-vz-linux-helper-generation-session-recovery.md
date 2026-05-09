@@ -292,7 +292,7 @@ Add `_can_reuse_session_vm(...)` that returns `True` only when:
 
 - [ ] **Step 5: Change helper failure handling**
 
-In `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`, keep `MacOSVirtualizationHelperProtocolError` covered by `_VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS`. Add it explicitly next to `MacOSVirtualizationHelperUnavailable` if the exception tuple is narrowed or if explicit listing makes the fail-closed contract clearer.
+In `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`, add `MacOSVirtualizationHelperProtocolError` explicitly to `_VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS` next to `MacOSVirtualizationHelperUnavailable`. This is intentionally explicit even though the class currently subclasses `RuntimeError`, because the fail-closed contract should survive future exception tuple narrowing.
 
 In the reuse block, do not convert `MacOSVirtualizationHelperUnavailable` or `MacOSVirtualizationHelperProtocolError` into `status = None`. Let them propagate to the existing outer failure path so the run fails and the row is preserved.
 
