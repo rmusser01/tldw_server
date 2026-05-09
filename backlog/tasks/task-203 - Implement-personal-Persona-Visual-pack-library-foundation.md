@@ -4,7 +4,7 @@ title: Implement personal Persona Visual pack library foundation
 status: In Progress
 assignee: []
 created_date: '2026-05-09 23:41'
-updated_date: '2026-05-09 23:45'
+updated_date: '2026-05-09 23:55'
 labels:
   - persona
   - buddy
@@ -45,6 +45,8 @@ Implementation plan: Docs/superpowers/plans/2026-05-09-persona-visual-personal-l
 
 <!-- SECTION:NOTES:BEGIN -->
 Created implementation plan for the reference-backed personal Persona Visual pack library. Focused baseline backend tests passed before implementation: 50 passed across persona visual DB/service/API suites.
+
+Stage 1 persistence foundation implemented. Schema v46 creates persona_visual_library_items and DB helpers now upsert list get update and soft-delete user-scoped entries while preserving stale source rows as unavailable. Verification: DB library test 4 passed. Persona visual DB service API suite 54 passed. git diff --check clean. Bandit on touched production files reported 0 results.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

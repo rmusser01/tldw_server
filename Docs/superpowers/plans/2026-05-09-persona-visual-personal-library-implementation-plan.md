@@ -18,7 +18,7 @@
 
 **Tests:** `tldw_Server_API/tests/ChaChaNotesDB/test_persona_visual_library_db.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Add failing DB migration and persistence tests
 
@@ -27,7 +27,7 @@
 - Modify later: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 - Modify later: `tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py`
 
-- [ ] **Step 1: Write migration test**
+- [x] **Step 1: Write migration test**
 
   Add a test that seeds schema v45, drops `persona_visual_library_items`, opens `CharactersRAGDB`, and asserts:
   - schema version is current
@@ -35,7 +35,7 @@
   - index `idx_persona_visual_library_items_user_time` exists
   - unique live-source index exists
 
-- [ ] **Step 2: Write create/list/upsert test**
+- [x] **Step 2: Write create/list/upsert test**
 
   Create a source persona and pack, save a library entry twice for `user-1`, and assert:
   - only one active entry exists
@@ -43,14 +43,14 @@
   - source persona/pack display metadata and snapshots are present
   - `source_available` is true and `source_changed` reflects version drift
 
-- [ ] **Step 3: Write stale-source and ownership tests**
+- [x] **Step 3: Write stale-source and ownership tests**
 
   Add tests proving:
   - soft-deleted source packs list with `source_available: false`
   - stale entries can be soft-deleted
   - another user cannot list or update the entry
 
-- [ ] **Step 4: Run tests and verify RED**
+- [x] **Step 4: Run tests and verify RED**
 
   Run:
 
@@ -66,7 +66,7 @@
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py`
 
-- [ ] **Step 1: Add SQLite and Postgres migrations**
+- [x] **Step 1: Add SQLite and Postgres migrations**
 
   Bump `_CURRENT_SCHEMA_VERSION` to 46. Add `_MIGRATION_SQL_V45_TO_V46` and `_MIGRATION_SQL_V45_TO_V46_POSTGRES` with:
   - nullable `source_persona_id`
@@ -77,18 +77,18 @@
   - `(user_id, deleted, last_modified)` listing index
   - partial unique active live-source index for `(user_id, source_persona_id, source_pack_id)` where not deleted and refs are not null
 
-- [ ] **Step 2: Wire migration execution**
+- [x] **Step 2: Wire migration execution**
 
   Add v45-to-v46 execution to SQLite/Postgres migration paths.
 
-- [ ] **Step 3: Add row normalization helpers**
+- [x] **Step 3: Add row normalization helpers**
 
   In `PersonaStateStore`, add:
   - `_persona_visual_library_item_row_to_dict`
   - `_normalize_persona_visual_library_tags`
   - `_require_persona_visual_library_item_owner`
 
-- [ ] **Step 4: Add CRUD helpers**
+- [x] **Step 4: Add CRUD helpers**
 
   Add delegated methods:
   - `upsert_persona_visual_library_item(...)`
@@ -103,7 +103,7 @@
   - `source_changed`
   - live display fields with snapshot fallbacks
 
-- [ ] **Step 5: Run DB test and verify GREEN**
+- [x] **Step 5: Run DB test and verify GREEN**
 
   Run:
 
@@ -113,7 +113,7 @@
 
   Expected: pass.
 
-- [ ] **Step 6: Commit persistence foundation**
+- [x] **Step 6: Commit persistence foundation**
 
   ```bash
   git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visual_library_db.py
