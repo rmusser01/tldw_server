@@ -28,10 +28,13 @@ describe("Collections StatusBadge design-system adapter", () => {
     }
   )
 
-  it("preserves compact sizing for small badges", () => {
+  it("uses the shared Badge compact sizing for small badges", () => {
     const { container } = render(<StatusBadge status="saved" size="small" />)
     const badge = container.querySelector('[data-ds-component="Badge"]')
 
-    expect(badge).toHaveClass("py-0")
+    expect(badge).toHaveClass("py-0.5")
+    expect(badge).toHaveClass("text-[10px]")
+    expect(badge).not.toHaveClass("py-0")
+    expect(badge).not.toHaveClass("text-xs")
   })
 })

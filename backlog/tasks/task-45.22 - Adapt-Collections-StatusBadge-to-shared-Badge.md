@@ -4,7 +4,7 @@ title: Adapt Collections StatusBadge to shared Badge
 status: Done
 assignee: []
 created_date: '2026-05-09 04:03'
-updated_date: '2026-05-09 04:11'
+updated_date: '2026-05-09 04:27'
 labels:
   - design-system
   - webui
@@ -49,12 +49,18 @@ Bandit not run: touched implementation and test files are TypeScript/JSON/Backlo
 Post-rebase verification on origin/dev after commit 370706dde: focused StatusBadge test passed 5/5, product-state guard test passed 46/46, design-system verifier passed with local-status-badge still at 7, and git diff --check passed.
 
 Post-rebase TypeScript caveat: bunx tsc --noEmit --pretty false still exits 2 on unrelated existing frontend baseline errors; the rebased output contains no src/components/Option/Collections/common/StatusBadge.tsx errors.
+
+PR review follow-up: Gemini and Qodo both flagged the same sizing issue where StatusBadge passed Badge size="sm" and then overrode the primitive sizing with py-0 text-xs. Reopening the task to remove that override and keep the adapter aligned with the shared Badge size contract.
+
+Review fix verification: updated the focused compact-size test first and confirmed it failed because the small badge still included overriding py-0 text-xs classes. Removed the adapter className override so small badges now rely on Badge size="sm" tokens.
+
+Review fix verification after implementation: focused StatusBadge test passed 5/5, product-state guard test passed 46/46, design-system verifier passed with local-status-badge at 7, and git diff --check passed. bunx tsc --noEmit --pretty false still exits 2 on unrelated existing frontend baseline errors and reports no touched Collections StatusBadge errors.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Adapted Collections StatusBadge to the shared Badge primitive and design-system state registry, added focused regression coverage for labels/icons/shared Badge rendering and compact sizing, and removed the old local-status-badge baseline exception. Full frontend TypeScript remains blocked by unrelated baseline errors; focused tests, guard tests, verifier, and diff checks pass on the rebased branch.
+Adapted Collections StatusBadge to the shared Badge primitive and design-system state registry, added focused regression coverage for labels/icons/shared Badge rendering and compact sizing, removed the old local-status-badge baseline exception, and addressed PR review by relying on Badge size="sm" without overriding its sizing tokens. Full frontend TypeScript remains blocked by unrelated baseline errors; focused tests, guard tests, verifier, and diff checks pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

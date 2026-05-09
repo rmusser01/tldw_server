@@ -61,7 +61,6 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     <Badge
       variant={SEVERITY_BADGE_VARIANTS[state.severity]}
       size={size === "small" ? "sm" : "md"}
-      className={size === "small" ? "py-0 text-xs" : undefined}
     >
       <Icon
         className={size === "small" ? "h-3 w-3" : "h-3.5 w-3.5"}
