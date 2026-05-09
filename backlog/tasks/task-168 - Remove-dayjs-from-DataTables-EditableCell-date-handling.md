@@ -1,10 +1,11 @@
 ---
 id: TASK-168
 title: Remove dayjs from DataTables EditableCell date handling
-status: In Progress
-assignee: []
+status: Done
+assignee:
+  - codex
 created_date: '2026-05-09 16:49'
-updated_date: '2026-05-09 16:55'
+updated_date: '2026-05-09 17:01'
 labels:
   - webui
   - dependencies
@@ -12,6 +13,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
+  - 'https://github.com/rmusser01/tldw_server/pull/1424'
 priority: medium
 ---
 
@@ -51,6 +53,8 @@ Exact shared UI dayjs package-import scan now reports 6 lines: Media/FilterPanel
 `git diff --check` exited 0. `bun run lint` from apps/tldw-frontend exited 0 with the existing 131-warning baseline. Full `./node_modules/.bin/tsc --noEmit --project tsconfig.json --pretty false` from apps/packages/ui exits 2 on existing repo-wide baseline diagnostics; filtering the same diagnostics for `EditableCell|DataTables` returned no matches.
 
 Bandit skipped because this slice touches TypeScript, tests, docs, and Backlog metadata only; no Python files changed.
+
+Opened PR #1424 against dev: https://github.com/rmusser01/tldw_server/pull/1424
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
