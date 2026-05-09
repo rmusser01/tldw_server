@@ -419,8 +419,11 @@ The workflow succeeds when:
 
 ## Open Questions For Implementation Planning
 
-- Should Conversation Context Panel live as a right rail, drawer, popover, or
-  tabbed panel in the current WebUI layout?
+- Initial placement direction: implement Conversation Context as a composer
+  popover that replaces or evolves the existing chat-composer character picker,
+  so character selection becomes one slot inside broader conversation context
+  instead of a separate control. Implementation planning should validate the
+  current picker shape before committing to exact component boundaries.
 - Which backend endpoint should become the source of truth for effective
   context preview, especially dictionary diagnostics?
 - What is the minimal backend effective-context response shape that can support
