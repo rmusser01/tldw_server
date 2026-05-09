@@ -61,10 +61,13 @@ Implement Task 3 from the embeddings RAG recipe implementation plan: add typed f
 - Hygiene verification: `cd apps/packages/ui && bun run verify:openapi` passed; `git diff --check` passed.
 - Bandit skipped: frontend-only TypeScript/service/hook changes, no Python touched in this task.
 - Known skips/blockers: no package typecheck script exists in `apps/packages/ui/package.json`; focused Vitest and OpenAPI guard verification were run instead.
+- Follow-up red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/Evaluations/hooks/__tests__/useRecipes.test.tsx` failed with candidate `{ ok: false }` not reaching `isError` and apply-preview `{ ok: false }` resolving instead of rejecting.
+- Follow-up green verification: same focused Vitest command passed with 8 tests after wrapping the embeddings candidate query and apply-preview mutation in `ensureOk`.
+- Follow-up hygiene verification: `cd apps/packages/ui && bun run verify:openapi` passed; `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added typed frontend service calls and React Query hooks for the embeddings recipe candidate discovery and recommendation apply-preview APIs. Covered the hooks with focused tests for stable candidate query loading and null-normalized apply-preview payload mapping, and added the new client paths to the OpenAPI guard.
+Added typed frontend service calls and React Query hooks for the embeddings recipe candidate discovery and recommendation apply-preview APIs. Covered the hooks with focused tests for stable candidate query loading, null-normalized apply-preview payload mapping, and `ensureOk` error propagation for failed candidate and apply-preview responses. Added the new client paths to the OpenAPI guard.
 <!-- SECTION:FINAL_SUMMARY:END -->

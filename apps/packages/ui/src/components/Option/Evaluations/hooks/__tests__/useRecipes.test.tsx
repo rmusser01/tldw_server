@@ -201,6 +201,30 @@ describe("useRecipes", () => {
     ).toEqual(result.current.data)
   })
 
+  it("surfaces embeddings recipe candidate load failures as query errors", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+
+    vi.mocked(getEmbeddingRecipeCandidates).mockResolvedValue({
+      ok: false,
+      status: 500,
+      error: "boom"
+    } as any)
+
+    const { result } = renderHook(() => useEmbeddingRecipeCandidates(true), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+
+    expect(result.current.error).toBeInstanceOf(Error)
+    expect((result.current.error as Error).message).toContain("boom")
+  })
+
   it("posts apply preview requests through the hook", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -239,6 +263,34 @@ describe("useRecipes", () => {
     expect(previewRecipeRecommendationApply).toHaveBeenCalledWith("recipe-run-1", {
       slot_name: "best_overall",
       candidate_run_id: null
+    })
+  })
+
+  it("rejects failed apply preview responses through the hook", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+
+    vi.mocked(previewRecipeRecommendationApply).mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "blocked"
+    } as any)
+
+    const { result } = renderHook(() => usePreviewRecipeRecommendationApply(), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          runId: "recipe-run-1",
+          slotName: "best_overall"
+        })
+      ).rejects.toThrow("blocked")
     })
   })
 })

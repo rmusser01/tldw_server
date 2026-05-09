@@ -151,7 +151,7 @@ export function useRecipeRunReport(runId: string | null) {
 export function useEmbeddingRecipeCandidates(enabled: boolean) {
   return useQuery({
     queryKey: ["evaluations", "recipes", "embeddings_model_selection", "candidates"],
-    queryFn: getEmbeddingRecipeCandidates,
+    queryFn: async () => ensureOk(await getEmbeddingRecipeCandidates()),
     enabled,
     staleTime: 60 * 1000
   })
@@ -159,14 +159,16 @@ export function useEmbeddingRecipeCandidates(enabled: boolean) {
 
 export function usePreviewRecipeRecommendationApply() {
   return useMutation({
-    mutationFn: (params: {
+    mutationFn: async (params: {
       runId: string
       slotName: string
       candidateRunId?: string | null
     }) =>
-      previewRecipeRecommendationApply(params.runId, {
-        slot_name: params.slotName,
-        candidate_run_id: params.candidateRunId ?? null
-      })
+      ensureOk(
+        await previewRecipeRecommendationApply(params.runId, {
+          slot_name: params.slotName,
+          candidate_run_id: params.candidateRunId ?? null
+        })
+      )
   })
 }
