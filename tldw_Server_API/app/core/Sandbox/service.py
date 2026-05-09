@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .audit_metadata import build_run_completion_audit_metadata
 from .image_store import ImageStoreValidationError, SandboxImageStore
 from .limits import build_limit_audit_metadata, limit_event_actions
 from .macos_diagnostics import collect_macos_diagnostics, probe_helper
@@ -1592,7 +1593,16 @@ class SandboxService:
             "reasons": reasons,
         }
 
-    def _audit_run_completion(self, *, user_id: str | int | None, run_id: str, status: RunStatus, spec_version: str, session_id: str | None) -> None:
+    def _audit_run_completion(
+        self,
+        *,
+        user_id: str | int | None,
+        run_id: str,
+        status: RunStatus,
+        spec_version: str,
+        session_id: str | None,
+        spec: RunSpec | None = None,
+    ) -> None:
         """Log a completion audit event in a fire-and-forget manner."""
         try:
             uid_int = None
@@ -1626,24 +1636,15 @@ class SandboxService:
                             dur_ms = max(0.0, (status.finished_at - status.started_at).total_seconds() * 1000.0)
                     except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
                         dur_ms = None
-                    # Include reason_code for non-success outcomes when available
-                    reason_code = None
-                    try:
-                        if outcome in ("timeout", "failed"):
-                            reason_code = (status.message or None)
-                    except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
-                        reason_code = None
+                    metadata = build_run_completion_audit_metadata(
+                        status=status,
+                        spec_version=spec_version,
+                        requested_runtime=(spec.runtime if spec else None),
+                        trust_level=(spec.trust_level if spec else None),
+                        network_policy=(spec.network_policy if spec else None),
+                        capture_patterns=(spec.capture_patterns if spec else None),
+                    )
                     limit_metadata = build_limit_audit_metadata(status.resource_usage)
-                    metadata = {
-                        "runtime": status.runtime.value if status.runtime else None,
-                        "base_image": status.base_image,
-                        "image_digest": status.image_digest,
-                        "policy_hash": status.policy_hash,
-                        "exit_code": status.exit_code,
-                        "spec_version": spec_version,
-                        "reason_code": reason_code,
-                    }
-                    metadata.update(limit_metadata)
                     await svc.log_event(
                         event_type=AuditEventType.API_RESPONSE,
                         category=AuditEventCategory.API_CALL,
@@ -2039,7 +2040,7 @@ class SandboxService:
                             if not status.policy_hash:
                                 status.policy_hash = compute_policy_hash(self.policy.cfg)
                             # Audit completion
-                            self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                            self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Background docker execution failed: {e}")
                             self._mark_run_failed(status, reason="docker_failed")
@@ -2088,7 +2089,7 @@ class SandboxService:
                     self._orch.update_run(status.id, status)
                     # Audit completion (sync path)
                     with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Docker execution failed; marking run failed. Error: {e}")
                 self._mark_run_failed(status, reason="docker_failed")
@@ -2131,7 +2132,7 @@ class SandboxService:
                                 self._orch.store_artifacts(status.id, real.artifacts)
                             self._orch.update_run(status.id, status)
                             with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Firecracker background execution failed: {e}")
                             self._mark_run_failed(status, reason="firecracker_failed")
@@ -2172,7 +2173,7 @@ class SandboxService:
                         self._orch.store_artifacts(status.id, real.artifacts)
                     self._orch.update_run(status.id, status)
                     with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Firecracker execution failed; marking run failed. Error: {e}")
                 try:
@@ -2222,7 +2223,7 @@ class SandboxService:
                                 self._orch.store_artifacts(status.id, real.artifacts)
                             self._orch.update_run(status.id, status)
                             with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
                         except (SandboxPolicy.RuntimeUnavailable, SandboxPolicy.PolicyUnsupported) as e:
                             logger.warning(f"Lima execution preflight rejected run: {e}")
                             try:
@@ -2283,7 +2284,7 @@ class SandboxService:
                         self._orch.store_artifacts(status.id, real.artifacts)
                     self._orch.update_run(status.id, status)
                     with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Lima execution failed; marking run failed. Error: {e}")
                 try:

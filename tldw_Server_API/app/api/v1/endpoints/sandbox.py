@@ -79,6 +79,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
+from tldw_Server_API.app.core.Sandbox.audit_metadata import build_run_completion_audit_metadata
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, SessionSpec
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType as CoreRuntimeType
 from tldw_Server_API.app.core.Sandbox.models import TrustLevel as CoreTrustLevel
@@ -1491,13 +1492,6 @@ async def start_run(
                         method=(request.method if request else "POST"),
                         session_id=payload.session_id,
                     )
-                    # Map reason_code for non-success outcomes
-                    reason_code = None
-                    try:
-                        if outcome in ("timeout", "failed"):
-                            reason_code = (status.message or None)
-                    except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-                        reason_code = None
                     await audit_service.log_event(
                         event_type=AuditEventType.API_RESPONSE,
                         category=AuditEventCategory.API_CALL,
@@ -1508,16 +1502,14 @@ async def start_run(
                         action="run",
                         result=("success" if outcome == "success" else outcome),
                         duration_ms=duration * 1000.0,
-                        metadata={
-                            "runtime": status.runtime.value if status.runtime else None,
-                            "base_image": status.base_image,
-                            "image_digest": status.image_digest,
-                            "policy_hash": status.policy_hash,
-                            "exit_code": status.exit_code,
-                            "spec_version": payload.spec_version,
-                            "capture_patterns": payload.capture_patterns or [],
-                            "reason_code": reason_code,
-                        },
+                        metadata=build_run_completion_audit_metadata(
+                            status=status,
+                            spec_version=payload.spec_version,
+                            requested_runtime=runtime,
+                            trust_level=spec.trust_level,
+                            network_policy=spec.network_policy,
+                            capture_patterns=spec.capture_patterns,
+                        )
                     )
             except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"sandbox audit(run.complete) failed: {e}")
