@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecommendationSlot
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_recipes import (
     get_recipe_run_job_enqueuer,
@@ -453,6 +454,120 @@ async def test_embeddings_recipe_run_create_persists_inline_dataset(async_api_cl
     body = response.json()
     assert body["metadata"]["inline_dataset"] == payload["dataset"]
     assert body["metadata"]["run_config"]["media_ids"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_candidates_endpoint_returns_current_model(
+    async_api_client,
+    auth_headers,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_recipes.build_embedding_recipe_candidate_hints",
+        lambda *, user: {
+            "recipe_id": "embeddings_model_selection",
+            "current": {
+                "provider": "openai",
+                "model": "text-embedding-3-small",
+                "is_local": False,
+                "default": True,
+                "status": "ready",
+            },
+            "candidates": [
+                {
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "is_local": False,
+                    "default": True,
+                    "status": "ready",
+                }
+            ],
+            "warnings": [],
+        },
+    )
+
+    response = await async_api_client.get(
+        "/api/v1/evaluations/recipes/embeddings_model_selection/candidates",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recipe_id"] == "embeddings_model_selection"
+    assert body["current"]["provider"] == "openai"
+    assert body["candidates"][0]["model"] == "text-embedding-3-small"
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_apply_preview_returns_copy_config_for_completed_run(
+    async_api_client,
+    auth_headers,
+    monkeypatch,
+) -> None:
+    db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
+    user_id = get_single_user_instance().id_str
+    run_id = db.create_recipe_run(
+        recipe_id="embeddings_model_selection",
+        recipe_version="1",
+        status=RunStatus.COMPLETED,
+        dataset_content_hash=build_dataset_content_hash(_embeddings_dataset()),
+        metadata={"owner_user_id": user_id},
+        recommendation_slots={
+            "best_overall": RecommendationSlot(
+                candidate_run_id="arm-1",
+                metadata={
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "apply_eligible": True,
+                    "apply_warnings": ["Existing indexes may need rebuild."],
+                },
+            )
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_current_embedding_config",
+        lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
+    )
+
+    response = await async_api_client.post(
+        f"/api/v1/evaluations/recipe-runs/{run_id}/apply-preview",
+        json={"slot_name": "best_overall", "candidate_run_id": "arm-1"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["apply_eligible"] is True
+    assert body["apply_available"] is False
+    assert body["copy_config"]["Embeddings"] == {
+        "embedding_provider": "openai",
+        "embedding_model": "text-embedding-3-small",
+    }
+    assert body["reindex_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_apply_preview_rejects_non_embeddings_recipe_run(
+    async_api_client,
+    auth_headers,
+) -> None:
+    db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
+    run_id = db.create_recipe_run(
+        recipe_id="summarization_quality",
+        recipe_version="1",
+        status=RunStatus.COMPLETED,
+        dataset_content_hash=build_dataset_content_hash(_inline_dataset()),
+        metadata={"owner_user_id": get_single_user_instance().id_str},
+    )
+
+    response = await async_api_client.post(
+        f"/api/v1/evaluations/recipe-runs/{run_id}/apply-preview",
+        json={"slot_name": "best_overall"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409
+    assert "not 'embeddings_model_selection'" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
