@@ -2035,116 +2035,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-error-line-1471-1u10oev",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-error-line-1588-uuthnk",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-info-line-1258-htb9pu",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-info-line-1461-1tim1pg",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-info-line-1599-1wov5rw",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1120-t6los0",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1189-1yjw7qd",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1271-3hyoej",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1285-60akw",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1384-9poli0",
-    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RunsTab.tsx:Alert#antd-alert-runstab-type-info-line-292-h54t5s",
     "path": "src/components/Option/Evaluations/tabs/RunsTab.tsx",
     "rule": "antd-product-state-import",
@@ -5566,17 +5456,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-status-badge:src/components/Option/PresentationStudio/PresentationStudioStatusBadge.tsx:PresentationStudioStatusBadge",
-    "path": "src/components/Option/PresentationStudio/PresentationStudioStatusBadge.tsx",
-    "rule": "local-status-badge",
-    "subject": "PresentationStudioStatusBadge",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local PresentationStudioStatusBadge status wrapper before the guard.",
-    "replacement": "Badge with design-system state registry mapping",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-status-badge:src/components/Option/Prompt/SyncStatusBadge.tsx:SyncStatusBadge",
     "path": "src/components/Option/Prompt/SyncStatusBadge.tsx",
     "rule": "local-status-badge",
@@ -5596,6 +5475,171 @@
     "owner": "design-system",
     "reason": "Existing local StatusDot status wrapper before the guard.",
     "replacement": "Badge with design-system state registry mapping",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx:Alert",
+    "path": "src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1220-1270rlx",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-error-line-1381-14hl8wd",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-success-line-1385-1skeyw",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1445-1blemdi",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1485-1bk8d6a",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1554-l1wimf",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-info-line-1623-1xtgj34",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1636-1l64pfm",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1650-l45huu",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-warning-line-1758-vi14gl",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-info-line-1844-206hsd",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-error-line-1854-x1q0sm",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-error-line-1971-14xvj5k",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RecipesTab.tsx:Alert#antd-alert-recipestab-type-info-line-1982-2xui7g",
+    "path": "src/components/Option/Evaluations/tabs/RecipesTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
+    "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   }
 ]
