@@ -65,6 +65,25 @@ def test_initialized_creates_session_event_turn_and_state_tables(chacha_db: Char
     }.issubset(table_names)
 
 
+def test_initialized_creates_session_actions_and_active_session_action_column(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    VNPlayRepository.initialized(chacha_db)
+
+    table_cursor = chacha_db.execute_query(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'vn_play_session_actions'
+        """
+    )
+    assert table_cursor.fetchone() is not None
+
+    column_cursor = chacha_db.execute_query("PRAGMA table_info(vn_play_sessions)")
+    column_names = {row["name"] for row in column_cursor.fetchall()}
+    assert "active_session_action_id" in column_names
+
+
 def test_turn_request_idempotency_key_is_unique_per_session(chacha_db: CharactersRAGDB) -> None:
     repo = VNPlayRepository.initialized(chacha_db)
     session = repo.create_session(
@@ -102,6 +121,176 @@ def test_turn_request_idempotency_key_is_unique_per_session(chacha_db: Character
             request_payload_hash="hash-b",
             base_scene_version=0,
         )
+
+
+def test_session_action_idempotency_key_is_unique_per_session_and_decodes_json(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Library branch",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed-1",
+    )
+    first = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-1",
+        request_payload_hash="branch_restore:hash-a",
+    )
+    replayed = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-1",
+        request_payload_hash="branch_restore:hash-a",
+    )
+
+    assert replayed["id"] == first["id"]
+    assert replayed["action_type"] == "branch_restore"
+    assert replayed["response_payload"] is None
+    assert replayed["error"] is None
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_session_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            action_type="branch_restore",
+            idempotency_key="restore-1",
+            request_payload_hash="branch_restore:hash-b",
+        )
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_session_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            action_type="checkpoint_restore",
+            idempotency_key="restore-1",
+            request_payload_hash="checkpoint_restore:hash-a",
+        )
+
+    updated = repo.update_session_action(
+        first["id"],
+        {
+            "status": "succeeded",
+            "response_payload": {"scene_version": 3, "warnings": []},
+            "error": {"code": "stale_scene_version"},
+            "lease_owner": "worker-1",
+        },
+        owner_user_id=42,
+    )
+
+    assert updated["status"] == "succeeded"
+    assert updated["response_payload"] == {"scene_version": 3, "warnings": []}
+    assert updated["error"] == {"code": "stale_scene_version"}
+    assert repo.get_session_action_by_key(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="restore-1",
+    )["id"] == first["id"]
+
+
+def test_turn_and_session_action_locks_share_session_mutation_gate(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Shared gate",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    turn = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="turn-1",
+        request_payload_hash="turn-hash",
+        base_scene_version=0,
+    )
+    action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-1",
+        request_payload_hash="restore-hash",
+    )
+    other_action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="checkpoint_restore",
+        idempotency_key="restore-2",
+        request_payload_hash="restore-hash-2",
+    )
+
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=action["id"],
+        expected_scene_version=1,
+    ) is False
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=action["id"],
+        expected_scene_version=0,
+    ) is True
+    assert (
+        repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"]
+        == action["id"]
+    )
+    assert repo.latest_active_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+    )["id"] == action["id"]
+    assert repo.try_acquire_turn_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        turn_request_id=turn["id"],
+        expected_scene_version=0,
+    ) is False
+
+    repo.clear_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=other_action["id"],
+    )
+    assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] == action["id"]
+
+    repo.clear_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=action["id"],
+    )
+    assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
+
+    assert repo.try_acquire_turn_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        turn_request_id=turn["id"],
+        expected_scene_version=0,
+    ) is True
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=action["id"],
+        expected_scene_version=0,
+    ) is False
+
+    repo.update_session(session["id"], {"active_turn_request_id": None}, owner_user_id=42)
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=other_action["id"],
+        expected_scene_version=0,
+    ) is True
+    repo.clear_session_action_lock(session_id=session["id"], owner_user_id=42)
+    assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
 
 
 def test_scene_branches_and_checkpoints_round_trip_json(chacha_db: CharactersRAGDB) -> None:

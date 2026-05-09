@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS vn_play_sessions (
     settings_json TEXT NOT NULL DEFAULT '{}',
     scene_version INTEGER NOT NULL DEFAULT 0,
     active_turn_request_id INTEGER,
+    active_session_action_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted BOOLEAN NOT NULL DEFAULT 0
@@ -63,6 +64,23 @@ CREATE TABLE IF NOT EXISTS vn_play_turn_requests (
     input_event_id INTEGER REFERENCES vn_play_events(id),
     turn_started_event_id INTEGER REFERENCES vn_play_events(id),
     turn_completed_event_id INTEGER REFERENCES vn_play_events(id),
+    response_payload_json TEXT,
+    error_json TEXT,
+    lease_owner TEXT,
+    locked_until DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, session_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS vn_play_session_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_payload_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
     response_payload_json TEXT,
     error_json TEXT,
     lease_owner TEXT,
@@ -128,6 +146,10 @@ CREATE INDEX IF NOT EXISTS idx_vn_play_turn_requests_session
     ON vn_play_turn_requests(session_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_turn_requests_owner_status
     ON vn_play_turn_requests(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_vn_play_session_actions_session
+    ON vn_play_session_actions(session_id);
+CREATE INDEX IF NOT EXISTS idx_vn_play_session_actions_owner_status
+    ON vn_play_session_actions(owner_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_vn_play_scene_state_owner_user_id
     ON vn_play_scene_state(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_branches_session
@@ -149,6 +171,7 @@ def ensure_vn_play_tables(db: CharactersRAGDB) -> None:
     with db.transaction() as conn:
         for statement in VN_PLAY_SCHEMA_STATEMENTS:
             conn.execute(statement)
+        _ensure_vn_play_session_columns(conn)
 
 
 class VNPlayRepository:
@@ -382,6 +405,7 @@ class VNPlayRepository:
                   AND owner_user_id = ?
                   AND deleted = 0
                   AND active_turn_request_id IS NULL
+                  AND active_session_action_id IS NULL
                   AND scene_version = ?
                 """,
                 (
@@ -392,6 +416,58 @@ class VNPlayRepository:
                 ),
             )
             return cursor.rowcount == 1
+
+    def try_acquire_session_action_lock(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_id: int,
+        expected_scene_version: int,
+    ) -> bool:
+        """Attach an active session action if no turn or restore action is running."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET active_session_action_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND deleted = 0
+                  AND active_turn_request_id IS NULL
+                  AND active_session_action_id IS NULL
+                  AND scene_version = ?
+                """,
+                (
+                    action_id,
+                    session_id,
+                    owner_user_id,
+                    expected_scene_version,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def clear_session_action_lock(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_id: int | None = None,
+    ) -> None:
+        """Clear the active session action marker, optionally guarded by action id."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET active_session_action_id = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND (? IS NULL OR active_session_action_id = ?)
+                """,
+                (session_id, owner_user_id, action_id, action_id),
+            )
 
     def append_event(
         self,
@@ -503,6 +579,133 @@ class VNPlayRepository:
         if turn_request is None:
             raise RuntimeError("created_turn_request_not_found")
         return turn_request
+
+    def create_session_action(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_type: str,
+        idempotency_key: str,
+        request_payload_hash: str,
+        status: str = "pending",
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        existing = self.get_session_action_by_key(
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            if existing["request_payload_hash"] != request_payload_hash:
+                raise ValueError("idempotency_key_conflict")
+            return existing
+
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO vn_play_session_actions (
+                    session_id,
+                    owner_user_id,
+                    action_type,
+                    idempotency_key,
+                    request_payload_hash,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    action_type,
+                    idempotency_key,
+                    request_payload_hash,
+                    status,
+                ),
+            )
+            action_id = int(cursor.lastrowid)
+
+        session_action = self.get_session_action(action_id)
+        if session_action is None:
+            raise RuntimeError("created_session_action_not_found")
+        return session_action
+
+    def get_session_action(self, action_id: int) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            "SELECT * FROM vn_play_session_actions WHERE id = ?",
+            (action_id,),
+        )
+        row = cursor.fetchone()
+        return _decode_session_action(row) if row is not None else None
+
+    def get_session_action_by_key(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_session_actions
+            WHERE session_id = ? AND owner_user_id = ? AND idempotency_key = ?
+            """,
+            (session_id, owner_user_id, idempotency_key),
+        )
+        row = cursor.fetchone()
+        return _decode_session_action(row) if row is not None else None
+
+    def latest_active_session_action(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT action.*
+            FROM vn_play_session_actions AS action
+            JOIN vn_play_sessions AS session
+              ON session.active_session_action_id = action.id
+            WHERE session.id = ?
+              AND session.owner_user_id = ?
+              AND action.owner_user_id = ?
+            ORDER BY action.updated_at DESC, action.id DESC
+            LIMIT 1
+            """,
+            (session_id, owner_user_id, owner_user_id),
+        )
+        row = cursor.fetchone()
+        return _decode_session_action(row) if row is not None else None
+
+    def update_session_action(
+        self,
+        action_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        update_values = _mapped_update_values(
+            fields,
+            _SESSION_ACTION_UPDATE_COLUMNS,
+            json_fields={"response_payload", "error"},
+        )
+        if not update_values:
+            return self.get_session_action(action_id)
+
+        with self.db.transaction() as conn:
+            for field_name, value in update_values:
+                statement = _SESSION_ACTION_UPDATE_STATEMENTS[field_name]
+                conn.execute(
+                    statement,
+                    (value, action_id, owner_user_id, owner_user_id),
+                )
+        return self.get_session_action(action_id)
 
     def get_turn_request(self, turn_request_id: int) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
@@ -1060,6 +1263,7 @@ _SESSION_UPDATE_COLUMNS = {
     "settings": "settings_json",
     "scene_version": "scene_version",
     "active_turn_request_id": "active_turn_request_id",
+    "active_session_action_id": "active_session_action_id",
     "deleted": "deleted",
 }
 
@@ -1070,6 +1274,16 @@ _TURN_REQUEST_UPDATE_COLUMNS = {
     "input_event_id": "input_event_id",
     "turn_started_event_id": "turn_started_event_id",
     "turn_completed_event_id": "turn_completed_event_id",
+    "response_payload": "response_payload_json",
+    "error": "error_json",
+    "lease_owner": "lease_owner",
+    "locked_until": "locked_until",
+}
+
+_SESSION_ACTION_UPDATE_COLUMNS = {
+    "action_type": "action_type",
+    "request_payload_hash": "request_payload_hash",
+    "status": "status",
     "response_payload": "response_payload_json",
     "error": "error_json",
     "lease_owner": "lease_owner",
@@ -1141,6 +1355,10 @@ _SESSION_UPDATE_STATEMENTS = {
         "UPDATE vn_play_sessions SET active_turn_request_id = ?, updated_at = CURRENT_TIMESTAMP "
         "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
     ),
+    "active_session_action_id": (
+        "UPDATE vn_play_sessions SET active_session_action_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
     "deleted": (
         "UPDATE vn_play_sessions SET deleted = ?, updated_at = CURRENT_TIMESTAMP "
         "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
@@ -1190,12 +1408,52 @@ _TURN_REQUEST_UPDATE_STATEMENTS = {
     ),
 }
 
+_SESSION_ACTION_UPDATE_STATEMENTS = {
+    "action_type": (
+        "UPDATE vn_play_session_actions SET action_type = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "request_payload_hash": (
+        "UPDATE vn_play_session_actions SET request_payload_hash = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "status": (
+        "UPDATE vn_play_session_actions SET status = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "response_payload": (
+        "UPDATE vn_play_session_actions SET response_payload_json = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "error": (
+        "UPDATE vn_play_session_actions SET error_json = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "lease_owner": (
+        "UPDATE vn_play_session_actions SET lease_owner = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "locked_until": (
+        "UPDATE vn_play_session_actions SET locked_until = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+}
+
 
 def _require_sqlite_chacha_db(db: CharactersRAGDB) -> None:
     if getattr(db, "backend_type", None) != BackendType.SQLITE:
         raise NotImplementedError(
             "VN Play metadata currently supports SQLite ChaChaNotes databases only."
         )
+
+
+def _ensure_vn_play_session_columns(conn: Any) -> None:
+    existing_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(vn_play_sessions)").fetchall()
+    }
+    if "active_session_action_id" not in existing_columns:
+        conn.execute("ALTER TABLE vn_play_sessions ADD COLUMN active_session_action_id INTEGER")
 
 
 def _insert_event(
@@ -1280,6 +1538,13 @@ def _decode_event(row: Any) -> dict[str, Any]:
 
 
 def _decode_turn_request(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    data["response_payload"] = _json_loads(data.pop("response_payload_json"), None)
+    data["error"] = _json_loads(data.pop("error_json"), None)
+    return data
+
+
+def _decode_session_action(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["response_payload"] = _json_loads(data.pop("response_payload_json"), None)
     data["error"] = _json_loads(data.pop("error_json"), None)
