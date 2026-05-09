@@ -1,6 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Button, Empty, Skeleton, Collapse, Segmented } from "antd"
+import { Button, Empty, Collapse, Segmented } from "antd"
 import {
   Lightbulb,
   AlertTriangle,
@@ -15,6 +15,7 @@ import {
   type InsightItem,
 } from "@/hooks/document-workspace"
 import { useConnectionStore } from "@/store/connection"
+import { LoadingState as SharedLoadingState } from "@/components/ui/feedback/LoadingState"
 import type { InsightDetailLevel } from "../types"
 import { CATEGORY_ICONS } from "../config"
 
@@ -192,11 +193,11 @@ const ErrorState: React.FC<{
  */
 const LoadingState: React.FC = () => {
   return (
-    <div className="space-y-3 p-4">
-      <Skeleton active paragraph={{ rows: 2 }} />
-      <Skeleton active paragraph={{ rows: 2 }} />
-      <Skeleton active paragraph={{ rows: 2 }} />
-    </div>
+    <SharedLoadingState
+      mode="skeleton"
+      rows={6}
+      className="p-4"
+    />
   )
 }
 
