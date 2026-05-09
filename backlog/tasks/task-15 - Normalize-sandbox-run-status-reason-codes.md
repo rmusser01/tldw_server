@@ -1,7 +1,7 @@
 ---
 id: TASK-15
 title: Normalize sandbox run status reason codes
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-03 20:38'
 labels:

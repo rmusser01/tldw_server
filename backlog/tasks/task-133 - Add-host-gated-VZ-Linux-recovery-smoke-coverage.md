@@ -1,7 +1,7 @@
 ---
 id: TASK-133
 title: Add host-gated VZ Linux recovery smoke coverage
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 00:26'
 labels:
@@ -49,6 +49,11 @@ Extend the existing Apple Silicon host-gated VZ Linux operator/CI smoke path so 
   - `git diff --check` passed.
   - Bandit over touched Python with only `B101` skipped reported pre-existing test-harness findings in `tools/vz-linux-image/tests/test_host_e2e_smoke_script.py` (`B404`, `B603`, `B108`) on unchanged lines. Re-run with those known test-harness checks also skipped exited 0.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added host-gated VZ Linux recovery smoke coverage after real ephemeral execution and same-session reuse. The smoke path now runs a non-destructive diagnostics and dry-run reconciliation slice, workflow contract tests verify the operator path remains manual/nightly and branch-gated, and docs clarify that recovery smoke does not terminate VMs or delete state.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
