@@ -2998,7 +2998,9 @@ describe("CharactersManager first-use onboarding", () => {
         return makeUseQueryResult({ data: listCharactersData, status: "success" })
       }
       if (key === "getModelsForFieldGeneration") {
-        return makeUseQueryResult({ data: [] })
+        return makeUseQueryResult({
+          data: [{ model: "mock-chat-model", provider: "openai" }]
+        })
       }
       if (key === "getAllModelsForGeneration") {
         return makeUseQueryResult({ data: [] })
@@ -3528,6 +3530,84 @@ describe("CharactersManager first-use onboarding", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
     expect(tldwClientMock.createChat).not.toHaveBeenCalled()
     expect(navigateMock).not.toHaveBeenCalled()
+  }, 30000)
+
+  it("preserves row chat intent locally when no chat model is configured", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "intent-no-model",
+      name: "Intent Character",
+      system_prompt: "Stay in character.",
+      greeting: "Intent preserved.",
+      description: "Row chat intent blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return [null, vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chat as Intent Character" })
+    )
+
+    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "intent-no-model",
+        name: "Intent Character"
+      })
+    )
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as Intent Character"
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Saved characters are still available. Configure a chat model, then return here to continue with Intent Character."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
+      "href",
+      "/settings/model"
+    )
+    expect(screen.getByRole("button", { name: "Retry character chat" })).toBeEnabled()
+    const returnButton = screen.getByRole("button", { name: "Return to character" })
+    expect(returnButton).toBeEnabled()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
+
+    await user.click(returnButton)
+    await waitFor(() => {
+      expect(
+        screen.queryByText(
+          "Choose a chat model before chatting as Intent Character"
+        )
+      ).not.toBeInTheDocument()
+    })
+    expect(setSelectedCharacterMock).toHaveBeenLastCalledWith(null)
   }, 30000)
 
   it("opens quick chat from gallery preview actions", async () => {

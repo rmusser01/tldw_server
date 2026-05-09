@@ -26,13 +26,19 @@
 
 **Tests:** Targeted Vitest around quick-chat hook and, if feasible, Puppeteer/Playwright E2E for the row action.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Trace the row action from Characters to navigation target and state mutation.
 - Identify whether selected character should be held in URL state, shared store, or chat session bootstrap state.
 - Write the failing test around the current redirect/context-loss behavior.
+
+Outcome:
+
+- Confirmed the row-level `Chat as ...` handler stored the selected character and immediately navigated to `/` without checking model readiness.
+- Chose the existing selected-character storage handoff as the durable intent carrier, with a local blocker as the incomplete-setup UI.
+- Added a failing regression test for the no-model row action before changing production code.
 
 ## Stage 2: Preserve Selected Character Through Blockers
 
@@ -46,7 +52,7 @@ Steps:
 
 **Tests:** Unit/component tests for state preservation and blocker rendering.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
@@ -54,6 +60,12 @@ Steps:
 - Preserve character id, name, and source route.
 - Avoid a generic `/` fallback unless no better local route exists.
 - Ensure no stale character persists after cancellation or explicit clear.
+
+Outcome:
+
+- The row-level chat action now stores the selected character before readiness checks.
+- Missing chat-model readiness opens a local character-chat setup blocker that names the selected character and offers model settings, retry, and return actions.
+- Explicit return/close clears the selected-character handoff to avoid stale intent leakage.
 
 ## Stage 3: Wire Chat Creation/Resume Behavior
 
@@ -66,13 +78,19 @@ Steps:
 
 **Tests:** Character chat journey E2E with mocked or test provider state; existing chat action tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Resolve whether the row action should create an empty session immediately or defer until first send.
 - Preserve selected character across model setup navigation.
 - Add regression coverage for switching between two characters.
+
+Outcome:
+
+- Preserved the existing model-ready behavior: row chat sets the selected character, navigates to the chat surface, and focuses the composer.
+- Deferred empty server-chat creation until first send, matching the existing chat flow and avoiding empty-history pollution.
+- Added regression coverage for the no-model intent blocker and kept the existing model-ready handoff test green with an explicit mocked model.
 
 ## Risks
 

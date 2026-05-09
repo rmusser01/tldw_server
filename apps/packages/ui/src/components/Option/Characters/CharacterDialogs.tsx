@@ -120,6 +120,9 @@ export type CharacterDialogsProps = {
   quickChatSending: boolean
   sendQuickChatMessage: () => Promise<void>
   handlePromoteQuickChat: () => Promise<void>
+  chatIntentBlocker: { record: any; characterSelection: any } | null
+  clearChatIntentBlocker: () => Promise<void>
+  retryChatIntentBlocker: () => Promise<void>
 
   // --- conversations ---
   conversationsOpen: boolean
@@ -323,6 +326,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     quickChatSending,
     sendQuickChatMessage,
     handlePromoteQuickChat,
+    chatIntentBlocker,
+    clearChatIntentBlocker,
+    retryChatIntentBlocker,
     // conversations
     conversationsOpen,
     setConversationsOpen,
@@ -495,6 +501,22 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
   )
   const showQuickChatModelBlocker =
     quickChatReadiness.missingRequirement === "chat-model"
+  const chatIntentReadinessCopy = React.useMemo(() => {
+    if (!chatIntentBlocker) return null
+    const characterSelection = chatIntentBlocker.characterSelection
+    const readiness = buildCharacterChatReadiness({
+      selectedCharacter: characterSelection,
+      selectedModel: null,
+      availableModels: []
+    })
+    return getCharacterChatReadinessCopy(readiness, t, {
+      characterName:
+        characterSelection?.name ||
+        characterSelection?.title ||
+        characterSelection?.slug ||
+        null
+    })
+  }, [chatIntentBlocker, t])
 
   const characterIdentifierFn = (record: any): string =>
     String(record?.id ?? record?.slug ?? record?.name ?? "")
@@ -611,6 +633,57 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
 
   return (
     <>
+      {/* Full character-chat intent blocker */}
+      <Modal
+        title={t("settings:manageCharacters.chatIntent.title", {
+          defaultValue: "Character chat setup"
+        })}
+        open={!!chatIntentBlocker}
+        onCancel={() => {
+          void clearChatIntentBlocker()
+        }}
+        destroyOnHidden
+        width={560}
+        rootClassName="characters-motion-modal"
+        footer={[
+          <Button
+            key="return"
+            onClick={() => {
+              void clearChatIntentBlocker()
+            }}>
+            {t("settings:manageCharacters.chatIntent.return", {
+              defaultValue: "Return to character"
+            })}
+          </Button>,
+          <Button
+            key="retry"
+            onClick={() => {
+              void retryChatIntentBlocker()
+            }}>
+            {t("settings:manageCharacters.chatIntent.retry", {
+              defaultValue: "Retry character chat"
+            })}
+          </Button>,
+          <Button
+            key="settings"
+            type="primary"
+            href={CHARACTER_CHAT_MODEL_SETTINGS_PATH}>
+            {chatIntentReadinessCopy?.actionLabel ||
+              t("settings:manageCharacters.chatIntent.openModelSettings", {
+                defaultValue: "Open model settings"
+              })}
+          </Button>
+        ]}>
+        {chatIntentReadinessCopy && (
+          <Alert
+            type="warning"
+            showIcon
+            title={chatIntentReadinessCopy.title}
+            description={chatIntentReadinessCopy.description}
+          />
+        )}
+      </Modal>
+
       {/* Import Preview Modal */}
       <Modal
         title={t("settings:manageCharacters.import.previewTitle", {

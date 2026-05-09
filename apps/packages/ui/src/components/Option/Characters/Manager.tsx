@@ -19,6 +19,7 @@ import {
   useCharacterCrud,
   useCharacterBulkOps
 } from "./hooks"
+import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
 import { useCharacterGeneration } from "@/hooks/useCharacterGeneration"
 import { useFormDraft } from "@/hooks/useFormDraft"
 import { useCharacterShortcuts } from "@/hooks/useCharacterShortcuts"
@@ -274,6 +275,13 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     handlePromoteQuickChat
   } = quickChat
 
+  const [chatIntentBlocker, setChatIntentBlocker] =
+    React.useState<CharacterChatIntentBlocker | null>(null)
+  const clearChatIntentBlocker = React.useCallback(async () => {
+    setChatIntentBlocker(null)
+    await setSelectedCharacter(null)
+  }, [setSelectedCharacter])
+
   const versionHistory = useCharacterVersionHistory({ t, notification, qc, confirmDanger })
   const {
     versionHistoryOpen, setVersionHistoryOpen,
@@ -411,6 +419,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     openEdit ||
     conversationsOpen ||
     generationPreviewOpen ||
+    Boolean(chatIntentBlocker) ||
     Boolean(quickChatCharacter)
   useCharacterShortcuts({
     modalOpen,
@@ -425,6 +434,8 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         setGenerationPreviewOpen(false)
       } else if (conversationsOpen) {
         setConversationsOpen(false)
+      } else if (chatIntentBlocker) {
+        void clearChatIntentBlocker()
       } else if (quickChatCharacter) {
         void closeQuickChat()
       } else if (openEdit) {
@@ -826,7 +837,10 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     data,
     effectiveDefaultCharacterId,
     defaultCharacterSelection,
-    setDefaultCharacterSelection
+    setDefaultCharacterSelection,
+    activeChatModel: activeQuickChatModel,
+    availableChatModels: generationModels,
+    setChatIntentBlocker
   })
   const {
     createCharacter,
@@ -874,6 +888,10 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     conversationsLoadErrorMessageRef,
     restoreCharacter
   } = crud
+  const retryChatIntentBlocker = React.useCallback(async () => {
+    if (!chatIntentBlocker) return
+    await handleChat(chatIntentBlocker.record)
+  }, [chatIntentBlocker, handleChat])
 
   const handleEditWithPrefetch = React.useCallback(
     (record: any, triggerRef?: HTMLButtonElement | null) => {
@@ -967,6 +985,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     openEdit ||
     conversationsOpen ||
     Boolean(quickChatCharacter) ||
+    Boolean(chatIntentBlocker) ||
     generationPreviewOpen ||
     versionHistoryOpen ||
     compareModalOpen ||
@@ -1198,6 +1217,10 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         quickChatSending={quickChatSending}
         sendQuickChatMessage={sendQuickChatMessage}
         handlePromoteQuickChat={handlePromoteQuickChat}
+        // full-chat intent blocker
+        chatIntentBlocker={chatIntentBlocker}
+        clearChatIntentBlocker={clearChatIntentBlocker}
+        retryChatIntentBlocker={retryChatIntentBlocker}
         // conversations
         conversationsOpen={conversationsOpen}
         setConversationsOpen={setConversationsOpen}

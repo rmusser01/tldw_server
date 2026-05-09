@@ -36,6 +36,12 @@ import {
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 import { createAvatarValue } from "../AvatarField"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import { buildCharacterChatReadiness } from "@/utils/chat-model-availability"
+
+export type CharacterChatIntentBlocker = {
+  record: any
+  characterSelection: any
+}
 
 export interface UseCharacterCrudDeps {
   t: (key: string, opts?: Record<string, any>) => string
@@ -75,6 +81,9 @@ export interface UseCharacterCrudDeps {
   effectiveDefaultCharacterId: string | undefined
   defaultCharacterSelection: any
   setDefaultCharacterSelection: (value: any) => Promise<void> | void
+  activeChatModel: string | null
+  availableChatModels: Array<{ model?: unknown; name?: unknown }> | null | undefined
+  setChatIntentBlocker: (value: CharacterChatIntentBlocker | null) => void
 }
 
 export function useCharacterCrud(deps: UseCharacterCrudDeps) {
@@ -108,7 +117,10 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     clearEditDraft,
     data,
     effectiveDefaultCharacterId,
-    setDefaultCharacterSelection
+    setDefaultCharacterSelection,
+    activeChatModel,
+    availableChatModels,
+    setChatIntentBlocker
   } = deps
 
   const navigate = useNavigate()
@@ -481,13 +493,32 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
   }, [notification, setExporting, t])
 
   // --- Chat handler ---
-  const handleChat = React.useCallback((record: any) => {
-    setSelectedCharacter(buildCharacterSelectionPayload(record))
+  const handleChat = React.useCallback(async (record: any) => {
+    const characterSelection = buildCharacterSelectionPayload(record)
+    await setSelectedCharacter(characterSelection)
+
+    const readiness = buildCharacterChatReadiness({
+      selectedCharacter: characterSelection,
+      selectedModel: activeChatModel,
+      availableModels: availableChatModels
+    })
+    if (!readiness.canStart && readiness.missingRequirement === "chat-model") {
+      setChatIntentBlocker({ record, characterSelection })
+      return
+    }
+
+    setChatIntentBlocker(null)
     navigate("/")
     setTimeout(() => {
       focusComposer()
     }, 0)
-  }, [setSelectedCharacter, navigate])
+  }, [
+    activeChatModel,
+    availableChatModels,
+    navigate,
+    setChatIntentBlocker,
+    setSelectedCharacter
+  ])
 
   // --- Chat in new tab ---
   const handleChatInNewTab = React.useCallback(
