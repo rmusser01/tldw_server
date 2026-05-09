@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1407'
   - 'https://github.com/rmusser01/tldw_server/issues/1391'
+  - 'https://github.com/rmusser01/tldw_server/pull/1409'
 documentation:
   - Docs/API-related/VN_PLAY_API.md
   - Docs/superpowers/plans/2026-05-09-vn-play-session-setup-implementation-plan.md
@@ -48,6 +49,8 @@ Implement in four stages: add minimal character API/types; replace raw IDs with 
 Created implementation plan Docs/superpowers/plans/2026-05-09-vn-play-session-setup-implementation-plan.md for issue #1407. The Backlog ID was moved to TASK-157 to avoid colliding with an existing TASK-155 in the main checkout.
 
 Implemented a selector-driven VN Play session setup dialog, a minimal WebUI characters API wrapper/types, readiness and compatibility warning states, manual ID fallback on selector load failure, empty-state guidance, and selector-aware VN Play smoke mocks.
+
+Opened draft PR #1409 for review.
 
 Verification recorded:
 - RED: `bunx vitest run __tests__/vn-play/VNPlayWorkspace.test.tsx` failed 5 selector/warning/fallback tests before implementation.
