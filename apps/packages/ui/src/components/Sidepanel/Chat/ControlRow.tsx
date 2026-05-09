@@ -16,7 +16,7 @@ import { ModelSelect } from "@/components/Common/ModelSelect"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { FeatureHint, useFeatureHintSeen } from "@/components/Common/FeatureHint"
 import { McpToolSelector } from "@/components/Common/McpToolSelector"
-import { CharacterSelect } from "./CharacterSelect"
+import { ConversationContextPopover } from "./ConversationContextPopover"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useMcpTools } from "@/hooks/useMcpTools"
@@ -26,6 +26,8 @@ import { fetchChatModels } from "@/services/tldw-server"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
+import type { ConversationContextComposition } from "@/types/conversation-context"
+import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
 
 interface ControlRowProps {
   // Prompt selection
@@ -35,6 +37,16 @@ interface ControlRowProps {
   // Character selection
   selectedCharacterId: string | null
   setSelectedCharacterId: (id: string | null) => void
+  // Conversation context
+  serverChatId?: string | null
+  conversationContextComposition?: ConversationContextComposition | null
+  conversationContextStatus?: ConversationContextCompositionStatus
+  conversationContextSaveSelection?: (
+    selection: {
+      worldBookIds: number[]
+      dictionaryIds: number[]
+    }
+  ) => Promise<unknown> | unknown
   // Toggles
   webSearch: boolean
   setWebSearch: (value: boolean) => void
@@ -59,6 +71,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   setSelectedQuickPrompt,
   selectedCharacterId,
   setSelectedCharacterId,
+  serverChatId,
+  conversationContextComposition,
+  conversationContextStatus = "idle",
+  conversationContextSaveSelection,
   webSearch,
   setWebSearch,
   chatMode,
@@ -657,9 +673,13 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           className="px-2 text-text-muted hover:text-text"
         />
         <ModelSelect iconClassName="size-4" showSelectedName />
-        <CharacterSelect
+        <ConversationContextPopover
+          chatId={serverChatId}
           selectedCharacterId={selectedCharacterId}
           setSelectedCharacterId={setSelectedCharacterId}
+          composition={conversationContextComposition}
+          compositionStatus={conversationContextStatus}
+          saveSelection={conversationContextSaveSelection}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />

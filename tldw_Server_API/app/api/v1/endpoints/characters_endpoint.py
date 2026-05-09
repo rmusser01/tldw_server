@@ -2661,6 +2661,13 @@ async def process_context_with_world_info(
     try:
         service = WorldBookService(db)
 
+        for world_book_id in request.world_book_ids or []:
+            if service.get_world_book(world_book_id=world_book_id) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"World book {world_book_id} not found.",
+                )
+
         result = service.process_context(
             text=request.text,
             world_book_ids=request.world_book_ids,

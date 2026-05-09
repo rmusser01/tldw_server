@@ -810,7 +810,7 @@
     "message": "Select at least one model for Compare mode."
   },
   "actor_title": {
-    "message": "Scene Director (Actor)"
+    "message": "Optional scene context"
   },
   "actor_help": {
     "message": "Configure per-chat scene context: roles, mood, world, goals, and notes."

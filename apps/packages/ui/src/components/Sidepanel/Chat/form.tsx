@@ -114,6 +114,8 @@ import { formatFileSize } from "@/utils/format"
 import { formatPinnedResults } from "@/utils/rag-format"
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
+import { useConversationContextComposition } from "@/hooks/chat/useConversationContextComposition"
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
@@ -668,6 +670,7 @@ export const SidepanelForm = ({
     toolChoice,
     setToolChoice,
     historyId,
+    history,
     chatLoopState = {
       status: "idle",
       pendingApprovals: [],
@@ -679,6 +682,11 @@ export const SidepanelForm = ({
     setQueuedMessages,
     serverChatId
   } = useMessage()
+  const { settings: conversationContextSettings, updateSettings } =
+    useChatSettingsRecord({
+      historyId,
+      serverChatId
+    })
   const previousServerChatIdRef = React.useRef<string | null | undefined>(
     serverChatId
   )
@@ -1065,6 +1073,19 @@ export const SidepanelForm = ({
     setStoredCharacter,
     storedCharacterId
   ])
+
+  const conversationContextComposition = useConversationContextComposition({
+    draftMessage: form.values.message,
+    selection: {
+      chatId: serverChatId ?? undefined,
+      characterId: selectedCharacterId,
+      worldBookIds: [],
+      dictionaryIds: []
+    },
+    settings: conversationContextSettings,
+    debounceMs: 250,
+    updateSettings
+  })
 
   const {
     filteredSlashCommands,
@@ -1546,6 +1567,12 @@ export const SidepanelForm = ({
         return
       }
     }
+    const contextSend = intent.isImageCommand
+      ? null
+      : await conversationContextComposition.composeForSend({
+          message: trimmed,
+          history
+        })
     await submitDispatch(
       {
         image: intent.isImageCommand ? "" : image,
@@ -1562,7 +1589,8 @@ export const SidepanelForm = ({
         uploadedFiles: intent.isImageCommand ? [] : contextFiles,
         imageBackendOverride: intent.isImageCommand
           ? intent.imageBackendOverride
-          : undefined
+          : undefined,
+        requestOverrides: contextSend?.requestOverrides
       },
       {
         beforeSend: () => {
@@ -2880,6 +2908,16 @@ export const SidepanelForm = ({
                               setSelectedQuickPrompt={setSelectedQuickPrompt}
                               selectedCharacterId={selectedCharacterId}
                               setSelectedCharacterId={setSelectedCharacterId}
+                              serverChatId={serverChatId}
+                              conversationContextComposition={
+                                conversationContextComposition.composition
+                              }
+                              conversationContextStatus={
+                                conversationContextComposition.status
+                              }
+                              conversationContextSaveSelection={
+                                conversationContextComposition.saveSelection
+                              }
                               webSearch={webSearch}
                               setWebSearch={setWebSearch}
                               chatMode={chatMode}

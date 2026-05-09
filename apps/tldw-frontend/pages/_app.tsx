@@ -15,6 +15,12 @@ import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuar
 import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
 import { hasEnvApiAuth } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
+import {
+  buildFirstRunOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  getOnboardingReturnToFromSearch,
+  resolveOnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
 
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
@@ -51,6 +57,45 @@ type ConfiguredAuthState = {
   hasConfig: boolean
   authMode?: "single-user" | "multi-user"
   isAuthenticated: boolean
+}
+
+const splitRouteAsPath = (asPath: string) => {
+  const fallback = asPath || "/"
+  const hashIndex = fallback.indexOf("#")
+  const withoutHash = hashIndex >= 0 ? fallback.slice(0, hashIndex) : fallback
+  const hash = hashIndex >= 0 ? fallback.slice(hashIndex) : ""
+  const searchIndex = withoutHash.indexOf("?")
+  const pathname =
+    searchIndex >= 0 ? withoutHash.slice(0, searchIndex) || "/" : withoutHash || "/"
+  const search = searchIndex >= 0 ? withoutHash.slice(searchIndex) : ""
+
+  return {
+    pathname,
+    search,
+    hash
+  }
+}
+
+const buildFirstRunSetupRoute = (asPath: string): string => {
+  const routeParts = splitRouteAsPath(asPath)
+  const entryIntent = resolveOnboardingEntryIntent(routeParts)
+
+  if (entryIntent !== CHARACTER_CHAT_ONBOARDING_INTENT) {
+    return "/persona"
+  }
+
+  if (routeParts.pathname === "/") {
+    const returnTo = getOnboardingReturnToFromSearch(routeParts.search)
+    if (returnTo) {
+      const params = new URLSearchParams({
+        intent: CHARACTER_CHAT_ONBOARDING_INTENT
+      })
+      params.set("returnTo", returnTo)
+      return `/?${params.toString()}`
+    }
+  }
+
+  return buildFirstRunOnboardingRoute(routeParts)
 }
 
 const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
@@ -250,10 +295,16 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const hideShellNav = !authResolved || !isAuthenticated
   const shouldBypassGates = isPublicAuthRoute || isSettingsRoute
+  const firstRunSetupRoute = React.useMemo(
+    () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
+    [routePath, router.asPath]
+  )
+  const shouldBypassFirstRunOverlay =
+    firstRunSetupRoute !== "/persona" && !shouldBypassGates
 
   const handleStartSetup = React.useCallback(() => {
-    void router.push("/persona")
-  }, [router])
+    void router.push(firstRunSetupRoute)
+  }, [firstRunSetupRoute, router])
 
   const layoutProps = React.useMemo(
     () => ({
@@ -275,7 +326,9 @@ export default function App({ Component, pageProps }: AppProps) {
   ) : shouldBypassGates ? (
     layoutContent
   ) : (
-    <FirstRunGate onStartSetup={handleStartSetup}>
+    <FirstRunGate
+      onStartSetup={handleStartSetup}
+      bypass={shouldBypassFirstRunOverlay}>
       {layoutContent}
     </FirstRunGate>
   )

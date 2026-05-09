@@ -2229,6 +2229,8 @@ export const useMessage = () => {
       useOCR?: boolean;
       webSearch?: boolean;
       chatMode?: "normal" | "rag" | "vision";
+      historyForModel?: ChatHistory;
+      messageForModel?: string;
     };
     serverChatIdOverride?: string | null;
   }) => {
@@ -2271,6 +2273,15 @@ export const useMessage = () => {
       requestOverrides?.chatMode === "vision"
         ? requestOverrides.chatMode
         : chatMode;
+    const conversationContextOverrides = {
+      historyForModel: Array.isArray(requestOverrides?.historyForModel)
+        ? requestOverrides.historyForModel
+        : undefined,
+      messageForModel:
+        typeof requestOverrides?.messageForModel === "string"
+          ? requestOverrides.messageForModel
+          : undefined,
+    };
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
         return;
@@ -2355,6 +2366,7 @@ export const useMessage = () => {
               ? trimmedImageBackendOverride
               : undefined,
             regenerateFromMessage,
+            ...conversationContextOverrides,
             ...replyOverrides,
           },
         );
@@ -2522,6 +2534,7 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 uploadedFiles,
                 regenerateFromMessage,
+                ...conversationContextOverrides,
                 ...replyOverrides,
               },
             );
@@ -2553,6 +2566,7 @@ export const useMessage = () => {
                 webSearch: resolvedWebSearch,
                 setIsSearchingInternet,
                 regenerateFromMessage,
+                ...conversationContextOverrides,
                 ...replyOverrides,
               },
             );

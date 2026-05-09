@@ -1376,12 +1376,13 @@ export const chatRagMethods = {
     scan_depth?: number
     token_budget?: number
     recursive_scanning?: boolean
-  }): Promise<WorldBookProcessResponse> {
+  }, options?: { signal?: AbortSignal }): Promise<WorldBookProcessResponse> {
     return await bgRequest<WorldBookProcessResponse>({
       path: "/api/v1/characters/world-books/process",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      abortSignal: options?.signal
     })
   },
 
@@ -1527,14 +1528,16 @@ export const chatRagMethods = {
     text: string
     token_budget?: number
     dictionary_id?: number | string
+    dictionary_ids?: Array<number | string>
     max_iterations?: number
     chat_id?: string
-  }): Promise<any> {
+  }, options?: { signal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/chat/dictionaries/process",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      abortSignal: options?.signal
     })
   },
 

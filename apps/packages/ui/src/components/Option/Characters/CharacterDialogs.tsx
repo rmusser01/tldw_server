@@ -48,8 +48,14 @@ import { validateAndCreateImageDataUrl } from "@/utils/image-utils"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { focusComposer } from "@/hooks/useComposerFocus"
+import {
+  buildCharacterChatReadiness,
+  CHARACTER_CHAT_MODEL_SETTINGS_PATH,
+  getCharacterChatReadinessCopy
+} from "@/utils/chat-model-availability"
 import type { TFunction } from "i18next"
 import type { NavigateFunction } from "react-router-dom"
+import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
 
 // ---------------------------------------------------------------------------
 // Shared props type for the CharacterDialogs component
@@ -107,6 +113,7 @@ export type CharacterDialogsProps = {
   closeQuickChat: () => Promise<void>
   quickChatModelOptions: Array<{ value: string; label: string }>
   activeQuickChatModel: string | null
+  isServerConnected: boolean
   setQuickChatModelOverride: (v: string | null) => void
   quickChatError: string | null
   quickChatMessages: Array<{ id: string; role: string; content: string }>
@@ -115,6 +122,9 @@ export type CharacterDialogsProps = {
   quickChatSending: boolean
   sendQuickChatMessage: () => Promise<void>
   handlePromoteQuickChat: () => Promise<void>
+  chatIntentBlocker: CharacterChatIntentBlocker | null
+  clearChatIntentBlocker: () => Promise<void>
+  retryChatIntentBlocker: () => Promise<void>
 
   // --- conversations ---
   conversationsOpen: boolean
@@ -310,6 +320,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     closeQuickChat,
     quickChatModelOptions,
     activeQuickChatModel,
+    isServerConnected,
     setQuickChatModelOverride,
     quickChatError,
     quickChatMessages,
@@ -318,6 +329,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     quickChatSending,
     sendQuickChatMessage,
     handlePromoteQuickChat,
+    chatIntentBlocker,
+    clearChatIntentBlocker,
+    retryChatIntentBlocker,
     // conversations
     conversationsOpen,
     setConversationsOpen,
@@ -466,6 +480,51 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     data
   } = props
 
+  const quickChatReadiness = React.useMemo(
+    () =>
+      buildCharacterChatReadiness({
+        isServerConnected,
+        selectedCharacter: quickChatCharacter,
+        selectedModel: activeQuickChatModel,
+        availableModels: quickChatModelOptions.map((option) => ({
+          model: option.value
+        })),
+        isSendBlocked: quickChatSending
+      }),
+    [
+      activeQuickChatModel,
+      isServerConnected,
+      quickChatCharacter,
+      quickChatModelOptions,
+      quickChatSending
+    ]
+  )
+  const quickChatReadinessCopy = React.useMemo(
+    () =>
+      getCharacterChatReadinessCopy(quickChatReadiness, t, {
+        characterName:
+          quickChatCharacter?.name ||
+          quickChatCharacter?.title ||
+          quickChatCharacter?.slug ||
+          null
+      }),
+    [quickChatCharacter, quickChatReadiness, t]
+  )
+  const showQuickChatModelBlocker =
+    quickChatReadiness.missingRequirement === "chat-model"
+  const chatIntentReadinessCopy = React.useMemo(() => {
+    if (!chatIntentBlocker) return null
+    const characterSelection = chatIntentBlocker.characterSelection
+    const readiness = chatIntentBlocker.readiness
+    return getCharacterChatReadinessCopy(readiness, t, {
+      characterName:
+        characterSelection?.name ||
+        characterSelection?.title ||
+        characterSelection?.slug ||
+        null
+    })
+  }, [chatIntentBlocker, t])
+
   const characterIdentifierFn = (record: any): string =>
     String(record?.id ?? record?.slug ?? record?.name ?? "")
 
@@ -581,6 +640,57 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
 
   return (
     <>
+      {/* Full character-chat intent blocker */}
+      <Modal
+        title={t("settings:manageCharacters.chatIntent.title", {
+          defaultValue: "Character chat setup"
+        })}
+        open={!!chatIntentBlocker}
+        onCancel={() => {
+          void clearChatIntentBlocker()
+        }}
+        destroyOnHidden
+        width={560}
+        rootClassName="characters-motion-modal"
+        footer={[
+          <Button
+            key="return"
+            onClick={() => {
+              void clearChatIntentBlocker()
+            }}>
+            {t("settings:manageCharacters.chatIntent.return", {
+              defaultValue: "Return to character"
+            })}
+          </Button>,
+          <Button
+            key="retry"
+            onClick={() => {
+              void retryChatIntentBlocker()
+            }}>
+            {t("settings:manageCharacters.chatIntent.retry", {
+              defaultValue: "Retry character chat"
+            })}
+          </Button>,
+          <Button
+            key="settings"
+            type="primary"
+            href={CHARACTER_CHAT_MODEL_SETTINGS_PATH}>
+            {chatIntentReadinessCopy?.actionLabel ||
+              t("settings:manageCharacters.chatIntent.openModelSettings", {
+                defaultValue: "Open model settings"
+              })}
+          </Button>
+        ]}>
+        {chatIntentReadinessCopy && (
+          <Alert
+            type="warning"
+            showIcon
+            title={chatIntentReadinessCopy.title}
+            description={chatIntentReadinessCopy.description}
+          />
+        )}
+      </Modal>
+
       {/* Import Preview Modal */}
       <Modal
         title={t("settings:manageCharacters.import.previewTitle", {
@@ -791,11 +901,30 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             />
           </div>
 
+          {showQuickChatModelBlocker && (
+            <Alert
+              type="warning"
+              showIcon
+              title={quickChatReadinessCopy.title}
+              description={
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{quickChatReadinessCopy.description}</span>
+                  <a
+                    href={CHARACTER_CHAT_MODEL_SETTINGS_PATH}
+                    className="shrink-0 text-primary hover:underline"
+                  >
+                    {quickChatReadinessCopy.actionLabel}
+                  </a>
+                </div>
+              }
+            />
+          )}
+
           {quickChatError && (
             <Alert
               type="warning"
               showIcon
-              message={quickChatError}
+              title={quickChatError}
             />
           )}
 
@@ -852,7 +981,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               onClick={() => {
                 void sendQuickChatMessage()
               }}
-              disabled={!quickChatDraft.trim() || !activeQuickChatModel}>
+              disabled={!quickChatDraft.trim() || !quickChatReadiness.canStart}>
               {t("settings:manageCharacters.quickChat.send", {
                 defaultValue: "Send"
               })}

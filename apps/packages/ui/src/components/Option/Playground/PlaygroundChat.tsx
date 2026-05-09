@@ -1,5 +1,6 @@
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { PlaygroundEmpty } from "./PlaygroundEmpty"
@@ -15,6 +16,11 @@ import { useIsConnected } from "@/hooks/useConnectionState"
 import { tldwClient, type ChatLinkedResearchRun } from "@/services/tldw/TldwApiClient"
 import { NoProviderBanner } from "@/components/Common/NoProviderBanner"
 import { applyVariantToMessage } from "@/utils/message-variants"
+import {
+  buildCharacterChatReadiness,
+  CHARACTER_CHAT_MODEL_SETTINGS_PATH,
+  getCharacterChatReadinessCopy
+} from "@/utils/chat-model-availability"
 import {
   getChatLinkedResearchActionPolicy,
   getChatLinkedResearchRefetchInterval,
@@ -208,6 +214,23 @@ export const PlaygroundChat = ({
   })
   const noProvidersConfigured =
     providersStatus != null && providersStatus.any_configured === false
+  const selectedCharacterName =
+    selectedCharacter?.name ||
+    (selectedCharacter as any)?.title ||
+    (selectedCharacter as any)?.slug ||
+    null
+  const characterChatNoModelCopy = React.useMemo(() => {
+    if (!selectedCharacter) return null
+    const readiness = buildCharacterChatReadiness({
+      isServerConnected: isConnected,
+      selectedCharacter,
+      selectedModel: null,
+      availableModels: chatModels as any[]
+    })
+    return getCharacterChatReadinessCopy(readiness, t, {
+      characterName: selectedCharacterName
+    })
+  }, [chatModels, isConnected, selectedCharacter, selectedCharacterName, t])
   const compareModeActive = compareFeatureEnabled && compareMode
   const stableHistoryId =
     temporaryChat || historyId === "temp" ? null : historyId
@@ -1021,9 +1044,26 @@ export const PlaygroundChat = ({
             )}
             {isConnected && !noProvidersConfigured && chatModelsFetched && chatModels.length === 0 && (
               <div className="mx-auto mb-4 max-w-xl rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-center text-sm text-text">
-                <p className="font-medium">{t("playground:noModelsAvailable", "No AI models available")}</p>
+                <p className="font-medium">
+                  {characterChatNoModelCopy
+                    ? characterChatNoModelCopy.title
+                    : t("playground:noModelsAvailable", "No AI models available")}
+                </p>
                 <p className="mt-1 text-xs text-text-muted">
-                  {t("playground:addApiKeyInstructions", "Add an LLM provider API key in your server settings and restart, then")}{" "}
+                  {characterChatNoModelCopy
+                    ? characterChatNoModelCopy.description
+                    : t("playground:addApiKeyInstructions", "Add an LLM provider API key in your server settings and restart, then")}{" "}
+                  {characterChatNoModelCopy && (
+                    <>
+                      <Link
+                        to={CHARACTER_CHAT_MODEL_SETTINGS_PATH}
+                        className="underline hover:text-text"
+                      >
+                        {characterChatNoModelCopy.actionLabel}
+                      </Link>{" "}
+                      {t("common:or", "or")}{" "}
+                    </>
+                  )}
                   <button
                     type="button"
                     className="underline hover:text-text"

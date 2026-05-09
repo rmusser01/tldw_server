@@ -131,11 +131,11 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.type(
-      await screen.findByRole("textbox", { name: /search assistants/i }),
+      await screen.findByRole("textbox", { name: /search characters and personas/i }),
       "beta"
     )
 
@@ -148,7 +148,7 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(
@@ -156,6 +156,42 @@ describe("AssistantSelect behavior", () => {
     )
 
     expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+  })
+
+  it("opens the character tab when character chat requests character selection", async () => {
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: { tab: "character", source: "chat-header" }
+      })
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Alpha" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Characters" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+  })
+
+  it("labels identity and optional scene choices without mixing character and persona concepts", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    expect(
+      screen.getByRole("tablist", { name: "Character or persona" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Characters" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Personas" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Optional scene context" })
+    ).toBeInTheDocument()
   })
 
   it("keeps personas accessible and dispatches the actor footer action", async () => {
@@ -166,7 +202,7 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(await screen.findByRole("tab", { name: "Personas" }))
@@ -175,7 +211,7 @@ describe("AssistantSelect behavior", () => {
     ).toBeInTheDocument()
 
     await user.click(
-      await screen.findByRole("button", { name: /scene director \(actor\)/i })
+      await screen.findByRole("button", { name: "Optional scene context" })
     )
 
     expect(actorListener).toHaveBeenCalledTimes(1)
@@ -205,7 +241,7 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(await screen.findByRole("tab", { name: "Personas" }))
@@ -245,7 +281,7 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(

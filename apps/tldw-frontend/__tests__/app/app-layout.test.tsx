@@ -1,5 +1,5 @@
 import React from "react"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@web/lib/i18n-web", () => ({}))
@@ -63,8 +63,24 @@ vi.mock("@web/components/networking/ServerReadinessGate", () => ({
 }))
 
 vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
-  FirstRunGate: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="first-run-gate">{children}</div>
+  FirstRunGate: ({
+    children,
+    bypass,
+    onStartSetup
+  }: {
+    children: React.ReactNode
+    bypass?: boolean
+    onStartSetup: () => void
+  }) => (
+    <div data-testid="first-run-gate" data-bypass={String(Boolean(bypass))}>
+      <button
+        type="button"
+        data-testid="first-run-gate-start"
+        onClick={onStartSetup}>
+        Start setup
+      </button>
+      {children}
+    </div>
   )
 }))
 
@@ -79,9 +95,9 @@ vi.mock("@web/lib/configured-auth-state", () => ({
 
 const DummyPage = () => <div data-testid="page-content">Page</div>
 
-const renderApp = (pathname: string) => {
+const renderApp = (pathname: string, asPath = pathname) => {
   mockRouter.pathname = pathname
-  mockRouter.asPath = pathname
+  mockRouter.asPath = asPath
   return render(<App Component={DummyPage} pageProps={{}} />)
 }
 
@@ -114,8 +130,46 @@ describe("App layout routing", () => {
     renderApp("/media")
     expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
     expect(screen.getByTestId("first-run-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "false"
+    )
     expect(await screen.findByTestId("option-layout")).toBeInTheDocument()
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
+  })
+
+  it("bypasses the generic first-run splash for character-chat route intent", async () => {
+    renderApp("/characters")
+
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith(
+      "/?intent=character-chat&returnTo=%2Fcharacters"
+    )
+  })
+
+  it("preserves explicit character-chat onboarding routes through first-run setup", async () => {
+    renderApp(
+      "/",
+      "/?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue"
+    )
+
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith(
+      "/?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue"
+    )
   })
 
   it("skips OptionLayout for /login but keeps ServerReadinessGate mounted", () => {

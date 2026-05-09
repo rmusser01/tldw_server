@@ -102,7 +102,11 @@ def _normalize_dictionary_tags(value: Any) -> list[str]:
     return normalized_tags
 
 
-def _normalize_included_dictionary_ids(value: Any) -> list[int]:
+def _normalize_included_dictionary_ids(
+    value: Any,
+    *,
+    field_name: str = "included_dictionary_ids",
+) -> list[int]:
     if value is None:
         return []
 
@@ -122,7 +126,7 @@ def _normalize_included_dictionary_ids(value: Any) -> list[int]:
     elif isinstance(value, (list, tuple, set)):
         raw_values = list(value)
     else:
-        raise ValueError("included_dictionary_ids must be a list of integers")
+        raise ValueError(f"{field_name} must be a list of integers")
 
     normalized: list[int] = []
     seen: set[int] = set()
@@ -132,16 +136,16 @@ def _normalize_included_dictionary_ids(value: Any) -> list[int]:
         try:
             dictionary_id = int(item)
         except (TypeError, ValueError):
-            raise ValueError(f"Invalid dictionary ID '{item}' in included_dictionary_ids") from None
+            raise ValueError(f"Invalid dictionary ID '{item}' in {field_name}") from None
         if dictionary_id <= 0:
-            raise ValueError("included_dictionary_ids must contain positive integers")
+            raise ValueError(f"{field_name} must contain positive integers")
         if dictionary_id in seen:
             continue
         seen.add(dictionary_id)
         normalized.append(dictionary_id)
 
     if len(normalized) > MAX_INCLUDED_DICTIONARIES:
-        raise ValueError(f"At most {MAX_INCLUDED_DICTIONARIES} included dictionaries are allowed")
+        raise ValueError(f"At most {MAX_INCLUDED_DICTIONARIES} {field_name} are allowed")
 
     return normalized
 
@@ -473,6 +477,10 @@ class ProcessTextRequest(BaseModel):
     """Request schema for processing text through dictionaries."""
     text: str = Field(..., max_length=MAX_CHAT_DICTIONARY_TEXT_LENGTH, description="Text to process")
     dictionary_id: Optional[int] = Field(None, description="Specific dictionary to use")
+    dictionary_ids: Optional[list[int]] = Field(
+        None,
+        description="Explicit client-ordered dictionaries to apply. An empty list applies no dictionaries.",
+    )
     group: Optional[str] = Field(None, description="Specific group to filter entries")
     max_iterations: int = Field(5, ge=1, le=20, description="Maximum processing iterations")
     token_budget: Optional[int] = Field(None, ge=1, description="Optional token limit")
@@ -480,6 +488,13 @@ class ProcessTextRequest(BaseModel):
         None,
         description="Optional chat session ID for activity/audit attribution.",
     )
+
+    @field_validator("dictionary_ids", mode="before")
+    @classmethod
+    def normalize_dictionary_ids(cls, value: Any) -> Optional[list[int]]:
+        if value is None:
+            return None
+        return _normalize_included_dictionary_ids(value, field_name="dictionary_ids")
 
 
 class ProcessTextResponse(BaseModel):

@@ -9,6 +9,10 @@ import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { focusComposer } from "@/hooks/useComposerFocus"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import {
+  buildCharacterChatReadiness,
+  getCharacterChatReadinessCopy
+} from "@/utils/chat-model-availability"
 import { buildCharacterSelectionPayload } from "../utils"
 
 type CharacterQuickChatMessage = {
@@ -39,10 +43,19 @@ export interface UseCharacterQuickChatDeps {
   t: (key: string, opts?: Record<string, any>) => string
   /** Active model for quick chat (resolved from overrides/defaults) */
   activeQuickChatModel: string | null
+  /** Server connectivity/readiness for character chat. */
+  isServerConnected?: boolean
+  /** Loaded model catalog used to validate selected model availability. */
+  availableModels?: Array<{ model?: unknown; name?: unknown }> | null
 }
 
 export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
-  const { t, activeQuickChatModel } = deps
+  const {
+    t,
+    activeQuickChatModel,
+    isServerConnected = true,
+    availableModels
+  } = deps
 
   const navigate = useNavigate()
   const [, setSelectedCharacter] = useSelectedCharacter<any>(null)
@@ -134,13 +147,20 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
 
   const sendQuickChatMessage = React.useCallback(async () => {
     const trimmed = quickChatDraft.trim()
-    if (!trimmed || quickChatSending || !quickChatCharacter) return
-    if (!activeQuickChatModel) {
-      setQuickChatError(
-        t("settings:manageCharacters.quickChat.modelRequired", {
-          defaultValue: "Select a model to start quick chat."
-        })
-      )
+    if (!trimmed || !quickChatCharacter) return
+    const readiness = buildCharacterChatReadiness({
+      isServerConnected,
+      selectedCharacter: quickChatCharacter,
+      selectedModel: activeQuickChatModel,
+      availableModels,
+      isSendBlocked: quickChatSending
+    })
+    if (!readiness.canStart) {
+      const characterSelection = buildCharacterSelectionPayload(quickChatCharacter)
+      const readinessCopy = getCharacterChatReadinessCopy(readiness, t, {
+        characterName: characterSelection.name
+      })
+      setQuickChatError(readinessCopy.title)
       return
     }
 
@@ -243,6 +263,8 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
     }
   }, [
     activeQuickChatModel,
+    availableModels,
+    isServerConnected,
     quickChatCharacter,
     quickChatDraft,
     quickChatMessages,

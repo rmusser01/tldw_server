@@ -8,6 +8,11 @@ import type { PersonaInfo } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import {
+  OPEN_ASSISTANT_SELECT_EVENT,
+  type AssistantSelectOpenDetail,
+  type AssistantSelectTab
+} from "@/utils/assistant-select-events"
+import {
   characterToAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection
@@ -119,6 +124,25 @@ export const AssistantSelect: React.FC<Props> = ({
       setActiveTab(selectedAssistant.kind)
     }
   }, [selectedAssistant?.kind])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<AssistantSelectOpenDetail>).detail
+      const requestedTab = detail?.tab
+      if (requestedTab === "character" || requestedTab === "persona") {
+        setActiveTab(requestedTab as AssistantSelectTab)
+      }
+      setSearchText("")
+      setOpen(true)
+    }
+
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
+    return () => {
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!open || typeof window === "undefined") return
@@ -320,15 +344,15 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const buttonLabel =
     selectedAssistant?.name ||
-    t("option:assistant.selectAssistant", "Select assistant")
+    t("option:assistant.selectAssistant", "Select character or persona")
 
   const searchLabel = t(
     "option:assistant.searchPlaceholder",
-    "Search assistants"
+    "Search characters and personas"
   )
   const actorLabel = t(
     "playground:composer.actorTitle",
-    "Scene Director (Actor)"
+    "Optional scene context"
   )
 
   const tabs = [
@@ -469,7 +493,7 @@ export const AssistantSelect: React.FC<Props> = ({
       </div>
       <div
         role="tablist"
-        aria-label={t("option:assistant.tabList", "Assistant types")}
+        aria-label={t("option:assistant.tabList", "Character or persona")}
         className="flex items-center gap-1 border-b border-border px-2 pt-2"
       >
         {tabs.map((tab) => {

@@ -3342,7 +3342,7 @@
     "message": "Close chat tab"
   },
   "playground_actor_title": {
-    "message": "Scene Director (Actor)"
+    "message": "Optional scene context"
   },
   "playground_actor_help": {
     "message": "Configure per-chat scene context: roles, mood, world, goals, and notes."
