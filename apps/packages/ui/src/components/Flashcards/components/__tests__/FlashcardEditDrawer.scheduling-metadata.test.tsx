@@ -133,9 +133,15 @@ describe("FlashcardEditDrawer scheduling metadata panel", () => {
     expect(screen.getByText("Relearns")).toBeInTheDocument()
     expect(screen.getByText("2")).toBeInTheDocument()
 
-    const expectedDueAbsolute = formatFlashcardAbsoluteDateTime(dueAt) ?? ""
+    const expectedDueAbsolute = formatFlashcardAbsoluteDateTime(dueAt)
     const expectedLastReviewedAbsolute =
-      formatFlashcardAbsoluteDateTime(lastReviewedAt) ?? ""
+      formatFlashcardAbsoluteDateTime(lastReviewedAt)
+    expect(expectedDueAbsolute).not.toBeNull()
+    expect(expectedLastReviewedAbsolute).not.toBeNull()
+    if (expectedDueAbsolute == null || expectedLastReviewedAbsolute == null) {
+      throw new Error("Expected valid scheduling timestamp labels")
+    }
+
     expect(
       screen.getByText((content) => content.includes(expectedDueAbsolute))
     ).toBeInTheDocument()

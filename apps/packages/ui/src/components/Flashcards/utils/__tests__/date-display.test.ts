@@ -21,6 +21,14 @@ describe("flashcard date display utilities", () => {
     ["invalid-date", null],
     [null, null],
     ["2026-02-18T09:00:00Z", Date.parse("2026-02-18T09:00:00Z")],
+    [
+      Date.parse("2026-02-18T09:00:00Z") / 1000,
+      Date.parse("2026-02-18T09:00:00Z")
+    ],
+    [
+      new Date(2000, 0, 1, 0, 0).getTime(),
+      new Date(2000, 0, 1, 0, 0).getTime()
+    ]
   ])("parses %s to %s", (value, expected) => {
     expect(parseFlashcardTimestamp(value)).toBe(expected)
   })
@@ -62,6 +70,17 @@ describe("flashcard date display utilities", () => {
       absolute: "2026-02-18 09:00",
       relative: "3 hours ago",
       timestamp: new Date(2026, 1, 18, 9, 0).getTime()
+    })
+  })
+
+  it("combines pre-2001 millisecond timestamps without reinterpreting them as seconds", () => {
+    const timestamp = new Date(2000, 0, 1, 0, 0).getTime()
+    const nowMs = new Date(2000, 0, 2, 0, 0).getTime()
+
+    expect(formatFlashcardTimestampWithRelative(timestamp, { nowMs })).toEqual({
+      absolute: "2000-01-01 00:00",
+      relative: "a day ago",
+      timestamp
     })
   })
 })

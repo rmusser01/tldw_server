@@ -1,5 +1,6 @@
 const SECONDS_TO_MS = 1000
-const SECOND_TIMESTAMP_CUTOFF = 1_000_000_000_000
+// Epoch seconds remain below this until 2286; millisecond timestamps exceed it after 1970.
+const SECOND_TIMESTAMP_CUTOFF = 10_000_000_000
 const MINUTES_TO_MS = 60 * SECONDS_TO_MS
 const HOURS_TO_MS = 60 * MINUTES_TO_MS
 const DAYS_TO_MS = 24 * HOURS_TO_MS
@@ -32,10 +33,7 @@ export const parseFlashcardTimestamp = (value: unknown): number | null => {
 
 const padDatePart = (value: number): string => value.toString().padStart(2, "0")
 
-export const formatFlashcardAbsoluteDateTime = (value: unknown): string | null => {
-  const timestamp = parseFlashcardTimestamp(value)
-  if (timestamp == null) return null
-
+const formatFlashcardAbsoluteDateTimeFromMs = (timestamp: number): string => {
   const date = new Date(timestamp)
   const year = date.getFullYear()
   const month = padDatePart(date.getMonth() + 1)
@@ -46,13 +44,15 @@ export const formatFlashcardAbsoluteDateTime = (value: unknown): string | null =
   return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
-export const formatFlashcardRelativeTime = (
-  value: unknown,
-  options?: { nowMs?: number }
-): string | null => {
+export const formatFlashcardAbsoluteDateTime = (value: unknown): string | null => {
   const timestamp = parseFlashcardTimestamp(value)
-  if (timestamp == null) return null
+  return timestamp == null ? null : formatFlashcardAbsoluteDateTimeFromMs(timestamp)
+}
 
+const formatFlashcardRelativeTimeFromMs = (
+  timestamp: number,
+  options?: { nowMs?: number }
+): string => {
   const nowMs =
     typeof options?.nowMs === "number" && Number.isFinite(options.nowMs)
       ? options.nowMs
@@ -90,6 +90,14 @@ export const formatFlashcardRelativeTime = (
   return unitRelative(years, "a year", "years")
 }
 
+export const formatFlashcardRelativeTime = (
+  value: unknown,
+  options?: { nowMs?: number }
+): string | null => {
+  const timestamp = parseFlashcardTimestamp(value)
+  return timestamp == null ? null : formatFlashcardRelativeTimeFromMs(timestamp, options)
+}
+
 export const formatFlashcardTimestampWithRelative = (
   value: unknown,
   options?: { nowMs?: number }
@@ -97,13 +105,9 @@ export const formatFlashcardTimestampWithRelative = (
   const timestamp = parseFlashcardTimestamp(value)
   if (timestamp == null) return null
 
-  const absolute = formatFlashcardAbsoluteDateTime(timestamp)
-  const relative = formatFlashcardRelativeTime(timestamp, options)
-  if (!absolute || !relative) return null
-
   return {
-    absolute,
-    relative,
+    absolute: formatFlashcardAbsoluteDateTimeFromMs(timestamp),
+    relative: formatFlashcardRelativeTimeFromMs(timestamp, options),
     timestamp
   }
 }
