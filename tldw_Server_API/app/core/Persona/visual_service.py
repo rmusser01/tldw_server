@@ -14,6 +14,10 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
+    collect_visual_manifest_asset_ids,
+    remap_visual_manifest_assets,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
     validate_visual_manifest,
@@ -222,6 +226,171 @@ class PersonaVisualService:
             persona_id=persona_id,
             user_id=user_id,
         )
+
+    def duplicate_pack_to_persona(
+        self,
+        *,
+        source_persona_id: str,
+        user_id: str,
+        pack_id: str,
+        target_persona_id: str,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        if str(source_persona_id) == str(target_persona_id):
+            raise PersonaVisualServiceError(
+                "same_persona_target_unsupported",
+                "Persona visual packs can only be duplicated to a different persona in V1.",
+            )
+
+        source_pack = self._db.get_persona_visual_pack(
+            pack_id=pack_id,
+            persona_id=source_persona_id,
+            user_id=user_id,
+        )
+        if not source_pack:
+            raise PersonaVisualServiceError(
+                "pack_not_found",
+                "Persona visual pack not found for user.",
+                details={"pack_id": pack_id},
+            )
+
+        target_persona = self._db.get_persona_profile(
+            target_persona_id,
+            user_id=user_id,
+        )
+        if not target_persona:
+            raise PersonaVisualServiceError(
+                "target_persona_not_found",
+                "Target persona not found for user.",
+                details={"target_persona_id": target_persona_id},
+            )
+
+        source_manifest = source_pack.get("manifest") if isinstance(source_pack.get("manifest"), dict) else {}
+        source_assets = self._db.list_persona_visual_assets(
+            pack_id=pack_id,
+            persona_id=source_persona_id,
+            user_id=user_id,
+        )
+        source_assets_by_id = {str(asset["id"]): asset for asset in source_assets}
+        referenced_asset_ids = collect_visual_manifest_asset_ids(source_manifest)
+        missing_asset_ids = sorted(referenced_asset_ids - set(source_assets_by_id))
+        if missing_asset_ids:
+            raise PersonaVisualServiceError(
+                "invalid_manifest",
+                "Persona visual manifest references assets that are not in the source pack.",
+                details={"asset_ids": missing_asset_ids},
+            )
+
+        preflight_assets: list[tuple[dict[str, Any], bytes]] = []
+        for asset_id in sorted(referenced_asset_ids):
+            asset = source_assets_by_id[asset_id]
+            source_path = self._asset_storage_path(
+                user_id=user_id,
+                storage_key=str(asset.get("storage_key") or ""),
+            )
+            if not source_path.is_file():
+                raise PersonaVisualServiceError(
+                    "source_asset_missing",
+                    "Persona visual source asset file is missing.",
+                    details={"asset_id": asset_id},
+                )
+            content = source_path.read_bytes()
+            checksum = hashlib.sha256(content).hexdigest()
+            if checksum != str(asset.get("checksum_sha256") or ""):
+                raise PersonaVisualServiceError(
+                    "source_asset_checksum_mismatch",
+                    "Persona visual source asset checksum does not match metadata.",
+                    details={"asset_id": asset_id},
+                )
+            preflight_assets.append((asset, content))
+
+        title_value = str(title or "").strip()
+        if not title_value:
+            title_value = f"Copy of {source_pack['title']}"
+        renderer_type = str(source_pack.get("renderer_type") or "sprite_frames")
+        target_pack = self._db.create_persona_visual_pack(
+            persona_id=target_persona_id,
+            user_id=user_id,
+            title=title_value,
+            renderer_type=renderer_type,
+            status="failed",
+            parent_pack_id=pack_id,
+            parent_persona_id=source_persona_id,
+            provenance="mixed",
+            manifest={
+                "manifest_version": 1,
+                "renderer_type": renderer_type,
+                "states": {},
+                "animations": {},
+            },
+        )
+        copied_file_paths: list[Path] = []
+        try:
+            asset_id_map: dict[str, str] = {}
+            copied_assets: list[dict[str, Any]] = []
+            for source_asset, content in preflight_assets:
+                copied = self.create_asset_from_upload(
+                    persona_id=target_persona_id,
+                    user_id=user_id,
+                    pack_id=str(target_pack["id"]),
+                    content=content,
+                    mime_type=str(source_asset.get("mime_type") or "application/octet-stream"),
+                    original_filename=source_asset.get("original_filename"),
+                    asset_role=str(source_asset.get("asset_role") or "frame"),
+                    provenance="mixed",
+                )
+                if copied.get("storage_path"):
+                    copied_file_paths.append(Path(str(copied["storage_path"])))
+                asset_id_map[str(source_asset["id"])] = str(copied["id"])
+                copied_assets.append(copied)
+
+            remapped_manifest = remap_visual_manifest_assets(source_manifest, asset_id_map)
+            asset_ids = {str(asset["id"]) for asset in copied_assets}
+            asset_dimensions = {
+                str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+                for asset in copied_assets
+                if asset.get("width") is not None and asset.get("height") is not None
+            }
+            try:
+                validation = validate_visual_manifest(
+                    remapped_manifest,
+                    available_asset_ids=asset_ids,
+                    available_asset_dimensions=asset_dimensions,
+                    require_activatable=False,
+                )
+            except PersonaVisualManifestError as exc:
+                raise PersonaVisualServiceError(
+                    "invalid_manifest",
+                    str(exc),
+                    details={"pack_id": pack_id},
+                ) from exc
+            updated_pack = self._db.update_persona_visual_pack_manifest(
+                pack_id=str(target_pack["id"]),
+                persona_id=target_persona_id,
+                user_id=user_id,
+                manifest=validation.manifest,
+                expected_version=int(target_pack["version"]),
+            )
+            finalized = self._db.update_persona_visual_pack_status(
+                pack_id=str(target_pack["id"]),
+                persona_id=target_persona_id,
+                user_id=user_id,
+                status="draft",
+                expected_version=int(updated_pack["version"]),
+            )
+        except Exception:
+            for path in copied_file_paths:
+                path.unlink(missing_ok=True)
+            raise
+
+        assets = self._db.list_persona_visual_assets(
+            pack_id=str(target_pack["id"]),
+            persona_id=target_persona_id,
+            user_id=user_id,
+        )
+        finalized["assets"] = assets
+        finalized["assets_by_id"] = {str(asset["id"]): asset for asset in assets}
+        return finalized
 
     def list_candidates(
         self,
@@ -474,6 +643,24 @@ class PersonaVisualService:
             )
         storage_key = f"{VISUAL_STORAGE_PREFIX}/{safe_persona_id}/{safe_pack_id}/{safe_asset_name}"
         return storage_key, target_path
+
+    def _asset_storage_path(self, *, user_id: str, storage_key: str) -> Path:
+        prefix = f"{VISUAL_STORAGE_PREFIX}/"
+        relative_key = storage_key[len(prefix):] if storage_key.startswith(prefix) else storage_key
+        relative_path = Path(*Path(relative_key).parts)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise PersonaVisualServiceError(
+                "invalid_storage_path",
+                "Persona visual storage path escapes the user visual directory.",
+            )
+        base = DatabasePaths.get_user_persona_visuals_dir(user_id).resolve(strict=False)
+        target_path = (base / relative_path).resolve(strict=False)
+        if not target_path.is_relative_to(base):
+            raise PersonaVisualServiceError(
+                "invalid_storage_path",
+                "Persona visual storage path escapes the user visual directory.",
+            )
+        return target_path
 
 
 __all__ = [

@@ -445,7 +445,7 @@ git commit -m "Support persona visual duplicate lineage"
 - Modify: `tldw_Server_API/app/core/Persona/visual_service.py`
 - Test: `tldw_Server_API/tests/Persona/test_persona_visual_service.py`
 
-- [ ] **Step 1: Write failing service test for successful duplicate**
+- [x] **Step 1: Write failing service test for successful duplicate**
 
 Add to `tldw_Server_API/tests/Persona/test_persona_visual_service.py`:
 
@@ -553,7 +553,7 @@ def test_duplicate_pack_to_persona_copies_referenced_assets_and_remaps_manifest(
     assert remapped_animation["preview_asset_id"] in copied_ids
 ```
 
-- [ ] **Step 2: Write failing service tests for V1 guardrails**
+- [x] **Step 2: Write failing service tests for V1 guardrails**
 
 Add tests for same-persona, missing manifest asset row, and missing source file:
 
@@ -580,7 +580,7 @@ For checksum mismatch, mutate the stored source file bytes after upload and asse
 
 For partial failure cleanup, induce an exception after the first copied file is created, then assert copied files under the target pack storage directory were removed and no target pack was promoted to `draft` or `active`.
 
-- [ ] **Step 3: Run service duplicate tests and verify they fail**
+- [x] **Step 3: Run service duplicate tests and verify they fail**
 
 Run:
 
@@ -591,7 +591,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q
 
 Expected: failures because `duplicate_pack_to_persona()` does not exist.
 
-- [ ] **Step 4: Add source asset path resolution helper**
+- [x] **Step 4: Add source asset path resolution helper**
 
 In `PersonaVisualService`, add a private helper based on the exporter pattern:
 
@@ -617,7 +617,7 @@ def _asset_storage_path(self, *, user_id: str, storage_key: str) -> Path:
 
 If using `Path(*Path(relative_key).parts)` proves awkward with normalized keys, import and reuse `_safe_relative_storage_path()` from the exporter only if it does not create an import cycle. Otherwise keep the helper local.
 
-- [ ] **Step 5: Add duplicate orchestration**
+- [x] **Step 5: Add duplicate orchestration**
 
 In `PersonaVisualService`, implement:
 
@@ -778,7 +778,7 @@ def duplicate_pack_to_persona(
 
 Adjust exact calls if `get_persona_profile()` uses a different signature; use the existing profile owner helper pattern from the endpoint if needed.
 
-- [ ] **Step 6: Convert manifest validation errors**
+- [x] **Step 6: Convert manifest validation errors**
 
 Wrap `validate_visual_manifest()` in the duplicate path:
 
@@ -793,7 +793,7 @@ except PersonaVisualManifestError as exc:
     ) from exc
 ```
 
-- [ ] **Step 7: Run service tests**
+- [x] **Step 7: Run service tests**
 
 Run:
 
@@ -804,7 +804,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q
 
 Expected: pass.
 
-- [ ] **Step 8: Commit service duplicate behavior**
+- [x] **Step 8: Commit service duplicate behavior**
 
 ```bash
 git add tldw_Server_API/app/core/Persona/visual_service.py \
