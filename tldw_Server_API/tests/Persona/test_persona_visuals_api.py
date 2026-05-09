@@ -162,15 +162,19 @@ class FakeImageRegistry:
         enabled_backends: list[str] | None = None,
         default_backend: str | None = None,
         adapter_available: bool = True,
+        raise_on_resolve: bool = False,
     ) -> None:
         self.enabled_backends = enabled_backends or []
         self.default_backend = default_backend
         self.adapter_available = adapter_available
+        self.raise_on_resolve = raise_on_resolve
 
     def list_backend_names(self, *, include_disabled: bool = False) -> list[str]:
         return list(self.enabled_backends)
 
     def resolve_backend(self, requested: str | None) -> str | None:
+        if self.raise_on_resolve:
+            raise RuntimeError("backend resolution failed")
         name = (requested or self.default_backend or "").strip()
         if not name or name not in self.enabled_backends:
             return None
@@ -535,6 +539,44 @@ def test_visual_generation_readiness_reports_adapter_unavailable(
     assert payload["default_backend"] == "openrouter"
     assert payload["enabled_backends"] == ["openrouter"]
     assert payload["reasons"] == ["image_adapter_unavailable"]
+
+
+def test_visual_generation_readiness_fails_closed_when_dependency_check_errors(
+    persona_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PERSONA_VISUAL_GENERATION_WORKER_ENABLED", "true")
+    monkeypatch.setenv("PERSONA_VISUAL_GENERATION_JOBS_QUEUE", "persona-generation")
+    monkeypatch.setattr(
+        persona_ep,
+        "get_image_generation_registry",
+        lambda: FakeImageRegistry(
+            enabled_backends=["openrouter"],
+            default_backend="openrouter",
+            raise_on_resolve=True,
+        ),
+        raising=False,
+    )
+
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Readiness Dependency Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-readiness?backend=openrouter"
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["worker_enabled"] is True
+    assert payload["queue"] == "persona-generation"
+    assert payload["image_backend_available"] is False
+    assert payload["default_backend"] is None
+    assert payload["requested_backend"] == "openrouter"
+    assert payload["requested_backend_available"] is False
+    assert payload["enabled_backends"] == []
+    assert payload["reasons"] == ["dependency_check_failed"]
 
 
 def test_start_visual_pack_export_creates_portability_job(persona_db: CharactersRAGDB) -> None:

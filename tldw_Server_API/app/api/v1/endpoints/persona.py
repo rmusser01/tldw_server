@@ -1919,31 +1919,42 @@ def _build_persona_visual_generation_readiness(
     queue name, backend resolution, and adapter instantiation.
     """
 
-    registry = get_image_generation_registry()
-    enabled_backends = registry.list_backend_names(include_disabled=False)
-    default_backend = registry.resolve_backend(None)
     requested_backend = str(backend or "").strip() or None
-    resolved_backend = registry.resolve_backend(requested_backend) if requested_backend else default_backend
-    requested_backend_available = None
-    adapter_available = False
-    if resolved_backend:
-        adapter_available = registry.get_adapter(resolved_backend) is not None
-    if requested_backend is not None:
-        requested_backend_available = adapter_available
-
     worker_enabled = env_flag_enabled("PERSONA_VISUAL_GENERATION_WORKER_ENABLED")
-    image_backend_available = adapter_available
-    reasons: list[str] = []
-    if not worker_enabled:
-        reasons.append("jobs_worker_disabled")
-    if requested_backend and resolved_backend is None:
-        reasons.append("requested_backend_unavailable")
-    elif resolved_backend and not adapter_available:
-        reasons.append("image_adapter_unavailable")
-    elif not requested_backend and not enabled_backends:
-        reasons.append("image_backend_unavailable")
-    elif not requested_backend and default_backend is None:
-        reasons.append("default_backend_unavailable")
+    try:
+        registry = get_image_generation_registry()
+        enabled_backends = registry.list_backend_names(include_disabled=False)
+        default_backend = registry.resolve_backend(None)
+        resolved_backend = registry.resolve_backend(requested_backend) if requested_backend else default_backend
+        requested_backend_available = None
+        adapter_available = False
+        if resolved_backend:
+            adapter_available = registry.get_adapter(resolved_backend) is not None
+        if requested_backend is not None:
+            requested_backend_available = adapter_available
+
+        image_backend_available = adapter_available
+        reasons: list[str] = []
+        if not worker_enabled:
+            reasons.append("jobs_worker_disabled")
+        if requested_backend and resolved_backend is None:
+            reasons.append("requested_backend_unavailable")
+        elif resolved_backend and not adapter_available:
+            reasons.append("image_adapter_unavailable")
+        elif not requested_backend and not enabled_backends:
+            reasons.append("image_backend_unavailable")
+        elif not requested_backend and default_backend is None:
+            reasons.append("default_backend_unavailable")
+    except Exception:
+        logger.exception("Persona visual generation readiness dependency check failed")
+        enabled_backends = []
+        default_backend = None
+        requested_backend_available = False if requested_backend is not None else None
+        image_backend_available = False
+        reasons = []
+        if not worker_enabled:
+            reasons.append("jobs_worker_disabled")
+        reasons.append("dependency_check_failed")
 
     return PersonaVisualGenerationReadinessResponse(
         available=worker_enabled and image_backend_available,

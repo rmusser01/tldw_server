@@ -125,6 +125,17 @@ const getGenerationReadinessCopy = (
         }),
         toneClassName: "border-warning/40 bg-warning/10 text-warning"
       }
+    case "dependency_check_failed":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationDependencyCheckFailedTitle", {
+          defaultValue: "Generation readiness check failed."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationDependencyCheckFailedMessage", {
+          defaultValue:
+            "Check the server logs and image generation configuration before queueing a Persona Buddy visual generation job."
+        }),
+        toneClassName: "border-destructive/40 bg-destructive/10 text-destructive"
+      }
     case "backend_unavailable":
       return {
         title: t("sidepanel:personaGarden.visuals.generationBackendUnavailableTitle", {

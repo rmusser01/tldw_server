@@ -4,7 +4,7 @@ title: Improve Persona Visuals generation setup and unavailable-provider states
 status: Done
 assignee: []
 created_date: '2026-05-09 19:16'
-updated_date: '2026-05-09 19:42'
+updated_date: '2026-05-09 19:51'
 labels:
   - WebUI
   - Persona
@@ -54,12 +54,14 @@ Verification: Vitest focused Persona visual suite passed (VisualPackEditor, pers
 PR review follow-up: addressed Qodo and Gemini comments by checking adapter instantiation in the readiness endpoint, adding the requested Python docstrings, adding adapter-failure regression coverage, and guarding VisualPackEditor readiness loads against stale async responses after rapid pack switches.
 
 Review verification: Vitest focused Persona visual suite passed (VisualPackEditor, personaVisualGenerationReadiness, personaVisualDiagnostics, SpriteFrameRenderer): 36 tests passed. Pytest Persona visual API suite passed: 25 tests passed. Bandit on touched backend endpoint/schema files reported zero findings. git diff --check passed. The package-wide TypeScript baseline still reports an unrelated PersonaGarden/MCPExternalCatalog.tsx error; touched Persona Visuals files were clean in the grep-filtered output.
+
+Second review follow-up: addressed CodeRabbit's fail-closed readiness comment by returning a deterministic non-sensitive `dependency_check_failed` readiness payload when image generation registry checks fail, and by classifying that reason separately in the WebUI instead of presenting it as a missing provider.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented PR #1439 for issue #1431 and addressed follow-up review comments. The slice adds a pack-scoped Persona Visuals generation readiness API, WebUI service/types, a tested readiness classifier, VisualPackEditor setup-state rendering/gating, adapter-instantiation preflight, and stale-readiness request protection. Generation enqueue remains available when readiness is available, and generated candidates still go through the review workflow. Verification recorded in implementation notes; package-wide TypeScript still has unrelated baseline failures, with no errors found in the touched Persona Visuals files.
+Implemented PR #1439 for issue #1431 and addressed follow-up review comments. The slice adds a pack-scoped Persona Visuals generation readiness API, WebUI service/types, a tested readiness classifier, VisualPackEditor setup-state rendering/gating, adapter-instantiation preflight, fail-closed dependency-check handling, and stale-readiness request protection. Generation enqueue remains available when readiness is available, and generated candidates still go through the review workflow. Verification recorded in implementation notes; package-wide TypeScript still has unrelated baseline failures, with no errors found in the touched Persona Visuals files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

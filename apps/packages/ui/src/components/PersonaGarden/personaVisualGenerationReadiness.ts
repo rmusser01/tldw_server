@@ -7,6 +7,7 @@ export type PersonaVisualGenerationReadinessStatus =
   | "jobs_unavailable"
   | "image_provider_unavailable"
   | "image_adapter_unavailable"
+  | "dependency_check_failed"
   | "backend_unavailable"
   | "default_backend_unavailable"
 
@@ -64,6 +65,18 @@ export function classifyPersonaVisualGenerationReadiness(
   if (!readiness.worker_enabled || readiness.reasons.includes("jobs_worker_disabled")) {
     return {
       status: "jobs_unavailable",
+      canQueue: false,
+      blocking: true,
+      selectedBackend,
+      defaultBackend,
+      enabledBackends,
+      queue: readiness.queue
+    }
+  }
+
+  if (readiness.reasons.includes("dependency_check_failed")) {
+    return {
+      status: "dependency_check_failed",
       canQueue: false,
       blocking: true,
       selectedBackend,
