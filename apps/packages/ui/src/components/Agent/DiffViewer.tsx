@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 import { message } from "antd"
 import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
-import { Badge, type BadgeVariant } from "@/components/ui/primitives"
+import { Badge, getBadgeVariantForDesignSystemSeverity } from "@/components/ui/primitives"
 
 export interface DiffHunk {
   id: string
@@ -208,28 +208,24 @@ function getFilePath(diff: FileDiff): string {
 const FILE_STATUS_CONFIG = {
   new: {
     label: "NEW",
+    srLabel: "New file",
     stateKey: "ready"
   },
   deleted: {
     label: "DEL",
+    srLabel: "Deleted file",
     stateKey: "error"
   },
   renamed: {
     label: "RENAME",
+    srLabel: "Renamed file",
     stateKey: "empty"
   }
 } satisfies Record<string, {
   label: string
+  srLabel: string
   stateKey: DesignSystemStateKey
 }>
-
-const SEVERITY_BADGE_VARIANTS = {
-  success: "success",
-  error: "danger",
-  warning: "warning",
-  info: "info",
-  neutral: "secondary",
-} satisfies Record<ReturnType<typeof getDesignSystemState>["severity"], BadgeVariant>
 
 const FileStatusBadge: FC<{ diff: FileDiff }> = ({ diff }) => {
   const config = diff.isNew
@@ -248,10 +244,10 @@ const FileStatusBadge: FC<{ diff: FileDiff }> = ({ diff }) => {
 
   return (
     <Badge
-      variant={SEVERITY_BADGE_VARIANTS[state.severity]}
+      variant={getBadgeVariantForDesignSystemSeverity(state.severity)}
       size="md"
       pill={false}
-      srLabel={state.label}
+      srLabel={config.srLabel}
     >
       {config.label}
     </Badge>

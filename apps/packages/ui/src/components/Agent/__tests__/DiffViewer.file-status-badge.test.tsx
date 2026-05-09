@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { DiffViewer, type FileDiff } from "../DiffViewer"
 
@@ -32,8 +32,10 @@ const makeDiff = (overrides: Partial<FileDiff>): FileDiff => ({
 })
 
 const badgeFor = (label: string) => {
-  const badge = screen.getByText(label).closest('[data-ds-component="Badge"]')
-  expect(badge).not.toBeNull()
+  const badge = screen.getByText(label).closest<HTMLElement>('[data-ds-component="Badge"]')
+  if (!badge) {
+    throw new Error(`Expected ${label} to render inside a Badge`)
+  }
   return badge
 }
 
@@ -73,5 +75,39 @@ describe("DiffViewer file status badges", () => {
     expect(badgeFor("DEL")).toHaveAttribute("data-ds-variant", "danger")
     expect(badgeFor("RENAME")).toHaveAttribute("data-ds-variant", "secondary")
     expect(screen.queryByText("MOD")).not.toBeInTheDocument()
+  })
+
+  it("uses file-operation screen reader labels for status badges", () => {
+    render(
+      <DiffViewer
+        diffs={[
+          makeDiff({
+            id: "new-file",
+            oldPath: "/dev/null",
+            newPath: "src/new.ts",
+            isNew: true
+          }),
+          makeDiff({
+            id: "deleted-file",
+            oldPath: "src/deleted.ts",
+            newPath: "/dev/null",
+            isDeleted: true
+          }),
+          makeDiff({
+            id: "renamed-file",
+            oldPath: "src/old-name.ts",
+            newPath: "src/new-name.ts",
+            isRenamed: true
+          })
+        ]}
+      />
+    )
+
+    expect(within(badgeFor("NEW")).getByText("New file")).toHaveClass("sr-only")
+    expect(within(badgeFor("DEL")).getByText("Deleted file")).toHaveClass("sr-only")
+    expect(within(badgeFor("RENAME")).getByText("Renamed file")).toHaveClass("sr-only")
+    expect(screen.queryByText("Ready")).not.toBeInTheDocument()
+    expect(screen.queryByText("Error")).not.toBeInTheDocument()
+    expect(screen.queryByText("Empty")).not.toBeInTheDocument()
   })
 })
