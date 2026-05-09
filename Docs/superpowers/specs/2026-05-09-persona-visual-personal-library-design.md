@@ -71,18 +71,20 @@ Add a new table owned by the ChaChaNotes persona store:
 CREATE TABLE persona_visual_library_items (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  source_persona_id TEXT NOT NULL,
-  source_pack_id TEXT NOT NULL,
+  source_persona_id TEXT,
+  source_pack_id TEXT,
   title TEXT NOT NULL,
   notes TEXT,
   tags_json TEXT NOT NULL DEFAULT '[]',
+  source_persona_name_snapshot TEXT,
+  source_pack_title_snapshot TEXT,
   source_pack_version INTEGER,
   created_at DATETIME NOT NULL,
   last_modified DATETIME NOT NULL,
   deleted BOOLEAN NOT NULL DEFAULT 0,
   version INTEGER NOT NULL DEFAULT 1,
-  FOREIGN KEY(source_persona_id) REFERENCES persona_profiles(id),
-  FOREIGN KEY(source_pack_id) REFERENCES persona_visual_packs(id)
+  FOREIGN KEY(source_persona_id) REFERENCES persona_profiles(id) ON DELETE SET NULL,
+  FOREIGN KEY(source_pack_id) REFERENCES persona_visual_packs(id) ON DELETE SET NULL
 );
 ```
 
@@ -90,8 +92,9 @@ Indexes:
 
 1. `(user_id, deleted, last_modified)` for library listing.
 2. A unique active-entry index for `(user_id, source_persona_id,
-   source_pack_id)` where `deleted = false`, or the closest existing backend
-   equivalent, to prevent duplicate saved entries for the same live pack.
+   source_pack_id)` where `deleted = false` and both source references are not
+   null, or the closest existing backend equivalent, to prevent duplicate saved
+   entries for the same live pack.
 3. Optional `(user_id, title)` for simple filtering once the UI adds search.
 
 `source_pack_version` records the pack version when the item was saved. Because
@@ -99,6 +102,12 @@ the first slice is reference-backed, applying the item uses the current source
 pack state, not a snapshot. If the source pack version has changed since save,
 the API should surface `source_changed: true` so the UI can show a small status
 label.
+
+`source_persona_id` and `source_pack_id` are nullable so hard deletes or future
+maintenance operations do not delete or block the library entry. The snapshot
+name/title fields preserve enough display metadata to show stale entries and let
+users remove them. `source_available` is derived at read time from whether the
+source IDs are present and still resolve to non-deleted same-user records.
 
 ## Library Item Shape
 
@@ -115,6 +124,8 @@ API responses should include:
   "source_available": true,
   "source_persona_name": "Research Buddy",
   "source_pack_title": "Warm desk assistant",
+  "source_persona_name_snapshot": "Research Buddy",
+  "source_pack_title_snapshot": "Warm desk assistant",
   "title": "Warm desk assistant",
   "notes": "Good default for focused research sessions.",
   "tags": ["research", "calm"],
@@ -131,7 +142,9 @@ already scoped to the authenticated/current user.
 If the source persona or pack was deleted, the item can still be listed with
 `source_available: false`, but "Use for persona" must be disabled and the
 backend must reject the apply request. This keeps users able to remove stale
-library entries.
+library entries. Display fields should prefer live source persona/pack names when
+available and fall back to the stored snapshot values when the source no longer
+resolves.
 
 ## Backend API
 
@@ -242,7 +255,8 @@ The migration must be additive:
 2. Existing duplicate, import, export, activation, and MCP paths do not need to
    know about library entries.
 3. Deleting a source pack should not cascade-delete library entries in V1. It
-   should make entries unavailable so users can see and remove stale references.
+   should set source references to null or otherwise make entries unavailable so
+   users can see and remove stale references.
 4. Future archive-backed snapshots can add a nullable snapshot/archive pointer
    to library entries or introduce a parallel item type without changing the
    source-pack reference behavior.
