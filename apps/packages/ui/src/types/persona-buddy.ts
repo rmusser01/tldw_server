@@ -1,3 +1,8 @@
+import type {
+  PersonaVisualPack,
+  PersonaVisualStateId
+} from "@/types/persona-visuals"
+
 export type PersonaBuddyPositionBucket =
   | "web-desktop"
   | "sidepanel-desktop"
@@ -13,6 +18,7 @@ export interface PersonaBuddySummary {
   persona_name: string
   role_summary: string | null
   visual: PersonaBuddyVisualSummary | null
+  active_visual_pack?: PersonaVisualPack | null
 }
 
 export interface PersonaBuddyRenderContext {
@@ -21,6 +27,12 @@ export interface PersonaBuddyRenderContext {
   active_persona_id: string | null
   position_bucket: PersonaBuddyPositionBucket
   buddy_summary?: PersonaBuddySummary | null
+  live_session_id?: string | null
+  live_voice_state?: string | null
+  active_tool_status?: string | null
+  wake_armed?: boolean
+  recovery_mode?: string | null
+  visual_state?: PersonaVisualStateId | null
   persona_source:
     | "route-local"
     | "route-bootstrap"

@@ -1,0 +1,893 @@
+from io import BytesIO
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
+from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+
+pytestmark = pytest.mark.unit
+
+fastapi_app = FastAPI()
+fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
+
+
+def _png_bytes() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGBA", (1, 1), (0, 255, 0, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _valid_manifest(asset_id: str) -> dict[str, object]:
+    return {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": {
+            "idle": {"animation_id": "idle"},
+            "listening": {"animation_id": "idle"},
+            "thinking": {"animation_id": "idle"},
+            "speaking": {"animation_id": "idle"},
+            "error": {"animation_id": "idle"},
+        },
+        "animations": {
+            "idle": {
+                "frames": [{"asset_id": asset_id, "duration_ms": 100}],
+                "frame_rate": 1,
+            }
+        },
+    }
+
+
+def _client_for_user(user_id: int, db: CharactersRAGDB) -> TestClient:
+    async def override_user() -> User:
+        return User(
+            id=user_id,
+            username=f"persona-user-{user_id}",
+            email=None,
+            is_active=True,
+        )
+
+    fastapi_app.dependency_overrides[get_request_user] = override_user
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    fastapi_app.dependency_overrides[check_rate_limit] = lambda: None
+    return TestClient(fastapi_app)
+
+
+@pytest.fixture()
+def persona_db(tmp_path: Path):
+    db = CharactersRAGDB(tmp_path / "persona_visuals_api.sqlite", client_id="persona-visuals-api-tests")
+    yield db
+    db.close_connection()
+
+
+@pytest.fixture(autouse=True)
+def visual_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "visuals"
+    outputs_root = tmp_path / "outputs"
+
+    def _fake_visuals_dir(user_id: str) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _fake_temp_outputs_dir(user_id: str) -> Path:
+        path = outputs_root / str(user_id)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_persona_visuals_dir",
+        staticmethod(_fake_visuals_dir),
+    )
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_temp_outputs_dir",
+        staticmethod(_fake_temp_outputs_dir),
+    )
+    yield root
+    fastapi_app.dependency_overrides.clear()
+
+
+def _create_persona(client: TestClient, *, name: str) -> str:
+    response = client.post("/api/v1/persona/profiles", json={"name": name})
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def _create_visual_pack(client: TestClient, persona_id: str, *, title: str = "Pack") -> dict:
+    response = client.post(
+        f"/api/v1/persona/profiles/{persona_id}/visual-packs",
+        json={
+            "title": title,
+            "manifest": {
+                "manifest_version": 1,
+                "renderer_type": "sprite_frames",
+                "states": {},
+                "animations": {},
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
+    response = client.post(
+        f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets",
+        data={"asset_role": "frame"},
+        files={"file": ("idle.png", _png_bytes(), "image/png")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+class FakeJobManager:
+    def __init__(self) -> None:
+        self.created: list[dict] = []
+        self.jobs_by_id: dict[int, dict] = {}
+        self.cancelled: list[tuple[int, str | None]] = []
+
+    def create_job(self, **kwargs):
+        job_id = 9001 + len(self.created)
+        self.created.append(kwargs)
+        job = {"id": job_id, "status": "queued", **kwargs}
+        self.jobs_by_id[job_id] = job
+        return job
+
+    def get_job(self, job_id: int):
+        return self.jobs_by_id.get(int(job_id))
+
+    def cancel_job(self, job_id: int, reason: str | None = None):
+        job = self.jobs_by_id.get(int(job_id))
+        if job is None:
+            return False
+        job["status"] = "cancelled"
+        self.cancelled.append((int(job_id), reason))
+        return True
+
+
+def test_create_list_and_activate_visual_pack(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Visual API Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+
+        manifest_response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        assert manifest_response.status_code == 200, manifest_response.text
+
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+        )
+        assert activated.status_code == 200, activated.text
+        assert activated.json()["status"] == "active"
+
+        listed = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs")
+        assert listed.status_code == 200, listed.text
+        payload = listed.json()
+        assert [item["id"] for item in payload] == [pack["id"]]
+        assert payload[0]["status"] == "active"
+        assert payload[0]["assets"][0]["id"] == asset["id"]
+
+
+def test_upload_rejects_unsupported_mime_type(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Visual Upload Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/assets",
+            files={"file": ("bad.txt", b"not an image", "text/plain")},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["code"] == "unsupported_mime_type"
+
+
+def test_upload_rejects_oversized_asset_before_service_call(persona_db: CharactersRAGDB) -> None:
+    from tldw_Server_API.app.core.Persona.visual_service import MAX_VISUAL_UPLOAD_BYTES
+
+    class UnexpectedService:
+        def create_asset_from_upload(self, **_kwargs):
+            raise AssertionError("oversized upload reached visual service")
+
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_service] = lambda: UnexpectedService()
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Oversized Visual Upload Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/assets",
+            data={"asset_role": "frame"},
+            files={
+                "file": (
+                    "too-large.png",
+                    BytesIO(b"x" * (MAX_VISUAL_UPLOAD_BYTES + 1)),
+                    "image/png",
+                )
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json()["detail"]["code"] == "upload_too_large"
+
+
+def test_activation_rejects_manifest_without_required_states(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Invalid Manifest Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["code"] == "invalid_manifest"
+
+
+def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Owner Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+    with _client_for_user(2, persona_db) as other_client:
+        response = other_client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        )
+
+    assert response.status_code == 404
+
+
+def test_accept_and_reject_generated_candidates(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Candidate Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        accepted = persona_db.create_persona_visual_candidate(
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id="1",
+            job_id="job-1",
+            proposed_manifest_patch={
+                "states": {"thinking": {"animation_id": "generated-thinking"}},
+                "animations": {
+                    "generated-thinking": {
+                        "asset_ids": [asset["id"]],
+                        "frame_rate": 1,
+                        "loop": True,
+                    }
+                },
+            },
+            generated_asset_ids=[asset["id"]],
+            prompt="make thinking",
+        )
+        rejected = persona_db.create_persona_visual_candidate(
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id="1",
+            job_id="job-2",
+            proposed_manifest_patch={},
+            generated_asset_ids=[],
+            prompt="make another",
+        )
+
+        accepted_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/candidates/{accepted['id']}/review",
+            json={"status": "accepted"},
+        )
+        rejected_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/candidates/{rejected['id']}/review",
+            json={"status": "rejected", "failure_reason": "not useful"},
+        )
+
+        assert accepted_response.status_code == 200, accepted_response.text
+        assert accepted_response.json()["status"] == "accepted"
+        detail = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["status"] == "draft"
+        assert detail.json()["manifest"]["states"]["thinking"]["animation_id"] == "generated-thinking"
+        assert rejected_response.status_code == 200, rejected_response.text
+        assert rejected_response.json()["status"] == "rejected"
+        assert rejected_response.json()["failure_reason"] == "not useful"
+
+
+def test_list_generated_candidates_returns_preview_asset_urls(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Candidate List Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        candidate = persona_db.create_persona_visual_candidate(
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id="1",
+            job_id="job-preview",
+            proposed_manifest_patch={},
+            generated_asset_ids=[asset["id"]],
+            prompt="make preview",
+        )
+
+        response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generated-candidates"
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["candidates"][0]["id"] == candidate["id"]
+        assert payload["candidates"][0]["generated_assets"][0]["id"] == asset["id"]
+        assert payload["candidates"][0]["generated_assets"][0]["url"].endswith(
+            f"/visual-packs/{pack['id']}/assets/{asset['id']}/content"
+        )
+        detail = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generated-candidates/{candidate['id']}"
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["generated_assets"][0]["id"] == asset["id"]
+
+
+def test_create_generation_job_for_visual_pack(persona_db: CharactersRAGDB) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Generation Job Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "prompt": "make a speaking pose",
+                "target_state": "speaking",
+                "backend": "fake",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["job_id"] == "9001"
+        assert manager.created[0]["domain"] == "persona_visuals"
+        assert manager.created[0]["payload"]["target_state"] == "speaking"
+
+
+def test_create_generation_job_rejects_other_user_pack(persona_db: CharactersRAGDB) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Generation Owner Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+    with _client_for_user(2, persona_db) as other_client:
+        response = other_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={"prompt": "steal pack", "target_state": "idle"},
+        )
+
+    assert response.status_code == 404
+    assert manager.created == []
+
+
+def test_start_visual_pack_export_creates_portability_job(persona_db: CharactersRAGDB) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs import PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Export API Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/export",
+            json={"request_id": "req-export", "strict": False},
+        )
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["job_id"] == "9001"
+    assert payload["operation"] == "export"
+    assert payload["persona_id"] == persona_id
+    assert payload["pack_id"] == pack["id"]
+    assert payload["status"] == "queued"
+    assert payload["stage"] == "queued"
+    assert manager.created[0]["job_type"] == PERSONA_VISUAL_PACK_EXPORT_JOB_TYPE
+    assert manager.created[0]["payload"]["portability_job_id"] == ""
+    repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+    row = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert row is not None
+    assert row["operation"] == "export"
+    assert row["persona_id"] == persona_id
+    assert row["pack_id"] == pack["id"]
+
+
+def test_visual_pack_export_status_download_and_scope(persona_db: CharactersRAGDB) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Export Download Persona")
+        pack = _create_visual_pack(client, persona_id)
+        started = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/export",
+            json={"request_id": "req-download"},
+        )
+        assert started.status_code == 202, started.text
+        job_id = started.json()["job_id"]
+
+        archive_root = DatabasePaths.get_user_temp_outputs_dir("1") / "persona_visual_packs"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_root / f"done{PERSONA_VISUAL_PACK_EXTENSION}"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "archive_path": str(archive_path),
+                "archive_sha256": "a" * 64,
+                "canonical_payload_fingerprint": "b" * 64,
+            },
+            owner_user_id="1",
+        )
+
+        status_response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/exports/{job_id}"
+        )
+        download_response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/exports/{job_id}/download"
+        )
+
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["status"] == "completed"
+    assert status_response.json()["archive_sha256"] == "a" * 64
+    assert download_response.status_code == 200, download_response.text
+    assert download_response.content == b"portable visual archive"
+
+    with _client_for_user(2, persona_db) as other_client:
+        denied = other_client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/exports/{job_id}"
+        )
+
+    assert denied.status_code == 404
+
+
+def test_cancel_visual_pack_export_updates_job_and_portability_row(
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Export Cancel Persona")
+        pack = _create_visual_pack(client, persona_id)
+        started = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/export",
+            json={"request_id": "req-cancel"},
+        )
+        assert started.status_code == 202, started.text
+        job_id = started.json()["job_id"]
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/exports/{job_id}/cancel"
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "cancelled"
+    assert manager.cancelled == [(int(job_id), "persona_visual_pack_export_cancel_requested")]
+    repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+    row = repo.get_portability_job_by_job_id(job_id, owner_user_id="1")
+    assert row is not None
+    assert row["status"] == "cancelled"
+    assert row["stage"] == "cancelled"
+
+
+def test_start_visual_pack_export_rejects_other_user_pack(persona_db: CharactersRAGDB) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Export Owner Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+    with _client_for_user(2, persona_db) as other_client:
+        response = other_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/export",
+            json={"request_id": "req-denied"},
+        )
+
+    assert response.status_code == 404
+    assert manager.created == []
+
+
+def test_start_import_preview_creates_preview_job_without_mutating_packs(
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Preview Persona")
+        _create_visual_pack(client, persona_id)
+        packs_before = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs").json()
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews",
+            files={
+                "archive": (
+                    f"pack{PERSONA_VISUAL_PACK_EXTENSION}",
+                    b"portable visual archive",
+                    "application/zip",
+                )
+            },
+        )
+        packs_after = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs").json()
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["job_id"] == "9001"
+    assert payload["operation"] == "import_preview"
+    assert payload["target_persona_id"] == persona_id
+    assert payload["status"] == "queued"
+    assert manager.created[0]["job_type"] == PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE
+    repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+    preview = repo.get_import_preview(payload["preview_id"], owner_user_id="1")
+    assert preview is not None
+    assert preview["target_persona_id"] == persona_id
+    assert packs_after == packs_before
+
+
+def test_import_preview_status_is_scoped(persona_db: CharactersRAGDB) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Preview Status Persona")
+        started = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews",
+            files={
+                "archive": (
+                    f"pack{PERSONA_VISUAL_PACK_EXTENSION}",
+                    b"portable visual archive",
+                    "application/zip",
+                )
+            },
+        )
+        assert started.status_code == 202, started.text
+        payload = started.json()
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        repo.update_import_preview(
+            payload["preview_id"],
+            {
+                "status": "completed",
+                "stage": "completed",
+                "schema_version": "tldw.persona_visual_pack.v1",
+                "bundle_summary": {"pack_title": "Imported Visuals"},
+                "target_warnings": [],
+            },
+            owner_user_id="1",
+        )
+        repo.update_portability_job(
+            payload["job_id"],
+            {"status": "completed", "stage": "completed"},
+            owner_user_id="1",
+        )
+
+        status_response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{payload['preview_id']}"
+        )
+
+    assert status_response.status_code == 200, status_response.text
+    body = status_response.json()
+    assert body["status"] == "completed"
+    assert body["bundle_summary"] == {"pack_title": "Imported Visuals"}
+    assert body["target_warnings"] == []
+
+    with _client_for_user(2, persona_db) as other_client:
+        denied = other_client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{payload['preview_id']}"
+        )
+
+    assert denied.status_code == 404
+
+
+def test_cancel_import_preview_updates_preview_and_portability_row(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Preview Cancel Persona")
+        archive_path = tmp_path / f"queued{PERSONA_VISUAL_PACK_EXTENSION}"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="9001",
+            status="queued",
+            stage="queued",
+            archive_path=str(archive_path),
+            target_persona_id=persona_id,
+        )
+        repo.create_portability_job(
+            owner_user_id="1",
+            job_id="9001",
+            operation="import_preview",
+            status="queued",
+            stage="queued",
+            preview_id=preview["id"],
+            archive_path=str(archive_path),
+        )
+        manager.jobs_by_id[9001] = {"id": 9001, "status": "queued"}
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/cancel"
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["stage"] == "cancelled"
+    assert manager.cancelled == [(9001, "persona_visual_pack_import_preview_cancel_requested")]
+    updated_preview = repo.get_import_preview(preview["id"], owner_user_id="1")
+    updated_job = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert updated_preview is not None
+    assert updated_preview["status"] == "cancelled"
+    assert updated_preview["stage"] == "cancelled"
+    assert updated_job is not None
+    assert updated_job["status"] == "cancelled"
+    assert updated_job["stage"] == "cancelled"
+
+
+def test_delete_import_preview_removes_staged_archive(
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+        PERSONA_VISUAL_PACK_EXTENSION,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Preview Delete Persona")
+        archive_root = DatabasePaths.get_user_temp_outputs_dir("1") / "persona_visual_pack_import_previews"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_root / f"delete-me{PERSONA_VISUAL_PACK_EXTENSION}"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="9001",
+            status="failed",
+            stage="failed",
+            archive_path=str(archive_path),
+            target_persona_id=persona_id,
+        )
+        repo.create_portability_job(
+            owner_user_id="1",
+            job_id="9001",
+            operation="import_preview",
+            status="failed",
+            stage="failed",
+            preview_id=preview["id"],
+            archive_path=str(archive_path),
+        )
+        manager.jobs_by_id[9001] = {"id": 9001, "status": "failed"}
+
+        response = client.delete(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}"
+        )
+
+    assert response.status_code == 204, response.text
+    assert not archive_path.exists()
+    updated_preview = repo.get_import_preview(preview["id"], owner_user_id="1")
+    updated_job = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert updated_preview is not None
+    assert updated_preview["status"] == "deleted"
+    assert updated_preview["stage"] == "deleted"
+    assert updated_job is not None
+    assert updated_job["status"] == "cancelled"
+    assert updated_job["stage"] == "deleted"
+
+
+def test_start_import_commit_creates_jobs_backed_portability_row(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Commit Persona")
+        archive_path = tmp_path / "commit.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["job_id"] == "9001"
+    assert body["operation"] == "import_commit"
+    assert body["preview_id"] == preview["id"]
+    assert body["target_persona_id"] == persona_id
+    assert body["status"] == "queued"
+    assert body["stage"] == "queued"
+    assert manager.created[0]["job_type"] == PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE
+    row = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert row is not None
+    assert row["operation"] == "import_commit"
+    assert row["preview_id"] == preview["id"]
+    assert row["persona_id"] == persona_id
+
+
+def test_import_commit_status_is_scoped(persona_db: CharactersRAGDB, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Import Commit Status Persona")
+        archive_path = tmp_path / "commit-status.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+        )
+        started = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "trusted_restore", "target_mode": "create_new"},
+        )
+        assert started.status_code == 202, started.text
+        job_id = started.json()["job_id"]
+        imported_pack = _create_visual_pack(client, persona_id, title="Imported Pack")
+        repo.update_portability_job(
+            job_id,
+            {
+                "status": "completed",
+                "stage": "completed",
+                "pack_id": imported_pack["id"],
+                "progress": {"asset_count": 1},
+            },
+            owner_user_id="1",
+        )
+
+        status_response = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/imports/{job_id}"
+        )
+
+    assert status_response.status_code == 200, status_response.text
+    body = status_response.json()
+    assert body["status"] == "completed"
+    assert body["pack_id"] == imported_pack["id"]
+    assert body["progress"] == {"asset_count": 1}
+
+    with _client_for_user(2, persona_db) as other_client:
+        denied = other_client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/imports/{job_id}"
+        )
+
+    assert denied.status_code == 404
+
+
+def test_start_import_commit_rejects_incomplete_preview(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Incomplete Import Commit Persona")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="queued",
+            archive_path=str(tmp_path / "not-ready.tldw-persona-vpack"),
+            target_persona_id=persona_id,
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert manager.created == []
+
+
+def test_deactivate_visual_pack_reverts_to_derived_buddy(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Deactivate Visual API Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": pack["version"]},
+        )
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+        )
+        assert activated.status_code == 200, activated.text
+
+        deactivated = client.post(f"/api/v1/persona/profiles/{persona_id}/visual-packs/deactivate")
+
+        assert deactivated.status_code == 200, deactivated.text
+        assert deactivated.json() == {"status": "deactivated", "persona_id": persona_id}
+        assert persona_db.get_active_persona_visual_pack(persona_id=persona_id, user_id="1") is None

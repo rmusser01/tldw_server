@@ -423,6 +423,7 @@ class DatabasePaths:
     CHATBOOKS_IMPORTS_SUBDIR = "imports"
     CHATBOOKS_TEMP_SUBDIR = "temp"
     READING_IMPORTS_SUBDIR = "reading_imports"
+    PERSONA_VISUALS_SUBDIR = "persona_visuals"
 
     @staticmethod
     def get_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
@@ -784,6 +785,14 @@ class DatabasePaths:
         imports_dir = user_dir / DatabasePaths.READING_IMPORTS_SUBDIR
         _ensure_dir(imports_dir, label="reading imports")
         return imports_dir
+
+    @staticmethod
+    def get_user_persona_visuals_dir(user_id: Optional[UserId]) -> Path:
+        """Get the path to the user's persona visual asset directory."""
+        user_dir = DatabasePaths.get_user_base_directory(user_id)
+        visuals_dir = user_dir / DatabasePaths.PERSONA_VISUALS_SUBDIR
+        _ensure_dir(visuals_dir, label="persona visuals")
+        return visuals_dir
 
     @staticmethod
     def get_user_rewrite_cache_path(user_id: Optional[UserId]) -> Path:

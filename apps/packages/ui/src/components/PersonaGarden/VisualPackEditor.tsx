@@ -1,0 +1,1816 @@
+import React from "react"
+import { Button, Tag, Typography } from "antd"
+import {
+  ArrowDown,
+  ArrowUp,
+  CheckCircle2,
+  Download,
+  FileSearch,
+  Plus,
+  RefreshCw,
+  Save,
+  Upload,
+  XCircle
+} from "lucide-react"
+import { useTranslation } from "react-i18next"
+
+import {
+  activatePersonaVisualPack,
+  createPersonaVisualGenerationJob,
+  createPersonaVisualImportPreview,
+  createPersonaVisualPack,
+  deactivatePersonaVisualPack,
+  downloadPersonaVisualPackExportArchive,
+  getPersonaVisualImportPreview,
+  getPersonaVisualPackExportJob,
+  listPersonaVisualCandidates,
+  listPersonaVisualPacks,
+  PersonaVisualApiError,
+  reviewPersonaVisualCandidate,
+  startPersonaVisualPackExport,
+  updatePersonaVisualManifest,
+  uploadPersonaVisualAsset
+} from "@/services/persona-visuals"
+import type {
+  PersonaVisualAnimation,
+  PersonaVisualAsset,
+  PersonaVisualAssetRole,
+  PersonaVisualAuthoredTrigger,
+  PersonaVisualCandidate,
+  PersonaVisualFrame,
+  PersonaVisualImportPreviewResponse,
+  PersonaVisualImportPreviewStartResponse,
+  PersonaVisualManifest,
+  PersonaVisualPack,
+  PersonaVisualPackExportResponse,
+  PersonaVisualPortabilityJobResponse,
+  PersonaVisualStateId
+} from "@/types/persona-visuals"
+
+type VisualPackEditorProps = {
+  selectedPersonaId: string
+  selectedPersonaName: string
+  isActive?: boolean
+}
+
+type TriggerDraft = {
+  source: PersonaVisualAuthoredTrigger["source"]
+  match: string
+  state: PersonaVisualStateId
+  durationMs: string
+  priority: string
+}
+
+const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
+  "idle",
+  "listening",
+  "thinking",
+  "speaking",
+  "error"
+]
+
+const OPTIONAL_VISUAL_STATES: PersonaVisualStateId[] = [
+  "wake_armed",
+  "tool_running",
+  "approval_needed",
+  "offline"
+]
+
+const VISUAL_STATES: PersonaVisualStateId[] = [
+  ...REQUIRED_VISUAL_STATES,
+  ...OPTIONAL_VISUAL_STATES
+]
+
+const ASSET_ROLES: PersonaVisualAssetRole[] = [
+  "frame",
+  "still_pose",
+  "sprite_sheet",
+  "preview",
+  "generated_candidate"
+]
+
+const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
+  "live_state",
+  "tool_category",
+  "mcp_runtime"
+]
+
+const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
+
+const DEFAULT_MANIFEST: PersonaVisualManifest = {
+  manifest_version: 1,
+  renderer_type: "sprite_frames",
+  states: {},
+  animations: {},
+  fallbacks: {},
+  authored_triggers: []
+}
+
+const DEFAULT_TRIGGER_DRAFT: TriggerDraft = {
+  source: "tool_category",
+  match: "",
+  state: "tool_running",
+  durationMs: "2500",
+  priority: "20"
+}
+
+const cloneJson = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
+
+const normalizeManifest = (
+  manifest: PersonaVisualPack["manifest"] | Record<string, unknown> | null | undefined
+): PersonaVisualManifest => {
+  const source =
+    manifest && typeof manifest === "object"
+      ? (cloneJson(manifest) as Partial<PersonaVisualManifest>)
+      : {}
+  return {
+    manifest_version: 1,
+    renderer_type: "sprite_frames",
+    states: {
+      ...(source.states || {})
+    },
+    animations: {
+      ...(source.animations || {})
+    },
+    fallbacks: {
+      ...(source.fallbacks || {})
+    },
+    authored_triggers: Array.isArray(source.authored_triggers)
+      ? source.authored_triggers
+      : []
+  }
+}
+
+const normalizeFrames = (
+  animation: PersonaVisualAnimation | null | undefined
+): PersonaVisualFrame[] => {
+  if (!animation) return []
+  if (Array.isArray(animation.frames) && animation.frames.length > 0) {
+    return animation.frames.map((frame) => ({ ...frame }))
+  }
+  return (animation.asset_ids || [])
+    .filter((assetId) => String(assetId || "").trim())
+    .map((assetId) => ({ asset_id: String(assetId) }))
+}
+
+const formatStateLabel = (state: PersonaVisualStateId): string =>
+  state.replace(/_/g, " ")
+
+const stringifyPreviewValue = (value: unknown): string => {
+  if (value == null) return ""
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+const formatPreviewList = (items: unknown[] | null | undefined): string =>
+  (items || [])
+    .map(stringifyPreviewValue)
+    .filter(Boolean)
+    .join(" ")
+
+const isFullImportPreview = (
+  preview: PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
+): preview is PersonaVisualImportPreviewResponse =>
+  Boolean(preview && "bundle_summary" in preview)
+
+const formatImportPreviewSummary = (
+  preview: PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse
+): string => {
+  if (!isFullImportPreview(preview)) return `${preview.status} ${preview.stage}`
+  const summary = preview.bundle_summary || {}
+  const title =
+    typeof summary.pack_title === "string" && summary.pack_title.trim()
+      ? summary.pack_title
+      : "Portable visual pack"
+  const assetCount =
+    typeof summary.asset_count === "number" ? `${summary.asset_count} assets` : null
+  const assetsWithBytes =
+    typeof summary.assets_with_bytes === "number"
+      ? `${summary.assets_with_bytes} with bytes`
+      : null
+  return [title, assetCount, assetsWithBytes].filter(Boolean).join(" / ")
+}
+
+const buildExportFilename = (pack: PersonaVisualPack): string => {
+  const slug = (pack.title || pack.id || "persona-visual-pack")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return `${slug || "persona-visual-pack"}${PORTABLE_VISUAL_PACK_EXTENSION}`
+}
+
+const getAnimationIds = (manifest: PersonaVisualManifest): string[] =>
+  Object.keys(manifest.animations || {}).sort((a, b) => a.localeCompare(b))
+
+const getPackAssets = (pack: PersonaVisualPack | null): PersonaVisualAsset[] => {
+  if (!pack) return []
+  if (Array.isArray(pack.assets)) return pack.assets
+  return Object.values(pack.assets_by_id || {})
+}
+
+const mergePack = (
+  packs: PersonaVisualPack[],
+  nextPack: PersonaVisualPack
+): PersonaVisualPack[] => {
+  const found = packs.some((pack) => pack.id === nextPack.id)
+  if (!found) return [nextPack, ...packs]
+  return packs.map((pack) => (pack.id === nextPack.id ? nextPack : pack))
+}
+
+const resolveAnimationForState = (
+  manifest: PersonaVisualManifest,
+  state: PersonaVisualStateId,
+  seen = new Set<PersonaVisualStateId>()
+): string | null => {
+  if (seen.has(state)) return null
+  seen.add(state)
+  const direct = manifest.states?.[state]?.animation_id
+  if (direct && manifest.animations?.[direct]) return direct
+  for (const fallback of manifest.fallbacks?.[state] || []) {
+    const resolved = resolveAnimationForState(manifest, fallback, seen)
+    if (resolved) return resolved
+  }
+  return null
+}
+
+const validateManifestForActivation = (
+  manifest: PersonaVisualManifest
+): string[] => {
+  const missing = REQUIRED_VISUAL_STATES.filter(
+    (state) => !resolveAnimationForState(manifest, state)
+  )
+  return missing.length
+    ? [`Missing required visual states: ${missing.map(formatStateLabel).join(", ")}`]
+    : []
+}
+
+const parseNumberOrUndefined = (value: string): number | undefined => {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+const replaceAnimation = (
+  manifest: PersonaVisualManifest,
+  animationId: string,
+  updater: (animation: PersonaVisualAnimation) => PersonaVisualAnimation
+): PersonaVisualManifest => ({
+  ...manifest,
+  animations: {
+    ...manifest.animations,
+    [animationId]: updater(manifest.animations[animationId] || {})
+  }
+})
+
+export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
+  selectedPersonaId,
+  selectedPersonaName,
+  isActive = false
+}) => {
+  const { t } = useTranslation(["sidepanel", "common"])
+  const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
+  const [selectedPackId, setSelectedPackId] = React.useState("")
+  const [draftTitle, setDraftTitle] = React.useState("")
+  const [draftManifest, setDraftManifest] =
+    React.useState<PersonaVisualManifest>(DEFAULT_MANIFEST)
+  const [selectedAnimationId, setSelectedAnimationId] = React.useState("")
+  const [newAnimationId, setNewAnimationId] = React.useState("")
+  const [selectedAddFrameAssetId, setSelectedAddFrameAssetId] = React.useState("")
+  const [uploadRole, setUploadRole] = React.useState<PersonaVisualAssetRole>("frame")
+  const [selectedUploadFile, setSelectedUploadFile] = React.useState<File | null>(null)
+  const [exportJob, setExportJob] = React.useState<
+    PersonaVisualPackExportResponse | PersonaVisualPortabilityJobResponse | null
+  >(null)
+  const [exportingPack, setExportingPack] = React.useState(false)
+  const [refreshingExport, setRefreshingExport] = React.useState(false)
+  const [downloadingExport, setDownloadingExport] = React.useState(false)
+  const [selectedImportPreviewFile, setSelectedImportPreviewFile] =
+    React.useState<File | null>(null)
+  const [importPreview, setImportPreview] = React.useState<
+    PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
+  >(null)
+  const [previewingImport, setPreviewingImport] = React.useState(false)
+  const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
+  const [triggerDraft, setTriggerDraft] =
+    React.useState<TriggerDraft>(DEFAULT_TRIGGER_DRAFT)
+  const [loading, setLoading] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
+  const [uploading, setUploading] = React.useState(false)
+  const [activating, setActivating] = React.useState(false)
+  const [deactivating, setDeactivating] = React.useState(false)
+  const [candidates, setCandidates] = React.useState<PersonaVisualCandidate[]>([])
+  const [candidatesLoading, setCandidatesLoading] = React.useState(false)
+  const [generationPrompt, setGenerationPrompt] = React.useState("")
+  const [generationTargetState, setGenerationTargetState] =
+    React.useState<PersonaVisualStateId>("thinking")
+  const [generationBackend, setGenerationBackend] = React.useState("")
+  const [enqueueingGeneration, setEnqueueingGeneration] = React.useState(false)
+  const [reviewingCandidateId, setReviewingCandidateId] = React.useState("")
+  const [error, setError] = React.useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = React.useState<string | null>(null)
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
+  const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
+
+  const selectedPack =
+    packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
+  const assets = React.useMemo(() => getPackAssets(selectedPack), [selectedPack])
+  const animationIds = React.useMemo(
+    () => getAnimationIds(draftManifest),
+    [draftManifest]
+  )
+  const selectedAnimation =
+    selectedAnimationId && draftManifest.animations[selectedAnimationId]
+      ? draftManifest.animations[selectedAnimationId]
+      : null
+  const selectedFrames = React.useMemo(
+    () => normalizeFrames(selectedAnimation),
+    [selectedAnimation]
+  )
+  const validationErrors = React.useMemo(
+    () => validateManifestForActivation(draftManifest),
+    [draftManifest]
+  )
+
+  const loadPacks = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId) {
+      setPacks([])
+      setSelectedPackId("")
+      setDraftManifest(DEFAULT_MANIFEST)
+      setCandidates([])
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await listPersonaVisualPacks(selectedPersonaId)
+      const nextPacks = response.packs || []
+      setPacks(nextPacks)
+      const preferred =
+        response.active_pack ??
+        nextPacks.find((pack) => pack.id === selectedPackId) ??
+        nextPacks[0] ??
+        null
+      setSelectedPackId(preferred?.id || "")
+      if (!preferred) {
+        setDraftManifest(DEFAULT_MANIFEST)
+        setSelectedAnimationId("")
+      }
+    } catch (loadError) {
+      setPacks([])
+      setSelectedPackId("")
+      setDraftManifest(DEFAULT_MANIFEST)
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load visual packs."
+      )
+    } finally {
+      setLoading(false)
+    }
+  }, [isActive, selectedPersonaId])
+
+  const loadCandidates = React.useCallback(async () => {
+    const packId = selectedPack?.id || ""
+    if (!isActive || !selectedPersonaId || !packId) {
+      setCandidates([])
+      return
+    }
+    setCandidatesLoading(true)
+    try {
+      const response = await listPersonaVisualCandidates(selectedPersonaId, packId)
+      setCandidates(response.candidates || [])
+    } catch (loadError) {
+      setCandidates([])
+      if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load generated candidates."
+        )
+      }
+    } finally {
+      setCandidatesLoading(false)
+    }
+  }, [isActive, selectedPersonaId, selectedPack?.id])
+
+  React.useEffect(() => {
+    void loadPacks()
+  }, [loadPacks])
+
+  React.useEffect(() => {
+    void loadCandidates()
+  }, [loadCandidates])
+
+  React.useEffect(() => {
+    if (!selectedPack) {
+      setDraftManifest(DEFAULT_MANIFEST)
+      setSelectedAnimationId("")
+      return
+    }
+    const nextManifest = normalizeManifest(selectedPack.manifest)
+    setDraftManifest(nextManifest)
+    const ids = getAnimationIds(nextManifest)
+    setSelectedAnimationId((current) =>
+      current && nextManifest.animations[current] ? current : ids[0] || ""
+    )
+  }, [selectedPack?.id, selectedPack?.version])
+
+  React.useEffect(() => {
+    if (!selectedAnimationId && animationIds.length > 0) {
+      setSelectedAnimationId(animationIds[0])
+    }
+    if (selectedAnimationId && !animationIds.includes(selectedAnimationId)) {
+      setSelectedAnimationId(animationIds[0] || "")
+    }
+  }, [animationIds, selectedAnimationId])
+
+  React.useEffect(() => {
+    setExportJob(null)
+    setImportPreview(null)
+    setSelectedImportPreviewFile(null)
+    if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
+  }, [selectedPersonaId, selectedPack?.id])
+
+  const updateManifest = React.useCallback(
+    (updater: (manifest: PersonaVisualManifest) => PersonaVisualManifest) => {
+      setDraftManifest((current) => normalizeManifest(updater(normalizeManifest(current))))
+      setStatusMessage(null)
+    },
+    []
+  )
+
+  const handleCreateDraft = async () => {
+    const title = draftTitle.trim()
+    if (!selectedPersonaId || !title) return
+    setSaving(true)
+    setError(null)
+    try {
+      const created = await createPersonaVisualPack(selectedPersonaId, {
+        title,
+        manifest: DEFAULT_MANIFEST
+      })
+      setPacks((current) => mergePack(current, created))
+      setSelectedPackId(created.id)
+      setDraftTitle("")
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.created", {
+          defaultValue: "Draft created."
+        })
+      )
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : t("sidepanel:personaGarden.visuals.createError", {
+              defaultValue: "Failed to create visual pack."
+            })
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUploadAsset = async () => {
+    if (!selectedPersonaId || !selectedPack || !selectedUploadFile) return
+    setUploading(true)
+    setError(null)
+    try {
+      const asset = await uploadPersonaVisualAsset(
+        selectedPersonaId,
+        selectedPack.id,
+        selectedUploadFile,
+        uploadRole
+      )
+      const nextPack = {
+        ...selectedPack,
+        assets: [...getPackAssets(selectedPack), asset]
+      }
+      setPacks((current) => mergePack(current, nextPack))
+      setSelectedUploadFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.uploaded", {
+          defaultValue: "Asset uploaded."
+        })
+      )
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : t("sidepanel:personaGarden.visuals.uploadError", {
+              defaultValue: "Failed to upload asset."
+            })
+      )
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleStartExport = async () => {
+    if (!selectedPersonaId || !selectedPack) return
+    setExportingPack(true)
+    setError(null)
+    try {
+      const job = await startPersonaVisualPackExport(selectedPersonaId, selectedPack.id)
+      setExportJob(job)
+      setStatusMessage("Export job queued.")
+    } catch (exportError) {
+      setError(
+        exportError instanceof Error
+          ? exportError.message
+          : "Failed to queue visual pack export."
+      )
+    } finally {
+      setExportingPack(false)
+    }
+  }
+
+  const handleRefreshExport = async () => {
+    if (!selectedPersonaId || !selectedPack || !exportJob?.job_id) return
+    setRefreshingExport(true)
+    setError(null)
+    try {
+      const job = await getPersonaVisualPackExportJob(
+        selectedPersonaId,
+        selectedPack.id,
+        exportJob.job_id
+      )
+      setExportJob(job)
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Failed to refresh visual pack export."
+      )
+    } finally {
+      setRefreshingExport(false)
+    }
+  }
+
+  const handleDownloadExport = async () => {
+    if (!selectedPersonaId || !selectedPack || !exportJob?.job_id) return
+    setDownloadingExport(true)
+    setError(null)
+    try {
+      await downloadPersonaVisualPackExportArchive(
+        selectedPersonaId,
+        selectedPack.id,
+        exportJob.job_id,
+        buildExportFilename(selectedPack)
+      )
+      setStatusMessage("Export archive downloaded.")
+    } catch (downloadError) {
+      setError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : "Failed to download visual pack export."
+      )
+    } finally {
+      setDownloadingExport(false)
+    }
+  }
+
+  const handleStartImportPreview = async () => {
+    if (!selectedPersonaId || !selectedImportPreviewFile) return
+    setPreviewingImport(true)
+    setError(null)
+    try {
+      const preview = await createPersonaVisualImportPreview(
+        selectedPersonaId,
+        selectedImportPreviewFile
+      )
+      setImportPreview(preview)
+      setSelectedImportPreviewFile(null)
+      if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
+      setStatusMessage("Import preview queued.")
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Failed to queue visual pack import preview."
+      )
+    } finally {
+      setPreviewingImport(false)
+    }
+  }
+
+  const handleRefreshImportPreview = async () => {
+    if (!selectedPersonaId || !importPreview?.preview_id) return
+    setRefreshingImportPreview(true)
+    setError(null)
+    try {
+      const preview = await getPersonaVisualImportPreview(
+        selectedPersonaId,
+        importPreview.preview_id
+      )
+      setImportPreview(preview)
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Failed to refresh visual pack import preview."
+      )
+    } finally {
+      setRefreshingImportPreview(false)
+    }
+  }
+
+  const handleSaveManifest = async () => {
+    if (!selectedPersonaId || !selectedPack) return
+    setSaving(true)
+    setError(null)
+    try {
+      const saved = await updatePersonaVisualManifest(
+        selectedPersonaId,
+        selectedPack.id,
+        {
+          manifest: draftManifest,
+          expected_version: selectedPack.version ?? null
+        }
+      )
+      setPacks((current) =>
+        mergePack(current, {
+          ...saved,
+          assets: getPackAssets(saved).length ? getPackAssets(saved) : assets
+        })
+      )
+      setSelectedPackId(saved.id)
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.saved", {
+          defaultValue: "Manifest saved."
+        })
+      )
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("sidepanel:personaGarden.visuals.saveError", {
+              defaultValue: "Failed to save visual manifest."
+            })
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleActivate = async () => {
+    if (!selectedPersonaId || !selectedPack || validationErrors.length) return
+    setActivating(true)
+    setError(null)
+    try {
+      const active = await activatePersonaVisualPack(selectedPersonaId, selectedPack.id)
+      setPacks((current) =>
+        current.map((pack) =>
+          pack.id === active.id
+            ? { ...active, assets: getPackAssets(active).length ? getPackAssets(active) : assets }
+            : pack.status === "active"
+              ? { ...pack, status: "archived" }
+              : pack
+        )
+      )
+      setSelectedPackId(active.id)
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.activated", {
+          defaultValue: "Visual pack activated."
+        })
+      )
+    } catch (activateError) {
+      setError(
+        activateError instanceof Error
+          ? activateError.message
+          : t("sidepanel:personaGarden.visuals.activateError", {
+              defaultValue: "Failed to activate visual pack."
+            })
+      )
+    } finally {
+      setActivating(false)
+    }
+  }
+
+  const handleDeactivate = async () => {
+    if (!selectedPersonaId) return
+    setDeactivating(true)
+    setError(null)
+    try {
+      await deactivatePersonaVisualPack(selectedPersonaId)
+      setPacks((current) =>
+        current.map((pack) =>
+          pack.status === "active" ? { ...pack, status: "archived" } : pack
+        )
+      )
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.deactivated", {
+          defaultValue: "Active visual pack deactivated."
+        })
+      )
+    } catch (deactivateError) {
+      setError(
+        deactivateError instanceof Error
+          ? deactivateError.message
+          : t("sidepanel:personaGarden.visuals.deactivateError", {
+              defaultValue: "Failed to deactivate visual pack."
+            })
+      )
+    } finally {
+      setDeactivating(false)
+    }
+  }
+
+  const handleEnqueueGeneration = async () => {
+    if (!selectedPersonaId || !selectedPack || !generationPrompt.trim()) return
+    setEnqueueingGeneration(true)
+    setError(null)
+    try {
+      const job = await createPersonaVisualGenerationJob(
+        selectedPersonaId,
+        selectedPack.id,
+        {
+          prompt: generationPrompt.trim(),
+          target_state: generationTargetState || null,
+          backend: generationBackend.trim() || null
+        }
+      )
+      setGenerationPrompt("")
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.generationQueued", {
+          defaultValue: `Generation job ${job.job_id} queued.`
+        })
+      )
+    } catch (generationError) {
+      setError(
+        generationError instanceof Error
+          ? generationError.message
+          : t("sidepanel:personaGarden.visuals.generationError", {
+              defaultValue: "Failed to queue generation job."
+            })
+      )
+    } finally {
+      setEnqueueingGeneration(false)
+    }
+  }
+
+  const handleReviewCandidate = async (
+    candidateId: string,
+    status: "accepted" | "rejected"
+  ) => {
+    if (!selectedPersonaId || !selectedPack) return
+    setReviewingCandidateId(candidateId)
+    setError(null)
+    try {
+      const updated = await reviewPersonaVisualCandidate(
+        selectedPersonaId,
+        selectedPack.id,
+        candidateId,
+        {
+          status,
+          failure_reason: status === "rejected" ? "Rejected in editor." : null
+        }
+      )
+      setCandidates((current) =>
+        current.map((candidate) =>
+          candidate.id === candidateId ? { ...candidate, ...updated } : candidate
+        )
+      )
+      if (status === "accepted") {
+        void loadPacks()
+      }
+      setStatusMessage(
+        status === "accepted"
+          ? t("sidepanel:personaGarden.visuals.candidateAccepted", {
+              defaultValue: "Candidate accepted."
+            })
+          : t("sidepanel:personaGarden.visuals.candidateRejected", {
+              defaultValue: "Candidate rejected."
+            })
+      )
+    } catch (reviewError) {
+      setError(
+        reviewError instanceof Error
+          ? reviewError.message
+          : t("sidepanel:personaGarden.visuals.reviewError", {
+              defaultValue: "Failed to review candidate."
+            })
+      )
+    } finally {
+      setReviewingCandidateId("")
+    }
+  }
+
+  const handleStateMappingChange = (
+    state: PersonaVisualStateId,
+    animationId: string
+  ) => {
+    updateManifest((manifest) => {
+      const states = { ...manifest.states }
+      if (animationId) {
+        states[state] = { animation_id: animationId }
+      } else {
+        delete states[state]
+      }
+      return { ...manifest, states }
+    })
+  }
+
+  const handleFallbackChange = (state: PersonaVisualStateId, value: string) => {
+    updateManifest((manifest) => {
+      const fallbacks = { ...(manifest.fallbacks || {}) }
+      const nextValues = value
+        .split(",")
+        .map((item) => item.trim() as PersonaVisualStateId)
+        .filter((item) => VISUAL_STATES.includes(item))
+      if (nextValues.length) {
+        fallbacks[state] = nextValues
+      } else {
+        delete fallbacks[state]
+      }
+      return { ...manifest, fallbacks }
+    })
+  }
+
+  const handleAddAnimation = () => {
+    const animationId = newAnimationId.trim()
+    if (!animationId || draftManifest.animations[animationId]) return
+    updateManifest((manifest) => ({
+      ...manifest,
+      animations: {
+        ...manifest.animations,
+        [animationId]: {
+          frames: assets[0] ? [{ asset_id: assets[0].id }] : [],
+          frame_rate: 1,
+          loop: true,
+          alignment: { x: 0.5, y: 1 },
+          preview_frame: 0
+        }
+      }
+    }))
+    setSelectedAnimationId(animationId)
+    setNewAnimationId("")
+  }
+
+  const handleAnimationFieldChange = (
+    field: keyof PersonaVisualAnimation,
+    value: unknown
+  ) => {
+    if (!selectedAnimationId) return
+    updateManifest((manifest) =>
+      replaceAnimation(manifest, selectedAnimationId, (animation) => ({
+        ...animation,
+        frames: normalizeFrames(animation),
+        [field]: value
+      }))
+    )
+  }
+
+  const handleMoveFrame = (index: number, direction: -1 | 1) => {
+    if (!selectedAnimationId) return
+    updateManifest((manifest) =>
+      replaceAnimation(manifest, selectedAnimationId, (animation) => {
+        const frames = normalizeFrames(animation)
+        const target = index + direction
+        if (target < 0 || target >= frames.length) return { ...animation, frames }
+        const nextFrames = [...frames]
+        const [frame] = nextFrames.splice(index, 1)
+        nextFrames.splice(target, 0, frame)
+        return { ...animation, frames: nextFrames }
+      })
+    )
+  }
+
+  const handleFrameChange = (
+    index: number,
+    updater: (frame: PersonaVisualFrame) => PersonaVisualFrame
+  ) => {
+    if (!selectedAnimationId) return
+    updateManifest((manifest) =>
+      replaceAnimation(manifest, selectedAnimationId, (animation) => {
+        const frames = normalizeFrames(animation)
+        if (!frames[index]) return { ...animation, frames }
+        const nextFrames = frames.map((frame, frameIndex) =>
+          frameIndex === index ? updater(frame) : frame
+        )
+        return { ...animation, frames: nextFrames }
+      })
+    )
+  }
+
+  const handleFrameRegionChange = (
+    index: number,
+    key: "x" | "y" | "width" | "height",
+    value: string
+  ) => {
+    handleFrameChange(index, (frame) => {
+      const currentRegion = frame.region || {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0
+      }
+      const parsed = parseNumberOrUndefined(value) ?? 0
+      return {
+        ...frame,
+        region: {
+          ...currentRegion,
+          [key]: parsed
+        }
+      }
+    })
+  }
+
+  const handleAddFrame = () => {
+    if (!selectedAnimationId || !selectedAddFrameAssetId) return
+    updateManifest((manifest) =>
+      replaceAnimation(manifest, selectedAnimationId, (animation) => ({
+        ...animation,
+        frames: [
+          ...normalizeFrames(animation),
+          { asset_id: selectedAddFrameAssetId }
+        ]
+      }))
+    )
+  }
+
+  const handleAddTrigger = () => {
+    const match = triggerDraft.match.trim()
+    if (!match) return
+    updateManifest((manifest) => ({
+      ...manifest,
+      authored_triggers: [
+        ...(manifest.authored_triggers || []),
+        {
+          id: `trigger-${Date.now()}`,
+          source: triggerDraft.source,
+          match,
+          state: triggerDraft.state,
+          duration_ms: parseNumberOrUndefined(triggerDraft.durationMs) ?? 2500,
+          priority: parseNumberOrUndefined(triggerDraft.priority) ?? 20
+        }
+      ]
+    }))
+    setTriggerDraft(DEFAULT_TRIGGER_DRAFT)
+  }
+
+  const renderAnimationOptions = () => (
+    <>
+      <option value="">None</option>
+      {animationIds.map((animationId) => (
+        <option key={animationId} value={animationId}>
+          {animationId}
+        </option>
+      ))}
+    </>
+  )
+
+  const exportWarnings =
+    exportJob && "warnings" in exportJob && Array.isArray(exportJob.warnings)
+      ? exportJob.warnings
+      : []
+  const fullImportPreview = isFullImportPreview(importPreview) ? importPreview : null
+  const importPreviewWarnings = fullImportPreview
+    ? [
+        ...(fullImportPreview.validation_warnings || []),
+        ...(fullImportPreview.target_warnings || [])
+      ]
+    : []
+  const importPreviewConflicts = fullImportPreview?.conflicts || []
+  const importPreviewPlan = fullImportPreview?.proposed_plan || null
+
+  return (
+    <div className="space-y-3" data-testid="persona-visual-pack-editor">
+      <div className="rounded-lg border border-border bg-surface p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+              {t("sidepanel:personaGarden.visuals.heading", {
+                defaultValue: "Visual Packs"
+              })}
+            </div>
+            <div className="mt-1 text-sm font-medium text-text">
+              {selectedPersonaName || selectedPersonaId}
+            </div>
+          </div>
+          <Button
+            size="small"
+            onClick={() => void loadPacks()}
+            disabled={loading}
+          >
+            {loading
+              ? t("common:loading", "Loading")
+              : t("common:refresh", "Refresh")}
+          </Button>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+          <label className="text-xs text-text-muted">
+            <span className="mb-1 block">Pack</span>
+            <select
+              data-testid="persona-visual-pack-select"
+              className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+              value={selectedPack?.id || ""}
+              onChange={(event) => setSelectedPackId(event.target.value)}
+              disabled={!packs.length}
+            >
+              {packs.map((pack) => (
+                <option key={pack.id} value={pack.id}>
+                  {pack.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-text-muted">
+            <span className="mb-1 block">New draft title</span>
+            <input
+              data-testid="persona-visual-pack-title-input"
+              className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+            />
+          </label>
+          <Button
+            data-testid="persona-visual-create-pack"
+            className="self-end"
+            size="small"
+            type="primary"
+            icon={<Plus className="h-3.5 w-3.5" />}
+            disabled={!draftTitle.trim() || saving}
+            onClick={() => void handleCreateDraft()}
+          >
+            Create draft
+          </Button>
+        </div>
+        {!loading && !packs.length ? (
+          <div
+            data-testid="persona-visual-pack-empty"
+            className="mt-3 rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted"
+          >
+            No visual packs yet.
+          </div>
+        ) : null}
+        {selectedPack ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <Tag data-testid="persona-visual-pack-status" color="blue">
+              {selectedPack.status}
+            </Tag>
+            <span className="font-medium text-text">{selectedPack.title}</span>
+            <span className="text-text-muted">{`v${selectedPack.version ?? 1}`}</span>
+          </div>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
+          {error}
+        </div>
+      ) : null}
+      {statusMessage ? (
+        <div className="rounded-md border border-success/30 bg-success/10 p-2 text-xs text-success">
+          {statusMessage}
+        </div>
+      ) : null}
+
+      {selectedPack ? (
+        <>
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Asset role</span>
+                <select
+                  data-testid="persona-visual-upload-role-select"
+                  className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={uploadRole}
+                  onChange={(event) =>
+                    setUploadRole(event.target.value as PersonaVisualAssetRole)
+                  }
+                >
+                  {ASSET_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <input
+                ref={fileInputRef}
+                data-testid="persona-visual-upload-input"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="text-xs text-text"
+                onChange={(event) =>
+                  setSelectedUploadFile(event.target.files?.[0] ?? null)
+                }
+              />
+              <Button
+                data-testid="persona-visual-upload-button"
+                size="small"
+                icon={<Upload className="h-3.5 w-3.5" />}
+                loading={uploading}
+                disabled={!selectedUploadFile}
+                onClick={() => void handleUploadAsset()}
+              >
+                Upload
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {assets.map((asset) => (
+                <div
+                  key={asset.id}
+                  className="rounded border border-border bg-bg px-2 py-1.5 text-xs"
+                >
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Tag>{asset.asset_role}</Tag>
+                    <span className="font-medium text-text">
+                      {asset.original_filename || asset.id}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-text-muted">{asset.id}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+              Portability
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <div className="rounded border border-border bg-bg p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Typography.Text strong>Export archive</Typography.Text>
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      data-testid="persona-visual-export-button"
+                      size="small"
+                      icon={<Upload className="h-3.5 w-3.5" />}
+                      loading={exportingPack}
+                      onClick={() => void handleStartExport()}
+                    >
+                      Export
+                    </Button>
+                    <Button
+                      data-testid="persona-visual-export-refresh-button"
+                      size="small"
+                      icon={<RefreshCw className="h-3.5 w-3.5" />}
+                      loading={refreshingExport}
+                      disabled={!exportJob?.job_id}
+                      onClick={() => void handleRefreshExport()}
+                    >
+                      Refresh
+                    </Button>
+                    <Button
+                      data-testid="persona-visual-export-download-button"
+                      size="small"
+                      icon={<Download className="h-3.5 w-3.5" />}
+                      loading={downloadingExport}
+                      disabled={exportJob?.status !== "completed"}
+                      onClick={() => void handleDownloadExport()}
+                    >
+                      Download
+                    </Button>
+                  </div>
+                </div>
+                {exportJob ? (
+                  <div className="mt-2 space-y-1 text-xs text-text-muted">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tag data-testid="persona-visual-export-status">
+                        {exportJob.status}
+                      </Tag>
+                      <span data-testid="persona-visual-export-stage">
+                        {exportJob.stage}
+                      </span>
+                      <span>{exportJob.job_id}</span>
+                    </div>
+                    {exportWarnings.length ? (
+                      <div>{formatPreviewList(exportWarnings)}</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-text-muted">No export job.</div>
+                )}
+              </div>
+
+              <div className="rounded border border-border bg-bg p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Typography.Text strong>Import preview</Typography.Text>
+                  <Tag>review only</Tag>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    ref={importPreviewInputRef}
+                    data-testid="persona-visual-import-preview-input"
+                    type="file"
+                    accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+                    className="text-xs text-text"
+                    onChange={(event) =>
+                      setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
+                    }
+                  />
+                  <Button
+                    data-testid="persona-visual-import-preview-button"
+                    size="small"
+                    icon={<FileSearch className="h-3.5 w-3.5" />}
+                    loading={previewingImport}
+                    disabled={!selectedImportPreviewFile}
+                    onClick={() => void handleStartImportPreview()}
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    data-testid="persona-visual-import-preview-refresh-button"
+                    size="small"
+                    icon={<RefreshCw className="h-3.5 w-3.5" />}
+                    loading={refreshingImportPreview}
+                    disabled={!importPreview?.preview_id}
+                    onClick={() => void handleRefreshImportPreview()}
+                  >
+                    Refresh
+                  </Button>
+                </div>
+                {importPreview ? (
+                  <div className="mt-2 space-y-1 text-xs text-text-muted">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tag data-testid="persona-visual-import-preview-status">
+                        {importPreview.status}
+                      </Tag>
+                      <span>{importPreview.stage}</span>
+                      <span>{importPreview.preview_id}</span>
+                    </div>
+                    <div data-testid="persona-visual-import-preview-summary">
+                      {formatImportPreviewSummary(importPreview)}
+                    </div>
+                    {importPreviewWarnings.length ? (
+                      <div data-testid="persona-visual-import-preview-warnings">
+                        {formatPreviewList(importPreviewWarnings)}
+                      </div>
+                    ) : null}
+                    {importPreviewConflicts.length ? (
+                      <div data-testid="persona-visual-import-preview-conflicts">
+                        {formatPreviewList(importPreviewConflicts)}
+                      </div>
+                    ) : null}
+                    {importPreviewPlan ? (
+                      <div data-testid="persona-visual-import-preview-plan">
+                        {stringifyPreviewValue(importPreviewPlan)}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-text-muted">No import preview.</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+              State Mapping
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {[...REQUIRED_VISUAL_STATES, ...OPTIONAL_VISUAL_STATES].map((state) => (
+                <label key={state} className="text-xs text-text-muted">
+                  <span className="mb-1 flex items-center gap-1">
+                    <span>{formatStateLabel(state)}</span>
+                    {REQUIRED_VISUAL_STATES.includes(state) ? (
+                      <Tag color="red">required</Tag>
+                    ) : null}
+                  </span>
+                  <select
+                    data-testid={`persona-visual-state-${state}-select`}
+                    className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                    value={draftManifest.states?.[state]?.animation_id || ""}
+                    onChange={(event) =>
+                      handleStateMappingChange(state, event.target.value)
+                    }
+                  >
+                    {renderAnimationOptions()}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {OPTIONAL_VISUAL_STATES.map((state) => (
+                <label key={state} className="text-xs text-text-muted">
+                  <span className="mb-1 block">{`${formatStateLabel(state)} fallbacks`}</span>
+                  <input
+                    data-testid={`persona-visual-fallback-${state}-input`}
+                    className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                    value={(draftManifest.fallbacks?.[state] || []).join(",")}
+                    onChange={(event) => handleFallbackChange(state, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="mb-2 flex flex-wrap items-end gap-2">
+              <label className="min-w-[180px] text-xs text-text-muted">
+                <span className="mb-1 block">Animation</span>
+                <select
+                  data-testid="persona-visual-animation-select"
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={selectedAnimationId}
+                  onChange={(event) => setSelectedAnimationId(event.target.value)}
+                >
+                  {animationIds.map((animationId) => (
+                    <option key={animationId} value={animationId}>
+                      {animationId}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">New animation</span>
+                <input
+                  data-testid="persona-visual-new-animation-input"
+                  className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={newAnimationId}
+                  onChange={(event) => setNewAnimationId(event.target.value)}
+                />
+              </label>
+              <Button
+                size="small"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                disabled={!newAnimationId.trim()}
+                onClick={handleAddAnimation}
+              >
+                Add animation
+              </Button>
+            </div>
+
+            {selectedAnimation ? (
+              <>
+                <div className="grid gap-2 md:grid-cols-5">
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Frame rate</span>
+                    <input
+                      data-testid="persona-visual-frame-rate-input"
+                      type="number"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={selectedAnimation.frame_rate ?? ""}
+                      onChange={(event) =>
+                        handleAnimationFieldChange(
+                          "frame_rate",
+                          parseNumberOrUndefined(event.target.value)
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Preview frame</span>
+                    <select
+                      data-testid="persona-visual-preview-frame-select"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={selectedAnimation.preview_frame ?? 0}
+                      onChange={(event) =>
+                        handleAnimationFieldChange(
+                          "preview_frame",
+                          Number(event.target.value)
+                        )
+                      }
+                    >
+                      {selectedFrames.map((_, index) => (
+                        <option key={index} value={index}>
+                          {index}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Alignment X</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="1"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={selectedAnimation.alignment?.x ?? 0.5}
+                      onChange={(event) =>
+                        handleAnimationFieldChange("alignment", {
+                          ...(selectedAnimation.alignment || { x: 0.5, y: 1 }),
+                          x: Number(event.target.value)
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Alignment Y</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="1"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={selectedAnimation.alignment?.y ?? 1}
+                      onChange={(event) =>
+                        handleAnimationFieldChange("alignment", {
+                          ...(selectedAnimation.alignment || { x: 0.5, y: 1 }),
+                          y: Number(event.target.value)
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="flex items-end gap-2 text-xs text-text-muted">
+                    <input
+                      data-testid="persona-visual-loop-checkbox"
+                      type="checkbox"
+                      checked={selectedAnimation.loop !== false}
+                      onChange={(event) =>
+                        handleAnimationFieldChange("loop", event.target.checked)
+                      }
+                    />
+                    <span>Loop</span>
+                  </label>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Frame asset</span>
+                    <select
+                      data-testid="persona-visual-add-frame-asset-select"
+                      className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={selectedAddFrameAssetId}
+                      onChange={(event) => setSelectedAddFrameAssetId(event.target.value)}
+                    >
+                      <option value="">Select asset</option>
+                      {assets.map((asset) => (
+                        <option key={asset.id} value={asset.id}>
+                          {asset.original_filename || asset.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Button
+                    size="small"
+                    icon={<Plus className="h-3.5 w-3.5" />}
+                    disabled={!selectedAddFrameAssetId}
+                    onClick={handleAddFrame}
+                  >
+                    Add frame
+                  </Button>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {selectedFrames.map((frame, index) => (
+                    <div
+                      key={`${frame.asset_id}-${index}`}
+                      data-testid={`persona-visual-frame-row-${index}`}
+                      className="grid gap-2 rounded border border-border bg-bg p-2 md:grid-cols-[minmax(140px,1fr)_repeat(5,minmax(64px,90px))_auto]"
+                    >
+                      <label className="text-xs text-text-muted">
+                        <span className="mb-1 block">Asset</span>
+                        <select
+                          data-testid="persona-visual-frame-asset-select"
+                          className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                          value={frame.asset_id}
+                          onChange={(event) =>
+                            handleFrameChange(index, (current) => ({
+                              ...current,
+                              asset_id: event.target.value
+                            }))
+                          }
+                        >
+                          {assets.map((asset) => (
+                            <option key={asset.id} value={asset.id}>
+                              {asset.original_filename || asset.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {(["x", "y", "width", "height"] as const).map((key) => (
+                        <label key={key} className="text-xs text-text-muted">
+                          <span className="mb-1 block">{key}</span>
+                          <input
+                            data-testid={`persona-visual-frame-region-${key}`}
+                            type="number"
+                            className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                            value={frame.region?.[key] ?? ""}
+                            onChange={(event) =>
+                              handleFrameRegionChange(index, key, event.target.value)
+                            }
+                          />
+                        </label>
+                      ))}
+                      <label className="text-xs text-text-muted">
+                        <span className="mb-1 block">ms</span>
+                        <input
+                          data-testid="persona-visual-frame-duration-input"
+                          type="number"
+                          className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                          value={frame.duration_ms ?? ""}
+                          onChange={(event) =>
+                            handleFrameChange(index, (current) => ({
+                              ...current,
+                              duration_ms: parseNumberOrUndefined(event.target.value)
+                            }))
+                          }
+                        />
+                      </label>
+                      <div className="flex items-end gap-1">
+                        <Button
+                          data-testid={`persona-visual-frame-move-up-${index}`}
+                          size="small"
+                          icon={<ArrowUp className="h-3.5 w-3.5" />}
+                          disabled={index === 0}
+                          onClick={() => handleMoveFrame(index, -1)}
+                        />
+                        <Button
+                          data-testid={`persona-visual-frame-move-down-${index}`}
+                          size="small"
+                          icon={<ArrowDown className="h-3.5 w-3.5" />}
+                          disabled={index >= selectedFrames.length - 1}
+                          onClick={() => handleMoveFrame(index, 1)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
+                No animations in this pack.
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+              Authored Triggers
+            </div>
+            <div className="grid gap-2 md:grid-cols-[130px_minmax(160px,1fr)_130px_100px_90px_auto]">
+              <select
+                data-testid="persona-visual-trigger-source-select"
+                className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={triggerDraft.source}
+                onChange={(event) =>
+                  setTriggerDraft((current) => ({
+                    ...current,
+                    source: event.target.value as TriggerDraft["source"]
+                  }))
+                }
+              >
+                {TRIGGER_SOURCES.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
+              <input
+                data-testid="persona-visual-trigger-match-input"
+                className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={triggerDraft.match}
+                onChange={(event) =>
+                  setTriggerDraft((current) => ({
+                    ...current,
+                    match: event.target.value
+                  }))
+                }
+              />
+              <select
+                data-testid="persona-visual-trigger-state-select"
+                className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={triggerDraft.state}
+                onChange={(event) =>
+                  setTriggerDraft((current) => ({
+                    ...current,
+                    state: event.target.value as PersonaVisualStateId
+                  }))
+                }
+              >
+                {VISUAL_STATES.map((state) => (
+                  <option key={state} value={state}>
+                    {state}
+                  </option>
+                ))}
+              </select>
+              <input
+                data-testid="persona-visual-trigger-duration-input"
+                type="number"
+                className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={triggerDraft.durationMs}
+                onChange={(event) =>
+                  setTriggerDraft((current) => ({
+                    ...current,
+                    durationMs: event.target.value
+                  }))
+                }
+              />
+              <input
+                data-testid="persona-visual-trigger-priority-input"
+                type="number"
+                className="rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={triggerDraft.priority}
+                onChange={(event) =>
+                  setTriggerDraft((current) => ({
+                    ...current,
+                    priority: event.target.value
+                  }))
+                }
+              />
+              <Button
+                data-testid="persona-visual-add-trigger"
+                size="small"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                disabled={!triggerDraft.match.trim()}
+                onClick={handleAddTrigger}
+              >
+                Add
+              </Button>
+            </div>
+            {draftManifest.authored_triggers?.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {draftManifest.authored_triggers.map((trigger) => (
+                  <Tag key={trigger.id} color="purple">
+                    {`${trigger.source}:${trigger.match} -> ${trigger.state}`}
+                  </Tag>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <Typography.Text strong>Validation</Typography.Text>
+                {validationErrors.length ? (
+                  <div
+                    data-testid="persona-visual-validation-errors"
+                    className="mt-1 text-xs text-danger"
+                  >
+                    {validationErrors.join(" ")}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-success">
+                    Required states resolve.
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  data-testid="persona-visual-save-manifest"
+                  size="small"
+                  type="primary"
+                  icon={<Save className="h-3.5 w-3.5" />}
+                  loading={saving}
+                  onClick={() => void handleSaveManifest()}
+                >
+                  Save manifest
+                </Button>
+                <Button
+                  data-testid="persona-visual-activate-button"
+                  size="small"
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                  disabled={validationErrors.length > 0}
+                  loading={activating}
+                  onClick={() => void handleActivate()}
+                >
+                  Activate
+                </Button>
+                <Button
+                  data-testid="persona-visual-deactivate-button"
+                  size="small"
+                  icon={<XCircle className="h-3.5 w-3.5" />}
+                  loading={deactivating}
+                  disabled={!packs.some((pack) => pack.status === "active")}
+                  onClick={() => void handleDeactivate()}
+                >
+                  Deactivate
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                Generated Candidates
+              </div>
+              <Button size="small" onClick={() => void loadCandidates()}>
+                {candidatesLoading ? "Loading" : "Refresh"}
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_150px_minmax(120px,160px)_auto]">
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Prompt</span>
+                <input
+                  data-testid="persona-visual-generation-prompt-input"
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={generationPrompt}
+                  onChange={(event) => setGenerationPrompt(event.target.value)}
+                />
+              </label>
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Target state</span>
+                <select
+                  data-testid="persona-visual-generation-target-state-select"
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={generationTargetState}
+                  onChange={(event) =>
+                    setGenerationTargetState(event.target.value as PersonaVisualStateId)
+                  }
+                >
+                  {VISUAL_STATES.map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-text-muted">
+                <span className="mb-1 block">Backend</span>
+                <input
+                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                  value={generationBackend}
+                  onChange={(event) => setGenerationBackend(event.target.value)}
+                />
+              </label>
+              <Button
+                data-testid="persona-visual-generation-enqueue-button"
+                className="self-end"
+                size="small"
+                type="primary"
+                loading={enqueueingGeneration}
+                disabled={!generationPrompt.trim()}
+                onClick={() => void handleEnqueueGeneration()}
+              >
+                Queue
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {candidates.length ? (
+                candidates.map((candidate) => (
+                  <div
+                    key={candidate.id}
+                    className="rounded border border-border bg-bg p-2 text-xs"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="font-medium text-text">
+                          {candidate.prompt || candidate.id}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1 text-text-muted">
+                          <Tag>{candidate.status}</Tag>
+                          {candidate.job_id ? <span>{candidate.job_id}</span> : null}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          data-testid={`persona-visual-candidate-accept-${candidate.id}`}
+                          size="small"
+                          loading={reviewingCandidateId === candidate.id}
+                          onClick={() => void handleReviewCandidate(candidate.id, "accepted")}
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          data-testid={`persona-visual-candidate-reject-${candidate.id}`}
+                          size="small"
+                          danger
+                          loading={reviewingCandidateId === candidate.id}
+                          onClick={() => void handleReviewCandidate(candidate.id, "rejected")}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                    {candidate.generated_assets?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {candidate.generated_assets.map((asset) => (
+                          <div
+                            key={asset.id}
+                            className="flex items-center gap-2 rounded border border-border bg-surface px-2 py-1"
+                          >
+                            <img
+                              src={asset.url}
+                              alt={asset.original_filename || asset.id}
+                              className="h-10 w-10 rounded object-contain"
+                            />
+                            <div>
+                              <div className="text-text">
+                                {asset.original_filename || asset.id}
+                              </div>
+                              <div className="text-text-muted">{asset.id}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
+                  No generated candidates.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+export default VisualPackEditor

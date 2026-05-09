@@ -7,7 +7,10 @@ import {
 } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
-import { useSetBuddyShellRenderContext } from "@/components/Common/PersonaBuddy"
+import {
+  resolvePersonaVisualState,
+  useSetBuddyShellRenderContext
+} from "@/components/Common/PersonaBuddy"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { PersonaPolicySummary } from "@/components/Option/MCPHub"
 import type { PersonaTurnDetectionValues } from "@/components/PersonaGarden/PersonaTurnDetectionControls"
@@ -35,6 +38,7 @@ import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import {
   type PersonaGardenTabKey
 } from "@/utils/persona-garden-route"
@@ -124,6 +128,12 @@ const LazyVoiceExamplesPanel = React.lazy(() =>
   }))
 )
 
+const LazyVisualPackEditor = React.lazy(() =>
+  import("@/components/PersonaGarden/VisualPackEditor").then((module) => ({
+    default: module.VisualPackEditor
+  }))
+)
+
 const normalizeWakeTriggerPhrases = (phrases?: string[] | null): string[] => {
   const seen = new Set<string>()
   const next: string[] = []
@@ -210,6 +220,13 @@ const SidepanelPersona = ({
     setSelectedPersonaId
   })
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
+  const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const [buddyShellLiveContext, setBuddyShellLiveContext] = React.useState({
+    live_voice_state: "idle",
+    active_tool_status: "",
+    wake_armed: false,
+    recovery_mode: "none"
+  })
   const selectedCatalogPersona = React.useMemo(
     () =>
       catalog.find((persona) => String(persona.id || "") === String(selectedPersonaId || "")) ??
@@ -245,6 +262,11 @@ const SidepanelPersona = ({
             : null) ??
           selectedCatalogPersona?.buddy_summary ??
           null,
+        live_session_id: sessionId,
+        live_voice_state: buddyShellLiveContext.live_voice_state,
+        active_tool_status: buddyShellLiveContext.active_tool_status,
+        wake_armed: buddyShellLiveContext.wake_armed,
+        recovery_mode: buddyShellLiveContext.recovery_mode,
         persona_source: "route-local"
       }
     }
@@ -264,6 +286,8 @@ const SidepanelPersona = ({
     savedPersonaBuddySummaryPersonaId,
     setBuddyShellRenderContext,
     shell,
+    sessionId,
+    buddyShellLiveContext,
     uxState
   ])
 
@@ -554,6 +578,20 @@ const SidepanelPersona = ({
   liveVoiceControllerRef.current = liveVoiceController
 
   React.useEffect(() => {
+    setBuddyShellLiveContext({
+      live_voice_state: liveVoiceController.state,
+      active_tool_status: liveVoiceController.activeToolStatus,
+      wake_armed: liveVoiceController.wakeArmed,
+      recovery_mode: liveVoiceController.recoveryMode
+    })
+  }, [
+    liveVoiceController.activeToolStatus,
+    liveVoiceController.recoveryMode,
+    liveVoiceController.state,
+    liveVoiceController.wakeArmed
+  ])
+
+  React.useEffect(() => {
     liveVoiceAnalyticsSnapshotRef.current = {
       personaId: String(livePersonaId || "").trim(),
       sessionId: String(sessionId || "").trim(),
@@ -575,6 +613,7 @@ const SidepanelPersona = ({
     consumeSetupHandoffAction: setupOrch.consumeSetupHandoffAction,
     emitSetupAnalyticsEvent,
     liveVoiceController,
+    personaId: String(selectedPersonaId || "").trim(),
     personaSetupWizardCurrentStep: setupOrch.personaSetupWizard.currentStep,
     personaSetupWizardIsSetupRequired: setupOrch.personaSetupWizard.isSetupRequired,
     resolvedApprovalSnapshot,
@@ -1044,6 +1083,42 @@ const SidepanelPersona = ({
     </div>
   ) : null
 
+  const normalizedLivePersonaId = String(livePersonaId || "").trim()
+  const applicableVisualOverride =
+    visualRuntimeOverride &&
+    visualRuntimeOverride.personaId === normalizedLivePersonaId &&
+    (!sessionId ||
+      !visualRuntimeOverride.sessionId ||
+      visualRuntimeOverride.sessionId === sessionId) &&
+    visualRuntimeOverride.expiresAt > Date.now()
+      ? visualRuntimeOverride
+      : null
+  const resolvedLiveVisualState = resolvePersonaVisualState({
+    liveVoiceState: liveVoiceController.state,
+    activeToolStatus: liveVoiceController.activeToolStatus,
+    wakeArmed: liveVoiceController.wakeArmed,
+    recovering: liveVoiceController.recoveryMode !== "none",
+    runtimeOverride: applicableVisualOverride,
+    mcpRuntimeReason: applicableVisualOverride?.reason
+  })
+  const visualStateFeedback: React.ComponentProps<
+    typeof AssistantVoiceCard
+  >["visualStateFeedback"] = !isCompanionMode
+    ? {
+        state: resolvedLiveVisualState,
+        source: applicableVisualOverride
+          ? "override"
+          : liveVoiceController.recoveryMode !== "none" ||
+              liveVoiceController.state === "error"
+            ? "error_recovery"
+            : liveVoiceController.activeToolStatus
+              ? "live"
+              : "default",
+        reason: applicableVisualOverride?.reason ?? null,
+        fallbackReason: null
+      }
+    : undefined
+
   const assistantVoiceCard = (
     <AssistantVoiceCard
       resolvedDefaults={resolvedLivePersonaVoiceDefaults}
@@ -1075,6 +1150,7 @@ const SidepanelPersona = ({
       minSilenceMs={liveVoiceController.minSilenceMs}
       turnStopSecs={liveVoiceController.turnStopSecs}
       minUtteranceSecs={liveVoiceController.minUtteranceSecs}
+      visualStateFeedback={visualStateFeedback}
       onToggleListening={liveVoiceController.toggleListening}
       onSendNow={liveVoiceController.sendCurrentTranscriptNow}
       onSessionAutoResumeChange={liveVoiceController.setSessionAutoResume}
@@ -1764,6 +1840,21 @@ const SidepanelPersona = ({
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName}
           isActive={activeTab === "voice"}
+        />,
+        {
+          includeSetupHandoff: false
+        }
+      )
+    },
+    {
+      key: "visuals",
+      label: t("sidepanel:persona.tabVisuals", "Visuals"),
+      content: renderLazyPersonaTab(
+        "visuals",
+        <LazyVisualPackEditor
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName}
+          isActive={activeTab === "visuals"}
         />,
         {
           includeSetupHandoff: false

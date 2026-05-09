@@ -249,6 +249,31 @@ describe("AssistantVoiceCard", () => {
     )
   })
 
+  it("renders compact persona visual-state feedback when provided", () => {
+    const props = defaultVoiceCardProps()
+    props.visualStateFeedback = {
+      state: "tool_running",
+      source: "override",
+      reason: "persona_visuals.trigger_state",
+      fallbackReason: "idle fallback"
+    }
+
+    render(<AssistantVoiceCard {...props} />)
+
+    expect(screen.getByTestId("live-visual-state-feedback")).toHaveTextContent(
+      "tool_running"
+    )
+    expect(screen.getByTestId("live-visual-state-feedback")).toHaveTextContent(
+      "override"
+    )
+    expect(screen.getByTestId("live-visual-state-feedback")).toHaveTextContent(
+      "persona_visuals.trigger_state"
+    )
+    expect(screen.getByTestId("live-visual-state-feedback")).toHaveTextContent(
+      "idle fallback"
+    )
+  })
+
   it("renders listening recovery copy and actions", () => {
     const onKeepListening = vi.fn()
     const onResetTurn = vi.fn()

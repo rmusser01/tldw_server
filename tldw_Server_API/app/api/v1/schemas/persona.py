@@ -22,6 +22,12 @@ PersonaWakeBehavior = Literal["one_shot", "continuous", "push_to_talk_after_wake
 PersonaSetupStatus = Literal["not_started", "in_progress", "completed"]
 PersonaSetupStep = Literal["archetype", "persona", "voice", "commands", "safety", "test"]
 PersonaSetupTestType = Literal["dry_run", "live_session"]
+PersonaVisualPackStatus = Literal["draft", "review", "active", "archived", "failed"]
+PersonaVisualRendererType = Literal["sprite_frames", "sprite_sheet", "static_image", "live2d"]
+PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview", "generated_candidate"]
+PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
+PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
+PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",
@@ -44,6 +50,184 @@ PersonaSetupEventType = Literal[
     "setup_skipped",
     "setup_resumed",
 ]
+
+
+class PersonaVisualPackCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    manifest: dict[str, Any] = Field(default_factory=dict)
+
+
+class PersonaVisualManifestUpdate(BaseModel):
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class PersonaVisualAssetResponse(BaseModel):
+    id: str
+    pack_id: str
+    persona_id: str
+    asset_role: PersonaVisualAssetRole
+    storage_key: str
+    url: str
+    original_filename: str | None = None
+    mime_type: str
+    byte_size: int
+    checksum_sha256: str
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
+    provenance: str = "uploaded"
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualPackResponse(BaseModel):
+    id: str
+    persona_id: str
+    user_id: str
+    title: str
+    renderer_type: PersonaVisualRendererType
+    status: PersonaVisualPackStatus
+    manifest_version: int = 1
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    parent_pack_id: str | None = None
+    revision_number: int = 1
+    provenance: str = "uploaded"
+    active_at: str | None = None
+    assets: list[PersonaVisualAssetResponse] = Field(default_factory=list)
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualCandidateReviewRequest(BaseModel):
+    status: PersonaVisualCandidateReviewStatus
+    failure_reason: str | None = Field(default=None, max_length=1000)
+
+
+class PersonaVisualGenerationRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    target_state: str | None = Field(default=None, max_length=80)
+    backend: str | None = Field(default=None, max_length=80)
+
+
+class PersonaVisualGenerationJobResponse(BaseModel):
+    job_id: str
+    status: str | None = None
+
+
+class PersonaVisualPackExportRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=120)
+    strict: bool = False
+    include_full_provenance: bool = False
+    warn_for_sharing: bool = True
+
+
+class PersonaVisualPortabilityJobResponse(BaseModel):
+    job_id: str
+    portability_job_id: str
+    operation: PersonaVisualPortabilityOperation
+    persona_id: str | None = None
+    pack_id: str | None = None
+    status: str
+    visual_status: str
+    stage: str
+    progress: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[Any] = Field(default_factory=list)
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    download_url: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
+
+
+class PersonaVisualPackExportResponse(BaseModel):
+    job_id: str
+    portability_job_id: str
+    operation: Literal["export"]
+    persona_id: str
+    pack_id: str
+    status: str
+    stage: str
+    download_url: str | None = None
+
+
+class PersonaVisualImportPreviewStartResponse(BaseModel):
+    preview_id: str
+    job_id: str
+    portability_job_id: str
+    operation: Literal["import_preview"]
+    target_persona_id: str | None = None
+    status: str
+    stage: str
+
+
+class PersonaVisualImportPreviewResponse(BaseModel):
+    preview_id: str
+    job_id: str
+    portability_job_id: str
+    operation: Literal["import_preview"]
+    target_persona_id: str | None = None
+    status: str
+    visual_status: str
+    stage: str
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    schema_version: str | None = None
+    bundle_summary: dict[str, Any] = Field(default_factory=dict)
+    validation_warnings: list[Any] = Field(default_factory=list)
+    conflicts: list[Any] = Field(default_factory=list)
+    proposed_plan: dict[str, Any] = Field(default_factory=dict)
+    quota_estimate: dict[str, Any] = Field(default_factory=dict)
+    required_choices: list[Any] = Field(default_factory=list)
+    target_warnings: list[Any] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
+
+
+class PersonaVisualImportCommitRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=120)
+    trust_mode: Literal["trusted_restore", "untrusted_import"] = "untrusted_import"
+    target_mode: Literal["create_new"] = "create_new"
+
+
+class PersonaVisualImportCommitStartResponse(BaseModel):
+    job_id: str
+    portability_job_id: str
+    operation: Literal["import_commit"]
+    preview_id: str
+    target_persona_id: str
+    status: str
+    stage: str
+
+
+class PersonaVisualCandidateResponse(BaseModel):
+    id: str
+    pack_id: str
+    persona_id: str
+    user_id: str
+    job_id: str | None = None
+    status: PersonaVisualCandidateStatus
+    proposed_manifest_patch: dict[str, Any] = Field(default_factory=dict)
+    generated_asset_ids: list[str] = Field(default_factory=list)
+    generated_assets: list[PersonaVisualAssetResponse] = Field(default_factory=list)
+    prompt: str | None = None
+    failure_reason: str | None = None
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualCandidateListResponse(BaseModel):
+    candidates: list[PersonaVisualCandidateResponse] = Field(default_factory=list)
+
+
+class PersonaVisualDeactivateResponse(BaseModel):
+    status: Literal["deactivated"]
+    persona_id: str
 
 
 class PersonaInfo(BaseModel):

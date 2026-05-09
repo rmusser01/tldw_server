@@ -4,19 +4,27 @@ import { createPortal } from "react-dom"
 import { useSetting } from "@/hooks/useSetting"
 import { useDesktop } from "@/hooks/useMediaQuery"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import {
+  getPersonaVisualPack,
+  listPersonaVisualPacks
+} from "@/services/persona-visuals"
 import { PERSONA_BUDDY_SHELL_ENABLED_SETTING } from "@/services/settings/ui-settings"
 import {
   clampPersonaBuddyShellPosition,
   DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS,
   usePersonaBuddyShellStore
 } from "@/store/persona-buddy-shell"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type {
   PersonaBuddyPositionBucket,
+  PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
+import type { PersonaVisualPack } from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
 import { BuddyShellDock } from "./BuddyShellDock"
+import { resolvePersonaVisualState } from "./personaVisualState"
 
 type BuddyShellHostProps = {
   root: "web" | "sidepanel"
@@ -29,6 +37,7 @@ type DragState = {
 
 type ResolvedPersonaShellState = {
   hasTargetPersona: boolean
+  activePersonaId: string | null
   fallbackName: string | null
   buddySummary: PersonaBuddySummary | null
 }
@@ -75,12 +84,7 @@ const resolveActivePersonaSelection = ({
   selectedAssistant
 }: {
   renderContext:
-    | {
-        surface_active: boolean
-        active_persona_id: string | null
-        persona_source?: string | null
-        buddy_summary?: PersonaBuddySummary | null
-      }
+    | PersonaBuddyRenderContext
     | null
     | undefined
   selectedAssistant: unknown
@@ -88,6 +92,7 @@ const resolveActivePersonaSelection = ({
   if (!renderContext?.surface_active) {
     return {
       hasTargetPersona: false,
+      activePersonaId: null,
       fallbackName: null,
       buddySummary: null
     }
@@ -110,6 +115,7 @@ const resolveActivePersonaSelection = ({
     if (renderContext.buddy_summary) {
       return {
         hasTargetPersona: true,
+        activePersonaId: renderContext.active_persona_id || selectedPersona?.id || null,
         fallbackName: renderContext.buddy_summary.persona_name,
         buddySummary: renderContext.buddy_summary
       }
@@ -117,6 +123,7 @@ const resolveActivePersonaSelection = ({
 
     return {
       hasTargetPersona: hasExplicitTargetPersona,
+      activePersonaId: renderContext.active_persona_id || selectedPersona?.id || null,
       fallbackName: selectionMatches ? selectedPersona.name : null,
       buddySummary: null
     }
@@ -125,6 +132,7 @@ const resolveActivePersonaSelection = ({
   if (selectionMatches) {
     return {
       hasTargetPersona: true,
+      activePersonaId: selectedPersona.id,
       fallbackName: selectedPersona.name,
       buddySummary: selectedPersona.buddy_summary ?? null
     }
@@ -132,10 +140,14 @@ const resolveActivePersonaSelection = ({
 
   return {
     hasTargetPersona: false,
+    activePersonaId: null,
     fallbackName: null,
     buddySummary: null
   }
 }
+
+const hasVisualPackAssetMap = (pack: PersonaVisualPack | null): boolean =>
+  Boolean(pack?.assets_by_id && Object.keys(pack.assets_by_id).length > 0)
 
 type BuddyShellHostInnerProps = {
   root: "web" | "sidepanel"
@@ -266,9 +278,76 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       }),
     [renderContext, selectedAssistant]
   )
+  const [visualPack, setVisualPack] = React.useState<PersonaVisualPack | null>(null)
+  const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const clearExpiredVisualOverride = usePersonaVisualRuntimeStore(
+    (state) => state.clearExpired
+  )
+
+  React.useEffect(() => {
+    clearExpiredVisualOverride()
+    if (typeof window === "undefined") return undefined
+    const timer = window.setInterval(() => clearExpiredVisualOverride(), 1000)
+    return () => window.clearInterval(timer)
+  }, [clearExpiredVisualOverride])
+
+  React.useEffect(() => {
+    const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
+    if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
+      setVisualPack(null)
+      return undefined
+    }
+
+    let cancelled = false
+    setVisualPack(null)
+    ;(async () => {
+      try {
+        const response = await listPersonaVisualPacks(activePersonaId)
+        let activePack =
+          response.active_pack ??
+          response.packs.find((pack) => pack.status === "active") ??
+          null
+        if (activePack && !hasVisualPackAssetMap(activePack)) {
+          activePack = await getPersonaVisualPack(activePersonaId, activePack.id)
+        }
+        if (!cancelled) {
+          setVisualPack(activePack)
+        }
+      } catch {
+        if (!cancelled) {
+          setVisualPack(null)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [resolvedPersona.activePersonaId, resolvedPersona.hasTargetPersona])
 
   const buddySummary = resolvedPersona.buddySummary
   const isDormant = resolvedPersona.hasTargetPersona && !buddySummary?.has_buddy
+  const applicableRuntimeOverride =
+    runtimeOverride &&
+    runtimeOverride.personaId === resolvedPersona.activePersonaId &&
+    (!renderContext.live_session_id ||
+      !runtimeOverride.sessionId ||
+      runtimeOverride.sessionId === renderContext.live_session_id)
+      ? runtimeOverride
+      : null
+  const visualState =
+    renderContext.visual_state ??
+    resolvePersonaVisualState({
+      liveVoiceState: renderContext.live_voice_state,
+      activeToolStatus: renderContext.active_tool_status,
+      wakeArmed: renderContext.wake_armed,
+      recovering:
+        Boolean(renderContext.recovery_mode) &&
+        renderContext.recovery_mode !== "none",
+      runtimeOverride: applicableRuntimeOverride,
+      authoredTriggers: visualPack?.manifest?.authored_triggers,
+      mcpRuntimeReason: applicableRuntimeOverride?.reason
+    })
   const portalRoot = ensurePortalRoot()
 
   if (!resolvedPersona.hasTargetPersona) {
@@ -294,6 +373,8 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       buddySummary={dockSummary}
       isOpen={isOpen}
       isDormant={isDormant}
+      visualPack={visualPack}
+      visualState={visualState}
       position={position}
       onToggle={() => setOpen(!isOpen)}
       onDragHandlePointerDown={handleDragHandlePointerDown}

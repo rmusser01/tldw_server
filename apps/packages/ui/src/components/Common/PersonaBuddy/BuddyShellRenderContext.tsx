@@ -47,6 +47,12 @@ const areRenderContextsEqual = (
     left.active_persona_id === right.active_persona_id &&
     left.position_bucket === right.position_bucket &&
     areBuddySummariesEqual(left.buddy_summary, right.buddy_summary) &&
+    left.live_session_id === right.live_session_id &&
+    left.live_voice_state === right.live_voice_state &&
+    left.active_tool_status === right.active_tool_status &&
+    left.wake_armed === right.wake_armed &&
+    left.recovery_mode === right.recovery_mode &&
+    left.visual_state === right.visual_state &&
     left.persona_source === right.persona_source)
 
 type BuddyShellRenderContextProviderProps = {

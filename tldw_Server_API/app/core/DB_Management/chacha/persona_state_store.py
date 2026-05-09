@@ -887,6 +887,129 @@ class PersonaStateStore:
             ) from exc
         return item
 
+    def _decode_persona_json_list(
+        self,
+        raw_value: Any,
+        *,
+        field_name: str,
+        context_label: str,
+    ) -> list[Any]:
+        if isinstance(raw_value, list):
+            return raw_value
+        if isinstance(raw_value, str):
+            try:
+                decoded = json.loads(raw_value)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Failed to decode JSON list for field '{}' in {}. Falling back to empty list. Value preview: {}",
+                    field_name,
+                    context_label,
+                    raw_value[:100] + ("..." if len(raw_value) > 100 else ""),
+                )
+                return []
+            return decoded if isinstance(decoded, list) else []
+        return []
+
+    def _persona_visual_pack_row_to_dict(self, row: Any) -> dict[str, Any] | None:
+        if not row:
+            return None
+        item = dict(row)
+        pack_label = str(item.get("id") or "unknown")
+        item["manifest"] = self._decode_persona_json_object(
+            item.get("manifest_json"),
+            field_name="manifest_json",
+            context_label=f"persona visual pack {pack_label}",
+        )
+        item["deleted"] = self._as_bool(item.get("deleted"))
+        return item
+
+    def _persona_visual_asset_row_to_dict(self, row: Any) -> dict[str, Any] | None:
+        if not row:
+            return None
+        item = dict(row)
+        item["deleted"] = self._as_bool(item.get("deleted"))
+        for field_name in ("byte_size", "width", "height", "duration_ms", "version"):
+            value = item.get(field_name)
+            if value is None:
+                continue
+            try:
+                item[field_name] = int(value)
+            except (TypeError, ValueError):
+                item[field_name] = None
+        return item
+
+    def _persona_visual_candidate_row_to_dict(self, row: Any) -> dict[str, Any] | None:
+        if not row:
+            return None
+        item = dict(row)
+        candidate_label = str(item.get("id") or "unknown")
+        item["proposed_manifest_patch"] = self._decode_persona_json_object(
+            item.get("proposed_manifest_patch_json"),
+            field_name="proposed_manifest_patch_json",
+            context_label=f"persona visual candidate {candidate_label}",
+        )
+        item["generated_asset_ids"] = self._decode_persona_json_list(
+            item.get("generated_asset_ids_json"),
+            field_name="generated_asset_ids_json",
+            context_label=f"persona visual candidate {candidate_label}",
+        )
+        item["deleted"] = self._as_bool(item.get("deleted"))
+        return item
+
+    def _normalize_persona_visual_enum(
+        self,
+        value: Any,
+        *,
+        allowed: tuple[str, ...],
+        field_name: str,
+        default: str | None = None,
+    ) -> str:
+        normalized = str(value if value is not None else default or "").strip().lower()
+        if normalized not in allowed:
+            allowed_values = ", ".join(allowed)
+            raise InputError(
+                f"Invalid persona visual {field_name} '{normalized}'. Allowed: {allowed_values}."
+            )  # noqa: TRY003
+        return normalized
+
+    def _require_persona_visual_pack_owner(
+        self,
+        conn: Any,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        row = conn.execute(
+            """
+            SELECT p.*
+              FROM persona_visual_packs p
+              JOIN persona_profiles pp
+                ON pp.id = p.persona_id
+               AND pp.user_id = p.user_id
+             WHERE p.id = ?
+               AND p.persona_id = ?
+               AND p.user_id = ?
+             LIMIT 1
+            """,
+            (pack_id, persona_id, user_id),
+        ).fetchone()
+        if not row:
+            raise ConflictError(  # noqa: TRY003
+                "Persona visual pack not found for user.",
+                entity="persona_visual_packs",
+                entity_id=pack_id,
+            )
+        item = dict(row)
+        if not include_deleted and self._as_bool(item.get("deleted")):
+            raise ConflictError(  # noqa: TRY003
+                "Persona visual pack is soft-deleted.",
+                entity="persona_visual_packs",
+                entity_id=pack_id,
+            )
+        return item
+
     def _persona_scope_rule_row_to_dict(self, row: Any) -> dict[str, Any] | None:
         if not row:
             return None
@@ -1868,6 +1991,782 @@ class PersonaStateStore:
                         return _load_persisted_item(conn)
 
             return _load_persisted_item(conn)
+
+    def create_persona_visual_pack(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        title: str,
+        manifest: dict[str, Any] | None = None,
+        renderer_type: str = "sprite_frames",
+        status: str = "draft",
+        parent_pack_id: str | None = None,
+        revision_number: int = 1,
+        provenance: str = "uploaded",
+        pack_id: str | None = None,
+    ) -> dict[str, Any]:
+        persona_id = str(persona_id or "").strip()
+        user_id = str(user_id or "").strip()
+        title_value = str(title or "").strip()
+        if not persona_id:
+            raise InputError("persona_id is required for persona visual pack creation.")  # noqa: TRY003
+        if not user_id:
+            raise InputError("user_id is required for persona visual pack creation.")  # noqa: TRY003
+        if not title_value:
+            raise InputError("title is required for persona visual pack creation.")  # noqa: TRY003
+
+        manifest_value = manifest if isinstance(manifest, dict) else {}
+        manifest_version = manifest_value.get("manifest_version", 1)
+        try:
+            manifest_version_value = int(manifest_version)
+        except (TypeError, ValueError) as exc:
+            raise InputError("manifest_version must be an integer.") from exc  # noqa: TRY003
+        try:
+            revision_number_value = int(revision_number)
+        except (TypeError, ValueError) as exc:
+            raise InputError("revision_number must be an integer.") from exc  # noqa: TRY003
+        if manifest_version_value < 1 or revision_number_value < 1:
+            raise InputError("manifest_version and revision_number must be >= 1.")  # noqa: TRY003
+
+        renderer_type_value = self._normalize_persona_visual_enum(
+            renderer_type,
+            allowed=self._ALLOWED_PERSONA_VISUAL_RENDERER_TYPES,
+            field_name="renderer_type",
+            default="sprite_frames",
+        )
+        status_value = self._normalize_persona_visual_enum(
+            status,
+            allowed=self._ALLOWED_PERSONA_VISUAL_PACK_STATUSES,
+            field_name="status",
+            default="draft",
+        )
+        provenance_value = self._normalize_persona_visual_enum(
+            provenance,
+            allowed=self._ALLOWED_PERSONA_VISUAL_PROVENANCE_TYPES,
+            field_name="provenance",
+            default="uploaded",
+        )
+        pack_id_value = str(pack_id or self._generate_uuid()).strip()
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        active_at = now if status_value == "active" else None
+
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            if parent_pack_id:
+                self._require_persona_visual_pack_owner(
+                    conn,
+                    pack_id=str(parent_pack_id),
+                    persona_id=persona_id,
+                    user_id=user_id,
+                )
+            if status_value == "active":
+                archive_query = (
+                    "UPDATE persona_visual_packs "
+                    "SET status = 'archived', active_at = NULL, last_modified = ?, version = version + 1 "
+                    "WHERE user_id = ? AND persona_id = ? AND status = 'active' AND deleted = ?"
+                )
+                archive_params = (
+                    now,
+                    user_id,
+                    persona_id,
+                    bool_cast(False),
+                )
+                prepared_archive, prepared_archive_params = self._prepare_backend_statement(
+                    archive_query,
+                    archive_params,
+                )
+                conn.execute(prepared_archive, prepared_archive_params or ())
+
+            insert_query = (
+                "INSERT INTO persona_visual_packs("
+                "id, persona_id, user_id, title, renderer_type, status, manifest_version, manifest_json, "
+                "parent_pack_id, revision_number, provenance, active_at, created_at, last_modified, deleted, version"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            insert_params = (
+                pack_id_value,
+                persona_id,
+                user_id,
+                title_value,
+                renderer_type_value,
+                status_value,
+                manifest_version_value,
+                self._ensure_json_string(manifest_value) or "{}",
+                str(parent_pack_id) if parent_pack_id else None,
+                revision_number_value,
+                provenance_value,
+                active_at,
+                now,
+                now,
+                bool_cast(False),
+                1,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(insert_query, insert_params)
+            conn.execute(prepared_query, prepared_params or ())
+
+        pack = self.get_persona_visual_pack(
+            pack_id=pack_id_value,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if not pack:
+            raise CharactersRAGDBError("Failed to load persona visual pack after creation.")  # noqa: TRY003
+        return pack
+
+    def get_persona_visual_pack(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        include_deleted: bool = False,
+        include_deleted_personas: bool = False,
+    ) -> dict[str, Any] | None:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = """
+            SELECT p.*
+              FROM persona_visual_packs p
+              JOIN persona_profiles pp
+                ON pp.id = p.persona_id
+               AND pp.user_id = p.user_id
+             WHERE p.id = ?
+               AND p.persona_id = ?
+               AND p.user_id = ?
+               AND (? OR p.deleted = ?)
+               AND (? OR pp.deleted = ?)
+             LIMIT 1
+        """
+        params = (
+            pack_id,
+            persona_id,
+            user_id,
+            bool(include_deleted),
+            deleted_false,
+            bool(include_deleted_personas),
+            deleted_false,
+        )
+        cursor = self.execute_query(query, params)
+        return self._persona_visual_pack_row_to_dict(cursor.fetchone())
+
+    def list_persona_visual_packs(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        include_deleted: bool = False,
+        include_deleted_personas: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = """
+            SELECT p.*
+              FROM persona_visual_packs p
+              JOIN persona_profiles pp
+                ON pp.id = p.persona_id
+               AND pp.user_id = p.user_id
+             WHERE p.persona_id = ?
+               AND p.user_id = ?
+               AND (? OR p.deleted = ?)
+               AND (? OR pp.deleted = ?)
+             ORDER BY CASE WHEN p.status = 'active' THEN 0 ELSE 1 END,
+                      p.last_modified DESC,
+                      p.id ASC
+             LIMIT ? OFFSET ?
+        """
+        params = (
+            persona_id,
+            user_id,
+            bool(include_deleted),
+            deleted_false,
+            bool(include_deleted_personas),
+            deleted_false,
+            max(1, int(limit)),
+            max(0, int(offset)),
+        )
+        cursor = self.execute_query(query, params)
+        return [
+            item
+            for row in cursor.fetchall()
+            if (item := self._persona_visual_pack_row_to_dict(row)) is not None
+        ]
+
+    def get_active_persona_visual_pack(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = """
+            SELECT p.*
+              FROM persona_visual_packs p
+              JOIN persona_profiles pp
+                ON pp.id = p.persona_id
+               AND pp.user_id = p.user_id
+             WHERE p.persona_id = ?
+               AND p.user_id = ?
+               AND p.status = 'active'
+               AND p.deleted = ?
+               AND pp.deleted = ?
+             ORDER BY p.active_at DESC, p.last_modified DESC
+             LIMIT 1
+        """
+        cursor = self.execute_query(
+            query,
+            (
+                persona_id,
+                user_id,
+                deleted_false,
+                deleted_false,
+            ),
+        )
+        pack = self._persona_visual_pack_row_to_dict(cursor.fetchone())
+        if not pack:
+            return None
+        assets = self.list_persona_visual_assets(
+            pack_id=str(pack["id"]),
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        pack["assets"] = assets
+        pack["assets_by_id"] = {str(asset["id"]): asset for asset in assets}
+        return pack
+
+    def activate_persona_visual_pack(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+        pack_id: str,
+    ) -> dict[str, Any]:
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            archive_query = (
+                "UPDATE persona_visual_packs "
+                "SET status = 'archived', active_at = NULL, last_modified = ?, version = version + 1 "
+                "WHERE user_id = ? AND persona_id = ? AND status = 'active' AND deleted = ? AND id <> ?"
+            )
+            archive_params = (
+                now,
+                user_id,
+                persona_id,
+                bool_cast(False),
+                pack_id,
+            )
+            prepared_archive, prepared_archive_params = self._prepare_backend_statement(
+                archive_query,
+                archive_params,
+            )
+            conn.execute(prepared_archive, prepared_archive_params or ())
+
+            activate_query = (
+                "UPDATE persona_visual_packs "
+                "SET status = 'active', active_at = ?, last_modified = ?, version = version + 1 "
+                "WHERE id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+            )
+            activate_params = (
+                now,
+                now,
+                pack_id,
+                user_id,
+                persona_id,
+                bool_cast(False),
+            )
+            prepared_activate, prepared_activate_params = self._prepare_backend_statement(
+                activate_query,
+                activate_params,
+            )
+            cursor = conn.execute(prepared_activate, prepared_activate_params or ())
+            if cursor.rowcount == 0:
+                raise ConflictError(  # noqa: TRY003
+                    "Persona visual pack could not be activated.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+
+        active = self.get_active_persona_visual_pack(persona_id=persona_id, user_id=user_id)
+        if not active or active["id"] != pack_id:
+            raise CharactersRAGDBError("Failed to load active persona visual pack after activation.")  # noqa: TRY003
+        return active
+
+    def deactivate_persona_visual_pack(
+        self,
+        *,
+        persona_id: str,
+        user_id: str,
+    ) -> bool:
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            query = (
+                "UPDATE persona_visual_packs "
+                "SET status = 'archived', active_at = NULL, last_modified = ?, version = version + 1 "
+                "WHERE user_id = ? AND persona_id = ? AND status = 'active' AND deleted = ?"
+            )
+            params = (
+                now,
+                user_id,
+                persona_id,
+                bool_cast(False),
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            cursor = conn.execute(prepared_query, prepared_params or ())
+            return cursor.rowcount > 0
+
+    def update_persona_visual_pack_manifest(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        manifest: dict[str, Any],
+        expected_version: int | None = None,
+    ) -> dict[str, Any] | None:
+        manifest_value = manifest if isinstance(manifest, dict) else {}
+        now = self._get_current_utc_timestamp_iso()
+        params: list[Any] = [
+            self._ensure_json_string(manifest_value) or "{}",
+            int(manifest_value.get("manifest_version", 1) or 1),
+            now,
+            pack_id,
+            user_id,
+            persona_id,
+            False if self.backend_type == BackendType.POSTGRESQL else 0,
+        ]
+        where_sql = "id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+        if expected_version is not None:
+            where_sql += " AND version = ?"
+            params.append(int(expected_version))
+        query = (
+            "UPDATE persona_visual_packs "
+            "SET manifest_json = ?, manifest_version = ?, last_modified = ?, version = version + 1 "
+            f"WHERE {where_sql}"  # nosec B608
+        )
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+            cursor = conn.execute(prepared_query, prepared_params or ())
+            if cursor.rowcount == 0 and expected_version is not None:
+                raise ConflictError(  # noqa: TRY003
+                    "Persona visual pack version mismatch.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+        return self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
+
+    def create_persona_visual_asset(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        asset_role: str,
+        storage_key: str,
+        original_filename: str | None,
+        mime_type: str,
+        byte_size: int,
+        checksum_sha256: str,
+        width: int | None = None,
+        height: int | None = None,
+        duration_ms: int | None = None,
+        provenance: str = "uploaded",
+        asset_id: str | None = None,
+    ) -> dict[str, Any]:
+        role_value = self._normalize_persona_visual_enum(
+            asset_role,
+            allowed=self._ALLOWED_PERSONA_VISUAL_ASSET_ROLES,
+            field_name="asset_role",
+            default="frame",
+        )
+        provenance_value = self._normalize_persona_visual_enum(
+            provenance,
+            allowed=self._ALLOWED_PERSONA_VISUAL_PROVENANCE_TYPES,
+            field_name="provenance",
+            default="uploaded",
+        )
+        storage_key_value = str(storage_key or "").strip()
+        mime_type_value = str(mime_type or "").strip()
+        checksum_value = str(checksum_sha256 or "").strip()
+        if not storage_key_value:
+            raise InputError("storage_key is required for persona visual assets.")  # noqa: TRY003
+        if not mime_type_value:
+            raise InputError("mime_type is required for persona visual assets.")  # noqa: TRY003
+        if len(checksum_value) != 64:
+            raise InputError("checksum_sha256 must be a 64-character hex digest.")  # noqa: TRY003
+        try:
+            byte_size_value = int(byte_size)
+        except (TypeError, ValueError) as exc:
+            raise InputError("byte_size must be an integer.") from exc  # noqa: TRY003
+        if byte_size_value < 0:
+            raise InputError("byte_size must be non-negative.")  # noqa: TRY003
+
+        asset_id_value = str(asset_id or self._generate_uuid()).strip()
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        query = (
+            "INSERT INTO persona_visual_assets("
+            "id, pack_id, persona_id, user_id, asset_role, storage_key, original_filename, mime_type, "
+            "byte_size, checksum_sha256, width, height, duration_ms, provenance, created_at, last_modified, deleted, version"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            asset_id_value,
+            pack_id,
+            persona_id,
+            user_id,
+            role_value,
+            storage_key_value,
+            self._normalize_nullable_text(original_filename),
+            mime_type_value,
+            byte_size_value,
+            checksum_value,
+            int(width) if width is not None else None,
+            int(height) if height is not None else None,
+            int(duration_ms) if duration_ms is not None else None,
+            provenance_value,
+            now,
+            now,
+            bool_cast(False),
+            1,
+        )
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            conn.execute(prepared_query, prepared_params or ())
+
+        asset = self.get_persona_visual_asset(
+            asset_id=asset_id_value,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if not asset:
+            raise CharactersRAGDBError("Failed to load persona visual asset after creation.")  # noqa: TRY003
+        return asset
+
+    def get_persona_visual_asset(
+        self,
+        *,
+        asset_id: str,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = """
+            SELECT a.*
+              FROM persona_visual_assets a
+              JOIN persona_visual_packs p
+                ON p.id = a.pack_id
+               AND p.persona_id = a.persona_id
+               AND p.user_id = a.user_id
+             WHERE a.id = ?
+               AND a.pack_id = ?
+               AND a.persona_id = ?
+               AND a.user_id = ?
+               AND (? OR a.deleted = ?)
+               AND p.deleted = ?
+             LIMIT 1
+        """
+        cursor = self.execute_query(
+            query,
+            (
+                asset_id,
+                pack_id,
+                persona_id,
+                user_id,
+                bool(include_deleted),
+                deleted_false,
+                deleted_false,
+            ),
+        )
+        return self._persona_visual_asset_row_to_dict(cursor.fetchone())
+
+    def list_persona_visual_assets(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        include_deleted: bool = False,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = """
+            SELECT a.*
+              FROM persona_visual_assets a
+              JOIN persona_visual_packs p
+                ON p.id = a.pack_id
+               AND p.persona_id = a.persona_id
+               AND p.user_id = a.user_id
+             WHERE a.pack_id = ?
+               AND a.persona_id = ?
+               AND a.user_id = ?
+               AND (? OR a.deleted = ?)
+               AND p.deleted = ?
+             ORDER BY a.created_at ASC, a.id ASC
+             LIMIT ? OFFSET ?
+        """
+        cursor = self.execute_query(
+            query,
+            (
+                pack_id,
+                persona_id,
+                user_id,
+                bool(include_deleted),
+                deleted_false,
+                deleted_false,
+                max(1, int(limit)),
+                max(0, int(offset)),
+            ),
+        )
+        return [
+            item
+            for row in cursor.fetchall()
+            if (item := self._persona_visual_asset_row_to_dict(row)) is not None
+        ]
+
+    def create_persona_visual_candidate(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        job_id: str | None,
+        proposed_manifest_patch: dict[str, Any] | None,
+        generated_asset_ids: list[str] | None,
+        prompt: str | None = None,
+        status: str = "review",
+        candidate_id: str | None = None,
+    ) -> dict[str, Any]:
+        status_value = self._normalize_persona_visual_enum(
+            status,
+            allowed=self._ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES,
+            field_name="candidate status",
+            default="review",
+        )
+        manifest_patch_value = proposed_manifest_patch if isinstance(proposed_manifest_patch, dict) else {}
+        generated_asset_ids_value = [
+            str(asset_id).strip()
+            for asset_id in (generated_asset_ids or [])
+            if str(asset_id).strip()
+        ]
+        candidate_id_value = str(candidate_id or self._generate_uuid()).strip()
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        query = (
+            "INSERT INTO persona_visual_candidates("
+            "id, pack_id, persona_id, user_id, job_id, status, proposed_manifest_patch_json, "
+            "generated_asset_ids_json, prompt, failure_reason, created_at, last_modified, deleted, version"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            candidate_id_value,
+            pack_id,
+            persona_id,
+            user_id,
+            self._normalize_nullable_text(job_id),
+            status_value,
+            self._ensure_json_string(manifest_patch_value) or "{}",
+            self._ensure_json_string(generated_asset_ids_value) or "[]",
+            self._normalize_nullable_text(prompt),
+            None,
+            now,
+            now,
+            bool_cast(False),
+            1,
+        )
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            conn.execute(prepared_query, prepared_params or ())
+
+        candidate = self.get_persona_visual_candidate(
+            candidate_id=candidate_id_value,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if not candidate:
+            raise CharactersRAGDBError("Failed to load persona visual candidate after creation.")  # noqa: TRY003
+        return candidate
+
+    def get_persona_visual_candidate(
+        self,
+        *,
+        candidate_id: str,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = """
+            SELECT c.*
+              FROM persona_visual_candidates c
+              JOIN persona_visual_packs p
+                ON p.id = c.pack_id
+               AND p.persona_id = c.persona_id
+               AND p.user_id = c.user_id
+             WHERE c.id = ?
+               AND c.pack_id = ?
+               AND c.persona_id = ?
+               AND c.user_id = ?
+               AND (? OR c.deleted = ?)
+               AND p.deleted = ?
+             LIMIT 1
+        """
+        cursor = self.execute_query(
+            query,
+            (
+                candidate_id,
+                pack_id,
+                persona_id,
+                user_id,
+                bool(include_deleted),
+                deleted_false,
+                deleted_false,
+            ),
+        )
+        return self._persona_visual_candidate_row_to_dict(cursor.fetchone())
+
+    def list_persona_visual_candidates(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        status: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
+        normalized_status = None
+        if status is not None:
+            normalized_status = self._normalize_persona_visual_enum(
+                status,
+                allowed=self._ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES,
+                field_name="candidate status",
+            )
+        query = """
+            SELECT c.*
+              FROM persona_visual_candidates c
+              JOIN persona_visual_packs p
+                ON p.id = c.pack_id
+               AND p.persona_id = c.persona_id
+               AND p.user_id = c.user_id
+             WHERE c.pack_id = ?
+               AND c.persona_id = ?
+               AND c.user_id = ?
+               AND (? IS NULL OR c.status = ?)
+               AND (? OR c.deleted = ?)
+               AND p.deleted = ?
+             ORDER BY c.created_at DESC, c.id ASC
+             LIMIT ? OFFSET ?
+        """
+        cursor = self.execute_query(
+            query,
+            (
+                pack_id,
+                persona_id,
+                user_id,
+                normalized_status,
+                normalized_status,
+                bool(include_deleted),
+                deleted_false,
+                deleted_false,
+                max(1, int(limit)),
+                max(0, int(offset)),
+            ),
+        )
+        return [
+            item
+            for row in cursor.fetchall()
+            if (item := self._persona_visual_candidate_row_to_dict(row)) is not None
+        ]
+
+    def update_persona_visual_candidate_status(
+        self,
+        *,
+        candidate_id: str,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        status: str,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        status_value = self._normalize_persona_visual_enum(
+            status,
+            allowed=self._ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES,
+            field_name="candidate status",
+        )
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        query = (
+            "UPDATE persona_visual_candidates "
+            "SET status = ?, failure_reason = ?, last_modified = ?, version = version + 1 "
+            "WHERE id = ? AND pack_id = ? AND persona_id = ? AND user_id = ? AND deleted = ?"
+        )
+        params = (
+            status_value,
+            self._normalize_nullable_text(failure_reason),
+            now,
+            candidate_id,
+            pack_id,
+            persona_id,
+            user_id,
+            bool_cast(False),
+        )
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            conn.execute(prepared_query, prepared_params or ())
+
+        return self.get_persona_visual_candidate(
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
 
     def list_persona_scope_rules(
         self,
