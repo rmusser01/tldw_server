@@ -107,7 +107,7 @@ This audit does not remove packages or rewrite runtime code.
 | `cytoscape` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Notes/NotesGraphModal.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesGraphModal.stage2.graph-view.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx | shared UI, shared UI tests | graph/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `cytoscape-dagre` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Notes/NotesGraphModal.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesGraphModal.stage2.graph-view.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx | shared UI, shared UI tests | graph/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `d3-dsv` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | parser/conversion | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in parser/conversion behavior. Confirm direct-vs-transitive ownership and CSV/DSV coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/parser-domain investigation slice. |
-| `dayjs` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 15 | apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx, apps/packages/ui/src/components/Media/FilterPanel.tsx, apps/packages/ui/src/components/Option/DataTables/EditableCell.tsx, apps/packages/ui/src/components/Option/KanbanPlayground/CardDetailPanel.tsx | shared UI, shared UI tests | frontend/runtime | `defer-design` | Medium; some display formatting can move to native `Intl` or small local helpers, but several Ant Design DatePicker/DateRangePicker surfaces currently exchange `Dayjs` values and types. | No immediate dependency reduction until shared UI date-picker value contracts are redesigned or isolated. | Continue display-formatting replacement slices before date-picker design. |
+| `dayjs` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 11 | apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx, apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx, apps/packages/ui/src/components/Media/FilterPanel.tsx, apps/packages/ui/src/components/Option/DataTables/EditableCell.tsx | shared UI | frontend/runtime | `defer-design` | Medium; some display formatting can move to native `Intl` or small local helpers, but several Ant Design DatePicker/DateRangePicker surfaces currently exchange `Dayjs` values and types. | No immediate dependency reduction until shared UI date-picker value contracts are redesigned or isolated. | Continue display-formatting replacement slices before date-picker design. |
 | `dexie` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/db/dexie/chat.ts, apps/packages/ui/src/db/dexie/schema.ts, apps/packages/ui/src/hooks/document-workspace/__tests__/offlineQueue.test.ts, apps/packages/ui/src/hooks/document-workspace/offlineQueue.ts | shared UI, shared UI tests, web tests, web app | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `dexie-react-hooks` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Sidepanel/Chat/TtsClipsDrawer.tsx | shared UI | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `dompurify` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 11 | apps/packages/ui/src/components/Common/CodeBlock.tsx, apps/packages/ui/src/components/Notes/NotesStudioDiagramCard.tsx, apps/packages/ui/src/components/Notes/export-utils.ts, apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemDetail.tsx | shared UI | security/sanitization | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
@@ -214,9 +214,15 @@ This audit does not remove packages or rewrite runtime code.
   Design `Dayjs` value-contract surfaces.
 - TASK-153 removed `dayjs` time formatting from the display-only Models
   last-refreshed label by replacing `dayjs(...).format("HH:mm")` with a small
-  native `Intl.DateTimeFormat` helper. The shared UI `dayjs` import count
+  native Date helper. The shared UI `dayjs` import count
   dropped from 17 to 15 while leaving the package declared for remaining
   Flashcards display formatting and Ant Design `Dayjs` value-contract surfaces.
+- TASK-158 removed `dayjs` scheduling metadata formatting from the display-only
+  FlashcardEditDrawer due/last-reviewed labels by replacing absolute and
+  relative labels with native Date helpers. The shared UI `dayjs` import count
+  dropped from 15 to 11 while leaving the package declared for remaining
+  Flashcards Review/Manage display formatting and Ant Design `Dayjs`
+  value-contract surfaces.
 
 ### Quick Cleanup Candidates
 
@@ -387,6 +393,18 @@ ownership checks, or complex-domain packages that should stay on the
   The PR review follow-up removed the filesystem-based source guard from the
   Vitest unit test; dependency regression coverage for this slice is recorded
   through the exact Models-tree package-import scan instead.
+- 2026-05-09 TASK-158 active-code scan: exact shared UI package-import scan
+  found 11 remaining `dayjs` import lines after removing both runtime imports
+  from `apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx`
+  and both test imports from the scheduling metadata test. Remaining
+  Flashcards imports are in ReviewTab and ManageTab display formatting; the
+  other remaining imports are Ant Design `Dayjs` value/type surfaces in media,
+  reading list, items, data table, and kanban code.
+- 2026-05-09 TASK-158 verification: `bunx vitest run
+  src/components/Flashcards/utils/__tests__/date-display.test.ts
+  src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx`
+  from `apps/packages/ui` passed after first failing on the missing native
+  date-display helper.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,
@@ -394,6 +412,8 @@ ownership checks, or complex-domain packages that should stay on the
 - Bandit: skipped for TASK-149 because the slice changed TypeScript,
   documentation, and Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-153 because the slice changed TypeScript,
+  documentation, and Backlog metadata only; no Python files were modified.
+- Bandit: skipped for TASK-158 because the slice changed TypeScript,
   documentation, and Backlog metadata only; no Python files were modified.
 
 ## Known Skips And Blockers

@@ -13,12 +13,11 @@ import {
   Typography
 } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useDebouncedFormField } from "../hooks"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../constants"
+import { formatFlashcardTimestampWithRelative } from "../utils/date-display"
 import { normalizeFlashcardTemplateFields } from "../utils/template-helpers"
 import { normalizeOptionalFlashcardTags } from "../utils/tag-normalization"
 import {
@@ -40,7 +39,6 @@ import { MarkdownWithBoundary } from "./MarkdownWithBoundary"
 import type { Flashcard, FlashcardUpdate, Deck } from "@/services/flashcards"
 
 const { Text } = Typography
-dayjs.extend(relativeTime)
 const CLOZE_PATTERN = /\{\{c\d+::[\s\S]+?\}\}/
 
 type FlashcardModelType = Flashcard["model_type"]
@@ -111,6 +109,14 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
   const sourceMeta = React.useMemo(
     () => (card ? getFlashcardSourceMeta(card) : null),
     [card]
+  )
+  const dueAtDisplay = React.useMemo(
+    () => formatFlashcardTimestampWithRelative(card?.due_at),
+    [card?.due_at]
+  )
+  const lastReviewedDisplay = React.useMemo(
+    () => formatFlashcardTimestampWithRelative(card?.last_reviewed_at),
+    [card?.last_reviewed_at]
   )
 
   const templateHelperText = React.useMemo(() => {
@@ -496,11 +502,11 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
                   {t("option:flashcards.dueAt", { defaultValue: "Due at" })}
                 </Text>
                 <Text>
-                  {card.due_at
+                  {dueAtDisplay
                     ? t("option:flashcards.timestampWithRelative", {
                         defaultValue: "{{absolute}} ({{relative}})",
-                        absolute: dayjs(card.due_at).format("YYYY-MM-DD HH:mm"),
-                        relative: dayjs(card.due_at).fromNow()
+                        absolute: dueAtDisplay.absolute,
+                        relative: dueAtDisplay.relative
                       })
                     : t("option:flashcards.notScheduled", {
                         defaultValue: "Not scheduled"
@@ -512,11 +518,11 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
                   {t("option:flashcards.lastReviewed", { defaultValue: "Last reviewed" })}
                 </Text>
                 <Text>
-                  {card.last_reviewed_at
+                  {lastReviewedDisplay
                     ? t("option:flashcards.timestampWithRelative", {
                         defaultValue: "{{absolute}} ({{relative}})",
-                        absolute: dayjs(card.last_reviewed_at).format("YYYY-MM-DD HH:mm"),
-                        relative: dayjs(card.last_reviewed_at).fromNow()
+                        absolute: lastReviewedDisplay.absolute,
+                        relative: lastReviewedDisplay.relative
                       })
                     : t("option:flashcards.neverReviewed", {
                         defaultValue: "Never"
