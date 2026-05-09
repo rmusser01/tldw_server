@@ -97,9 +97,9 @@ def test_vz_linux_host_gated_operator_smoke_runs_recovery_slice() -> None:
     """The delegated operator smoke should include the non-destructive recovery slice."""
     script = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
 
-    assert "run_real_vz_linux_recovery_smoke" in script  # nosec B101
-    assert "::test_vz_linux_real_recovery_diagnostics_dry_run_smoke" in script  # nosec B101
-    assert script.rfind("run_real_vz_linux_e2e") < script.rfind("run_real_vz_linux_recovery_smoke")  # nosec B101
+    assert "run_real_vz_linux_pytest" in script  # nosec B101
+    assert "run_real_vz_linux_host_smoke" in script  # nosec B101
+    assert "-m vz_linux_host_smoke" in script  # nosec B101
 
 
 def test_vz_linux_host_gated_acceptance_policy_requires_recovery_smoke() -> None:

@@ -322,7 +322,7 @@ wait_for_helper_socket() {
   die "helper daemon did not create socket within timeout: ${SOCKET_PATH}"
 }
 
-run_real_vz_linux_e2e() {
+run_real_vz_linux_pytest() {
   run_cmd env \
     TEST_MODE=0 \
     TLDW_SANDBOX_VZ_LINUX_E2E=1 \
@@ -331,22 +331,12 @@ run_real_vz_linux_e2e() {
     SANDBOX_ENABLE_EXECUTION=1 \
     SANDBOX_BACKGROUND_EXECUTION=0 \
     "${PYTHON_BIN}" -m pytest \
-    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py::test_vz_linux_real_ephemeral_run_smoke" \
-    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py::test_vz_linux_real_session_reuse_smoke" \
-    -q -rs
+    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py" \
+    "$@"
 }
 
-run_real_vz_linux_recovery_smoke() {
-  run_cmd env \
-    TEST_MODE=0 \
-    TLDW_SANDBOX_VZ_LINUX_E2E=1 \
-    TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE="${BUNDLE_PATH}" \
-    TLDW_SANDBOX_MACOS_HELPER_SOCKET="${SOCKET_PATH}" \
-    SANDBOX_ENABLE_EXECUTION=1 \
-    SANDBOX_BACKGROUND_EXECUTION=0 \
-    "${PYTHON_BIN}" -m pytest \
-    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py::test_vz_linux_real_recovery_diagnostics_dry_run_smoke" \
-    -q -rs
+run_real_vz_linux_host_smoke() {
+  run_real_vz_linux_pytest -m vz_linux_host_smoke -q -rs
 }
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
@@ -363,5 +353,4 @@ prepare_runtime_paths
 run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket
-run_real_vz_linux_e2e
-run_real_vz_linux_recovery_smoke
+run_real_vz_linux_host_smoke

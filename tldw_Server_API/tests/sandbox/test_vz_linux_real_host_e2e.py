@@ -150,6 +150,7 @@ def test_vz_linux_real_host_e2e_requires_helper_ping(monkeypatch, tmp_path: Path
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+@pytest.mark.vz_linux_host_smoke
 def test_vz_linux_real_ephemeral_run_smoke(monkeypatch, tmp_path: Path) -> None:
     base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
     monkeypatch.delenv("TEST_MODE", raising=False)
@@ -189,6 +190,7 @@ def test_vz_linux_real_ephemeral_run_smoke(monkeypatch, tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+@pytest.mark.vz_linux_host_smoke
 def test_vz_linux_real_session_reuse_smoke(monkeypatch, tmp_path: Path) -> None:
     base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
     monkeypatch.delenv("TEST_MODE", raising=False)
@@ -265,7 +267,12 @@ def test_vz_linux_real_session_reuse_smoke(monkeypatch, tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
-def test_vz_linux_real_recovery_diagnostics_dry_run_smoke(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.vz_linux_host_smoke
+def test_vz_linux_real_recovery_diagnostics_dry_run_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify real-helper diagnostics and dry-run repair planning stay non-destructive."""
     base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
@@ -287,8 +294,12 @@ def test_vz_linux_real_recovery_diagnostics_dry_run_smoke(monkeypatch, tmp_path:
 
     try:
         diagnostics = service.macos_diagnostics()
-        reconciliation = diagnostics["reconciliation"]
-        recovery_summary = diagnostics["recovery_summary"]
+        reconciliation_raw = diagnostics.get("reconciliation")
+        recovery_summary_raw = diagnostics.get("recovery_summary")
+        _expect(isinstance(reconciliation_raw, dict), "Expected reconciliation data in diagnostics")
+        _expect(isinstance(recovery_summary_raw, dict), "Expected recovery_summary in diagnostics")
+        reconciliation = reconciliation_raw if isinstance(reconciliation_raw, dict) else {}
+        recovery_summary = recovery_summary_raw if isinstance(recovery_summary_raw, dict) else {}
         _expect(
             reconciliation.get("computed") is True,
             f"Expected reconciliation to compute, got reasons={reconciliation.get('reasons')!r}",

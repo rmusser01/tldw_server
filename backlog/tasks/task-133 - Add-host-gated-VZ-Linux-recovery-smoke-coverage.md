@@ -40,10 +40,12 @@ Extend the existing Apple Silicon host-gated VZ Linux operator/CI smoke path so 
 
 <!-- SECTION:NOTES:BEGIN -->
 - Added explicit host-gated recovery smoke coverage after ephemeral execution and same-session reuse. The recovery smoke seeds only the isolated test store and verifies diagnostics plus `repair_macos_reconciliation(dry_run=true)`.
+- Addressed PR review comments by adding a `pytest.MonkeyPatch` type annotation and docstring to the new recovery test, using safe diagnostics `.get()` access with `_expect` failure messages, and refactoring the smoke script to run one registered `vz_linux_host_smoke` marker through a shared pytest/env helper.
 - Verification:
   - `python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q` passed with 8 passed, 1 skipped.
   - `python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q` passed with 11 passed.
   - `python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -q` passed with 4 passed, 3 skipped on this host because real VZ E2E env was not enabled.
+  - `python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -m vz_linux_host_smoke -q` selected the three marked real-host smoke tests and skipped them on this host because real VZ E2E env was not enabled.
   - `git diff --check` passed.
   - Bandit over touched Python with only `B101` skipped reported pre-existing test-harness findings in `tools/vz-linux-image/tests/test_host_e2e_smoke_script.py` (`B404`, `B603`, `B108`) on unchanged lines. Re-run with those known test-harness checks also skipped exited 0.
 <!-- SECTION:NOTES:END -->
@@ -54,6 +56,6 @@ Extend the existing Apple Silicon host-gated VZ Linux operator/CI smoke path so 
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

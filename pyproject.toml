@@ -606,6 +606,7 @@ markers = [
     "sandbox_no_auth: marks sandbox tests that must run without default auth headers",
     "sandbox_no_reload: marks sandbox tests that should not reload app.main",
     "sandbox_real_docker: marks sandbox tests that require real Docker execution paths",
+    "vz_linux_host_smoke: marks opt-in Apple silicon VZ Linux host smoke tests",
     "legacy_tts: marks legacy TTS tests",
     "concurrent: marks concurrency tests",
     "streaming: marks streaming tests",
