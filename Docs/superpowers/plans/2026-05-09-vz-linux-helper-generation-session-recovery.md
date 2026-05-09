@@ -177,8 +177,8 @@ helper_started_at: str | None = None,
 Persist normalized strings or `None`:
 
 ```python
-"helper_instance_id": (str(helper_instance_id).strip() if helper_instance_id else None),
-"helper_started_at": (str(helper_started_at).strip() if helper_started_at else None),
+"helper_instance_id": (str(helper_instance_id or "").strip() or None),
+"helper_started_at": (str(helper_started_at or "").strip() or None),
 ```
 
 - [ ] **Step 4: Update SQLite store schema and migrations**
@@ -291,6 +291,8 @@ Add `_can_reuse_session_vm(...)` that returns `True` only when:
 - missing generation follows the spec's conservative legacy path
 
 - [ ] **Step 5: Change helper failure handling**
+
+In `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`, keep `MacOSVirtualizationHelperProtocolError` covered by `_VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS`. Add it explicitly next to `MacOSVirtualizationHelperUnavailable` if the exception tuple is narrowed or if explicit listing makes the fail-closed contract clearer.
 
 In the reuse block, do not convert `MacOSVirtualizationHelperUnavailable` or `MacOSVirtualizationHelperProtocolError` into `status = None`. Let them propagate to the existing outer failure path so the run fails and the row is preserved.
 
