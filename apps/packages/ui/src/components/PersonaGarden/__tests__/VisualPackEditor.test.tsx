@@ -930,6 +930,7 @@ describe("VisualPackEditor", () => {
     expect(screen.getByTestId("persona-visual-import-commit-job-id")).toHaveTextContent(
       "import-job-1"
     )
+    expect(screen.getByTestId("persona-visual-import-commit-refresh-button")).toBeEnabled()
 
     fireEvent.click(screen.getByTestId("persona-visual-import-commit-refresh-button"))
     await waitFor(() =>
@@ -937,6 +938,7 @@ describe("VisualPackEditor", () => {
         "completed"
       )
     )
+    expect(screen.getByTestId("persona-visual-import-commit-refresh-button")).toBeDisabled()
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-pack-select")).toHaveTextContent(
         "Imported Visuals"
@@ -945,5 +947,173 @@ describe("VisualPackEditor", () => {
     expect(
       calls.some((call) => call.includes("/activate") || call.includes("/manifest"))
     ).toBe(false)
+  })
+
+  it("allows failed import commit jobs to be retried", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    let commitAttempts = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          bundle_summary: {
+            pack_title: "Imported Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: { target_mode: "create_new" },
+          quota_estimate: {},
+          required_choices: [],
+          target_warnings: []
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
+        method === "POST"
+      ) {
+        commitAttempts += 1
+        expect(parseJsonBody(init?.body)).toMatchObject({
+          trust_mode: "untrusted_import",
+          target_mode: "create_new"
+        })
+        return okResponse({
+          job_id: `import-job-${commitAttempts}`,
+          portability_job_id: `portability-import-${commitAttempts}`,
+          operation: "import_commit",
+          preview_id: "preview-1",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/imports/import-job-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          job_id: "import-job-1",
+          portability_job_id: "portability-import-1",
+          operation: "import_commit",
+          persona_id: "persona-1",
+          pack_id: null,
+          status: "failed",
+          visual_status: "failed",
+          stage: "failed",
+          error_message: "Archive failed validation"
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "failed"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-import-commit-refresh-button")).toBeDisabled()
+    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeEnabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-job-id")).toHaveTextContent(
+        "import-job-2"
+      )
+    )
+    expect(commitAttempts).toBe(2)
+    expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+      "queued"
+    )
   })
 })

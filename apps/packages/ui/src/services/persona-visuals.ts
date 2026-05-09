@@ -275,8 +275,12 @@ export async function downloadPersonaVisualPackExportArchive(
   if (data instanceof ArrayBuffer) {
     blobPart = data
   } else if (ArrayBuffer.isView(data)) {
-    const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-    blobPart = Uint8Array.from(view)
+    if (data.buffer instanceof ArrayBuffer) {
+      blobPart = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    } else {
+      const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      blobPart = Uint8Array.from(view)
+    }
   } else if (Array.isArray(data)) {
     blobPart = Uint8Array.from(data)
   }

@@ -100,6 +100,12 @@ const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
 ]
 
 const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
+const IMPORT_COMMIT_TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "quarantined"
+])
 
 const DEFAULT_MANIFEST: PersonaVisualManifest = {
   manifest_version: 1,
@@ -1049,6 +1055,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importPreviewConflicts = fullImportPreview?.conflicts || []
   const importPreviewPlan = fullImportPreview?.proposed_plan || null
   const canCommitImportPreview = fullImportPreview?.status === "completed"
+  const importCommitStatus = importCommitJob?.status || null
+  const importCommitIsTerminal = importCommitStatus
+    ? IMPORT_COMMIT_TERMINAL_STATUSES.has(importCommitStatus)
+    : false
+  const canStartImportCommit =
+    !importCommitJob?.job_id || importCommitStatus === "failed"
+  const canRefreshImportCommit =
+    Boolean(importCommitJob?.job_id) && !importCommitIsTerminal
 
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
@@ -1351,7 +1365,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                             size="small"
                             icon={<CheckCircle2 className="h-3.5 w-3.5" />}
                             loading={committingImport}
-                            disabled={Boolean(importCommitJob?.job_id)}
+                            disabled={!canStartImportCommit}
                             onClick={() => void handleStartImportCommit()}
                           >
                             Commit as draft
@@ -1361,7 +1375,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                             size="small"
                             icon={<RefreshCw className="h-3.5 w-3.5" />}
                             loading={refreshingImportCommit}
-                            disabled={!importCommitJob?.job_id}
+                            disabled={!canRefreshImportCommit}
                             onClick={() => void handleRefreshImportCommit()}
                           >
                             Refresh commit
