@@ -14,6 +14,13 @@ from typing import Any, Callable
 from urllib.parse import parse_qsl, quote, quote_plus, urlparse
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_config_option_names,
+    custom_openai_provider_name,
+    custom_openai_provider_number,
+    custom_openai_section_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.exceptions import TokenizerUnavailable
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -77,6 +84,17 @@ PROVIDER_NATIVE_TOKENIZER_CONFIG: dict[str, dict[str, str]] = {
         "label": "custom-openai-api",
     },
 }
+PROVIDER_NATIVE_TOKENIZER_CONFIG.update(
+    {
+        custom_openai_section_name(provider_number): {
+            "section": "API",
+            "endpoint_field": custom_openai_config_option_names(provider_number, "ip")[0],
+            "api_key_field": custom_openai_config_option_names(provider_number, "key")[0],
+            "label": custom_openai_provider_name(provider_number),
+        }
+        for provider_number in iter_custom_openai_provider_numbers(start=3)
+    }
+)
 
 COMMERCIAL_EXACT_TOKENIZER_CONFIG: dict[str, dict[str, Any]] = {
     "bedrock": {
@@ -642,6 +660,9 @@ def normalize_provider_for_tokenizer(provider: str) -> str:
     raw = str(provider or "").strip().lower()
     if not raw:
         return ""
+    custom_number = custom_openai_provider_number(raw)
+    if custom_number is not None:
+        return custom_openai_section_name(custom_number)
     return TOKENIZER_PROVIDER_ALIASES.get(raw, raw)
 
 
@@ -1156,10 +1177,10 @@ def resolve_provider_native_tokenizer(
             error="Provider-native tokenizer endpoint is invalid",
         )
 
-    if provider_key == "custom_openai_api" and _is_openai_host_url(base_url):
+    if custom_openai_provider_number(provider_key) is not None and _is_openai_host_url(base_url):
         return _unavailable_resolution(
             strict_mode_effective=strict_flag,
-            error="custom_openai_api endpoint points to OpenAI-hosted API; provider-native tokenizer endpoint is unavailable",
+            error=f"{provider_key} endpoint points to OpenAI-hosted API; provider-native tokenizer endpoint is unavailable",
         )
 
     adapter = adapter_cls(

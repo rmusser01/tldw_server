@@ -345,11 +345,18 @@ class TestValidateProviderName:
             "novita", "poe", "together",
             "llama.cpp", "kobold", "ooba", "ollama", "bedrock",
             "huggingface", "tabbyapi", "vllm", "local-llm", "aphrodite",
-            "custom-openai-api", "custom-openai-api-2", "moonshot", "zai"
+            "custom-openai-api", "custom-openai-api-2", "custom-openai-api-37",
+            "custom-openai-api-99", "moonshot", "zai"
         ]
         for provider in known_providers:
             result = validate_provider_name(provider)
             assert result == provider
+
+    def test_numbered_custom_openai_providers_stop_at_99(self):
+        """Test additional named custom providers are accepted through 99 only."""
+        assert validate_provider_name("custom-openai-api-99") == "custom-openai-api-99"
+        with pytest.raises(ValueError, match="Unknown provider"):
+            validate_provider_name("custom-openai-api-100")
 
     def test_none_value(self):
         """Test None value handling."""

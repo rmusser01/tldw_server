@@ -85,6 +85,11 @@ from tldw_Server_API.app.core.config import (
     resolve_chat_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_config_option_names,
+    custom_openai_provider_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
@@ -207,6 +212,15 @@ _PROVIDER_MODEL_CONFIG_FIELDS: dict[str, tuple[str, str]] = {
     "ollama": ("Local-API", "ollama_model"),
     "aphrodite": ("Local-API", "aphrodite_model"),
 }
+_PROVIDER_MODEL_CONFIG_FIELDS.update(
+    {
+        custom_openai_provider_name(provider_number): (
+            "API",
+            custom_openai_config_option_names(provider_number, "model")[0],
+        )
+        for provider_number in iter_custom_openai_provider_numbers(start=3)
+    }
+)
 
 _OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 _DEFAULT_ASSISTANT_SYSTEM_PROMPT = "You are a helpful AI assistant."

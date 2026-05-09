@@ -25,6 +25,7 @@ from tenacity import (
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provider_number
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -451,7 +452,7 @@ def aggregate_llm_scores(llm_responses: list[str], max_score: float) -> float:
     return score
 
 
-def validate_inputs(document: str, summary: str, api_name: str, api_key: str) -> None:
+def validate_inputs(document: str, summary: str, api_name: str | None, api_key: str | None) -> None:
     """
     Validate inputs for the G-Eval function.
 
@@ -490,7 +491,10 @@ def validate_inputs(document: str, summary: str, api_name: str, api_key: str) ->
         "ollama",
         "aphrodite",
     }
-    if api_name.lower() not in allowed_apis:
+    if not isinstance(api_name, str) or not api_name.strip():
+        raise ValueError(f"Unsupported API: {api_name}")
+    api_provider_key = api_name.strip().lower()
+    if api_provider_key not in allowed_apis and custom_openai_provider_number(api_provider_key) is None:
         raise ValueError(f"Unsupported API: {api_name}")
 
     # Check if API key is required for the given API
@@ -509,7 +513,10 @@ def validate_inputs(document: str, summary: str, api_name: str, api_key: str) ->
         "custom-openai-api-2",
         "aphrodite",
     }
-    if api_name.lower() in commercial_apis and not api_key:
+    if (
+        api_provider_key in commercial_apis
+        or custom_openai_provider_number(api_provider_key) is not None
+    ) and not api_key:
         raise ValueError(f"API key is required for {api_name}. Please provide a valid API key.")
 
 

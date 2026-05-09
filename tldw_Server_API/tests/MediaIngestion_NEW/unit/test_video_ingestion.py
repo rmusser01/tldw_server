@@ -424,6 +424,24 @@ def test_resolve_eval_api_key_normalizes_environment_lookup(monkeypatch):
 
 
 @pytest.mark.unit
+def test_resolve_eval_api_key_supports_numbered_custom_openai(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.loaded_config_data",
+        {"custom_openai_api_37": {"api_key": "cfg-custom37"}},
+        raising=False,
+    )
+    assert _resolve_eval_api_key("custom-openai-api-37") == "cfg-custom37"
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.loaded_config_data",
+        {},
+        raising=False,
+    )
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_37", "env-custom37")
+    assert _resolve_eval_api_key("custom-openai-api-37") == "env-custom37"
+
+
+@pytest.mark.unit
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.yt_dlp.YoutubeDL")
 def test_download_video_returns_downloaded_file(mock_ydl_cls, tmp_path):
     download_dir = tmp_path / "downloads"

@@ -21,6 +21,14 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_config_option_names,
+    custom_openai_endpoint_env_keys,
+    custom_openai_model_env_keys,
+    custom_openai_section_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -62,6 +70,67 @@ def _safe_json_dict(raw: Optional[str]) -> dict:
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+CUSTOM_OPENAI_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(1)
+CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
+
+
+def _first_nonempty_env(env_keys: tuple[str, ...]) -> Optional[str]:
+    """Return the first non-empty environment value from ordered candidates."""
+    for env_key in env_keys:
+        value = os.getenv(env_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _env_or_config_value(
+    env_keys: tuple[str, ...],
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    key: str,
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve an env-first value with a single config option fallback."""
+    return _first_nonempty_env(env_keys) or config_parser_object.get(section, key, fallback=fallback)
+
+
+def _first_config_option_value(
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    keys: tuple[str, ...],
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Return the first non-empty value from equivalent config option names."""
+    sentinel = object()
+    for key in keys:
+        value = config_parser_object.get(section, key, fallback=sentinel)
+        if value is sentinel or value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return fallback
+
+
+def _env_or_config_option_value(
+    env_keys: tuple[str, ...],
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    keys: tuple[str, ...],
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve ordered env aliases before ordered config option aliases."""
+    return _first_nonempty_env(env_keys) or _first_config_option_value(
+        config_parser_object,
+        section,
+        keys,
+        fallback=fallback,
+    )
 
 
 def _int_env_or_cfg(
@@ -2029,6 +2098,10 @@ def load_settings():
         "custom_openai_api",
         "custom_openai_api_2",
     ]
+    provider_keys.extend(
+        custom_openai_section_name(number)
+        for number in iter_custom_openai_provider_numbers(start=3)
+    )
     for provider_key in provider_keys:
         provider_cfg = comprehensive_config.get(provider_key)
         if isinstance(provider_cfg, dict):
@@ -3795,9 +3868,27 @@ def load_and_log_configs():
         aphrodite_api_retries = config_parser_object.get('Local-API', 'aphrodite_api_retry', fallback='3')
         aphrodite_api_retry_delay = config_parser_object.get('Local-API', 'aphrodite_api_retry_delay', fallback='5')
 
-        custom_openai_api_key = config_parser_object.get('API', 'custom_openai_api_key', fallback=None)
-        custom_openai_api_ip = config_parser_object.get('API', 'custom_openai_api_ip', fallback=None)
-        custom_openai_api_model = config_parser_object.get('API', 'custom_openai_api_model', fallback=None)
+        custom_openai_api_key = _env_or_config_option_value(
+            custom_openai_api_key_env_keys(1),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(1, 'key'),
+            fallback=None,
+        )
+        custom_openai_api_ip = _env_or_config_value(
+            CUSTOM_OPENAI_ENDPOINT_ENV_KEYS,
+            config_parser_object,
+            'API',
+            'custom_openai_api_ip',
+            fallback=None,
+        )
+        custom_openai_api_model = _env_or_config_option_value(
+            custom_openai_model_env_keys(1),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(1, 'model'),
+            fallback=None,
+        )
         custom_openai_api_streaming = config_parser_object.get('API', 'custom_openai_api_streaming', fallback='False')
         custom_openai_api_temperature = config_parser_object.get('API', 'custom_openai_api_temperature', fallback='0.7')
         custom_openai_api_top_p = config_parser_object.get('API', 'custom_openai_api_top_p', fallback='0.95')
@@ -3808,9 +3899,27 @@ def load_and_log_configs():
         custom_openai_api_retry_delay = config_parser_object.get('API', 'custom_openai_api_retry_delay', fallback='5')
 
         # 2nd Custom OpenAI API
-        custom_openai2_api_key = config_parser_object.get('API', 'custom_openai2_api_key', fallback=None)
-        custom_openai2_api_ip = config_parser_object.get('API', 'custom_openai2_api_ip', fallback=None)
-        custom_openai2_api_model = config_parser_object.get('API', 'custom_openai2_api_model', fallback=None)
+        custom_openai2_api_key = _env_or_config_option_value(
+            custom_openai_api_key_env_keys(2),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'key'),
+            fallback=None,
+        )
+        custom_openai2_api_ip = _env_or_config_option_value(
+            CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS,
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'ip'),
+            fallback=None,
+        )
+        custom_openai2_api_model = _env_or_config_option_value(
+            custom_openai_model_env_keys(2),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'model'),
+            fallback=None,
+        )
         custom_openai2_api_streaming = config_parser_object.get('API', 'custom_openai2_api_streaming', fallback='False')
         custom_openai2_api_temperature = config_parser_object.get('API', 'custom_openai2_api_temperature', fallback='0.7')
         custom_openai2_api_top_p = config_parser_object.get('API', 'custom_openai2_api_top_p', fallback='0.95')
@@ -4579,6 +4688,85 @@ def load_and_log_configs():
         stt_vnext_config = load_stt_config(config_parser_object)
         stt_vnext_items = dict(vars(stt_vnext_config))
 
+        def _numbered_custom_openai_config(provider_number: int) -> Optional[dict[str, Any]]:
+            api_ip = _env_or_config_option_value(
+                custom_openai_endpoint_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'ip'),
+                fallback=None,
+            )
+            api_key = _env_or_config_option_value(
+                custom_openai_api_key_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'key'),
+                fallback=None,
+            )
+            model = _env_or_config_option_value(
+                custom_openai_model_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'model'),
+                fallback=None,
+            )
+            if not any(value for value in (api_ip, api_key, model)):
+                return None
+
+            return {
+                'api_ip': api_ip,
+                'api_key': api_key,
+                'streaming': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'streaming'),
+                    fallback=custom_openai_api_streaming,
+                ),
+                'model': model,
+                'temperature': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'temperature'),
+                    fallback=custom_openai_api_temperature,
+                ),
+                'max_tokens': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'max_tokens'),
+                    fallback=custom_openai_api_max_tokens,
+                ),
+                'top_p': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'top_p'),
+                    fallback=custom_openai_api_top_p,
+                ),
+                'min_p': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'min_p'),
+                    fallback=custom_openai_api_min_p,
+                ),
+                'api_timeout': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'timeout'),
+                    fallback=custom_openai_api_timeout,
+                ),
+                'api_retries': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'retry'),
+                    fallback=custom_openai_api_retries,
+                ),
+                'api_retry_delay': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'retry_delay'),
+                    fallback=custom_openai_api_retry_delay,
+                ),
+            }
+
         return_dict = {
             'anthropic_api': {
                 'api_key': anthropic_api_key,
@@ -5238,6 +5426,11 @@ def load_and_log_configs():
             'Redis': dict(config_parser_object.items('Redis')) if config_parser_object.has_section('Redis') else {},
             'Web-Scraping': dict(config_parser_object.items('Web-Scraping')) if config_parser_object.has_section('Web-Scraping') else {}
         }
+        for provider_number in iter_custom_openai_provider_numbers(start=3):
+            numbered_config = _numbered_custom_openai_config(provider_number)
+            if numbered_config is not None:
+                return_dict[custom_openai_section_name(provider_number)] = numbered_config
+
         # Assemble minimal RAG config section (vector store + pgvector params)
         try:
             rag_section = {}

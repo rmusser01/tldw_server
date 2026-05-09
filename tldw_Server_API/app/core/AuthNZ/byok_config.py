@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
 
 PROVIDER_APP_CONFIG_KEYS: dict[str, str] = {
     "openai": "openai_api",
@@ -37,6 +41,10 @@ def build_app_config_overrides(
 
     provider_norm = normalize_provider_name(provider)
     section = PROVIDER_APP_CONFIG_KEYS.get(provider_norm)
+    if not section:
+        custom_number = custom_openai_provider_number(provider_norm)
+        if custom_number is not None:
+            section = custom_openai_section_name(custom_number)
     if not section:
         return {}
 
