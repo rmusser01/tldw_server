@@ -7,10 +7,13 @@ const mocks = vi.hoisted(() => ({
   createVNPlayCheckpoint: vi.fn(),
   createVNPlaySession: vi.fn(),
   getVNPlaySession: vi.fn(),
+  getVNAssetReadiness: vi.fn(),
   listVNPlayBranches: vi.fn(),
   listVNPlayCheckpoints: vi.fn(),
   listVNPlayEvents: vi.fn(),
   listVNPlaySessions: vi.fn(),
+  listCharacters: vi.fn(),
+  listVNAssetPacks: vi.fn(),
   restoreVNPlaySession: vi.fn(),
   retryLastVNPlayTurn: vi.fn(),
   submitVNPlayTurn: vi.fn(),
@@ -29,7 +32,39 @@ vi.mock('@web/lib/api/vnPlay', () => ({
   submitVNPlayTurn: (...args: unknown[]) => mocks.submitVNPlayTurn(...args),
 }));
 
+vi.mock('@web/lib/api/characters', () => ({
+  listCharacters: (...args: unknown[]) => mocks.listCharacters(...args),
+}));
+
+vi.mock('@web/lib/api/vnAssets', () => ({
+  getVNAssetReadiness: (...args: unknown[]) => mocks.getVNAssetReadiness(...args),
+  listVNAssetPacks: (...args: unknown[]) => mocks.listVNAssetPacks(...args),
+}));
+
 import VNPlayWorkspace from '@web/components/vn-play/VNPlayWorkspace';
+
+const defaultCharacters = [
+  {
+    id: 7,
+    version: 1,
+    name: 'Mira Vale',
+    description: 'Archive guide',
+    tags: ['archive', 'story'],
+    image_present: true,
+  },
+];
+
+const defaultPacks = [
+  {
+    id: 12,
+    title: 'Moonlit Archive Pack',
+    primary_character_id: 7,
+    description: 'Runtime-ready VN poses and backdrops',
+    status: 'approved',
+    content_rating: 'general',
+    planned_output_count: 8,
+  },
+];
 
 function mockVNPlayApi({
   branches = [],
@@ -99,6 +134,14 @@ describe('VNPlayWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVNPlayApi();
+    mocks.listCharacters.mockResolvedValue(defaultCharacters);
+    mocks.listVNAssetPacks.mockResolvedValue(defaultPacks);
+    mocks.getVNAssetReadiness.mockResolvedValue({
+      ready: true,
+      status: 'ready',
+      warnings: [],
+      errors: [],
+    });
   });
 
   it('renders freeform and story session actions', async () => {
@@ -131,19 +174,25 @@ describe('VNPlayWorkspace', () => {
     expect(screen.getByText('Selected session: Library')).toBeInTheDocument();
   });
 
-  it('creates a freeform session from the dialog', async () => {
+  it('creates a freeform session from named character and asset pack selectors', async () => {
     const user = userEvent.setup();
     mockVNPlayApi({ sessions: [] });
 
     render(<VNPlayWorkspace />);
 
     await user.click(await screen.findByRole('button', { name: /new freeform/i }));
+    expect(await screen.findByLabelText('Character')).toBeInTheDocument();
+    expect(screen.getAllByText('Mira Vale').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Archive guide/)).toBeInTheDocument();
+    expect(screen.getByText(/archive, story/)).toBeInTheDocument();
+    expect(screen.getByLabelText('VN asset pack')).toBeInTheDocument();
+    expect(screen.getAllByText('Moonlit Archive Pack').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Runtime-ready VN poses and backdrops/)).toBeInTheDocument();
+
     await user.clear(screen.getByLabelText('Title'));
     await user.type(screen.getByLabelText('Title'), 'Moonlit Archive');
-    await user.clear(screen.getByLabelText('Primary character ID'));
-    await user.type(screen.getByLabelText('Primary character ID'), '7');
-    await user.clear(screen.getByLabelText('VN asset pack ID'));
-    await user.type(screen.getByLabelText('VN asset pack ID'), '12');
+    await user.selectOptions(screen.getByLabelText('Character'), '7');
+    await user.selectOptions(screen.getByLabelText('VN asset pack'), '12');
     await user.click(screen.getByRole('button', { name: 'Create session' }));
 
     await waitFor(() => {
@@ -157,6 +206,106 @@ describe('VNPlayWorkspace', () => {
       });
     });
     expect(await screen.findByText('Moonlit Archive')).toBeInTheDocument();
+  });
+
+  it('marks incompatible asset packs as unavailable for the selected character', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNAssetPacks.mockResolvedValue([
+      ...defaultPacks,
+      {
+        id: 13,
+        title: 'Rival Pack',
+        primary_character_id: 99,
+        status: 'approved',
+        content_rating: 'general',
+        planned_output_count: 6,
+      },
+    ]);
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new story/i }));
+
+    expect(await screen.findByRole('option', {
+      name: /Rival Pack.*incompatible with Mira Vale/i,
+    })).toBeDisabled();
+    expect(screen.getByText(/Rival Pack is attached to character 99/i)).toBeInTheDocument();
+  });
+
+  it('shows readiness, draft, missing-byte, and content-rating warnings before submit', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNAssetPacks.mockResolvedValue([
+      {
+        ...defaultPacks[0],
+        status: 'draft',
+        content_rating: 'mature',
+      },
+    ]);
+    mocks.getVNAssetReadiness.mockResolvedValue({
+      ready: false,
+      status: 'missing_assets',
+      warnings: ['2 required runtime assets are missing bytes'],
+      errors: ['sprite.primary has no approved file bytes'],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new freeform/i }));
+
+    expect(await screen.findByText(/Pack status is draft/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 required runtime assets are missing bytes/i)).toBeInTheDocument();
+    expect(screen.getByText(/sprite.primary has no approved file bytes/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pack content rating mature differs from session rating general/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+  });
+
+  it('keeps manual ID entry available when setup selectors fail to load', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listCharacters.mockRejectedValueOnce(new Error('characters offline'));
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new freeform/i }));
+    expect(await screen.findByText(/Could not load setup selectors/i)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Manual Session');
+    await user.clear(screen.getByLabelText('Primary character ID'));
+    await user.type(screen.getByLabelText('Primary character ID'), '17');
+    await user.clear(screen.getByLabelText('VN asset pack ID'));
+    await user.type(screen.getByLabelText('VN asset pack ID'), '21');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlaySession).toHaveBeenCalledWith({
+        mode: 'freeform',
+        title: 'Manual Session',
+        primary_character_id: 17,
+        vn_asset_pack_id: 21,
+        linked_chat_id: null,
+        content_rating: 'general',
+      });
+    });
+  });
+
+  it('shows empty-state guidance when no character or runtime-ready pack exists', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listCharacters.mockResolvedValue([]);
+    mocks.listVNAssetPacks.mockResolvedValue([]);
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new story/i }));
+
+    expect(await screen.findByText(/No characters available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Create or import a character before starting VN Play/i)).toBeInTheDocument();
+    expect(screen.getByText(/No VN asset packs available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Prepare or review a VN asset pack before starting VN Play/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
   });
 
   it('submits a freeform turn and renders the returned dialogue', async () => {

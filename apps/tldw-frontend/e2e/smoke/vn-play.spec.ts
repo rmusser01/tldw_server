@@ -32,6 +32,53 @@ test.describe('VN play smoke', () => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
     });
 
+    await page.route(/\/api\/v1\/characters\/?(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, [
+        {
+          id: 7,
+          version: 1,
+          name: 'Mira Vale',
+          description: 'Archive guide',
+          tags: ['archive', 'story'],
+          image_present: true,
+        },
+      ]);
+    });
+
+    await page.route(/\/api\/v1\/vn-assets(?:\/.*)?$/, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const method = request.method().toUpperCase();
+      const path = url.pathname.replace('/api/v1/vn-assets', '');
+
+      if (method === 'GET' && path === '/packs') {
+        await fulfillJson(route, 200, [
+          {
+            id: 12,
+            title: 'Moonlit Archive Pack',
+            primary_character_id: 7,
+            description: 'Runtime-ready VN poses and backdrops',
+            status: 'approved',
+            content_rating: 'general',
+            planned_output_count: 8,
+          },
+        ]);
+        return;
+      }
+
+      if (method === 'GET' && path === '/packs/12/readiness') {
+        await fulfillJson(route, 200, {
+          ready: true,
+          status: 'ready',
+          warnings: [],
+          errors: [],
+        });
+        return;
+      }
+
+      await fulfillJson(route, 404, { detail: `unhandled vn-assets mock route: ${method} ${path}` });
+    });
+
     await page.route(/\/api\/v1\/vn-play(?:\/.*)?$/, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -114,8 +161,9 @@ test.describe('VN play smoke', () => {
     await expect(page.getByRole('heading', { name: 'VN play' })).toBeVisible();
     await page.getByRole('button', { name: 'New Story' }).click();
     await page.getByLabel('Title').fill('Smoke Story');
-    await page.getByLabel('Primary character ID').fill('7');
-    await page.getByLabel('VN asset pack ID').fill('12');
+    await expect(page.getByLabel('Character', { exact: true })).toBeVisible();
+    await page.getByLabel('Character', { exact: true }).selectOption('7');
+    await page.getByLabel('VN asset pack', { exact: true }).selectOption('12');
     await page.getByRole('button', { name: 'Create session' }).click();
 
     await expect(page.getByText('Selected session: Smoke Story')).toBeVisible();
