@@ -3610,6 +3610,64 @@ describe("CharactersManager first-use onboarding", () => {
     expect(setSelectedCharacterMock).toHaveBeenLastCalledWith(null)
   }, 30000)
 
+  it("does not treat the first catalog model as an implicit row chat selection", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "intent-implicit-catalog-model",
+      name: "Implicit Catalog Character",
+      system_prompt: "Keep implicit catalog fallback local.",
+      greeting: "Ready when explicitly configured.",
+      description: "Row chat implicit catalog model blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return [null, vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({
+          data: [{ model: "implicit-catalog-model", provider: "openai" }]
+        })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chat as Implicit Catalog Character" })
+    )
+
+    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "intent-implicit-catalog-model",
+        name: "Implicit Catalog Character"
+      })
+    )
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as Implicit Catalog Character"
+      )
+    ).toBeInTheDocument()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
+  }, 30000)
+
   it("keeps row chat intent local when a stale selected model exists before the model catalog resolves", async () => {
     const user = userEvent.setup()
     const characterRecord = {

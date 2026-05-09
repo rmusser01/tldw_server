@@ -838,7 +838,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     effectiveDefaultCharacterId,
     defaultCharacterSelection,
     setDefaultCharacterSelection,
-    activeChatModel: activeQuickChatModel,
+    activeChatModel: selectedChatModel,
     availableChatModels: generationModels ?? [],
     setChatIntentBlocker
   })

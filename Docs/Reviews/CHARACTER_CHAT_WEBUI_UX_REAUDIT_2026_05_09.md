@@ -1,7 +1,7 @@
 # Character Chat WebUI UX Re-Audit
 
 Date: 2026-05-09
-Backlog task: TASK-170
+Backlog tasks: TASK-170, TASK-170.1, TASK-170.1.1
 Audience lens: PhD-level UX/HCI review using cognitive walkthrough, task analysis, heuristic evaluation, and error-recovery analysis.
 
 ## Re-Audit Protocol
@@ -71,88 +71,70 @@ Observed environment:
 - Frontend and backend were reachable to the Puppeteer process.
 - The backend ran against an isolated temp SQLite profile, not the known malformed default user-1 DB.
 - UI character creation succeeded through the drawer with `POST /api/v1/characters` returning `201`.
+- Post-P1 refresh captured unique character `Reaudit Character 20260509184619`.
 - No LLM provider was configured, so final assistant response generation was not testable.
-- Browser console repeatedly logged notification API CORS failures for `/api/v1/notifications`, `/unread-count`, and `/stream`; those failures did not block the character creation path but are real console noise.
+- Browser console logged repeated Ant Design `useForm` disconnected warnings during character drawer interactions.
+- Notification event-stream requests were aborted during navigation; no failed HTTP response status was captured in the final post-P1 refresh JSON.
 
 ## Comparison Against Baseline
 
 ### Resolved Or Improved
 
+- Direct `/characters` now reaches the Characters surface in a clean profile instead of the generic `Build Your Assistant` splash.
+- Explicit `/?intent=character-chat&returnTo=...` now shows `Character Chat Onboarding` before the connection form, preserving the character-chat intent.
 - Character creation itself is functional in the isolated backend profile. The UI drawer submitted successfully and the new character appeared in the table.
 - Returning-user edit is available and exposes the expected character maintenance surface.
-- The chat empty state now says `No LLM provider configured` with `Open Settings` and `Refresh`, which is clearer than the earlier generic "no model" wording.
+- Row-level `Chat as...` now stays on `/characters` and shows the selected-character blocker: `Choose a chat model before chatting as Reaudit Character 20260509184619`, with `Return to character`, `Retry character chat`, and `Open model settings`.
+- The chat route says `No LLM provider configured` with `Open Settings` and `Refresh`, which is clearer than the earlier generic "no model" wording.
 - Some terminology is improved in the character/edit surfaces: `Characters`, `Character chat`, and `Behavior / instructions` are coherent in the tested path.
 
 ### Still Blocking Character-Chat Task Completion
 
-1. **First-run route intent is still preempted before the new onboarding lane can appear.**
-   - Direct `/characters` in a clean profile shows `Build Your Assistant`, not character-chat setup.
-   - Clicking `Get Started` navigates to `/persona`, where the user sees `Add your credentials to use Persona`.
-   - Even explicit `/?intent=character-chat&returnTo=...` showed the same generic first-run splash.
-   - Interpretation: the route-aware onboarding package exists, but an earlier first-run/splash layer intercepts character-chat intent before `OptionIndex` can render the character-chat lane.
+1. **Search result count remains misleading.**
+   - Searching the unique character displayed only that row, but the status text still said `7 characters found`.
+   - The correct status should be closer to `1 of 7 characters shown`.
 
-2. **Row-level `Chat as...` still loses the character-chat task context in the live app.**
-   - The row action for `Reaudit Character 20260509173128` navigated to `/`.
-   - The resulting page was `Companion Home`, not an in-context "choose a model before chatting as this character" blocker.
-   - This is the same high-impact behavioral failure as the baseline from the user's perspective.
-
-3. **Search result count remains misleading.**
-   - Searching the unique character displayed only that row, but the status text still said `3 characters found`.
-   - The correct status should be closer to `1 of 3 characters shown`.
-
-4. **No-provider state still fragments the character-chat path.**
+2. **No-provider state still blocks final character-chat task completion.**
    - Chat route clearly states no LLM provider is configured.
-   - The row action does not keep that blocker attached to the selected character.
-   - Header character-mode entry could not be meaningfully evaluated because the generic no-provider chat empty state dominated the route.
+   - Row action now keeps the model blocker attached to the selected character, but final message generation remains untested.
+   - Header character-mode entry could not be meaningfully evaluated because the no-provider chat empty state dominated the route.
 
-5. **Global first-run language still competes with the character-chat mental model.**
-   - The first visible path says `Build Your Assistant`.
-   - `Get Started` routes to `Persona Garden`.
-   - The later fallback route shows `Companion Home`.
-   - For a character-chat-centered user, those terms still force avoidable concept reconciliation before the first successful task.
+3. **Onboarding success still mixes character-chat and ingestion priorities.**
+   - The preserved character-chat lane appears and offers character-specific actions.
+   - The same connected setup surface still includes `RECOMMENDED FIRST RUN` guidance for ingesting a source and asking Chat.
+   - For a character-chat-centered user, this is no longer a route blocker, but it still adds avoidable cognitive branching during first setup.
 
 ### New Or Newly Visible Issues
 
-- Notification API requests fail CORS preflight when launched from `http://127.0.0.1:8080` because credentials mode expects `Access-Control-Allow-Credentials: true`. This did not visibly block character creation, but it creates repeated console errors and can undermine notification/trust diagnostics.
+- Ant Design logs repeated `useForm` disconnected warnings during the character edit/create flow. This did not visibly block the walkthrough, but it is noisy enough to weaken debugging signal during future UX audits.
+- Notification stream requests abort during navigation. The final refresh did not capture CORS status failures, but the aborted requests remain observable request noise.
 
 ## Work-Package Matrix
 
 | Work package | Re-audit status | Evidence | UX/HCI interpretation |
 | --- | --- | --- | --- |
 | DB recovery and root cause | Not retested as a restore; isolated DB profile starts cleanly | Backend temp profile allowed character creation; default malformed DB intentionally untouched | The corruption diagnosis remains valid. A restore/doctor implementation still needs its own verification before using default user-1 data. |
-| Character-chat intent preservation | Fails in live row action | `09-returning-user-row-chat-action.png` lands on `/` Companion Home | The task context is still lost at the most important returning-user entry point. |
-| Route-aware first-run onboarding | Implemented path is preempted | `01`, `02`, `03`, `04` all show generic first-run/splash or Persona state | The new lane needs integration with the earlier first-run experience, not only `WorkspaceConnectionGate`/`OptionIndex`. |
+| Character-chat intent preservation | Resolved for tested no-model row action | `09-returning-user-row-chat-action.png` stays on `/characters` with selected-character model blocker | The returning-user entry point now preserves task context when no explicit chat model is selected. |
+| Route-aware first-run onboarding | Resolved for direct and explicit intent routes | `01` reaches Characters; `03` and `04` show Character Chat Onboarding | The first-time path now preserves character-chat intent, though connected setup still includes ingestion-first guidance. |
 | Character mode sequencing | Not verifiable in live no-provider state | `10`, `11` stay in generic chat/no-provider state | Need a configured model or deterministic test provider to verify character-first sequencing. |
-| Model readiness and in-context blockers | Partial | Chat route has clearer provider blocker; row action does not | The readiness contract is not consistently applied across entry points. |
-| Library clarity polish | Partial/unresolved | `07` search shows one visible row with `3 characters found`; row chat remains icon-only | Returning users get control density, but status feedback and primary action salience remain weak. |
-| Terminology alignment | Partial | Character/edit surfaces improved; first-run uses Assistant/Persona/Companion | The taxonomy is useful but not yet dominant across the first-run path. |
-| Post-implementation re-audit | Complete | Current report and JSON/screenshots | Another implementation pass is required before a clean character-chat UX signoff. |
+| Model readiness and in-context blockers | Improved, still provider-limited | Row action has local blocker; `/chat` has no-provider state | The main local blocker is now consistent, but provider-free E2E cannot verify message send. |
+| Library clarity polish | Partial/unresolved | `07` search shows one visible row with `7 characters found`; row chat remains icon-only | Returning users get control density, but status feedback and primary action salience remain weak. |
+| Terminology alignment | Partial | Character/edit surfaces improved; first-run still has broader Assistant/Chat ingestion copy | The taxonomy is useful but not yet dominant across the connected setup path. |
+| Post-implementation re-audit | Refreshed after P1 fixes | Current report and JSON/screenshots | Core P1 route/context blockers are resolved in the tested no-provider profile; remaining signoff needs model-backed send coverage. |
 
 ## Remaining Issues
-
-### P1: First-Run Splash Discards Character Intent
-
-The top priority is to route `/characters` first-time users into the character-chat setup lane before generic assistant/persona onboarding. The user should see `Create character`, `Import character`, `Choose model`, and `Start character chat` without detouring through Persona Garden.
-
-Recommended fix: make the first-run splash consume `resolveOnboardingEntryIntent(location)` or bypass the splash when the current route/return target is `/characters`.
-
-### P1: Row `Chat As` Must Stay Local When No Model Is Ready
-
-The row action should preserve the selected character and show a local blocker with `Open model settings`, `Retry character chat`, and `Return to character`. The live browser evidence still lands on Companion Home.
-
-Recommended fix: trace why the tested live path differs from the unit expectation in `Manager.first-use.test.tsx`; likely candidates are selected-model storage resolution, query timing, or the `useCharacterQuickChat` navigation fallback.
 
 ### P2: Search Count Should Reflect Filtered State
 
 The visible table state and result-count text conflict after search.
 
-Recommended fix: expose both filtered and total counts, e.g. `1 of 3 characters shown`, and update the aria live region with the same semantics.
+Recommended fix: expose both filtered and total counts, e.g. `1 of 7 characters shown`, and update the aria live region with the same semantics.
 
-### P2: Notification CORS Noise Should Be Removed
+### P2: Console And Request Noise Should Be Removed
 
-The repeated notification request failures are not character-chat-specific, but they pollute debugging and can create latent UI trust issues.
+The repeated `useForm` warnings and notification stream aborts are not character-chat-specific, but they pollute debugging and can create latent UI trust issues.
 
-Recommended fix: align notification requests and backend CORS credentials behavior for the WebUI dev origins, or avoid `credentials: include` for API-key-only notification calls.
+Recommended fix: attach form instances only when their drawer form is mounted, and either avoid opening notification streams during route churn or treat expected navigation aborts as non-error telemetry.
 
 ### P2: Add A Deterministic Test Provider For Character-Chat E2E
 
@@ -163,7 +145,11 @@ Recommended fix: add a local mock/OpenAI-compatible provider profile for E2E tha
 ## Verification
 
 - Puppeteer/Chrome re-audit command: `node /private/tmp/character-chat-reaudit.mjs`
-- Captured unique character: `Reaudit Character 20260509173128`
+- Captured unique character: `Reaudit Character 20260509184619`
 - UI create response: `POST /api/v1/characters` returned `201`
+- Focused regression: `bunx vitest run src/components/Option/Characters/__tests__/Manager.first-use.test.tsx -t "row chat intent|stale selected model|implicit row chat selection" --testTimeout=30000`
+- Pinned UI typecheck: `../../tldw-frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false`
+- Artifact validation: `jq empty Docs/Reviews/assets/2026-05-09-character-chat-reaudit/puppeteer-states.json`
+- Whitespace check: `git diff --check`
 - Message generation: not tested because the server reported no LLM provider configured.
-- Bandit: skipped because this task touched docs and generated browser evidence only.
+- Bandit: skipped because no Python files were changed; touched runtime code is TypeScript/React plus docs and Puppeteer evidence.
