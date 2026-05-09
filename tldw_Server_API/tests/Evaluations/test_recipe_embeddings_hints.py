@@ -24,6 +24,10 @@ def test_candidate_hints_include_current_model_and_policy_status(monkeypatch) ->
         "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_models",
         lambda: ["text-embedding-3-*"],
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.should_enforce_embedding_policy",
+        lambda user=None: True,
+    )
 
     result = build_embedding_recipe_candidate_hints(user=None)
 
@@ -50,6 +54,10 @@ def test_candidate_hints_mark_disallowed_provider(monkeypatch) -> None:
         "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_models",
         lambda: None,
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.should_enforce_embedding_policy",
+        lambda user=None: True,
+    )
 
     result = build_embedding_recipe_candidate_hints(user=None)
 
@@ -74,11 +82,69 @@ def test_candidate_hints_mark_disallowed_model(monkeypatch) -> None:
         "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_models",
         lambda: ["text-embedding-3-*"],
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.should_enforce_embedding_policy",
+        lambda user=None: True,
+    )
 
     result = build_embedding_recipe_candidate_hints(user=None)
 
     assert result["candidates"][0]["status"] == "disallowed_model"
     assert "not allowed" in result["candidates"][0]["status_reason"].lower()
+
+
+def test_candidate_hints_ignore_allowlists_when_policy_not_enforced(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_simplified_embeddings_config",
+        lambda: {
+            "default_provider": "huggingface",
+            "default_model": "BAAI/bge-small-en-v1.5",
+            "providers": [{"name": "huggingface", "models": ["BAAI/bge-small-en-v1.5"]}],
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_providers",
+        lambda: ["openai"],
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_models",
+        lambda: ["text-embedding-3-*"],
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.should_enforce_embedding_policy",
+        lambda user=None: False,
+    )
+
+    result = build_embedding_recipe_candidate_hints(user=None)
+
+    assert result["candidates"][0]["status"] == "ready"
+
+
+def test_candidate_hints_only_support_exact_or_trailing_star_model_patterns(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_simplified_embeddings_config",
+        lambda: {
+            "default_provider": "openai",
+            "default_model": "text-embedding-3-small",
+            "providers": [{"name": "openai", "models": ["text-embedding-3-small"], "api_key": "sk-test"}],
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_providers",
+        lambda: ["openai"],
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_allowed_embedding_models",
+        lambda: ["text-embedding-?-small"],
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.should_enforce_embedding_policy",
+        lambda user=None: True,
+    )
+
+    result = build_embedding_recipe_candidate_hints(user=None)
+
+    assert result["candidates"][0]["status"] == "disallowed_model"
 
 
 def test_candidate_hints_mark_missing_key_for_remote_provider(monkeypatch) -> None:

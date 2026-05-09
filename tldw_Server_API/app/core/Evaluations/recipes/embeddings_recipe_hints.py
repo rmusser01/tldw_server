@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import os
 from dataclasses import asdict, is_dataclass
 from typing import Any
@@ -298,15 +297,13 @@ def _classify_candidate(
 
     policy_enforced = should_enforce_embedding_policy(user)
     allowed_providers = get_allowed_embedding_providers()
-    provider_policy_active = policy_enforced or allowed_providers is not None
-    if provider_policy_active and allowed_providers is not None and provider.lower() not in {
+    if policy_enforced and allowed_providers is not None and provider.lower() not in {
         str(item).lower() for item in allowed_providers
     }:
         return "disallowed_provider", f"Provider '{provider}' is not allowed by embedding policy."
 
     allowed_models = get_allowed_embedding_models()
-    model_policy_active = policy_enforced or allowed_models is not None
-    if model_policy_active and allowed_models is not None and not _model_allowed(model, allowed_models):
+    if policy_enforced and allowed_models is not None and not _model_allowed(model, allowed_models):
         return "disallowed_model", f"Model '{model}' is not allowed by embedding policy."
 
     if _remote_provider_requires_key(provider) and not _provider_has_key(provider, provider_config):
@@ -430,7 +427,13 @@ def _is_localish_provider(provider: str) -> bool:
 
 
 def _model_allowed(model: str, allowed_models: list[str]) -> bool:
-    return any(fnmatch.fnmatchcase(model, str(pattern)) for pattern in allowed_models)
+    for pattern in allowed_models:
+        normalized_pattern = str(pattern)
+        if normalized_pattern.endswith("*") and model.startswith(normalized_pattern[:-1]):
+            return True
+        if model == normalized_pattern:
+            return True
+    return False
 
 
 def _object_to_dict(value: object) -> dict[str, Any]:
