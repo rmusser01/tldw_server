@@ -38,4 +38,13 @@ describe("onboarding route intent", () => {
       })
     ).toBe("/characters/library?sort=name&from=onboarding&import=true")
   })
+
+  it("preserves existing characters query context when adding onboarding actions", () => {
+    expect(
+      buildCharacterOnboardingRoute({
+        returnTo: "/characters?from=header-select",
+        action: "create"
+      })
+    ).toBe("/characters?from=header-select&create=true")
+  })
 })
