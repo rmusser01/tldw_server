@@ -22,6 +22,7 @@ import {
   listVNPlayCheckpoints,
   listVNPlayEvents,
   listVNPlaySessions,
+  listVNPlaySetupOptions,
   restoreVNPlaySession,
   retryLastVNPlayTurn,
   submitVNPlayTurn,
@@ -110,5 +111,37 @@ describe('vnPlay api client', () => {
       idempotency_key: 'restore-1',
     });
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/branches');
+  });
+
+  it('loads VN play setup options with server-side selector parameters', async () => {
+    mocks.apiClient.get.mockResolvedValueOnce({
+      characters: [],
+      asset_packs: [],
+      defaults: {},
+      empty_states: [],
+      generated_at: '2026-05-09T15:00:00Z',
+      pagination: {
+        characters: { limit: 25, offset: 0, has_more: false, total: 0 },
+        asset_packs: { limit: 25, offset: 0, has_more: false, total: 0 },
+      },
+    });
+
+    await listVNPlaySetupOptions({
+      mode: 'story',
+      selected_character_id: 7,
+      content_rating: 'mature',
+      character_query: 'mira',
+      pack_query: 'archive',
+    });
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/setup-options', {
+      params: {
+        mode: 'story',
+        selected_character_id: 7,
+        content_rating: 'mature',
+        character_query: 'mira',
+        pack_query: 'archive',
+      },
+    });
   });
 });
