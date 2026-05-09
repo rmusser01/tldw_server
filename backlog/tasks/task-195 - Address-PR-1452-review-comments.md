@@ -1,10 +1,10 @@
 ---
 id: TASK-195
 title: Address PR 1452 review comments
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 21:59'
-updated_date: '2026-05-09 22:20'
+updated_date: '2026-05-09 22:21'
 labels:
   - review-fix
   - conversation-context
@@ -52,12 +52,18 @@ Second-pass CodeRabbit review fixes: made header listener tests cleanup-safe, se
 Second-pass verification: git diff --check passed; initial focused Vitest run showed chat-settings/character-manager failures caused by the new readiness wiring and an empty deep-research history merge mismatch; fixes were applied. Passing follow-up runs: chat-settings sync + full Manager.first-use suite (94 tests), quick-chat subset (4 tests), full chat dictionary endpoint unit file (56 tests), and Bandit on touched backend production files with 0 findings.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Addressed all currently actionable PR #1452 review comments in two commits and pushed the branch. Fixes cover DB-layer SQLite integrity checks, stale/abortable conversation-context composition, dictionary_ids validation messaging, CodeRabbit second-pass UI reliability/readiness issues, route-boundary hardening, chat-settings dictionary mirror normalization, and global token-budget enforcement for chained chat dictionaries. Verification recorded in implementation notes; known residual UI tsc failures are broader baseline errors outside this review-fix scope.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
