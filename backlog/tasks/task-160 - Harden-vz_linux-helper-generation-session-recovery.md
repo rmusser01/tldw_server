@@ -1,7 +1,7 @@
 ---
 id: TASK-160
 title: Harden vz_linux helper-generation session recovery
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 05:34'
 updated_date: '2026-05-09 18:43'

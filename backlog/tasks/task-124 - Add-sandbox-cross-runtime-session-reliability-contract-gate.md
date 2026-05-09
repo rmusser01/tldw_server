@@ -1,7 +1,7 @@
 ---
 id: TASK-124
 title: Add sandbox cross-runtime session reliability contract gate
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-08 19:35'
 updated_date: '2026-05-09 00:16'
