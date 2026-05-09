@@ -25,7 +25,7 @@
 
 **Tests:** Protocol review only.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
@@ -33,6 +33,12 @@ Steps:
 - Decide whether to test against recovered default DB, fresh temp DB, or both.
 - Decide whether to use a mocked/test model provider so final message generation can be exercised.
 - Define screenshot names and state-capture format.
+
+Notes:
+
+- Protocol written in `Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_REAUDIT_2026_05_09.md` before browser execution.
+- Re-audit uses a fresh temp DB profile. The default DB corruption remains a baseline blocker and is not overwritten.
+- Model/provider availability will be observed live; no provider mocking is introduced for this documentation-only re-audit.
 
 ## Stage 2: Run First-Time User Walkthrough
 
@@ -46,13 +52,19 @@ Steps:
 
 **Tests:** Puppeteer walkthrough.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Start frontend and backend in a controlled profile.
 - Capture Home/connection state, Characters entry, create/import, model readiness, and chat start.
 - Record blockers exactly if dependencies are missing.
+
+Notes:
+
+- Puppeteer captured direct `/characters`, first-run splash, explicit character-chat onboarding intent, character creation route, successful UI character creation, and chat/no-provider states.
+- The clean first-run path remains blocked by the generic `Build Your Assistant` splash and Persona detour before the new character-chat onboarding lane can render.
+- Final message generation remained blocked by missing LLM provider configuration.
 
 ## Stage 3: Run Returning-User Walkthrough
 
@@ -67,13 +79,19 @@ Steps:
 
 **Tests:** Puppeteer walkthrough.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Seed or create at least one known unique character.
 - Search, edit, start row chat, start header character mode, and switch/resume if available.
 - Compare route transitions against the baseline failures.
+
+Notes:
+
+- Created `Reaudit Character 20260509173128` via the UI drawer; the create request returned `201`.
+- Search and edit were captured.
+- Row-level `Chat as...` still navigated to `/` Companion Home in the live app, so the baseline intent-loss failure remains.
 
 ## Stage 4: Produce Comparison Report
 
@@ -86,7 +104,7 @@ Steps:
 
 **Tests:** `git diff --check` on report and artifact paths.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
@@ -94,6 +112,12 @@ Steps:
 - Store assets under a dated `Docs/Reviews/assets/` directory.
 - Include a matrix for the eight work packages.
 - Record verification commands, model/provider state, and any skipped send behavior.
+
+Notes:
+
+- Report written to `Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_REAUDIT_2026_05_09.md`.
+- Assets written to `Docs/Reviews/assets/2026-05-09-character-chat-reaudit/`.
+- Report records remaining blockers and the missing-provider send limitation.
 
 ## Risks
 
