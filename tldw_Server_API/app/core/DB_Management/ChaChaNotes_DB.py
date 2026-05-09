@@ -581,7 +581,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 44  # Schema v44 adds sync metadata to scene-link tables
+    _CURRENT_SCHEMA_VERSION = 45  # Schema v45 adds persona visual packs and generation candidates
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -612,6 +612,38 @@ class CharactersRAGDB:
         "transcript_import",
         "character_seed",
         "generated_candidate",
+    )
+    _ALLOWED_PERSONA_VISUAL_PACK_STATUSES: tuple[str, ...] = (
+        "draft",
+        "review",
+        "active",
+        "archived",
+        "failed",
+    )
+    _ALLOWED_PERSONA_VISUAL_RENDERER_TYPES: tuple[str, ...] = (
+        "sprite_frames",
+        "sprite_sheet",
+        "static_image",
+        "live2d",
+    )
+    _ALLOWED_PERSONA_VISUAL_PROVENANCE_TYPES: tuple[str, ...] = (
+        "uploaded",
+        "generated",
+        "imported",
+        "mixed",
+    )
+    _ALLOWED_PERSONA_VISUAL_ASSET_ROLES: tuple[str, ...] = (
+        "frame",
+        "still_pose",
+        "sprite_sheet",
+        "preview",
+        "generated_candidate",
+    )
+    _ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES: tuple[str, ...] = (
+        "review",
+        "accepted",
+        "rejected",
+        "failed",
     )
 
     _FTS_CONFIG: list[tuple[str, str, list[str]]] = [
@@ -5056,6 +5088,179 @@ UPDATE db_schema_version
    AND version < 44;
 """
 
+    _MIGRATION_SQL_V44_TO_V45 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 45 — Persona visual packs (2026-05-09)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS persona_visual_packs (
+  id               TEXT PRIMARY KEY,
+  persona_id       TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  renderer_type    TEXT NOT NULL DEFAULT 'sprite_frames'
+                   CHECK(renderer_type IN ('sprite_frames','sprite_sheet','static_image','live2d')),
+  status           TEXT NOT NULL DEFAULT 'draft'
+                   CHECK(status IN ('draft','review','active','archived','failed')),
+  manifest_version INTEGER NOT NULL DEFAULT 1,
+  manifest_json    TEXT NOT NULL DEFAULT '{}',
+  parent_pack_id   TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  revision_number  INTEGER NOT NULL DEFAULT 1,
+  provenance       TEXT NOT NULL DEFAULT 'uploaded'
+                   CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  active_at        TEXT,
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN NOT NULL DEFAULT 0,
+  version          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_packs_one_active
+  ON persona_visual_packs(user_id, persona_id)
+  WHERE status = 'active' AND deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_persona_visual_packs_persona
+  ON persona_visual_packs(user_id, persona_id, deleted, status);
+
+CREATE TABLE IF NOT EXISTS persona_visual_assets (
+  id                 TEXT PRIMARY KEY,
+  pack_id            TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id         TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id            TEXT NOT NULL,
+  asset_role         TEXT NOT NULL
+                     CHECK(asset_role IN ('frame','still_pose','sprite_sheet','preview','generated_candidate')),
+  storage_key        TEXT NOT NULL,
+  original_filename  TEXT,
+  mime_type          TEXT NOT NULL,
+  byte_size          INTEGER NOT NULL,
+  checksum_sha256    TEXT NOT NULL,
+  width              INTEGER,
+  height             INTEGER,
+  duration_ms        INTEGER,
+  provenance         TEXT NOT NULL DEFAULT 'uploaded'
+                     CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted            BOOLEAN NOT NULL DEFAULT 0,
+  version            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_assets_pack
+  ON persona_visual_assets(user_id, pack_id, deleted);
+
+CREATE TABLE IF NOT EXISTS persona_visual_candidates (
+  id                           TEXT PRIMARY KEY,
+  pack_id                      TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id                   TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id                      TEXT NOT NULL,
+  job_id                       TEXT,
+  status                       TEXT NOT NULL DEFAULT 'review'
+                               CHECK(status IN ('review','accepted','rejected','failed')),
+  proposed_manifest_patch_json TEXT NOT NULL DEFAULT '{}',
+  generated_asset_ids_json     TEXT NOT NULL DEFAULT '[]',
+  prompt                       TEXT,
+  failure_reason               TEXT,
+  created_at                   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                      BOOLEAN NOT NULL DEFAULT 0,
+  version                      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_candidates_pack
+  ON persona_visual_candidates(user_id, pack_id, status, deleted);
+
+UPDATE db_schema_version
+   SET version = 45
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 45;
+"""
+
+    _MIGRATION_SQL_V44_TO_V45_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 45 — Persona visual packs (2026-05-09) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS persona_visual_packs (
+  id               TEXT PRIMARY KEY,
+  persona_id       TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  renderer_type    TEXT NOT NULL DEFAULT 'sprite_frames'
+                   CHECK(renderer_type IN ('sprite_frames','sprite_sheet','static_image','live2d')),
+  status           TEXT NOT NULL DEFAULT 'draft'
+                   CHECK(status IN ('draft','review','active','archived','failed')),
+  manifest_version INTEGER NOT NULL DEFAULT 1,
+  manifest_json    TEXT NOT NULL DEFAULT '{}',
+  parent_pack_id   TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  revision_number  INTEGER NOT NULL DEFAULT 1,
+  provenance       TEXT NOT NULL DEFAULT 'uploaded'
+                   CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  active_at        TEXT,
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN NOT NULL DEFAULT FALSE,
+  version          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_packs_one_active
+  ON persona_visual_packs(user_id, persona_id)
+  WHERE status = 'active' AND deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_persona_visual_packs_persona
+  ON persona_visual_packs(user_id, persona_id, deleted, status);
+
+CREATE TABLE IF NOT EXISTS persona_visual_assets (
+  id                 TEXT PRIMARY KEY,
+  pack_id            TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id         TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id            TEXT NOT NULL,
+  asset_role         TEXT NOT NULL
+                     CHECK(asset_role IN ('frame','still_pose','sprite_sheet','preview','generated_candidate')),
+  storage_key        TEXT NOT NULL,
+  original_filename  TEXT,
+  mime_type          TEXT NOT NULL,
+  byte_size          INTEGER NOT NULL,
+  checksum_sha256    TEXT NOT NULL,
+  width              INTEGER,
+  height             INTEGER,
+  duration_ms        INTEGER,
+  provenance         TEXT NOT NULL DEFAULT 'uploaded'
+                     CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted            BOOLEAN NOT NULL DEFAULT FALSE,
+  version            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_assets_pack
+  ON persona_visual_assets(user_id, pack_id, deleted);
+
+CREATE TABLE IF NOT EXISTS persona_visual_candidates (
+  id                           TEXT PRIMARY KEY,
+  pack_id                      TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id                   TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id                      TEXT NOT NULL,
+  job_id                       TEXT,
+  status                       TEXT NOT NULL DEFAULT 'review'
+                               CHECK(status IN ('review','accepted','rejected','failed')),
+  proposed_manifest_patch_json TEXT NOT NULL DEFAULT '{}',
+  generated_asset_ids_json     TEXT NOT NULL DEFAULT '[]',
+  prompt                       TEXT,
+  failure_reason               TEXT,
+  created_at                   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                      BOOLEAN NOT NULL DEFAULT FALSE,
+  version                      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_candidates_pack
+  ON persona_visual_candidates(user_id, pack_id, status, deleted);
+
+UPDATE db_schema_version
+   SET version = 45
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 45;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7118,6 +7323,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V43->V44: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V44 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v44_to_v45(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V44 to V45 (persona visual packs)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V44 to V45 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V44_TO_V45)
+            final_version = self._get_db_version(conn)
+            if final_version != 45:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V44->V45 failed version check. Expected 45, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V45 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V44->V45 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V44->V45 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V44->V45: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V45 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
@@ -8467,6 +8692,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 44 and current_db_version == 43:
                         self._migrate_from_v43_to_v44(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 45 and current_db_version == 44:
+                        self._migrate_from_v44_to_v45(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -8810,6 +9038,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 self._migrate_from_v42_to_v43(conn)
                             elif fallback_version == 43:
                                 self._migrate_from_v43_to_v44(conn)
+                            elif fallback_version == 44:
+                                self._migrate_from_v44_to_v45(conn)
                             else:
                                 raise SchemaError(  # noqa: TRY003, TRY301
                                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
@@ -8917,6 +9147,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 44 and current_db_version == 43:
                     self._migrate_from_v43_to_v44(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 45 and current_db_version == 44:
+                    self._migrate_from_v44_to_v45(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -12731,6 +12964,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 44:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V43_TO_V44_POSTGRES, conn, expected_version=44)
                 current_version = 44
+            if current_version < 45:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V44_TO_V45_POSTGRES, conn, expected_version=45)
+                current_version = 45
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -23519,6 +23755,12 @@ for _persona_state_store_method in (
     "get_persona_setup_analytics_summary",
     "_persona_profile_row_to_dict",
     "_persona_buddy_row_to_dict",
+    "_decode_persona_json_list",
+    "_persona_visual_pack_row_to_dict",
+    "_persona_visual_asset_row_to_dict",
+    "_persona_visual_candidate_row_to_dict",
+    "_normalize_persona_visual_enum",
+    "_require_persona_visual_pack_owner",
     "_persona_scope_rule_row_to_dict",
     "_persona_policy_rule_row_to_dict",
     "_persona_session_row_to_dict",
@@ -23541,6 +23783,20 @@ for _persona_state_store_method in (
     "get_persona_buddy",
     "list_persona_buddies",
     "upsert_persona_buddy",
+    "create_persona_visual_pack",
+    "get_persona_visual_pack",
+    "list_persona_visual_packs",
+    "get_active_persona_visual_pack",
+    "activate_persona_visual_pack",
+    "deactivate_persona_visual_pack",
+    "update_persona_visual_pack_manifest",
+    "create_persona_visual_asset",
+    "get_persona_visual_asset",
+    "list_persona_visual_assets",
+    "create_persona_visual_candidate",
+    "get_persona_visual_candidate",
+    "list_persona_visual_candidates",
+    "update_persona_visual_candidate_status",
     "list_persona_scope_rules",
     "replace_persona_scope_rules",
     "list_persona_policy_rules",

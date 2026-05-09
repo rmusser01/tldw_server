@@ -582,7 +582,7 @@ Implementation details:
 - Raise `PersonaVisualManifestError` with field-specific messages.
 - Add helper functions for `_validate_animation`, `_detect_fallback_cycles`, and `_resolve_state`.
 
-- [ ] **Step 4: Run core tests**
+- [x] **Step 4: Run core tests**
 
 Run:
 
@@ -592,7 +592,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -610,7 +610,7 @@ git commit -m "feat: add persona visual manifest validation"
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py`
 - Test: `tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py`
 
-- [ ] **Step 1: Write failing DB migration and CRUD tests**
+- [x] **Step 1: Write failing DB migration and CRUD tests**
 
 Cover:
 
@@ -651,7 +651,7 @@ def test_candidate_accept_reject_round_trip(db_instance: CharactersRAGDB) -> Non
 
 Use the existing style in `tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py`.
 
-- [ ] **Step 2: Run DB tests to verify failure**
+- [x] **Step 2: Run DB tests to verify failure**
 
 Run:
 
@@ -661,7 +661,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: FAIL because storage helper and DB methods do not exist.
 
-- [ ] **Step 3: Add user storage directory helper**
+- [x] **Step 3: Add user storage directory helper**
 
 In `db_path_utils.py`, add:
 
@@ -681,7 +681,7 @@ def get_user_persona_visuals_dir(user_id: Optional[UserId]) -> Path:
     return visuals_dir
 ```
 
-- [ ] **Step 4: Add schema migration**
+- [x] **Step 4: Add schema migration**
 
 Add a new schema migration after the current latest version in `ChaChaNotes_DB.py`:
 
@@ -692,7 +692,7 @@ Add a new schema migration after the current latest version in `ChaChaNotes_DB.p
 
 Expected: a DB created from scratch includes the new tables; a DB forced to the previous version migrates forward.
 
-- [ ] **Step 5: Add PersonaStateStore methods**
+- [x] **Step 5: Add PersonaStateStore methods**
 
 In `persona_state_store.py`, add row mappers and these methods:
 
@@ -708,11 +708,11 @@ In `persona_state_store.py`, add row mappers and these methods:
 - `create_persona_visual_candidate`: create a generated-candidate review record for a draft pack.
 - `update_persona_visual_candidate_status`: persist accepted/rejected/failed candidate status and failure reason.
 
-- [ ] **Step 6: Delegate methods through CharactersRAGDB**
+- [x] **Step 6: Delegate methods through CharactersRAGDB**
 
 In `ChaChaNotes_DB.py`, add the new method names to the `_persona_state_store_method` tuple.
 
-- [ ] **Step 7: Run DB tests**
+- [x] **Step 7: Run DB tests**
 
 Run:
 
@@ -722,7 +722,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Run:
 
