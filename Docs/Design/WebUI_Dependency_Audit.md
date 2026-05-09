@@ -107,7 +107,7 @@ This audit does not remove packages or rewrite runtime code.
 | `cytoscape` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Notes/NotesGraphModal.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesGraphModal.stage2.graph-view.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx | shared UI, shared UI tests | graph/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `cytoscape-dagre` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/components/Notes/NotesGraphModal.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesGraphModal.stage2.graph-view.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage21.accessibility-modal-focus.test.tsx, apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx | shared UI, shared UI tests | graph/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `d3-dsv` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | parser/conversion | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in parser/conversion behavior. Confirm direct-vs-transitive ownership and CSV/DSV coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/parser-domain investigation slice. |
-| `dayjs` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 5 | apps/packages/ui/src/components/Media/FilterPanel.tsx, apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemsList.tsx, apps/packages/ui/src/components/Option/Items/ItemsWorkspace.tsx | shared UI | frontend/runtime | `defer-design` | Medium; remaining shared UI imports are Ant Design DatePicker/DateRangePicker value surfaces plus an Items published-date display use co-located with the Items date-filter contract. | No immediate dependency reduction until shared UI date-picker value contracts are redesigned or isolated and the final co-located display use is migrated. | Date-picker contract design before manifest removal. |
+| `dayjs` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 4 | apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemsList.tsx, apps/packages/ui/src/components/Option/Items/ItemsWorkspace.tsx | shared UI | frontend/runtime | `defer-design` | Medium; remaining shared UI imports are Ant Design RangePicker value surfaces plus an Items published-date display use co-located with the Items date-filter contract. | No immediate dependency reduction until shared UI date-picker value contracts are redesigned or isolated and the final co-located display use is migrated. | Date-picker contract design before manifest removal. |
 | `dexie` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 6 | apps/packages/ui/src/db/dexie/chat.ts, apps/packages/ui/src/db/dexie/schema.ts, apps/packages/ui/src/hooks/document-workspace/__tests__/offlineQueue.test.ts, apps/packages/ui/src/hooks/document-workspace/offlineQueue.ts | shared UI, shared UI tests, web tests, web app | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `dexie-react-hooks` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Sidepanel/Chat/TtsClipsDrawer.tsx | shared UI | state/data | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `dompurify` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 11 | apps/packages/ui/src/components/Common/CodeBlock.tsx, apps/packages/ui/src/components/Notes/NotesStudioDiagramCard.tsx, apps/packages/ui/src/components/Notes/export-utils.ts, apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemDetail.tsx | shared UI | security/sanitization | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
@@ -242,6 +242,15 @@ This audit does not remove packages or rewrite runtime code.
   narrow slice was one active package-import surface removed and no direct
   manifest, lockfile, install-size, or bundle-size reduction until the
   remaining `dayjs` surfaces are migrated.
+- TASK-176 removed `dayjs` from the Media FilterPanel date-range filter by
+  replacing the Ant Design RangePicker/Dayjs state path with native date
+  inputs plus local `YYYY-MM-DD` parse/format helpers. The shared UI `dayjs`
+  import count dropped from 5 to 4 while leaving the package declared for
+  ReadingList and Items date-control value-contract surfaces plus the
+  co-located Items published-date display use. Expected impact for this narrow
+  slice was one active package-import surface removed and no direct manifest,
+  lockfile, install-size, or bundle-size reduction until the remaining
+  `dayjs` surfaces are migrated.
 
 ### Quick Cleanup Candidates
 
@@ -254,10 +263,10 @@ ownership checks, or complex-domain packages that should stay on the
 ### Replacement Candidates
 
 1. `dayjs`: remaining shared UI imports are Ant Design date-control value
-   surfaces in media, reading list, and items plus a co-located Items
-   published-date display use. Do not attempt a direct dependency removal until
-   the surfaces that pass or type `Dayjs` values are redesigned or isolated and
-   the final display use is migrated.
+   surfaces in reading list and items plus a co-located Items published-date
+   display use. Do not attempt a direct dependency removal until the surfaces
+   that pass or type `Dayjs` values are redesigned or isolated and the final
+   display use is migrated.
 
 ### Deferred Design Candidates
 
@@ -479,6 +488,32 @@ ownership checks, or complex-domain packages that should stay on the
   `apps/tldw-frontend` exited 0. Next compiled successfully, generated 138
   static pages, and `verify-shared-token-sync.mjs` reported OK for the
   generated CSS.
+- 2026-05-09 TASK-176 active-code scan: exact shared UI package-import scan
+  found 4 remaining `dayjs` import lines after removing the combined
+  runtime/type import from
+  `apps/packages/ui/src/components/Media/FilterPanel.tsx`. Remaining imports
+  are in ReadingList and Items date-control surfaces plus the co-located Items
+  published-date display use.
+- 2026-05-09 TASK-176 focused verification: `bunx vitest run
+  src/components/Media/__tests__/FilterPanel.test.tsx
+  src/components/Media/__tests__/FilterPanel.dayjs-imports.test.ts
+  --maxWorkers=1` from `apps/packages/ui` first failed on the missing native
+  labeled date inputs and five remaining `dayjs` imports, then passed after the
+  helper/input implementation. The focused suite covers native date input
+  display values, local start/end day-boundary ISO emission, independent
+  clearing, and the remaining import scan expectation.
+- 2026-05-09 TASK-176 WebUI build/lint verification:
+  `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` from
+  `apps/tldw-frontend` exited 0. Next compiled successfully, generated 138
+  static pages, and `verify-shared-token-sync.mjs` reported OK for the
+  generated CSS. `bun run lint` from `apps/tldw-frontend` exited 0 with the
+  existing 131-warning baseline.
+- 2026-05-09 TASK-176 TypeScript/diff verification:
+  `node_modules/.bin/tsc --noEmit --project tsconfig.json --pretty false` from
+  `apps/tldw-frontend` still exits 1 on existing baseline errors in
+  `EmbeddingsModelSelectionConfig.tsx` and `lib/api/vnPlay.ts`; filtering the
+  log for `FilterPanel`, `components/Media`, `Media/__tests__`, task-176, and
+  `WebUI_Dependency_Audit` returned no matches. `git diff --check` exited 0.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,
@@ -494,6 +529,8 @@ ownership checks, or complex-domain packages that should stay on the
 - Bandit: skipped for TASK-168 because the slice changed TypeScript,
   documentation, and Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-171 because the slice changed TypeScript,
+  documentation, and Backlog metadata only; no Python files were modified.
+- Bandit: skipped for TASK-176 because the slice changed TypeScript,
   documentation, and Backlog metadata only; no Python files were modified.
 
 ## Known Skips And Blockers
