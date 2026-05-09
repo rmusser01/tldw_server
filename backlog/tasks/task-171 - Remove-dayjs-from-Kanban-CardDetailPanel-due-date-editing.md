@@ -1,10 +1,10 @@
 ---
 id: TASK-171
 title: Remove dayjs from Kanban CardDetailPanel due-date editing
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 17:46'
-updated_date: '2026-05-09 17:53'
+updated_date: '2026-05-09 17:55'
 labels:
   - webui
   - dependencies
@@ -13,6 +13,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
+  - 'https://github.com/rmusser01/tldw_server/pull/1427'
 priority: medium
 ---
 
@@ -54,12 +55,18 @@ bun run lint from apps/tldw-frontend exited 0 with the existing 131-warning base
 Bandit skipped for this task because the touched scope is TypeScript, tests, documentation, and Backlog metadata only; no Python files changed.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed the Kanban CardDetailPanel dependency on dayjs and Ant Design DatePicker for due-date editing. The panel now uses a native datetime-local input backed by small local ISO parse/format helpers, with an explicit touched flag so unchanged due dates are not rewritten when saving unrelated fields. Focused tests cover helper behavior plus changed, cleared, and unchanged due-date saves. The dependency audit now records the shared UI dayjs import count at 5 remaining lines, limited to Media, ReadingList, and Items surfaces. Verification passed with the focused Kanban Vitest suite, exact dayjs import scan, git diff --check, lint exiting 0 with the known warning baseline, and filtered touched-slice TypeScript diagnostics returning no matches. Bandit was skipped because this slice changed no Python files.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
