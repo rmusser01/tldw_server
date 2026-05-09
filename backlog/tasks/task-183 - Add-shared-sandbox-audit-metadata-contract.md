@@ -1,11 +1,11 @@
 ---
 id: TASK-183
 title: Add shared sandbox audit metadata contract
-status: In Progress
+status: Done
 assignee:
   - Codex
 created_date: '2026-05-09 19:31'
-updated_date: '2026-05-09 19:58'
+updated_date: '2026-05-09 20:15'
 labels:
   - sandbox
   - security
@@ -59,6 +59,8 @@ Implemented shared run-completion audit metadata helper and wired endpoint/backg
 PR review follow-up verified against current branch. Plan: add focused regression tests and run them red; update audit metadata and call sites minimally; run focused pytest, endpoint smoke, py_compile, diff check, Bandit; update the task, commit, and push.
 
 PR review fixes applied and verified. Red check failed on Windows drive-relative base_image redaction and omitted requested_runtime. Green checks passed: audit pytest 8 passed, endpoint smoke 1 passed, py_compile passed for touched production modules, git diff --check passed, Bandit reported 0 results and 0 errors in /tmp/bandit_sandbox_audit_metadata_contract_review.json.
+
+Post-merge hygiene: PR #1441 has merged into dev and the umbrella GitHub tracker was created at https://github.com/rmusser01/tldw_server/issues/1442.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -67,6 +69,8 @@ PR review fixes applied and verified. Red check failed on Windows drive-relative
 Implemented a shared sandbox run-completion audit metadata contract and wired it into both REST endpoint and background-service completion audit paths. The helper centralizes runtime, requested/effective runtime, trust/network policy, spec version, outcome, status reason, policy/image identifiers, and bounded limit metadata while omitting raw artifact paths, raw capture patterns, and host-path base image values. Focused tests cover path minimization and service metadata parity; verification passed for focused pytest, endpoint smoke, py_compile, git diff --check, and Bandit. PR: https://github.com/rmusser01/tldw_server/pull/1441
 
 PR review follow-up: added helper docstrings, redacted Windows drive-relative base_image values, preserved omitted requested_runtime as None, split the broad metadata contract test into focused cases, and removed redundant reason_code merges from endpoint/service call sites.
+
+Post-merge tracker: umbrella GitHub issue #1442 now tracks the broader sandbox-module stability roadmap and links the source-of-truth docs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
