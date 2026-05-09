@@ -491,7 +491,7 @@ export function FilterPanel({
           {t('review:mediaPage.dateRange', { defaultValue: 'Date range' })}
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="space-y-1 text-xs text-textMuted">
+          <label className="space-y-1 text-xs text-text-muted">
             <span>
               {t('review:mediaPage.startDate', { defaultValue: 'Start date' })}
             </span>
@@ -504,7 +504,7 @@ export function FilterPanel({
               className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
           </label>
-          <label className="space-y-1 text-xs text-textMuted">
+          <label className="space-y-1 text-xs text-text-muted">
             <span>
               {t('review:mediaPage.endDate', { defaultValue: 'End date' })}
             </span>

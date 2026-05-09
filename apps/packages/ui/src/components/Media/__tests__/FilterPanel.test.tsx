@@ -65,8 +65,8 @@ describe('FilterPanel', () => {
   it('renders existing date range values in native date inputs', () => {
     renderFilterPanel({
       dateRange: {
-        startDate: '2026-01-02T12:00:00.000Z',
-        endDate: '2026-01-31T12:00:00.000Z'
+        startDate: isoForLocalDate('2026-01-02', 'start'),
+        endDate: isoForLocalDate('2026-01-31', 'end')
       },
       onDateRangeChange: vi.fn()
     })

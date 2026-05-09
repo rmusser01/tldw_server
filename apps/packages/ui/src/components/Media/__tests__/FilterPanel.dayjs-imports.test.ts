@@ -1,10 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const srcRoot = existsSync(join(process.cwd(), 'src'))
-  ? join(process.cwd(), 'src')
-  : join(process.cwd(), 'apps/packages/ui/src')
+const srcRoot = resolve(__dirname, '../../..')
 const dayjsImportPattern =
   /^\s*import\s+(?:type\s+)?(?:.+?\s+from\s+)?['"]dayjs(?:\/[^'"]*)?['"]/
 
@@ -23,7 +21,7 @@ const collectSourceFiles = (directory: string): string[] => {
 
 const collectDayjsImports = (): string[] => {
   return collectSourceFiles(srcRoot).flatMap((filePath) => {
-    const relativePath = relative(srcRoot, filePath)
+    const relativePath = relative(srcRoot, filePath).replace(/\\/g, '/')
     return readFileSync(filePath, 'utf8')
       .split(/\r?\n/)
       .flatMap((line) => (dayjsImportPattern.test(line) ? [`${relativePath}:${line.trim()}`] : []))
