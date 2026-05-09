@@ -16,12 +16,14 @@ import time
 import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
+from starlette.responses import FileResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User, verify_jwt_and_fetch_user
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -74,6 +76,13 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVoiceCommandAnalyticsItem,
     PersonaVoiceDefaults,
     PersonaVoiceFallbackAnalytics,
+    PersonaVisualAssetResponse,
+    PersonaVisualCandidateResponse,
+    PersonaVisualCandidateReviewRequest,
+    PersonaVisualDeactivateResponse,
+    PersonaVisualManifestUpdate,
+    PersonaVisualPackCreate,
+    PersonaVisualPackResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
@@ -110,6 +119,10 @@ from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Persona.buddy import (
     build_persona_buddy_summary,
     ensure_persona_buddy_for_profile,
+)
+from tldw_Server_API.app.core.Persona.visual_service import (
+    PersonaVisualService,
+    PersonaVisualServiceError,
 )
 from tldw_Server_API.app.core.Persona.connections import (
     PERSONA_CONNECTION_STATUS_FIELD,
@@ -1808,6 +1821,106 @@ def _persona_exemplar_to_response(exemplar: dict[str, Any]) -> PersonaExemplarRe
     )
 
 
+def _persona_visual_asset_url(*, persona_id: str, pack_id: str, asset_id: str) -> str:
+    return f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets/{asset_id}/content"
+
+
+def _persona_visual_asset_to_response(asset: dict[str, Any]) -> PersonaVisualAssetResponse:
+    persona_id = str(asset.get("persona_id") or "")
+    pack_id = str(asset.get("pack_id") or "")
+    asset_id = str(asset.get("id") or "")
+    return PersonaVisualAssetResponse(
+        id=asset_id,
+        pack_id=pack_id,
+        persona_id=persona_id,
+        asset_role=str(asset.get("asset_role") or "frame"),
+        storage_key=str(asset.get("storage_key") or ""),
+        url=_persona_visual_asset_url(persona_id=persona_id, pack_id=pack_id, asset_id=asset_id),
+        original_filename=asset.get("original_filename"),
+        mime_type=str(asset.get("mime_type") or "application/octet-stream"),
+        byte_size=int(asset.get("byte_size") or 0),
+        checksum_sha256=str(asset.get("checksum_sha256") or ""),
+        width=asset.get("width"),
+        height=asset.get("height"),
+        duration_ms=asset.get("duration_ms"),
+        provenance=str(asset.get("provenance") or "uploaded"),
+        created_at=str(asset.get("created_at") or _utc_now_iso()),
+        last_modified=str(asset.get("last_modified") or asset.get("created_at") or _utc_now_iso()),
+        version=int(asset.get("version") or 1),
+    )
+
+
+def _persona_visual_pack_to_response(
+    pack: dict[str, Any],
+    *,
+    assets: list[dict[str, Any]] | None = None,
+) -> PersonaVisualPackResponse:
+    pack_assets = assets if assets is not None else list(pack.get("assets") or [])
+    return PersonaVisualPackResponse(
+        id=str(pack.get("id") or ""),
+        persona_id=str(pack.get("persona_id") or ""),
+        user_id=str(pack.get("user_id") or ""),
+        title=str(pack.get("title") or ""),
+        renderer_type=str(pack.get("renderer_type") or "sprite_frames"),
+        status=str(pack.get("status") or "draft"),
+        manifest_version=int(pack.get("manifest_version") or 1),
+        manifest=pack.get("manifest") if isinstance(pack.get("manifest"), dict) else {},
+        parent_pack_id=pack.get("parent_pack_id"),
+        revision_number=int(pack.get("revision_number") or 1),
+        provenance=str(pack.get("provenance") or "uploaded"),
+        active_at=pack.get("active_at"),
+        assets=[_persona_visual_asset_to_response(asset) for asset in pack_assets],
+        created_at=str(pack.get("created_at") or _utc_now_iso()),
+        last_modified=str(pack.get("last_modified") or pack.get("created_at") or _utc_now_iso()),
+        version=int(pack.get("version") or 1),
+    )
+
+
+def _persona_visual_candidate_to_response(candidate: dict[str, Any]) -> PersonaVisualCandidateResponse:
+    return PersonaVisualCandidateResponse(
+        id=str(candidate.get("id") or ""),
+        pack_id=str(candidate.get("pack_id") or ""),
+        persona_id=str(candidate.get("persona_id") or ""),
+        user_id=str(candidate.get("user_id") or ""),
+        job_id=candidate.get("job_id"),
+        status=str(candidate.get("status") or "review"),
+        proposed_manifest_patch=(
+            candidate.get("proposed_manifest_patch")
+            if isinstance(candidate.get("proposed_manifest_patch"), dict)
+            else {}
+        ),
+        generated_asset_ids=[str(item) for item in list(candidate.get("generated_asset_ids") or [])],
+        prompt=candidate.get("prompt"),
+        failure_reason=candidate.get("failure_reason"),
+        created_at=str(candidate.get("created_at") or _utc_now_iso()),
+        last_modified=str(candidate.get("last_modified") or candidate.get("created_at") or _utc_now_iso()),
+        version=int(candidate.get("version") or 1),
+    )
+
+
+def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTTPException:
+    status_code = status.HTTP_400_BAD_REQUEST
+    if exc.code in {"pack_not_found", "asset_not_found", "candidate_not_found"}:
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"forbidden"}:
+        status_code = status.HTTP_403_FORBIDDEN
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": str(exc), "details": exc.details},
+    )
+
+
+def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Path:
+    parts = str(storage_key or "").split("/")
+    if len(parts) < 4 or parts[0] != "persona_visuals" or any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(status_code=404, detail="Persona visual asset not found")
+    base = DatabasePaths.get_user_persona_visuals_dir(user_id).resolve(strict=False)
+    target = base.joinpath(*parts[1:]).resolve(strict=False)
+    if not target.is_relative_to(base) or not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Persona visual asset not found")
+    return target
+
+
 def _persona_state_response_from_rows(
     *,
     persona_id: str,
@@ -3045,6 +3158,401 @@ async def get_persona_buddy(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona buddy") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs",
+    response_model=list[PersonaVisualPackResponse],
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_packs(
+    persona_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> list[PersonaVisualPackResponse]:
+    """List visual packs owned by the current user for one active persona profile."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        packs = await _run_persona_db_call(
+            db.list_persona_visual_packs,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        responses: list[PersonaVisualPackResponse] = []
+        for pack in packs:
+            pack_id = str(pack.get("id") or "")
+            assets = await _run_persona_db_call(
+                db.list_persona_visual_assets,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            responses.append(_persona_visual_pack_to_response(pack, assets=assets))
+        return responses
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona visual packs") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def create_persona_visual_pack(
+    persona_id: str,
+    payload: PersonaVisualPackCreate,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Create a draft visual pack manifest for one active persona profile."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.create_persona_visual_pack,
+            persona_id=persona_id,
+            user_id=user_id,
+            title=payload.title,
+            manifest=payload.manifest,
+        )
+        return _persona_visual_pack_to_response(pack, assets=[])
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="create persona visual pack") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/deactivate",
+    response_model=PersonaVisualDeactivateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def deactivate_persona_visual_pack(
+    persona_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualDeactivateResponse:
+    """Deactivate the current active visual pack for one persona profile."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        service = PersonaVisualService(db)
+        await _run_persona_db_call(
+            service.deactivate_pack,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return PersonaVisualDeactivateResponse(status="deactivated", persona_id=persona_id)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="deactivate persona visual pack") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Return one visual pack and its projected asset URLs."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        assets = await _run_persona_db_call(
+            db.list_persona_visual_assets,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_pack_to_response(pack, assets=assets)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack") from exc
+
+
+@router.patch(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/manifest",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def update_persona_visual_pack_manifest(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualManifestUpdate,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Replace a draft visual-pack manifest with optimistic version protection."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.update_persona_visual_pack_manifest,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            manifest=payload.manifest,
+            expected_version=payload.expected_version,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        assets = await _run_persona_db_call(
+            db.list_persona_visual_assets,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_pack_to_response(pack, assets=assets)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="update persona visual pack manifest") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/assets",
+    response_model=PersonaVisualAssetResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def upload_persona_visual_asset(
+    persona_id: str,
+    pack_id: str,
+    asset_role: str = Form("frame"),
+    file: UploadFile = File(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualAssetResponse:
+    """Validate and store one raster asset for a persona visual pack."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        content = await file.read()
+        service = PersonaVisualService(db)
+        asset = await _run_persona_db_call(
+            service.create_asset_from_upload,
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+            content=content,
+            mime_type=file.content_type or "application/octet-stream",
+            original_filename=file.filename,
+            asset_role=asset_role,
+        )
+        return _persona_visual_asset_to_response(asset)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="upload persona visual asset") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/assets/{asset_id}/content",
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_asset_content(
+    persona_id: str,
+    pack_id: str,
+    asset_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FileResponse:
+    """Stream stored visual-pack asset bytes after user and pack ownership checks."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        asset = await _run_persona_db_call(
+            db.get_persona_visual_asset,
+            asset_id=asset_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Persona visual asset not found")
+        asset_path = _resolve_persona_visual_asset_path(
+            user_id=user_id,
+            storage_key=str(asset.get("storage_key") or ""),
+        )
+        return FileResponse(
+            asset_path,
+            media_type=str(asset.get("mime_type") or "application/octet-stream"),
+            filename=asset.get("original_filename") or asset_path.name,
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual asset content") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/activate",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def activate_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Validate the manifest and make this pack the active visual for a persona."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        service = PersonaVisualService(db)
+        active = await _run_persona_db_call(
+            service.activate_pack,
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+        )
+        assets = list(active.get("assets") or [])
+        return _persona_visual_pack_to_response(active, assets=assets)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="activate persona visual pack") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/candidates/{candidate_id}/review",
+    response_model=PersonaVisualCandidateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def review_persona_visual_candidate(
+    persona_id: str,
+    pack_id: str,
+    candidate_id: str,
+    payload: PersonaVisualCandidateReviewRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualCandidateResponse:
+    """Accept, reject, or mark a generated visual candidate as failed."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        candidate = await _run_persona_db_call(
+            db.update_persona_visual_candidate_status,
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            status=payload.status,
+            failure_reason=payload.failure_reason,
+        )
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Persona visual candidate not found")
+        return _persona_visual_candidate_to_response(candidate)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="review persona visual candidate") from exc
 
 
 @router.delete(

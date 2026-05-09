@@ -857,7 +857,7 @@ git commit -m "feat: validate persona visual assets"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/persona.py`
 - Test: `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Use `TestClient` and dependency overrides like `test_persona_buddy_api.py`.
 
@@ -889,7 +889,7 @@ def test_deactivate_visual_pack_reverts_to_derived_buddy(persona_db: CharactersR
     # Activate a pack, call deactivate, and assert active-pack lookup returns none.
 ```
 
-- [ ] **Step 2: Run failing API tests**
+- [x] **Step 2: Run failing API tests**
 
 Run:
 
@@ -899,7 +899,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test
 
 Expected: FAIL because API schemas/endpoints do not exist.
 
-- [ ] **Step 3: Add Pydantic schemas**
+- [x] **Step 3: Add Pydantic schemas**
 
 In `schemas/persona.py`, add:
 
@@ -981,7 +981,7 @@ class PersonaVisualGenerationRequest(BaseModel):
     backend: str | None = Field(default=None, max_length=80)
 ```
 
-- [ ] **Step 4: Add endpoint helpers**
+- [x] **Step 4: Add endpoint helpers**
 
 In `endpoints/persona.py`, import `UploadFile`, `File`, and schemas. Add helper:
 
@@ -1010,7 +1010,7 @@ Add asset URL projection:
 - `GET /visual-packs` should include `active_pack` with `assets_by_id` so the Buddy shell can render without inventing a second contract.
 - `GET /visual-packs/{pack_id}` should return `PersonaVisualPackDetailResponse` for editor/detail views.
 
-- [ ] **Step 5: Add endpoints**
+- [x] **Step 5: Add endpoints**
 
 Add routes under existing persona router:
 
@@ -1055,7 +1055,7 @@ async def list_persona_visual_candidates(persona_id: str, pack_id: str, current_
     return PersonaVisualCandidateListResponse(candidates=service.list_candidates(persona_id=persona_id, pack_id=pack_id))
 ```
 
-- [ ] **Step 6: Run API tests**
+- [x] **Step 6: Run API tests**
 
 Run:
 
@@ -1065,7 +1065,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 

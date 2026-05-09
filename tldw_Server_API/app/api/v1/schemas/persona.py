@@ -22,6 +22,11 @@ PersonaWakeBehavior = Literal["one_shot", "continuous", "push_to_talk_after_wake
 PersonaSetupStatus = Literal["not_started", "in_progress", "completed"]
 PersonaSetupStep = Literal["archetype", "persona", "voice", "commands", "safety", "test"]
 PersonaSetupTestType = Literal["dry_run", "live_session"]
+PersonaVisualPackStatus = Literal["draft", "review", "active", "archived", "failed"]
+PersonaVisualRendererType = Literal["sprite_frames", "sprite_sheet", "static_image", "live2d"]
+PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview", "generated_candidate"]
+PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
+PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",
@@ -44,6 +49,81 @@ PersonaSetupEventType = Literal[
     "setup_skipped",
     "setup_resumed",
 ]
+
+
+class PersonaVisualPackCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    manifest: dict[str, Any] = Field(default_factory=dict)
+
+
+class PersonaVisualManifestUpdate(BaseModel):
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class PersonaVisualAssetResponse(BaseModel):
+    id: str
+    pack_id: str
+    persona_id: str
+    asset_role: PersonaVisualAssetRole
+    storage_key: str
+    url: str
+    original_filename: str | None = None
+    mime_type: str
+    byte_size: int
+    checksum_sha256: str
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
+    provenance: str = "uploaded"
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualPackResponse(BaseModel):
+    id: str
+    persona_id: str
+    user_id: str
+    title: str
+    renderer_type: PersonaVisualRendererType
+    status: PersonaVisualPackStatus
+    manifest_version: int = 1
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    parent_pack_id: str | None = None
+    revision_number: int = 1
+    provenance: str = "uploaded"
+    active_at: str | None = None
+    assets: list[PersonaVisualAssetResponse] = Field(default_factory=list)
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualCandidateReviewRequest(BaseModel):
+    status: PersonaVisualCandidateReviewStatus
+    failure_reason: str | None = Field(default=None, max_length=1000)
+
+
+class PersonaVisualCandidateResponse(BaseModel):
+    id: str
+    pack_id: str
+    persona_id: str
+    user_id: str
+    job_id: str | None = None
+    status: PersonaVisualCandidateStatus
+    proposed_manifest_patch: dict[str, Any] = Field(default_factory=dict)
+    generated_asset_ids: list[str] = Field(default_factory=list)
+    prompt: str | None = None
+    failure_reason: str | None = None
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualDeactivateResponse(BaseModel):
+    status: Literal["deactivated"]
+    persona_id: str
 
 
 class PersonaInfo(BaseModel):
