@@ -83,6 +83,37 @@ def _create_pack(db: CharactersRAGDB, *, user_id: str = "user-1", title: str = "
     return persona_id, pack
 
 
+def test_db_allows_explicit_cross_persona_parent_for_duplicate_path(db_instance: CharactersRAGDB) -> None:
+    user_id = "user-1"
+    source_persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Source"})
+    target_persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Target"})
+    source_pack = db_instance.create_persona_visual_pack(
+        persona_id=source_persona_id,
+        user_id=user_id,
+        title="Source Pack",
+    )
+
+    target_pack = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id=user_id,
+        title="Duplicate",
+        parent_pack_id=source_pack["id"],
+        parent_persona_id=source_persona_id,
+        status="failed",
+        provenance="mixed",
+    )
+    updated = db_instance.update_persona_visual_pack_status(
+        pack_id=target_pack["id"],
+        persona_id=target_persona_id,
+        user_id=user_id,
+        status="draft",
+        expected_version=target_pack["version"],
+    )
+
+    assert updated["parent_pack_id"] == source_pack["id"]
+    assert updated["status"] == "draft"
+
+
 def test_merge_candidate_patch_replaces_authored_trigger_by_id() -> None:
     merged = PersonaVisualService._merge_candidate_patch(
         {

@@ -2002,6 +2002,7 @@ class PersonaStateStore:
         renderer_type: str = "sprite_frames",
         status: str = "draft",
         parent_pack_id: str | None = None,
+        parent_persona_id: str | None = None,
         revision_number: int = 1,
         provenance: str = "uploaded",
         pack_id: str | None = None,
@@ -2058,7 +2059,7 @@ class PersonaStateStore:
                 self._require_persona_visual_pack_owner(
                     conn,
                     pack_id=str(parent_pack_id),
-                    persona_id=persona_id,
+                    persona_id=str(parent_persona_id or persona_id),
                     user_id=user_id,
                 )
             if status_value == "active":
@@ -2352,6 +2353,60 @@ class PersonaStateStore:
         query = (
             "UPDATE persona_visual_packs "
             "SET manifest_json = ?, manifest_version = ?, last_modified = ?, version = version + 1 "
+            f"WHERE {where_sql}"  # nosec B608
+        )
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+            cursor = conn.execute(prepared_query, prepared_params or ())
+            if cursor.rowcount == 0 and expected_version is not None:
+                raise ConflictError(  # noqa: TRY003
+                    "Persona visual pack version mismatch.",
+                    entity="persona_visual_packs",
+                    entity_id=pack_id,
+                )
+        return self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
+
+    def update_persona_visual_pack_status(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+        status: str,
+        expected_version: int | None = None,
+    ) -> dict[str, Any] | None:
+        status_value = self._normalize_persona_visual_enum(
+            status,
+            allowed=self._ALLOWED_PERSONA_VISUAL_PACK_STATUSES,
+            field_name="status",
+        )
+        if status_value == "active":
+            raise InputError("Use activate_persona_visual_pack for active status transitions.")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        params: list[Any] = [
+            status_value,
+            None,
+            now,
+            pack_id,
+            user_id,
+            persona_id,
+            bool_cast(False),
+        ]
+        where_sql = "id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+        if expected_version is not None:
+            where_sql += " AND version = ?"
+            params.append(int(expected_version))
+        query = (
+            "UPDATE persona_visual_packs "
+            "SET status = ?, active_at = ?, last_modified = ?, version = version + 1 "
             f"WHERE {where_sql}"  # nosec B608
         )
         with self.transaction() as conn:

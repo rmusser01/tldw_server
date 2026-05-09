@@ -284,7 +284,7 @@ git commit -m "Extract persona visual manifest asset helpers"
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 - Test: `tldw_Server_API/tests/Persona/test_persona_visual_service.py`
 
-- [ ] **Step 1: Write service-level failing tests for cross-persona parent creation and status transition**
+- [x] **Step 1: Write service-level failing tests for cross-persona parent creation and status transition**
 
 Append focused expectations to the duplicate service tests in Task 3, or temporarily add this failing test to `tldw_Server_API/tests/Persona/test_persona_visual_service.py`:
 
@@ -320,7 +320,7 @@ def test_db_allows_explicit_cross_persona_parent_for_duplicate_path(db_instance:
     assert updated["status"] == "draft"
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -331,7 +331,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py::t
 
 Expected: failure because `parent_persona_id` and `update_persona_visual_pack_status()` do not exist.
 
-- [ ] **Step 3: Extend pack creation with explicit parent persona**
+- [x] **Step 3: Extend pack creation with explicit parent persona**
 
 In `create_persona_visual_pack()` in `tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py`, add an optional keyword after `parent_pack_id`:
 
@@ -353,7 +353,7 @@ if parent_pack_id:
 
 Do not change existing callers; the default remains same-persona validation.
 
-- [ ] **Step 4: Add status-update helper**
+- [x] **Step 4: Add status-update helper**
 
 In `persona_state_store.py`, near `update_persona_visual_pack_manifest()`, add:
 
@@ -413,11 +413,11 @@ def update_persona_visual_pack_status(
     return self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
 ```
 
-- [ ] **Step 5: Export the helper**
+- [x] **Step 5: Export the helper**
 
 In `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`, add `update_persona_visual_pack_status` to the persona visual method export list near `update_persona_visual_pack_manifest`.
 
-- [ ] **Step 6: Run the DB-focused test**
+- [x] **Step 6: Run the DB-focused test**
 
 Run:
 
@@ -428,7 +428,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py::t
 
 Expected: pass.
 
-- [ ] **Step 7: Commit DB support**
+- [x] **Step 7: Commit DB support**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py \
