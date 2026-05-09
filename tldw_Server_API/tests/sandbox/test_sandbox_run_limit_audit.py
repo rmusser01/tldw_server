@@ -12,7 +12,13 @@ from tldw_Server_API.app.core.Sandbox.limits import (
     build_limit_audit_metadata,
     limit_event_actions,
 )
-from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
+from tldw_Server_API.app.core.Sandbox.models import (
+    RunPhase,
+    RunSpec,
+    RunStatus,
+    RuntimeType,
+    TrustLevel,
+)
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
@@ -45,6 +51,59 @@ def test_limit_event_actions_reports_only_affected_limits() -> None:
     assert limit_event_actions({"log_truncated": 1}) == ["log_truncated"]
     assert limit_event_actions({"artifact_files_skipped": 1}) == ["artifacts_limited"]
     assert limit_event_actions({"stdout_truncated": 0, "artifact_files_skipped": 0}) == []
+
+
+def test_build_run_completion_audit_metadata_contract_minimizes_paths() -> None:
+    from tldw_Server_API.app.core.Sandbox.audit_metadata import (
+        build_run_completion_audit_metadata,
+    )
+
+    started = datetime.utcnow()
+    status = RunStatus(
+        id="run-audit-contract",
+        phase=RunPhase.completed,
+        runtime=RuntimeType.vz_linux,
+        base_image="/Users/operator/private-rootfs.img",
+        policy_hash="policy-hash",
+        exit_code=0,
+        started_at=started,
+        finished_at=started,
+        resource_usage={
+            "output_limit_bytes": 5,
+            "stdout_truncated": 1,
+            "artifact_files_skipped": 1,
+            "artifact_skip_file_limit": 1,
+            "artifact_paths": ["/Users/operator/private-output.txt"],
+        },
+    )
+
+    metadata = build_run_completion_audit_metadata(
+        status=status,
+        spec_version="1.1",
+        requested_runtime=RuntimeType.vz_linux,
+        trust_level=TrustLevel.untrusted,
+        network_policy="deny_all",
+        capture_patterns=["reports/*.json", "logs/*.txt"],
+    )
+
+    assert metadata["runtime"] == "vz_linux"
+    assert metadata["effective_runtime"] == "vz_linux"
+    assert metadata["requested_runtime"] == "vz_linux"
+    assert metadata["trust_level"] == "untrusted"
+    assert metadata["network_policy"] == "deny_all"
+    assert metadata["policy_hash"] == "policy-hash"
+    assert metadata["spec_version"] == "1.1"
+    assert metadata["exit_code"] == 0
+    assert metadata["outcome"] == "success"
+    assert metadata["status_reason_code"] == "limits_applied"
+    assert metadata["output_truncated"] is True
+    assert metadata["artifact_skip_reasons"] == ["file_limit"]
+    assert metadata["capture_pattern_count"] == 2
+    assert metadata["base_image_kind"] == "host_path"
+    assert metadata["base_image"] is None
+    assert "artifact_paths" not in metadata
+    assert "capture_patterns" not in metadata
+    assert "/Users/operator" not in str(metadata)
 
 
 def test_sandbox_service_audits_aggregate_limit_events(monkeypatch) -> None:
@@ -84,6 +143,15 @@ def test_sandbox_service_audits_aggregate_limit_events(monkeypatch) -> None:
             "artifact_skip_total_limit": 1,
         },
     )
+    spec = RunSpec(
+        session_id="session-1",
+        runtime=RuntimeType.vz_linux,
+        base_image="vz_linux:test",
+        command=["echo", "ok"],
+        trust_level=TrustLevel.standard,
+        network_policy="deny_all",
+        capture_patterns=["reports/*.json"],
+    )
 
     SandboxService()._audit_run_completion(
         user_id=None,
@@ -91,10 +159,18 @@ def test_sandbox_service_audits_aggregate_limit_events(monkeypatch) -> None:
         status=status,
         spec_version="1.0",
         session_id="session-1",
+        spec=spec,
     )
 
     assert [event["action"] for event in events] == ["run", "output_truncated", "artifacts_limited"]
     completion_metadata = events[0]["metadata"]
+    assert completion_metadata["effective_runtime"] == "vz_linux"
+    assert completion_metadata["requested_runtime"] == "vz_linux"
+    assert completion_metadata["trust_level"] == "standard"
+    assert completion_metadata["network_policy"] == "deny_all"
+    assert completion_metadata["status_reason_code"] == "limits_applied"
+    assert completion_metadata["outcome"] == "success"
+    assert completion_metadata["capture_pattern_count"] == 1
     assert completion_metadata["output_truncated"] is True
     assert completion_metadata["artifact_skip_reasons"] == ["file_limit", "total_limit"]
     assert "artifact_paths" not in completion_metadata
