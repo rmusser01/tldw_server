@@ -9,6 +9,8 @@ import type {
   VNPlaySession,
   VNPlaySessionCreate,
   VNPlaySessionUpdate,
+  VNPlaySetupOptionsQuery,
+  VNPlaySetupOptionsResponse,
   VNPlayTurnRequest,
   VNPlayTurnResponse,
 } from '@web/types/vn-play';
@@ -17,6 +19,12 @@ const VN_PLAY_BASE = '/vn-play';
 
 export function createVNPlaySession(request: VNPlaySessionCreate): Promise<VNPlaySession> {
   return apiClient.post(`${VN_PLAY_BASE}/sessions`, request);
+}
+
+export function listVNPlaySetupOptions(
+  query: VNPlaySetupOptionsQuery = {}
+): Promise<VNPlaySetupOptionsResponse> {
+  return apiClient.get(`${VN_PLAY_BASE}/setup-options`, { params: query });
 }
 
 export function listVNPlaySessions(): Promise<VNPlaySession[]> {

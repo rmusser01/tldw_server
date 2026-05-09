@@ -2,6 +2,11 @@ export type VNPlayMode = 'freeform' | 'story';
 export type VNPlaySessionStatus = 'active' | 'paused' | 'completed' | 'archived' | 'failed';
 export type VNPlayTrustLevel = 'local' | 'trusted_restore' | 'untrusted_import' | 'mixed';
 export type VNPlayLinkedChatMode = 'read_only_context';
+export type VNPlaySetupTrustLevel = 'local' | 'trusted_restore' | 'untrusted_import' | 'unknown';
+export type VNPlaySetupTrustSource = 'local_pack' | 'latest_import_journal' | 'unknown';
+export type VNPlaySetupWarningSeverity = 'info' | 'warning' | 'high_risk';
+export type VNPlaySetupCompatibilityStatus = 'compatible' | 'different_character' | 'unknown';
+export type VNPlaySetupEmptyStateScope = 'global' | 'filter' | 'page';
 export type VNPlayTurnStatus =
   | 'pending'
   | 'model_calling'
@@ -88,6 +93,96 @@ export interface VNPlaySessionCreate {
   linked_chat_mode?: VNPlayLinkedChatMode;
   seed?: string | null;
   settings?: Record<string, unknown>;
+}
+
+export interface VNPlaySetupCharacterOption {
+  id: number;
+  name: string;
+  description_preview?: string | null;
+  tags: string[];
+  favorite: boolean;
+  deleted: boolean;
+  has_image: boolean;
+}
+
+export interface VNPlaySetupCompatibility {
+  status: VNPlaySetupCompatibilityStatus;
+  reason_codes: string[];
+}
+
+export interface VNPlaySetupWarning {
+  code: string;
+  severity: VNPlaySetupWarningSeverity;
+  message: string;
+  requires_acknowledgement: boolean;
+}
+
+export interface VNPlaySetupWarningSummary {
+  highest_severity: VNPlaySetupWarningSeverity;
+  requires_acknowledgement: boolean;
+  warnings: VNPlaySetupWarning[];
+}
+
+export interface VNPlaySetupAssetPackOption {
+  id: number;
+  title: string;
+  primary_character_id: number;
+  content_rating: string;
+  status: string;
+  trust_level: VNPlaySetupTrustLevel;
+  trust_source: VNPlaySetupTrustSource;
+  ready: boolean;
+  readiness_status: string;
+  readiness_warnings: string[];
+  readiness_errors: string[];
+  compatibility: VNPlaySetupCompatibility;
+  warning_summary: VNPlaySetupWarningSummary;
+  recommended: boolean;
+}
+
+export interface VNPlaySetupDefaults {
+  mode?: VNPlayMode | null;
+  character_id?: number | null;
+  asset_pack_id?: number | null;
+  content_rating?: string | null;
+}
+
+export interface VNPlaySetupPagination {
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  total?: number | null;
+}
+
+export interface VNPlaySetupEmptyState {
+  code: string;
+  scope: VNPlaySetupEmptyStateScope;
+  message: string;
+}
+
+export interface VNPlaySetupOptionsResponse {
+  characters: VNPlaySetupCharacterOption[];
+  selected_character?: VNPlaySetupCharacterOption | null;
+  asset_packs: VNPlaySetupAssetPackOption[];
+  defaults: VNPlaySetupDefaults;
+  pagination: {
+    characters: VNPlaySetupPagination;
+    asset_packs: VNPlaySetupPagination;
+  };
+  empty_states: VNPlaySetupEmptyState[];
+  generated_at: string;
+}
+
+export interface VNPlaySetupOptionsQuery {
+  mode?: VNPlayMode;
+  character_query?: string;
+  pack_query?: string;
+  character_limit?: number;
+  character_offset?: number;
+  pack_limit?: number;
+  pack_offset?: number;
+  selected_character_id?: number;
+  content_rating?: string;
 }
 
 export type VNPlaySessionUpdate = Partial<

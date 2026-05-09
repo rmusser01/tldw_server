@@ -1,11 +1,15 @@
-import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
-import { listCharacters } from '@web/lib/api/characters';
-import { getVNAssetReadiness, listVNAssetPacks } from '@web/lib/api/vnAssets';
-import type { CharacterSummary } from '@web/types/characters';
-import type { VNAssetPack, VNAssetReadiness } from '@web/types/vn-assets';
-import type { VNPlayMode, VNPlaySessionCreate } from '@web/types/vn-play';
+import { listVNPlaySetupOptions } from '@web/lib/api/vnPlay';
+import type {
+  VNPlayMode,
+  VNPlaySessionCreate,
+  VNPlaySetupAssetPackOption,
+  VNPlaySetupCharacterOption,
+  VNPlaySetupEmptyState,
+  VNPlaySetupOptionsResponse,
+} from '@web/types/vn-play';
 
 export interface NewSessionDialogProps {
   initialMode: VNPlayMode;
@@ -16,153 +20,186 @@ export interface NewSessionDialogProps {
 }
 
 type SelectorMode = 'selectors' | 'manual';
-type ReadinessByPackId = Record<number, VNAssetReadiness>;
 
 const SELECT_CLASS =
   'mt-1 block w-full rounded-md border-border bg-bg shadow-sm focus:border-primary focus:ring-primary';
-const APPROVED_PACK_STATUSES = new Set(['approved', 'ready', 'runtime_ready', 'active']);
-const READINESS_REQUEST_BATCH_SIZE = 4;
+const EMPTY_ASSET_PACKS: VNPlaySetupAssetPackOption[] = [];
+const EMPTY_EMPTY_STATES: VNPlaySetupEmptyState[] = [];
 
 function parsePositiveInteger(value: string): number | null {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function characterName(character: CharacterSummary | null): string {
+function characterName(character: VNPlaySetupCharacterOption | null): string {
   return character?.name?.trim() || (character ? `Character ${character.id}` : 'selected character');
 }
 
-function formatTags(tags: CharacterSummary['tags']): string | null {
-  if (Array.isArray(tags)) {
-    const normalized = tags.map((tag) => tag.trim()).filter(Boolean);
-    return normalized.length ? normalized.join(', ') : null;
+function formatTags(tags: string[] | undefined): string | null {
+  const normalized = (tags ?? []).map((tag) => tag.trim()).filter(Boolean);
+  return normalized.length ? normalized.join(', ') : null;
+}
+
+function characterOptionLabel(character: VNPlaySetupCharacterOption): string {
+  const parts = [characterName(character), `#${character.id}`];
+  const tags = formatTags(character.tags);
+  if (tags) {
+    parts.push(tags);
   }
-
-  if (typeof tags === 'string') {
-    return tags.trim() || null;
-  }
-
-  return null;
-}
-
-function isApprovedPackStatus(status?: string | null): boolean {
-  if (!status) return true;
-  return APPROVED_PACK_STATUSES.has(status.toLowerCase());
-}
-
-function chooseBestPack(
-  packs: VNAssetPack[],
-  characterId: number | null,
-  readinessByPackId: ReadinessByPackId
-): VNAssetPack | null {
-  if (!characterId) return null;
-
-  const compatiblePacks = packs.filter((pack) => pack.primary_character_id === characterId);
-  return (
-    compatiblePacks.find((pack) => readinessByPackId[pack.id]?.ready && isApprovedPackStatus(pack.status)) ??
-    compatiblePacks[0] ??
-    null
-  );
-}
-
-async function loadReadinessForPacks(packs: VNAssetPack[]): Promise<ReadinessByPackId> {
-  const entries: Array<readonly [number, VNAssetReadiness]> = [];
-
-  for (let index = 0; index < packs.length; index += READINESS_REQUEST_BATCH_SIZE) {
-    const batch = packs.slice(index, index + READINESS_REQUEST_BATCH_SIZE);
-    const batchEntries = await Promise.all(
-      batch.map(async (pack) => {
-        try {
-          const readiness = await getVNAssetReadiness(pack.id);
-          return [pack.id, readiness] as const;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Readiness request failed';
-          return [
-            pack.id,
-            {
-              ready: false,
-              status: 'readiness_unavailable',
-              warnings: [],
-              errors: [`Could not load readiness for ${pack.title}: ${message}`],
-            },
-          ] as const;
-        }
-      })
-    );
-    entries.push(...batchEntries);
-  }
-
-  return entries.reduce<ReadinessByPackId>((accumulator, [packId, readiness]) => {
-    accumulator[packId] = readiness;
-    return accumulator;
-  }, {});
-}
-
-function buildPackOptionLabel(
-  pack: VNAssetPack,
-  selectedCharacter: CharacterSummary | null,
-  readiness?: VNAssetReadiness
-): string {
-  const parts = [pack.title];
-  if (selectedCharacter && pack.primary_character_id !== selectedCharacter.id) {
-    parts.push(`incompatible with ${characterName(selectedCharacter)}`);
-  } else if (readiness && !readiness.ready) {
-    parts.push('not ready');
+  if (character.favorite) {
+    parts.push('favorite');
   }
   return parts.join(' - ');
 }
 
-function buildSelectedPackWarnings({
-  contentRating,
-  pack,
-  readiness,
-  selectedCharacter,
-}: {
-  contentRating: string;
-  pack: VNAssetPack | null;
-  readiness?: VNAssetReadiness;
-  selectedCharacter: CharacterSummary | null;
-}): string[] {
-  if (!pack) return [];
+function humanizeValue(value: string): string {
+  return value.replace(/_/g, ' ');
+}
 
-  const warnings: string[] = [];
-  if (selectedCharacter && pack.primary_character_id !== selectedCharacter.id) {
-    warnings.push(`${pack.title} is attached to character ${pack.primary_character_id}, not ${characterName(selectedCharacter)}.`);
+function requiresPackAcknowledgement(pack: VNPlaySetupAssetPackOption | null): boolean {
+  return Boolean(pack?.warning_summary.requires_acknowledgement);
+}
+
+function acknowledgementWarningCodes(pack: VNPlaySetupAssetPackOption): string[] {
+  const requiredCodes = pack.warning_summary.warnings
+    .filter((warning) => warning.requires_acknowledgement)
+    .map((warning) => warning.code)
+    .filter(Boolean);
+
+  if (requiredCodes.length > 0) {
+    return requiredCodes;
   }
 
-  if (pack.status && !isApprovedPackStatus(pack.status)) {
-    warnings.push(`Pack status is ${pack.status}; review or approve it before starting VN Play.`);
-  }
+  return pack.warning_summary.warnings.map((warning) => warning.code).filter(Boolean);
+}
 
-  if (readiness) {
-    if (!readiness.ready) {
-      warnings.push(`Readiness status: ${readiness.status}.`);
-    }
-    warnings.push(...readiness.warnings);
-    warnings.push(...readiness.errors);
-  }
+function acknowledgementKey(pack: VNPlaySetupAssetPackOption | null): string {
+  if (!pack || !requiresPackAcknowledgement(pack)) return '';
+  return [pack.id, ...acknowledgementWarningCodes(pack)].join(':');
+}
 
-  if (
-    pack.content_rating &&
-    contentRating.trim() &&
-    pack.content_rating.toLowerCase() !== contentRating.trim().toLowerCase()
-  ) {
-    warnings.push(`Pack content rating ${pack.content_rating} differs from session rating ${contentRating.trim()}.`);
-  }
+function buildSetupAcknowledgement(pack: VNPlaySetupAssetPackOption) {
+  return {
+    asset_pack_id: pack.id,
+    warning_codes: acknowledgementWarningCodes(pack),
+    highest_severity: pack.warning_summary.highest_severity,
+  };
+}
 
-  return warnings;
+function packOptionLabel(pack: VNPlaySetupAssetPackOption): string {
+  const parts = [pack.title];
+  if (pack.recommended) {
+    parts.push('recommended');
+  }
+  if (pack.compatibility.status === 'different_character') {
+    parts.push('different character');
+  } else if (!pack.ready) {
+    parts.push('not ready');
+  } else if (requiresPackAcknowledgement(pack)) {
+    parts.push('review required');
+  }
+  return parts.join(' - ');
+}
+
+function setupCharacters(options: VNPlaySetupOptionsResponse | null): VNPlaySetupCharacterOption[] {
+  if (!options) return [];
+  const selected = options.selected_character;
+  if (!selected || options.characters.some((character) => character.id === selected.id)) {
+    return options.characters;
+  }
+  return [selected, ...options.characters];
+}
+
+function selectedCharacterFromOptions(
+  options: VNPlaySetupOptionsResponse | null,
+  selectedCharacterId: number | null
+): VNPlaySetupCharacterOption | null {
+  if (!options || !selectedCharacterId) return null;
+  if (options.selected_character?.id === selectedCharacterId) {
+    return options.selected_character;
+  }
+  return options.characters.find((character) => character.id === selectedCharacterId) ?? null;
+}
+
+function defaultCharacterId(
+  options: VNPlaySetupOptionsResponse,
+  currentCharacterId: number | null
+): number | null {
+  if (currentCharacterId && setupCharacters(options).some((character) => character.id === currentCharacterId)) {
+    return currentCharacterId;
+  }
+  return options.defaults.character_id ?? options.selected_character?.id ?? options.characters[0]?.id ?? null;
 }
 
 function hasBlockingPackIssue(
-  pack: VNAssetPack | null,
-  selectedCharacter: CharacterSummary | null,
-  readiness?: VNAssetReadiness
+  pack: VNPlaySetupAssetPackOption | null,
+  selectedCharacter: VNPlaySetupCharacterOption | null
 ): boolean {
   if (!pack || !selectedCharacter) return true;
-  if (pack.primary_character_id !== selectedCharacter.id) return true;
-  if (pack.status && !isApprovedPackStatus(pack.status)) return true;
-  if (!readiness?.ready) return true;
+  if (pack.compatibility.status === 'different_character') return true;
+  if (!pack.ready) return true;
   return false;
+}
+
+function defaultPackId(
+  options: VNPlaySetupOptionsResponse,
+  selectedCharacter: VNPlaySetupCharacterOption | null,
+  currentPackId: number | null
+): number | null {
+  const currentPack = currentPackId
+    ? options.asset_packs.find((pack) => pack.id === currentPackId) ?? null
+    : null;
+  if (currentPack && !hasBlockingPackIssue(currentPack, selectedCharacter)) {
+    return currentPack.id;
+  }
+  return (
+    options.defaults.asset_pack_id ??
+    options.asset_packs.find((pack) => pack.recommended)?.id ??
+    options.asset_packs.find((pack) => !hasBlockingPackIssue(pack, selectedCharacter))?.id ??
+    null
+  );
+}
+
+function packWarningMessages(pack: VNPlaySetupAssetPackOption | null): string[] {
+  if (!pack) return [];
+  const messages: string[] = [];
+  if (!pack.ready) {
+    messages.push(`Readiness status: ${pack.readiness_status}.`);
+  }
+  messages.push(...pack.readiness_warnings);
+  messages.push(...pack.readiness_errors);
+  messages.push(...pack.warning_summary.warnings.map((warning) => warning.message));
+  return messages.filter(Boolean);
+}
+
+function emptyStatesFor(
+  emptyStates: VNPlaySetupEmptyState[],
+  codes: string[]
+): VNPlaySetupEmptyState[] {
+  const codeSet = new Set(codes);
+  return emptyStates.filter((state) => codeSet.has(state.code));
+}
+
+function EmptyStateGuidance({
+  states,
+  workspaceHref,
+  workspaceLabel,
+}: {
+  states: VNPlaySetupEmptyState[];
+  workspaceHref: string;
+  workspaceLabel: string;
+}) {
+  if (states.length === 0) return null;
+  return (
+    <div className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
+      {states.map((state) => (
+        <p key={`${state.code}-${state.scope}`}>{state.message}</p>
+      ))}
+      <a className="mt-1 inline-block underline" href={workspaceHref}>
+        Open {workspaceLabel}
+      </a>
+    </div>
+  );
 }
 
 export default function NewSessionDialog({
@@ -182,60 +219,78 @@ export default function NewSessionDialog({
   const [contentRating, setContentRating] = useState('general');
   const [formError, setFormError] = useState<string | null>(null);
   const [selectorMode, setSelectorMode] = useState<SelectorMode>('selectors');
-  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
-  const [assetPacks, setAssetPacks] = useState<VNAssetPack[]>([]);
-  const [readinessByPackId, setReadinessByPackId] = useState<ReadinessByPackId>({});
+  const [setupOptions, setSetupOptions] = useState<VNPlaySetupOptionsResponse | null>(null);
   const [isLoadingSelectors, setIsLoadingSelectors] = useState(false);
   const [selectorError, setSelectorError] = useState<string | null>(null);
+  const [acknowledgedSetupWarnings, setAcknowledgedSetupWarnings] = useState(false);
+  const selectedPackIdRef = useRef(selectedPackId);
+  const applyingDefaultCharacterIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedPackIdRef.current = selectedPackId;
+  }, [selectedPackId]);
 
   useEffect(() => {
     if (open) {
+      applyingDefaultCharacterIdRef.current = null;
       setMode(initialMode);
+      setTitle('Untitled VN play session');
+      setPrimaryCharacterId('1');
+      setVnAssetPackId('1');
+      setLinkedChatId('');
       setFormError(null);
       setSelectorError(null);
       setSelectorMode('selectors');
+      setSetupOptions(null);
+      setSelectedCharacterId('');
+      setSelectedPackId('');
+      setContentRating('general');
+      setAcknowledgedSetupWarnings(false);
     }
   }, [initialMode, open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || selectorMode !== 'selectors') return;
+    if (applyingDefaultCharacterIdRef.current === selectedCharacterId) {
+      applyingDefaultCharacterIdRef.current = null;
+      return;
+    }
 
     let cancelled = false;
 
-    async function loadSelectorData() {
+    async function loadSetupOptions() {
       setIsLoadingSelectors(true);
       try {
-        const [nextCharacters, nextPacks] = await Promise.all([
-          listCharacters(),
-          listVNAssetPacks(),
-        ]);
+        const selectedCharacterIdNumber = parsePositiveInteger(selectedCharacterId);
+        const nextOptions = await listVNPlaySetupOptions({
+          content_rating: contentRating.trim() || 'general',
+          mode,
+          ...(selectedCharacterIdNumber ? { selected_character_id: selectedCharacterIdNumber } : {}),
+        });
         if (cancelled) return;
 
-        const firstCharacter = nextCharacters[0] ?? null;
-        const nextCharacterId = firstCharacter ? String(firstCharacter.id) : '';
+        const nextCharacterId = defaultCharacterId(nextOptions, selectedCharacterIdNumber);
+        const nextSelectedCharacter = selectedCharacterFromOptions(nextOptions, nextCharacterId);
+        const nextPackId = defaultPackId(
+          nextOptions,
+          nextSelectedCharacter,
+          parsePositiveInteger(selectedPackIdRef.current)
+        );
+        const nextCharacterIdValue = nextCharacterId ? String(nextCharacterId) : '';
+        const nextPackIdValue = nextPackId ? String(nextPackId) : '';
 
-        setCharacters(nextCharacters);
-        setAssetPacks(nextPacks);
-        setReadinessByPackId({});
-        setSelectedCharacterId(nextCharacterId);
-        setSelectedPackId(chooseBestPack(nextPacks, firstCharacter?.id ?? null, {})?.id.toString() ?? '');
-        setIsLoadingSelectors(false);
-
-        const nextReadiness = await loadReadinessForPacks(nextPacks);
-        if (cancelled) return;
-
-        const bestPack = chooseBestPack(nextPacks, firstCharacter?.id ?? null, nextReadiness);
-
-        setReadinessByPackId(nextReadiness);
-        setSelectedPackId(bestPack ? String(bestPack.id) : '');
+        setSetupOptions(nextOptions);
+        if (nextCharacterIdValue !== selectedCharacterId) {
+          applyingDefaultCharacterIdRef.current = nextCharacterIdValue;
+          setSelectedCharacterId(nextCharacterIdValue);
+        }
+        setSelectedPackId(nextPackIdValue);
       } catch (error) {
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : 'Failed to load setup selectors';
+          const message = error instanceof Error ? error.message : 'Failed to load setup options';
           setSelectorError(message);
           setSelectorMode('manual');
-          setCharacters([]);
-          setAssetPacks([]);
-          setReadinessByPackId({});
+          setSetupOptions(null);
         }
       } finally {
         if (!cancelled) {
@@ -244,62 +299,43 @@ export default function NewSessionDialog({
       }
     }
 
-    void loadSelectorData();
+    void loadSetupOptions();
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [contentRating, mode, open, selectedCharacterId, selectorMode]);
 
   const selectedCharacterIdNumber = parsePositiveInteger(selectedCharacterId);
   const selectedPackIdNumber = parsePositiveInteger(selectedPackId);
+  const characters = useMemo(() => setupCharacters(setupOptions), [setupOptions]);
+  const assetPacks = setupOptions?.asset_packs ?? EMPTY_ASSET_PACKS;
+  const emptyStates = setupOptions?.empty_states ?? EMPTY_EMPTY_STATES;
 
   const selectedCharacter = useMemo(
-    () => characters.find((character) => character.id === selectedCharacterIdNumber) ?? null,
-    [characters, selectedCharacterIdNumber]
+    () => selectedCharacterFromOptions(setupOptions, selectedCharacterIdNumber),
+    [setupOptions, selectedCharacterIdNumber]
   );
   const selectedPack = useMemo(
     () => assetPacks.find((pack) => pack.id === selectedPackIdNumber) ?? null,
     [assetPacks, selectedPackIdNumber]
   );
-  const selectedReadiness = selectedPack ? readinessByPackId[selectedPack.id] : undefined;
-
-  const orderedPacks = useMemo(() => {
-    if (!selectedCharacterIdNumber) return assetPacks;
-    return [...assetPacks].sort((left, right) => {
-      const leftCompatible = left.primary_character_id === selectedCharacterIdNumber;
-      const rightCompatible = right.primary_character_id === selectedCharacterIdNumber;
-      if (leftCompatible !== rightCompatible) {
-        return leftCompatible ? -1 : 1;
-      }
-      return left.title.localeCompare(right.title);
-    });
-  }, [assetPacks, selectedCharacterIdNumber]);
-
-  const incompatiblePacks = useMemo(() => {
-    if (!selectedCharacter) return [];
-    return assetPacks.filter((pack) => pack.primary_character_id !== selectedCharacter.id);
-  }, [assetPacks, selectedCharacter]);
-
-  const selectedPackWarnings = useMemo(
-    () =>
-      buildSelectedPackWarnings({
-        contentRating,
-        pack: selectedPack,
-        readiness: selectedReadiness,
-        selectedCharacter,
-      }),
-    [contentRating, selectedCharacter, selectedPack, selectedReadiness]
-  );
-
-  const selectorSubmitDisabled =
-    selectorMode === 'selectors' &&
-    (isLoadingSelectors || hasBlockingPackIssue(selectedPack, selectedCharacter, selectedReadiness));
+  const selectedPackAcknowledgementKey = useMemo(() => acknowledgementKey(selectedPack), [selectedPack]);
 
   useEffect(() => {
-    if (!open || selectorMode !== 'selectors') return;
-    const bestPack = chooseBestPack(assetPacks, selectedCharacterIdNumber, readinessByPackId);
-    setSelectedPackId(bestPack ? String(bestPack.id) : '');
-  }, [assetPacks, open, readinessByPackId, selectedCharacterIdNumber, selectorMode]);
+    setAcknowledgedSetupWarnings(false);
+  }, [selectedPackAcknowledgementKey]);
+
+  const selectedPackWarnings = useMemo(() => packWarningMessages(selectedPack), [selectedPack]);
+  const selectedPackRequiresAcknowledgement = requiresPackAcknowledgement(selectedPack);
+  const incompatiblePacks = useMemo(
+    () => assetPacks.filter((pack) => pack.compatibility.status === 'different_character'),
+    [assetPacks]
+  );
+  const selectorSubmitDisabled =
+    selectorMode === 'selectors' &&
+    (isLoadingSelectors ||
+      hasBlockingPackIssue(selectedPack, selectedCharacter) ||
+      (selectedPackRequiresAcknowledgement && !acknowledgedSetupWarnings));
 
   if (!open) return null;
 
@@ -317,23 +353,44 @@ export default function NewSessionDialog({
       return;
     }
 
-    if (!usingManualIds && hasBlockingPackIssue(selectedPack, selectedCharacter, selectedReadiness)) {
+    if (!usingManualIds && hasBlockingPackIssue(selectedPack, selectedCharacter)) {
       setFormError('Select a compatible runtime-ready character and asset pack.');
+      return;
+    }
+    if (!usingManualIds && selectedPackRequiresAcknowledgement && !acknowledgedSetupWarnings) {
+      setFormError('Acknowledge setup warnings before creating this session.');
       return;
     }
 
     setFormError(null);
-    await onCreateSession({
+    const request: VNPlaySessionCreate = {
       mode,
       title: trimmedTitle,
       primary_character_id: parsedPrimaryCharacterId,
       vn_asset_pack_id: parsedPackId,
       linked_chat_id: linkedChatId.trim() || null,
       content_rating: contentRating.trim() || 'general',
-    });
+    };
+
+    if (!usingManualIds && selectedPackRequiresAcknowledgement && acknowledgedSetupWarnings && selectedPack) {
+      request.settings = {
+        setup_acknowledgements: [buildSetupAcknowledgement(selectedPack)],
+      };
+    }
+
+    await onCreateSession(request);
   };
 
   const selectedCharacterTags = formatTags(selectedCharacter?.tags);
+  const characterEmptyStates = emptyStatesFor(emptyStates, [
+    'no_characters',
+    'selected_character_not_found',
+  ]);
+  const packEmptyStates = emptyStatesFor(emptyStates, [
+    'no_asset_packs',
+    'no_ready_packs',
+    'no_compatible_packs',
+  ]);
 
   return (
     <div className="rounded-md border border-border bg-surface p-4">
@@ -365,7 +422,7 @@ export default function NewSessionDialog({
           <>
             {selectorError && (
               <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
-                Could not load setup selectors. Manual ID entry is available for this session. {selectorError}
+                Could not load setup options. Manual ID entry is available for this session. {selectorError}
               </div>
             )}
             <Input
@@ -397,23 +454,24 @@ export default function NewSessionDialog({
                 <option value="">Select a character</option>
                 {characters.map((character) => (
                   <option key={character.id} value={character.id}>
-                    {characterName(character)}
+                    {characterOptionLabel(character)}
                   </option>
                 ))}
               </select>
               {isLoadingSelectors && <p className="mt-1 text-sm text-text-muted">Loading setup options...</p>}
-              {!isLoadingSelectors && characters.length === 0 && (
-                <div className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
-                  <p className="font-medium">No characters available.</p>
-                  <p>Create or import a character before starting VN Play.</p>
-                </div>
+              {!isLoadingSelectors && (
+                <EmptyStateGuidance
+                  states={characterEmptyStates}
+                  workspaceHref="/characters"
+                  workspaceLabel="characters"
+                />
               )}
               {selectedCharacter && (
                 <div className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text-muted">
                   <p className="font-medium text-text">{characterName(selectedCharacter)}</p>
-                  {selectedCharacter.description && <p>{selectedCharacter.description}</p>}
+                  {selectedCharacter.description_preview && <p>{selectedCharacter.description_preview}</p>}
                   {selectedCharacterTags && <p>{selectedCharacterTags}</p>}
-                  {selectedCharacter.image_present && <p>Image attached</p>}
+                  {selectedCharacter.has_image && <p>Image attached</p>}
                 </div>
               )}
             </div>
@@ -430,22 +488,22 @@ export default function NewSessionDialog({
                 onChange={(event) => setSelectedPackId(event.target.value)}
               >
                 <option value="">Select a runtime-ready pack</option>
-                {orderedPacks.map((pack) => {
-                  const readiness = readinessByPackId[pack.id];
-                  const compatible = selectedCharacter ? pack.primary_character_id === selectedCharacter.id : false;
-                  const disabled = !compatible || !readiness?.ready || !isApprovedPackStatus(pack.status);
-                  return (
-                    <option key={pack.id} disabled={disabled} value={pack.id}>
-                      {buildPackOptionLabel(pack, selectedCharacter, readiness)}
-                    </option>
-                  );
-                })}
+                {assetPacks.map((pack) => (
+                  <option
+                    key={pack.id}
+                    disabled={hasBlockingPackIssue(pack, selectedCharacter)}
+                    value={pack.id}
+                  >
+                    {packOptionLabel(pack)}
+                  </option>
+                ))}
               </select>
-              {!isLoadingSelectors && assetPacks.length === 0 && (
-                <div className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
-                  <p className="font-medium">No VN asset packs available.</p>
-                  <p>Prepare or review a VN asset pack before starting VN Play.</p>
-                </div>
+              {!isLoadingSelectors && (
+                <EmptyStateGuidance
+                  states={packEmptyStates}
+                  workspaceHref="/vn-assets"
+                  workspaceLabel="VN asset packs"
+                />
               )}
               {!isLoadingSelectors && assetPacks.length > 0 && selectedCharacter && !selectedPack && (
                 <div className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
@@ -455,9 +513,9 @@ export default function NewSessionDialog({
               {selectedPack && (
                 <div className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text-muted">
                   <p className="font-medium text-text">{selectedPack.title}</p>
-                  {selectedPack.description && <p>{selectedPack.description}</p>}
                   <p>Pack content rating: {selectedPack.content_rating || 'general'}</p>
-                  <p>Trust level: new sessions start as local; review imported packs before use.</p>
+                  <p>Trust level: {humanizeValue(selectedPack.trust_level)}</p>
+                  <p>Readiness: {humanizeValue(selectedPack.readiness_status)}</p>
                 </div>
               )}
             </div>
@@ -466,11 +524,12 @@ export default function NewSessionDialog({
               <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
                 <p className="font-medium">Some packs are attached to other characters.</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
-                  {incompatiblePacks.map((pack) => (
-                    <li key={pack.id}>
-                      {pack.title} is attached to character {pack.primary_character_id}, not {characterName(selectedCharacter)}.
-                    </li>
-                  ))}
+                  {incompatiblePacks.map((pack) => {
+                    const message =
+                      pack.warning_summary.warnings[0]?.message ??
+                      `${pack.title} is attached to character ${pack.primary_character_id}, not ${characterName(selectedCharacter)}.`;
+                    return <li key={pack.id}>{message}</li>;
+                  })}
                 </ul>
               </div>
             )}
@@ -484,6 +543,17 @@ export default function NewSessionDialog({
                   ))}
                 </ul>
               </div>
+            )}
+            {selectedPackRequiresAcknowledgement && (
+              <label className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
+                <input
+                  checked={acknowledgedSetupWarnings}
+                  className="mt-1"
+                  onChange={(event) => setAcknowledgedSetupWarnings(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>I understand and want to proceed with these warnings.</span>
+              </label>
             )}
           </>
         )}

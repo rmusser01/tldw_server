@@ -32,65 +32,63 @@ test.describe('VN play smoke', () => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
     });
 
-    await page.route(/\/api\/v1\/characters(?:\/query|\/)?(?:\?.*)?$/, async (route) => {
-      await fulfillJson(route, 200, {
-        items: [
-          {
-            id: 7,
-            version: 1,
-            name: 'Mira Vale',
-            description: 'Archive guide',
-            tags: ['archive', 'story'],
-            image_present: true,
-          },
-        ],
-        has_more: false,
-        next_offset: null,
-        page: 1,
-        page_size: 100,
-        total: 1,
-      });
-    });
-
-    await page.route(/\/api\/v1\/vn-assets(?:\/.*)?$/, async (route) => {
-      const request = route.request();
-      const url = new URL(request.url());
-      const method = request.method().toUpperCase();
-      const path = url.pathname.replace('/api/v1/vn-assets', '');
-
-      if (method === 'GET' && path === '/packs') {
-        await fulfillJson(route, 200, [
-          {
-            id: 12,
-            title: 'Moonlit Archive Pack',
-            primary_character_id: 7,
-            description: 'Runtime-ready VN poses and backdrops',
-            status: 'approved',
-            content_rating: 'general',
-            planned_output_count: 8,
-          },
-        ]);
-        return;
-      }
-
-      if (method === 'GET' && path === '/packs/12/readiness') {
-        await fulfillJson(route, 200, {
-          ready: true,
-          status: 'ready',
-          warnings: [],
-          errors: [],
-        });
-        return;
-      }
-
-      await fulfillJson(route, 404, { detail: `unhandled vn-assets mock route: ${method} ${path}` });
-    });
-
     await page.route(/\/api\/v1\/vn-play(?:\/.*)?$/, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const method = request.method().toUpperCase();
       const path = url.pathname.replace('/api/v1/vn-play', '');
+
+      if (method === 'GET' && path === '/setup-options') {
+        await fulfillJson(route, 200, {
+          characters: [
+            {
+              id: 7,
+              name: 'Mira Vale',
+              description_preview: 'Archive guide',
+              tags: ['archive', 'story'],
+              favorite: false,
+              deleted: false,
+              has_image: true,
+            },
+          ],
+          selected_character: null,
+          asset_packs: [
+            {
+              id: 12,
+              title: 'Moonlit Archive Pack',
+              primary_character_id: 7,
+              content_rating: 'general',
+              status: 'approved',
+              trust_level: 'local',
+              trust_source: 'local_pack',
+              ready: true,
+              readiness_status: 'ready',
+              readiness_warnings: [],
+              readiness_errors: [],
+              compatibility: { status: 'compatible', reason_codes: [] },
+              warning_summary: {
+                highest_severity: 'info',
+                requires_acknowledgement: false,
+                warnings: [],
+              },
+              recommended: true,
+            },
+          ],
+          defaults: {
+            mode: 'story',
+            character_id: 7,
+            asset_pack_id: 12,
+            content_rating: 'general',
+          },
+          pagination: {
+            characters: { limit: 25, offset: 0, has_more: false, total: 1 },
+            asset_packs: { limit: 25, offset: 0, has_more: false, total: 1 },
+          },
+          empty_states: [],
+          generated_at: '2026-05-09T15:00:00Z',
+        });
+        return;
+      }
 
       if (method === 'GET' && path === '/sessions') {
         await fulfillJson(route, 200, session ? [session] : []);
