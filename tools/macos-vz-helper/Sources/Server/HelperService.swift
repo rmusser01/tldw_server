@@ -26,6 +26,8 @@ final class HelperService {
 
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
+    private let helperInstanceID: String
+    private let helperStartedAt: String
     private let hostFacts: HostFacts
     private let templateValidator: TemplateValidator
     private let registry: VMRegistry
@@ -36,8 +38,12 @@ final class HelperService {
         hostFacts: HostFacts = HostFacts(isMacOS: true, isAppleSilicon: true),
         templateValidator: TemplateValidator = TemplateValidator(),
         registry: VMRegistry = VMRegistry(),
-        vmManager: VZLinuxVMManager? = nil
+        vmManager: VZLinuxVMManager? = nil,
+        helperInstanceID: String = UUID().uuidString,
+        helperStartedAt: String = ISO8601DateFormatter().string(from: Date())
     ) {
+        self.helperInstanceID = helperInstanceID
+        self.helperStartedAt = helperStartedAt
         self.hostFacts = hostFacts
         self.templateValidator = templateValidator
         self.registry = registry
@@ -53,7 +59,7 @@ final class HelperService {
             executionMode: nil,
             transport: nil,
             reasons: [],
-            details: ["transport": "unix"],
+            details: withHelperGeneration(["transport": "unix"]),
             errorCode: nil,
             message: nil
         )
@@ -265,7 +271,22 @@ final class HelperService {
                 details["guest_capabilities"] = guestInfo.capabilities.joined(separator: ",")
             }
         }
-        return details
+        return withHelperGeneration(details)
+    }
+
+    private func helperGenerationDetails() -> [String: String] {
+        [
+            "helper_instance_id": helperInstanceID,
+            "helper_started_at": helperStartedAt,
+        ]
+    }
+
+    private func withHelperGeneration(_ details: [String: String]) -> [String: String] {
+        var merged = details
+        for (key, value) in helperGenerationDetails() {
+            merged[key] = value
+        }
+        return merged
     }
 
     private func validateExecGuestContract(

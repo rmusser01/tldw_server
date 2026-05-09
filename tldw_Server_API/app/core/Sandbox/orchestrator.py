@@ -22,6 +22,7 @@ from .models import RunPhase, RunSpec, RunStatus, RuntimeType, Session, SessionS
 from .policy import SandboxPolicy, SandboxPolicyConfig
 from .store import IdempotencyConflict as StoreIdemConflict
 from .store import get_store
+from .utils import coerce_optional_nonempty_string
 
 _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -1418,6 +1419,8 @@ class SandboxOrchestrator:
         template_id: str | None,
         workspace_mount: str | None,
         agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         self._store.put_vz_session_control(
             session_id=str(session_id),
@@ -1426,6 +1429,8 @@ class SandboxOrchestrator:
             template_id=(str(template_id) if template_id is not None else None),
             workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
             agent_ready=bool(agent_ready),
+            helper_instance_id=coerce_optional_nonempty_string(helper_instance_id),
+            helper_started_at=coerce_optional_nonempty_string(helper_started_at),
         )
 
     def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:

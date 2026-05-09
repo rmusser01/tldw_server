@@ -11,7 +11,9 @@ import Testing
     let service = HelperService(
         hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
         registry: registry,
-        vmManager: manager
+        vmManager: manager,
+        helperInstanceID: "helper-test-1",
+        helperStartedAt: "2026-05-09T00:00:00Z"
     )
 
     let response = try service.createVM(
@@ -24,6 +26,8 @@ import Testing
     #expect(response.vmID == "vm-service")
     #expect(response.state == "running")
     #expect(response.details["transport"] == "vsock")
+    #expect(response.details["helper_instance_id"] == "helper-test-1")
+    #expect(response.details["helper_started_at"] == "2026-05-09T00:00:00Z")
 }
 
 @Test func helperServiceSurfacesGuestAgentDetailsInCreateStatusAndList() throws {
@@ -42,7 +46,9 @@ import Testing
     let service = HelperService(
         hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
         registry: registry,
-        vmManager: manager
+        vmManager: manager,
+        helperInstanceID: "helper-test-1",
+        helperStartedAt: "2026-05-09T00:00:00Z"
     )
 
     let response = try service.createVM(
@@ -55,6 +61,8 @@ import Testing
     let listed = service.listVMs().vms.first
 
     for details in [response.details, status?.details, listed?.details] {
+        #expect(details?["helper_instance_id"] == "helper-test-1")
+        #expect(details?["helper_started_at"] == "2026-05-09T00:00:00Z")
         #expect(details?["guest_version"] == "1.0.0")
         #expect(details?["guest_workspace_root"] == "/workspace")
         #expect(details?["guest_capabilities_known"] == "true")

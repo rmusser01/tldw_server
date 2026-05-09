@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import 
 )
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperExecReply,
+    HelperVMMetadata,
     HelperVMReply,
     HelperVMStatusReply,
 )
@@ -257,6 +258,8 @@ def test_vz_linux_image_store_does_not_persist_manifest_for_healthy_session_reus
                 "template_id": template_id,
                 "workspace_mount": str(tmp_path),
                 "agent_ready": True,
+                "helper_instance_id": "helper-a",
+                "helper_started_at": "2026-05-09T00:00:00Z",
             }
 
     class _FakeHelper:
@@ -267,6 +270,16 @@ def test_vz_linux_image_store_does_not_persist_manifest_for_healthy_session_reus
                 vm_id=vm_id,
                 state="running",
                 healthy=True,
+                metadata=HelperVMMetadata(
+                    owner="tldw",
+                    runtime="vz_linux",
+                    session_id="sess-store-reuse",
+                    session_mode=True,
+                ),
+                details={
+                    "helper_instance_id": "helper-a",
+                    "helper_started_at": "2026-05-09T00:00:00Z",
+                },
             )
 
         def validate_template(self, request: dict[str, object]) -> dict[str, object]:
@@ -542,6 +555,8 @@ def test_vz_linux_session_run_reuses_only_healthy_vm(monkeypatch, tmp_path) -> N
                 "template_id": "vz_linux:existing",
                 "workspace_mount": str(tmp_path),
                 "agent_ready": True,
+                "helper_instance_id": "helper-a",
+                "helper_started_at": "2026-05-09T00:00:00Z",
             }
 
         def delete_vz_session_control(self, session_id: str) -> bool:
@@ -559,6 +574,16 @@ def test_vz_linux_session_run_reuses_only_healthy_vm(monkeypatch, tmp_path) -> N
                 vm_id=vm_id,
                 state="running",
                 healthy=True,
+                metadata=HelperVMMetadata(
+                    owner="tldw",
+                    runtime="vz_linux",
+                    session_id="sess-1",
+                    session_mode=True,
+                ),
+                details={
+                    "helper_instance_id": "helper-a",
+                    "helper_started_at": "2026-05-09T00:00:00Z",
+                },
             )
 
         def validate_template(self, request: dict[str, object]) -> dict[str, object]:
@@ -590,7 +615,103 @@ def test_vz_linux_session_run_reuses_only_healthy_vm(monkeypatch, tmp_path) -> N
     assert calls == ["get_vm_status", "exec_guest"]
 
 
-def test_vz_linux_session_reuse_helper_unavailable_recreates_vm(monkeypatch, tmp_path) -> None:
+def test_vz_linux_session_reuse_generation_mismatch_recreates_vm(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    calls: list[str] = []
+    deleted: list[str] = []
+    stored: list[dict[str, object]] = []
+
+    class _Store:
+        def get_vz_session_control(self, session_id: str) -> dict[str, object]:
+            assert session_id == "sess-generation-mismatch"
+            return {
+                "runtime": "vz_linux",
+                "vm_id": "vm-stale-generation",
+                "template_id": "vz_linux:existing",
+                "workspace_mount": str(tmp_path),
+                "agent_ready": True,
+                "helper_instance_id": "helper-old",
+                "helper_started_at": "2026-05-09T00:00:00Z",
+            }
+
+        def delete_vz_session_control(self, session_id: str) -> bool:
+            deleted.append(session_id)
+            return True
+
+        def put_vz_session_control(self, **kwargs) -> None:
+            stored.append(dict(kwargs))
+
+    class _FakeHelper:
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            calls.append("get_vm_status")
+            return HelperVMStatusReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vm_id=vm_id,
+                state="running",
+                healthy=True,
+                metadata=HelperVMMetadata(
+                    owner="tldw",
+                    runtime="vz_linux",
+                    session_id="sess-generation-mismatch",
+                    session_mode=True,
+                ),
+                details={
+                    "helper_instance_id": "helper-new",
+                    "helper_started_at": "2026-05-09T01:00:00Z",
+                },
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append("validate_template")
+            return {
+                "template_id": "vz_linux:new-template",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            calls.append("create_vm")
+            assert request["session_id"] == "sess-generation-mismatch"
+            assert request["session_mode"] is True
+            return HelperVMReply(
+                vm_id="vm-new-generation",
+                state="created",
+                details={
+                    "helper_instance_id": "helper-new",
+                    "helper_started_at": "2026-05-09T01:00:00Z",
+                },
+            )
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            calls.append("exec_guest")
+            assert vm_id == "vm-new-generation"
+            return HelperExecReply(exit_code=0, stdout=b"recreated\n")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner(session_control_store=_Store()).start_run(
+        run_id="vz-run-generation-mismatch",
+        spec=RunSpec(
+            session_id="sess-generation-mismatch",
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert status.exit_code == 0
+    assert calls == ["get_vm_status", "validate_template", "create_vm", "exec_guest"]
+    assert deleted == ["sess-generation-mismatch"]
+    assert stored and stored[0]["vm_id"] == "vm-new-generation"
+    assert stored[0]["helper_instance_id"] == "helper-new"
+    assert stored[0]["helper_started_at"] == "2026-05-09T01:00:00Z"
+
+
+def test_vz_linux_session_reuse_helper_unavailable_fails_closed(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[str] = []
     deleted: list[str] = []
@@ -654,14 +775,15 @@ def test_vz_linux_session_reuse_helper_unavailable_recreates_vm(monkeypatch, tmp
         session_workspace=str(tmp_path),
     )
 
-    assert status.phase == RunPhase.completed
-    assert status.exit_code == 0
-    assert calls == ["get_vm_status", "validate_template", "create_vm", "exec_guest"]
-    assert deleted == ["sess-helper-unavailable"]
-    assert stored and stored[0]["vm_id"] == "vm-new"
+    assert status.phase == RunPhase.failed
+    assert status.exit_code is None
+    assert "macos_virtualization_helper_unavailable" in status.message
+    assert calls == ["get_vm_status"]
+    assert deleted == []
+    assert stored == []
 
 
-def test_vz_linux_session_reuse_protocol_mismatch_recreates_vm(monkeypatch, tmp_path) -> None:
+def test_vz_linux_session_reuse_protocol_mismatch_fails_closed(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[str] = []
     deleted: list[str] = []
@@ -725,11 +847,12 @@ def test_vz_linux_session_reuse_protocol_mismatch_recreates_vm(monkeypatch, tmp_
         session_workspace=str(tmp_path),
     )
 
-    assert status.phase == RunPhase.completed
-    assert status.exit_code == 0
-    assert calls == ["get_vm_status", "validate_template", "create_vm", "exec_guest"]
-    assert deleted == ["sess-protocol-mismatch"]
-    assert stored and stored[0]["vm_id"] == "vm-new"
+    assert status.phase == RunPhase.failed
+    assert status.exit_code is None
+    assert "macos_virtualization_helper_protocol_mismatch" in status.message
+    assert calls == ["get_vm_status"]
+    assert deleted == []
+    assert stored == []
 
 
 def test_vz_linux_session_reuse_absent_status_recreates_vm(monkeypatch, tmp_path) -> None:
@@ -775,7 +898,14 @@ def test_vz_linux_session_reuse_absent_status_recreates_vm(monkeypatch, tmp_path
             assert request["run_id"] == "vz-run-absent-status"
             assert request["session_id"] == "sess-absent-status"
             assert request["session_mode"] is True
-            return HelperVMReply(vm_id="vm-new", state="created")
+            return HelperVMReply(
+                vm_id="vm-new",
+                state="created",
+                details={
+                    "helper_instance_id": "helper-new",
+                    "helper_started_at": "2026-05-09T01:00:00Z",
+                },
+            )
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
             calls.append("exec_guest")
@@ -801,6 +931,8 @@ def test_vz_linux_session_reuse_absent_status_recreates_vm(monkeypatch, tmp_path
     assert calls == ["get_vm_status", "validate_template", "create_vm", "exec_guest"]
     assert deleted == ["sess-absent-status"]
     assert stored and stored[0]["vm_id"] == "vm-new"
+    assert stored[0]["helper_instance_id"] == "helper-new"
+    assert stored[0]["helper_started_at"] == "2026-05-09T01:00:00Z"
 
 
 def test_vz_linux_session_run_recreates_unhealthy_vm(monkeypatch, tmp_path) -> None:
@@ -854,7 +986,14 @@ def test_vz_linux_session_run_recreates_unhealthy_vm(monkeypatch, tmp_path) -> N
             assert request["session_id"] == "sess-2"
             assert request["session_mode"] is True
             assert request["template"] == "ubuntu-24.04"
-            return HelperVMReply(vm_id="vm-new", state="created")
+            return HelperVMReply(
+                vm_id="vm-new",
+                state="created",
+                details={
+                    "helper_instance_id": "helper-new",
+                    "helper_started_at": "2026-05-09T01:00:00Z",
+                },
+            )
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
             calls.append("exec_guest")
@@ -880,6 +1019,8 @@ def test_vz_linux_session_run_recreates_unhealthy_vm(monkeypatch, tmp_path) -> N
     assert deleted == ["sess-2"]
     assert stored and stored[0]["vm_id"] == "vm-new"
     assert stored[0]["template_id"] == "vz_linux:new-template"
+    assert stored[0]["helper_instance_id"] == "helper-new"
+    assert stored[0]["helper_started_at"] == "2026-05-09T01:00:00Z"
 
 
 def test_vz_linux_start_run_passes_log_cap_to_helper(monkeypatch, tmp_path) -> None:

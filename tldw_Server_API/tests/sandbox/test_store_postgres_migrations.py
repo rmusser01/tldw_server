@@ -9,6 +9,44 @@ from datetime import datetime, timezone
 import pytest
 
 
+class _FakePostgresCursor:
+    def __init__(self, *, failing_table: str, failing_column: str) -> None:
+        self.failing_table = failing_table
+        self.failing_column = failing_column
+        self._last_lookup: tuple[str, str] | None = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def execute(self, query: str, params: tuple[str, str] | None = None) -> None:
+        if "information_schema.columns" in query and params:
+            self._last_lookup = params
+            return
+        failing_alter = f"ALTER TABLE {self.failing_table} ADD COLUMN {self.failing_column}"
+        if failing_alter in query:
+            raise OSError("simulated migration failure")
+
+    def fetchone(self):
+        return None
+
+
+class _FakePostgresConnection:
+    def __init__(self, cursor: _FakePostgresCursor) -> None:
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def cursor(self) -> _FakePostgresCursor:
+        return self._cursor
+
+
 def _has_psycopg() -> bool:
 
 
@@ -17,6 +55,20 @@ def _has_psycopg() -> bool:
         return True
     except Exception:
         return False
+
+
+def test_postgres_store_init_fails_fast_when_required_column_migration_fails(monkeypatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.store import ClusterStoreUnavailable, PostgresStore
+
+    cursor = _FakePostgresCursor(
+        failing_table="sandbox_vz_sessions",
+        failing_column="helper_instance_id",
+    )
+    store = PostgresStore.__new__(PostgresStore)
+    monkeypatch.setattr(store, "_conn", lambda: _FakePostgresConnection(cursor))
+
+    with pytest.raises(ClusterStoreUnavailable, match="sandbox_vz_sessions.helper_instance_id"):
+        store._init_db()
 
 
 @pytest.mark.integration

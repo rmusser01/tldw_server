@@ -23,6 +23,11 @@ Every failure response should include:
 - `error_code`
 - `message`
 
+Successful `details` dictionaries may include helper-owned generation metadata:
+
+- `helper_instance_id`: per-helper-process UUID, changes after helper restart
+- `helper_started_at`: helper process start timestamp in ISO-8601 format
+
 ## Required Operations
 
 - `ping`
@@ -45,6 +50,8 @@ Every failure response should include:
   "helper_version": "0.1.0",
   "status": "ok",
   "details": {
+    "helper_instance_id": "77777777-7777-7777-7777-777777777777",
+    "helper_started_at": "2026-05-09T00:00:00Z",
     "transport": "unix"
   }
 }
@@ -91,6 +98,8 @@ Every failure response should include:
     "created_at": "2026-04-30T18:00:00Z"
   },
   "details": {
+    "helper_instance_id": "77777777-7777-7777-7777-777777777777",
+    "helper_started_at": "2026-05-09T00:00:00Z",
     "transport": "vsock",
     "network_policy": "deny_all",
     "guest_version": "1.0.0",
@@ -160,6 +169,8 @@ Response:
     "created_at": "2026-04-30T18:00:00Z"
   },
   "details": {
+    "helper_instance_id": "77777777-7777-7777-7777-777777777777",
+    "helper_started_at": "2026-05-09T00:00:00Z",
     "transport": "vsock",
     "network_policy": "deny_all",
     "guest_version": "1.0.0",

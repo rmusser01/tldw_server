@@ -36,6 +36,8 @@ def test_store_persists_vz_linux_session_control_metadata(monkeypatch, tmp_path:
         template_id="vz_linux:ubuntu-24.04",
         workspace_mount="/tmp/ws",
         agent_ready=True,
+        helper_instance_id="helper-a",
+        helper_started_at="2026-05-09T00:00:00Z",
     )
 
     store_b = get_store()
@@ -46,5 +48,7 @@ def test_store_persists_vz_linux_session_control_metadata(monkeypatch, tmp_path:
     assert row["template_id"] == "vz_linux:ubuntu-24.04"
     assert row["workspace_mount"] == "/tmp/ws"
     assert row["agent_ready"] is True
+    assert row["helper_instance_id"] == "helper-a"
+    assert row["helper_started_at"] == "2026-05-09T00:00:00Z"
     assert store_b.delete_vz_session_control("sess-1") is True
     assert store_b.get_vz_session_control("sess-1") is None
