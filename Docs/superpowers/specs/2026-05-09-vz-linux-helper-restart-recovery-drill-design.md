@@ -81,6 +81,8 @@ instance is current.
 This is the recommended path for this PR. It is narrow, keeps the lower-level
 smoke harness responsible for process cleanup, and avoids making the
 implementation depend on `launchd` or a broader helperctl lifecycle refactor.
+The main tradeoff is that the first implementation needs a careful pid-file
+lease contract rather than relying on `vz-helperctl`'s richer lifecycle checks.
 
 ### Option B: Convert Smoke To `vz-helperctl start`/`stop`
 
@@ -122,17 +124,25 @@ to infer process ownership.
 3. Run a first command and assert it completes.
 4. Capture the persisted VZ session-control VM ID.
 5. Confirm helper status reports that VM as healthy before restart.
-6. Terminate the helper process from the pid file and wait until the old helper
-   socket is unavailable.
-7. Start the same helper binary with the same socket path and serial log
+6. Validate the pid file is a regular file inside the private socket directory,
+   contains a positive PID, and points at a process that appears to be the
+   configured helper binary.
+7. Terminate the helper process from the pid file and wait with a bounded
+   timeout until the process exits and the old helper socket is unavailable or
+   no longer accepts connections.
+8. Start the same helper binary with the same socket path and serial log
    environment.
-8. Update the pid file to the replacement helper PID before running the second
+9. Redirect replacement helper stdout/stderr to restart-specific files under
+   the private serial/log directory.
+10. Update the pid file to the replacement helper PID before running the second
    command.
-9. Wait for helper ping and template validation to pass.
-10. Run a second command in the same sandbox session.
-11. Assert the command completes and the session-control VM ID changed, proving
+11. Wait for helper ping and template validation to pass.
+12. Treat the old VM ID as stale by confirming the replacement helper does not
+   report it as healthy before the second run.
+13. Run a second command in the same sandbox session.
+14. Assert the command completes and the session-control VM ID changed, proving
     stale helper-owned VM state was not reused.
-12. Destroy the sandbox session in `finally`.
+15. Destroy the sandbox session in `finally`.
 
 The drill should treat restart setup failures as clear skips or failures based
 on ownership:
@@ -141,6 +151,11 @@ on ownership:
   the external helper process
 - original helper already exited before the drill can stop it: skip with a
   prepared-host/lifecycle reason
+- pid file is missing, symlinked, non-regular, outside the private socket
+  directory, or points at a non-helper process: fail closed before sending any
+  signal
+- original helper does not exit within the bounded stop timeout: fail the drill
+  and leave cleanup to the shell trap
 - replacement helper cannot create the accepted socket or answer ping: fail the
   drill, because that is the failure mode being tested
 - second run aborts instead of provisioning a fresh VM: fail the drill
@@ -148,12 +163,13 @@ on ownership:
 ## Smoke Script Changes
 
 `run-host-e2e-smoke.sh` should gain internal state for a helper pid file under
-the private runtime directory. For normal smoke, this can be implementation
-detail only. For failure drills, `run_real_vz_linux_failure_drills` should pass:
+the accepted private socket directory. For the default path this is
+implementation detail only. For failure drills,
+`run_real_vz_linux_failure_drills` should pass:
 
 ```text
 TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_RESTART_ALLOWED=1
-TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_PID_FILE=<private-runtime-dir>/helper.pid
+TLDW_SANDBOX_VZ_LINUX_E2E_HELPER_PID_FILE=<private-socket-dir>/helper.pid
 TLDW_SANDBOX_MACOS_HELPER_BINARY=<helper-path>
 TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket-path>
 TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR=<serial-log-dir>
@@ -166,6 +182,10 @@ visible to the script's existing cleanup trap.
 Dry-run output should make the restart lease visible only when failure drills
 are included. Default dry-run output without failure drills should not advertise
 restart behavior.
+
+The script should not let a caller choose an arbitrary restart pid-file path in
+this PR. Deriving the path from the already-validated private socket directory
+keeps the trust boundary simple and avoids adding another file-safety surface.
 
 ## Workflow Shape
 
@@ -185,8 +205,15 @@ triggers.
   paths.
 - The drill must only act on the helper PID supplied by the smoke script's
   private pid file.
+- The pid file must live under the private socket directory and must be checked
+  with `lstat`/regular-file validation before use.
+- The drill must verify the PID still refers to the expected helper binary
+  before sending a signal. If that cannot be established, it must fail closed.
 - The replacement helper must use the exact accepted socket path; no fallback
   socket path is allowed.
+- The pytest drill should not remove arbitrary socket paths. If stale socket
+  cleanup is required, it must only act on a real socket under the private
+  socket directory or rely on the helper's existing socket safety behavior.
 - The test should not terminate arbitrary helper processes discovered through
   `ps`, socket probing, or broad name matching.
 - The sandbox session must be destroyed in `finally`.
@@ -203,6 +230,8 @@ Script tests should cover:
 - cleanup selects a replacement helper PID from the pid file when present
 - fake-helper real-run mode can update the helper pid file without leaking the
   runtime directory or logs
+- `vz-helperctl.py smoke --dry-run --include-failure-drills` forwards the flag
+  to the lower-level smoke script
 
 Real-host pytest guard tests should cover:
 
@@ -210,6 +239,8 @@ Real-host pytest guard tests should cover:
 - helper restart drill skips when restart lease opt-in is missing
 - restart helper helper functions reject missing or non-private pid/log/socket
   inputs where practical
+- restart helper helper functions reject pid-file symlinks, non-regular files,
+  non-positive PIDs, and obvious process-command mismatches before signaling
 
 Real-host verification remains:
 
@@ -223,6 +254,9 @@ tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
 If `vz-helperctl.py smoke` does not yet forward `--include-failure-drills`, this
 PR should add that pass-through so the documented operator entrypoint can run
 the manual drills.
+
+Add a focused `vz-helperctl.py smoke --dry-run --include-failure-drills` test so
+the managed wrapper and lower-level script do not drift.
 
 ## Documentation Updates
 
@@ -259,6 +293,24 @@ Update:
   manually started helper.
   **Mitigation:** The restart drill skips without the explicit restart lease
   variables supplied by the smoke script.
+- **Potential problem:** A stale or malicious pid file could point at an
+  unrelated local process.
+  **Mitigation:** Keep the pid file under the private socket directory, reject
+  symlinks/non-regular files/non-positive PIDs, and verify the process command
+  appears to match the configured helper before sending a signal.
+- **Potential problem:** The old helper process exits but leaves a stale socket
+  filesystem entry.
+  **Mitigation:** The drill should wait for connection failure rather than only
+  file disappearance, and it should not unlink non-socket or non-private paths.
+  Stale socket deletion remains constrained to the private socket directory and
+  existing helper safety rules.
+- **Potential problem:** Killing the helper could leave an old VM resource
+  outside the replacement helper's in-memory registry.
+  **Mitigation:** The drill records the old VM ID, verifies replacement helper
+  truth reports it unhealthy/missing where possible, asserts the second run uses
+  a new VM ID, and relies on the helper-process exit to release
+  Virtualization.framework-owned VM objects. Broader orphan detection remains a
+  separate reconciliation/host-reboot slice.
 
 ## Open Follow-Ups
 

@@ -4,7 +4,7 @@ title: Add manual VZ Linux helper restart recovery drill
 status: In Progress
 assignee: []
 created_date: '2026-05-09 04:26'
-updated_date: '2026-05-09 04:29'
+updated_date: '2026-05-09 04:35'
 labels:
   - sandbox
   - vz_linux
@@ -53,6 +53,8 @@ Design-first slice. Write a focused helper restart recovery drill spec, review i
 Created design spec: Docs/superpowers/specs/2026-05-09-vz-linux-helper-restart-recovery-drill-design.md. Key design decision: keep the lower-level smoke script as helper lifecycle owner and add an explicit restart lease/pid-file for manual failure drills instead of refactoring all smoke startup through vz-helperctl in this PR.
 
 Design self-review completed. Reviewed the spec for lifecycle ownership, private pid-file cleanup, direct pytest safety, default scheduled CI behavior, and scope creep. The design intentionally avoids host reboot automation, launchd bootstrap/install, networking changes, and broad repair generalization. Bandit is not applicable for this design-only checkpoint.
+
+Design hardening review found implementation-risk gaps and patched the spec before planning: pid-file lease must live under the private socket directory, use lstat/regular-file and positive-PID validation, verify process command matches the helper before signaling, bound helper-stop waits, avoid arbitrary socket deletion, add wrapper pass-through coverage for vz-helperctl smoke --include-failure-drills, and document the old-VM/orphan assumption as a separate follow-up risk.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
