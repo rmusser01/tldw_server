@@ -998,7 +998,7 @@ git commit -m "Expose persona visual pack duplication API"
 - Modify: `apps/packages/ui/src/services/persona-visuals.ts`
 - Test indirectly in: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Add frontend types**
+- [x] **Step 1: Add frontend types**
 
 In `apps/packages/ui/src/types/persona-visuals.ts`:
 
@@ -1014,7 +1014,7 @@ export interface PersonaVisualDuplicateTarget {
 }
 ```
 
-- [ ] **Step 2: Add API helper imports**
+- [x] **Step 2: Add API helper imports**
 
 In `apps/packages/ui/src/services/persona-visuals.ts`, import the new types:
 
@@ -1023,7 +1023,7 @@ In `apps/packages/ui/src/services/persona-visuals.ts`, import the new types:
   PersonaVisualPackDuplicateRequest,
 ```
 
-- [ ] **Step 3: Add duplicate API helper**
+- [x] **Step 3: Add duplicate API helper**
 
 In `persona-visuals.ts`:
 
@@ -1043,7 +1043,7 @@ export async function duplicatePersonaVisualPack(
 }
 ```
 
-- [ ] **Step 4: Add duplicate target listing helper**
+- [x] **Step 4: Add duplicate target listing helper**
 
 Use the same fetch wrapper so existing `fetchWithAuth` test mocks keep working:
 
@@ -1071,7 +1071,7 @@ export async function listPersonaVisualDuplicateTargets(): Promise<
 }
 ```
 
-- [ ] **Step 5: Run TypeScript-focused frontend test file after UI task**
+- [x] **Step 5: Run TypeScript-focused frontend test file after UI task**
 
 Defer execution until Task 6 adds UI consumers:
 
@@ -1091,7 +1091,7 @@ Expected after Task 6: pass.
 - Modify: `apps/packages/ui/src/routes/sidepanel-persona.tsx`
 - Test: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Write failing UI test for duplicate flow**
+- [x] **Step 1: Write failing UI test for duplicate flow**
 
 In `VisualPackEditor.test.tsx`, add a test near import/export tests:
 
@@ -1190,7 +1190,7 @@ it("duplicates a visual pack to another persona as a draft", async () => {
 })
 ```
 
-- [ ] **Step 2: Run the UI test and verify it fails**
+- [x] **Step 2: Run the UI test and verify it fails**
 
 Run:
 
@@ -1201,7 +1201,7 @@ bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPack
 
 Expected: type/test failure because duplicate UI does not exist.
 
-- [ ] **Step 3: Extend `VisualPackEditorProps`**
+- [x] **Step 3: Extend `VisualPackEditorProps`**
 
 In `VisualPackEditor.tsx`:
 
@@ -1216,7 +1216,7 @@ type VisualPackEditorProps = {
 
 Destructure `onOpenPersonaVisuals`.
 
-- [ ] **Step 4: Import duplicate helpers and icon**
+- [x] **Step 4: Import duplicate helpers and icon**
 
 Add `Copy` from `lucide-react`.
 
@@ -1233,7 +1233,7 @@ Add type import:
   PersonaVisualDuplicateTarget,
 ```
 
-- [ ] **Step 5: Add duplicate state**
+- [x] **Step 5: Add duplicate state**
 
 Near other import/export state:
 
@@ -1258,7 +1258,7 @@ const selectedDuplicateTarget = availableDuplicateTargets.find(
 ) ?? null
 ```
 
-- [ ] **Step 6: Load duplicate targets**
+- [x] **Step 6: Load duplicate targets**
 
 Add a callback/effect similar to `loadPacks()`:
 
@@ -1304,7 +1304,7 @@ React.useEffect(() => {
 }, [selectedPack?.id])
 ```
 
-- [ ] **Step 7: Add duplicate handler**
+- [x] **Step 7: Add duplicate handler**
 
 ```ts
 const handleDuplicatePack = async () => {
@@ -1342,7 +1342,7 @@ const handleDuplicatePack = async () => {
 }
 ```
 
-- [ ] **Step 8: Add duplicate card in the Portability section**
+- [x] **Step 8: Add duplicate card in the Portability section**
 
 Change the portability grid to allow three cards:
 
@@ -1416,7 +1416,7 @@ Add a new card before export or after import:
 </div>
 ```
 
-- [ ] **Step 9: Wire sidepanel persona switching**
+- [x] **Step 9: Wire sidepanel persona switching**
 
 In `apps/packages/ui/src/routes/sidepanel-persona.tsx`, pass:
 
@@ -1429,7 +1429,7 @@ onOpenPersonaVisuals={(personaId) => {
 
 to `LazyVisualPackEditor`.
 
-- [ ] **Step 10: Run UI tests**
+- [x] **Step 10: Run UI tests**
 
 Run:
 
@@ -1440,7 +1440,7 @@ bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPack
 
 Expected: pass.
 
-- [ ] **Step 11: Commit frontend duplicate UI**
+- [x] **Step 11: Commit frontend duplicate UI**
 
 ```bash
 git add apps/packages/ui/src/types/persona-visuals.ts \

@@ -126,6 +126,16 @@ export interface PersonaVisualPackCreate {
   manifest?: Partial<PersonaVisualManifest> | Record<string, unknown>
 }
 
+export interface PersonaVisualPackDuplicateRequest {
+  target_persona_id: string
+  title?: string | null
+}
+
+export interface PersonaVisualDuplicateTarget {
+  id: string
+  name?: string | null
+}
+
 export interface PersonaVisualManifestUpdate {
   manifest: PersonaVisualManifest | Record<string, unknown>
   expected_version?: number | null

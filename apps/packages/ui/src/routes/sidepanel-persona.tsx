@@ -1855,6 +1855,10 @@ const SidepanelPersona = ({
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName}
           isActive={activeTab === "visuals"}
+          onOpenPersonaVisuals={(personaId) => {
+            setSelectedPersonaId(personaId)
+            setActiveTab("visuals")
+          }}
         />,
         {
           includeSetupHandoff: false

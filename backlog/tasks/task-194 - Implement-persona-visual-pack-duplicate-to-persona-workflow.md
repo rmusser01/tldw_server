@@ -4,7 +4,7 @@ title: Implement persona visual pack duplicate-to-persona workflow
 status: In Progress
 assignee: []
 created_date: '2026-05-09 21:42'
-updated_date: '2026-05-09 21:50'
+updated_date: '2026-05-09 22:07'
 labels:
   - persona
   - buddy
@@ -31,7 +31,7 @@ Implement GitHub issue #1450: duplicate a Persona Visual pack from one same-user
 <!-- AC:BEGIN -->
 - [ ] #1 Backend duplicate workflow copies only manifest-referenced assets and remaps the manifest.
 - [ ] #2 Public duplicate endpoint returns PersonaVisualPackResponse and enforces same-user different-persona scope.
-- [ ] #3 Frontend exposes duplicate-to-persona draft flow and excludes the current persona from targets.
+- [x] #3 Frontend exposes duplicate-to-persona draft flow and excludes the current persona from targets.
 - [ ] #4 Focused backend and frontend tests pass.
 <!-- AC:END -->
 
@@ -45,6 +45,8 @@ Task 2 complete: added explicit parent_persona_id support for create_persona_vis
 Task 3 complete: implemented PersonaVisualService.duplicate_pack_to_persona with same-persona rejection, target persona ownership validation, manifest-referenced asset preflight, source file/checksum checks, physical asset copying through create_asset_from_upload, manifest remapping, failed-to-draft finalization, and copied-file cleanup on partial failures. Red verification: service tests failed because duplicate_pack_to_persona was missing. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q => 14 passed, 5 warnings.
 
 Task 4 complete: added PersonaVisualPackDuplicateRequest, mapped target_persona_not_found to 404 and stale source asset states to 409, and exposed POST /profiles/{persona_id}/visual-packs/{pack_id}/duplicate returning PersonaVisualPackResponse. Red verification: API duplicate tests returned 404 Not Found before route wiring. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q => 29 passed, 5 warnings.
+
+Task 5/6 complete: added frontend duplicate request/target types, duplicate pack and target-list service helpers, VisualPackEditor duplicate-to-persona draft controls, and sidepanel target persona Visuals handoff. Red verification: focused Vitest failed because persona-visual-duplicate-target-select did not exist. Green verification: bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx => 16 tests passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

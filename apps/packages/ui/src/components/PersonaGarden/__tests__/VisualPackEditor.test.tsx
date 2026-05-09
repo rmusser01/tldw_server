@@ -1035,6 +1035,114 @@ describe("VisualPackEditor", () => {
     )
   })
 
+  it("duplicates a visual pack to another persona as a draft", async () => {
+    const sourcePack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const duplicatedPack = {
+      ...sourcePack,
+      id: "pack-duplicate",
+      persona_id: "persona-2",
+      title: "Research Buddy copy",
+      status: "draft",
+      parent_pack_id: "pack-1",
+      assets: [
+        {
+          ...visualAssets[0],
+          id: "asset-copy",
+          pack_id: "pack-duplicate",
+          persona_id: "persona-2"
+        }
+      ]
+    }
+    const openTarget = vi.fn()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([sourcePack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Research Buddy" }
+        ])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/duplicate" &&
+        method === "POST"
+      ) {
+        expect(parseJsonBody(init?.body)).toEqual({
+          target_persona_id: "persona-2",
+          title: "Research Buddy copy"
+        })
+        return okResponse(duplicatedPack)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Source Persona"
+        isActive
+        onOpenPersonaVisuals={openTarget}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "active"
+      )
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-duplicate-target-select")).toHaveTextContent(
+        "Research Buddy"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-duplicate-target-select")).not.toHaveTextContent(
+      "Source Persona"
+    )
+
+    fireEvent.change(screen.getByTestId("persona-visual-duplicate-title-input"), {
+      target: { value: "Research Buddy copy" }
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-duplicate-target-select"), {
+      target: { value: "persona-2" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-duplicate-button"))
+
+    await waitFor(() =>
+      expect(screen.getByText(/Duplicated as a draft for Research Buddy/)).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-duplicate-open-target"))
+    expect(openTarget).toHaveBeenCalledWith("persona-2")
+  })
+
   it("queues, polls, and downloads visual pack exports through the authenticated client", async () => {
     const calls: string[] = []
     const pack = {
