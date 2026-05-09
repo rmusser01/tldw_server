@@ -262,3 +262,63 @@ def test_vz_linux_real_session_reuse_smoke(monkeypatch, tmp_path: Path) -> None:
     finally:
         if session_id and not destroyed:
             service.destroy_session(session_id)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+def test_vz_linux_real_recovery_diagnostics_dry_run_smoke(monkeypatch, tmp_path: Path) -> None:
+    base_image = _require_vz_linux_real_host_e2e(monkeypatch, tmp_path)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", raising=False)
+
+    service = SandboxService()
+    stale_session_id = f"vz-linux-real-recovery-stale-{os.getpid()}"
+    missing_vm_id = f"vz-linux-real-recovery-missing-vm-{os.getpid()}"
+    service._orch.put_vz_session_control(
+        session_id=stale_session_id,
+        runtime=RuntimeType.vz_linux.value,
+        vm_id=missing_vm_id,
+        template_id=base_image,
+        workspace_mount=None,
+        agent_ready=False,
+    )
+
+    try:
+        diagnostics = service.macos_diagnostics()
+        reconciliation = diagnostics["reconciliation"]
+        recovery_summary = diagnostics["recovery_summary"]
+        _expect(
+            reconciliation.get("computed") is True,
+            f"Expected reconciliation to compute, got reasons={reconciliation.get('reasons')!r}",
+        )
+        _expect(
+            stale_session_id in reconciliation.get("stale_session_ids", []),
+            f"Expected stale session id in reconciliation, got {reconciliation.get('stale_session_ids')!r}",
+        )
+        _expect(
+            recovery_summary.get("status") == "action_recommended",
+            f"Expected recovery action recommendation, got {recovery_summary!r}",
+        )
+        _expect(
+            "vz_stale_session_controls" in recovery_summary.get("codes", []),
+            f"Expected stale-session recovery code, got {recovery_summary.get('codes')!r}",
+        )
+
+        repair = service.repair_macos_reconciliation(dry_run=True)
+        planned_deletes = [
+            action
+            for action in repair.get("actions", [])
+            if action.get("type") == "delete_session_control"
+            and action.get("session_id") == stale_session_id
+            and action.get("status") == "planned"
+        ]
+        _expect(repair.get("dry_run") is True, f"Expected dry-run repair, got {repair!r}")
+        _expect(planned_deletes, f"Expected planned stale-session delete action, got {repair.get('actions')!r}")
+        _expect(
+            service._orch.get_vz_session_control(stale_session_id) is not None,
+            "Expected dry-run reconciliation repair to leave session control unchanged",
+        )
+    finally:
+        service._orch.delete_vz_session_control(stale_session_id)

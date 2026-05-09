@@ -410,7 +410,14 @@ builds the Swift helper when the binary is missing, ad hoc signs it with the
 supplied entitlements unless the helper is already signed with
 `com.apple.security.virtualization`, runs the helper-daemon smoke, starts one
 helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
-same-session VM reuse, and stops the helper on exit.
+same-session VM reuse, verifies recovery diagnostics plus dry-run
+reconciliation repair planning, and stops the helper on exit.
+
+The recovery smoke is non-destructive. It seeds an isolated test-store stale VZ
+session-control row, verifies `/api/v1/sandbox/admin/macos-diagnostics` style
+reconciliation and `recovery_summary` output through the service layer, then
+verifies `repair_macos_reconciliation(dry_run=true)` produces a planned delete
+without deleting state or terminating VMs.
 
 The lower-level fallback remains available when operators need to bypass the
 managed defaults:

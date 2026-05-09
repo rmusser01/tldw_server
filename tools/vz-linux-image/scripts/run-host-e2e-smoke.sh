@@ -23,7 +23,8 @@ Usage: run-host-e2e-smoke.sh --bundle PATH [options]
 
 Build/sign/start the macOS Virtualization.framework helper, run the helper
 daemon smoke, run real vz_linux ephemeral execution, verify same-session VM
-reuse, and stop the helper.
+reuse, verify recovery diagnostics plus dry-run repair planning, and stop the
+helper.
 
 Options:
   --bundle PATH          Canonical vz_linux bundle directory (required)
@@ -330,7 +331,21 @@ run_real_vz_linux_e2e() {
     SANDBOX_ENABLE_EXECUTION=1 \
     SANDBOX_BACKGROUND_EXECUTION=0 \
     "${PYTHON_BIN}" -m pytest \
-    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py" \
+    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py::test_vz_linux_real_ephemeral_run_smoke" \
+    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py::test_vz_linux_real_session_reuse_smoke" \
+    -q -rs
+}
+
+run_real_vz_linux_recovery_smoke() {
+  run_cmd env \
+    TEST_MODE=0 \
+    TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+    TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE="${BUNDLE_PATH}" \
+    TLDW_SANDBOX_MACOS_HELPER_SOCKET="${SOCKET_PATH}" \
+    SANDBOX_ENABLE_EXECUTION=1 \
+    SANDBOX_BACKGROUND_EXECUTION=0 \
+    "${PYTHON_BIN}" -m pytest \
+    "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py::test_vz_linux_real_recovery_diagnostics_dry_run_smoke" \
     -q -rs
 }
 
@@ -349,3 +364,4 @@ run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket
 run_real_vz_linux_e2e
+run_real_vz_linux_recovery_smoke
