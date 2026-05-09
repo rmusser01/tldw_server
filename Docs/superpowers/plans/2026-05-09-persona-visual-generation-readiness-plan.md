@@ -85,4 +85,4 @@
 - [x] Run focused pytest for Persona visual API readiness tests.
 - [x] Run Bandit on touched backend files.
 - [x] Update Backlog acceptance criteria and verification notes.
-- [ ] Commit, push, and open the PR linked to `#1431`.
+- [x] Commit, push, and open the PR linked to `#1431`.
