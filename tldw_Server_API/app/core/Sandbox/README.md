@@ -108,7 +108,14 @@ Current limitations:
 - `seatbelt` discovery may be `available=True` while `strict_deny_all_supported=False`; deny-all is a best-effort host policy claim, not a VM-grade guarantee.
 - `seatbelt` control files and isolated `HOME`/temp dirs live outside the writable workspace and are removed after each run.
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
-- `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
+- `vz_linux` supports session VM reuse through persisted VZ session-control
+  metadata; `vz_macos` does not. Reuse is generation-aware: the Swift helper
+  reports a per-process `helper_instance_id` and `helper_started_at`, Python
+  persists those values with the session-control row, and a later run reuses the
+  VM only when live helper status, ownership/session metadata, and helper
+  generation still agree. Helper unavailable or protocol mismatch fails closed
+  and preserves the row; reachable stale VM truth or generation drift clears the
+  row before provisioning a fresh VM.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
 - `vz_linux` admin diagnostics also include a read-only image-store block that correlates persisted run manifests and dry-run GC classifications with reconciliation/helper state.
 - `vz_linux` also exposes `GET /api/v1/sandbox/admin/macos-image-store/cleanup-plan` for read-only GC action planning and `POST /api/v1/sandbox/admin/macos-image-store/cleanup` for explicit admin cleanup, which defaults to `dry_run=true`; unfiltered mutating cleanup requires `confirm_all=true`.

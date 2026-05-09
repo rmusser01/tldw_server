@@ -31,6 +31,7 @@ _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS = (
     RuntimeError,
     TypeError,
     ValueError,
+    MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
 _OUTPUT_COUNTER_KEYS = frozenset(
@@ -252,6 +253,56 @@ class VZLinuxRunner(VZBaseRunner):
                 counters[key] = value
         return counters
 
+    @staticmethod
+    def _normalize_optional_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @classmethod
+    def _helper_generation_from_details(cls, details: dict[str, Any] | None) -> tuple[str | None, str | None]:
+        if not isinstance(details, dict):
+            return None, None
+        return (
+            cls._normalize_optional_text(details.get("helper_instance_id")),
+            cls._normalize_optional_text(details.get("helper_started_at")),
+        )
+
+    @classmethod
+    def _session_status_reusable(
+        cls,
+        *,
+        status: Any,
+        session_control: dict[str, Any],
+        session_id: str | None,
+    ) -> bool:
+        if not bool(getattr(status, "healthy", False)):
+            return False
+
+        metadata = getattr(status, "metadata", None)
+        owner = str(getattr(metadata, "owner", "") or "").strip()
+        runtime = str(getattr(metadata, "runtime", "") or "").strip()
+        if owner != "tldw" or runtime != RuntimeType.vz_linux.value:
+            return False
+
+        requested_session_id = str(session_id or "").strip()
+        live_session_id = str(getattr(metadata, "session_id", "") or "").strip()
+        if live_session_id and live_session_id != requested_session_id:
+            return False
+
+        stored_instance = cls._normalize_optional_text(session_control.get("helper_instance_id"))
+        stored_started_at = cls._normalize_optional_text(session_control.get("helper_started_at"))
+        live_instance, live_started_at = cls._helper_generation_from_details(getattr(status, "details", None))
+        if stored_instance and stored_started_at and live_instance and live_started_at:
+            return stored_instance == live_instance and stored_started_at == live_started_at
+
+        return bool(
+            requested_session_id
+            and live_session_id == requested_session_id
+            and bool(getattr(metadata, "session_mode", False))
+        )
+
     def _load_session_control(self, session_id: str | None) -> dict[str, Any] | None:
         sid = str(session_id or "").strip()
         if not sid or self._session_control_store is None:
@@ -269,6 +320,8 @@ class VZLinuxRunner(VZBaseRunner):
         vm_id: str,
         template_id: str | None,
         workspace_mount: str | None,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
     ) -> None:
         sid = str(session_id or "").strip()
         if not sid or self._session_control_store is None:
@@ -283,6 +336,8 @@ class VZLinuxRunner(VZBaseRunner):
             template_id=(str(template_id) if template_id is not None else None),
             workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
             agent_ready=True,
+            helper_instance_id=self._normalize_optional_text(helper_instance_id),
+            helper_started_at=self._normalize_optional_text(helper_started_at),
         )
 
     def _delete_session_control(self, session_id: str | None) -> None:
@@ -410,8 +465,12 @@ class VZLinuxRunner(VZBaseRunner):
                 try:
                     status = helper.get_vm_status(candidate_vm_id)
                 except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError):
-                    status = None
-                if bool(getattr(status, "healthy", False)):
+                    raise
+                if status is not None and self._session_status_reusable(
+                    status=status,
+                    session_control=session_control,
+                    session_id=spec.session_id,
+                ):
                     vm_id = candidate_vm_id
                     template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
                     should_terminate_vm = False
@@ -482,6 +541,8 @@ class VZLinuxRunner(VZBaseRunner):
                         vm_id=vm.vm_id,
                         template_id=template_ref,
                         workspace_mount=workspace,
+                        helper_instance_id=vm.details.get("helper_instance_id") if isinstance(vm.details, dict) else None,
+                        helper_started_at=vm.details.get("helper_started_at") if isinstance(vm.details, dict) else None,
                     )
             self._register_active_run(run_id, vm_id, workspace if created_workspace else None)
 
