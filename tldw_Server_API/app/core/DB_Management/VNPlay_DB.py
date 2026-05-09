@@ -564,12 +564,60 @@ class VNPlayRepository:
         client_scene_version: int,
         selected_choice: Mapping[str, Any],
         parent_event_id: int | None,
+        expected_scene_last_event_id: int | None = None,
         branch_label: str | None,
         branch_path: Sequence[Any] | None,
     ) -> dict[str, dict[str, Any]]:
         self._ensure_schema_initialized()
         choice = dict(selected_choice)
         with self.db.transaction() as conn:
+            turn_row = conn.execute(
+                """
+                SELECT id
+                FROM vn_play_turn_requests
+                WHERE id = ?
+                  AND session_id = ?
+                  AND owner_user_id = ?
+                  AND status = ?
+                  AND turn_started_event_id IS NULL
+                  AND input_event_id IS NULL
+                  AND base_scene_version = ?
+                """,
+                (
+                    turn_request_id,
+                    session_id,
+                    owner_user_id,
+                    "pending",
+                    client_scene_version,
+                ),
+            ).fetchone()
+            if turn_row is None:
+                raise RuntimeError("turn_request_not_pending")
+
+            current_scene_state = conn.execute(
+                """
+                SELECT last_event_id, visible_choices_json
+                FROM vn_play_scene_state
+                WHERE session_id = ? AND owner_user_id = ?
+                """,
+                (session_id, owner_user_id),
+            ).fetchone()
+            if current_scene_state is None:
+                raise RuntimeError("choice_not_visible")
+            if expected_scene_last_event_id is not None:
+                current_last_event_id = current_scene_state["last_event_id"]
+                if (
+                    current_last_event_id is None
+                    or int(current_last_event_id) != expected_scene_last_event_id
+                ):
+                    raise RuntimeError("scene_state_moved")
+            visible_choices = _json_loads(
+                current_scene_state["visible_choices_json"],
+                [],
+            )
+            if not _choice_id_is_visible(visible_choices, choice.get("id")):
+                raise RuntimeError("choice_not_visible")
+
             branch_cursor = conn.execute(
                 """
                 INSERT INTO vn_play_branches (
@@ -1235,3 +1283,15 @@ def _json_loads(value: Any, default: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+def _choice_id_is_visible(choices: Any, choice_id: Any) -> bool:
+    if choice_id is None:
+        return False
+    if not isinstance(choices, Sequence) or isinstance(choices, (str, bytes)):
+        return False
+    selected_id = str(choice_id)
+    return any(
+        isinstance(choice, Mapping) and str(choice.get("id")) == selected_id
+        for choice in choices
+    )

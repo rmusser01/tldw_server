@@ -305,17 +305,19 @@ class VNPlayService:
 
         selected_choice: dict[str, Any] | None = None
         parent_choice_event_id: int | None = None
+        expected_scene_last_event_id: int | None = None
         branch_path: list[dict[str, Any]] | None = None
         events_before_input = self.repo.list_events(session_id)
         if session.mode == MODE_STORY and choice_id is not None:
             selected_choice = _selected_visible_choice(persisted_scene_state, choice_id)
+            expected_scene_last_event_id = _optional_int(
+                persisted_scene_state.get("last_event_id")
+                if persisted_scene_state is not None
+                else None
+            )
             parent_choice_event_id = _parent_choice_event_id(
                 events_before_input,
-                _optional_int(
-                    persisted_scene_state.get("last_event_id")
-                    if persisted_scene_state is not None
-                    else None
-                ),
+                expected_scene_last_event_id,
                 choice_id,
             )
             branch_path = _branch_path_for_choice(
@@ -346,16 +348,38 @@ class VNPlayService:
             return self._abandon_conflicting_turn(turn_request, session_id)
 
         if selected_choice is not None:
-            persisted_choice = self.repo.record_story_choice_selection(
-                session_id=session_id,
-                owner_user_id=self.owner_user_id,
-                turn_request_id=int(turn_request["id"]),
-                client_scene_version=client_scene_version,
-                selected_choice=selected_choice,
-                parent_event_id=parent_choice_event_id,
-                branch_label=_choice_text(selected_choice),
-                branch_path=branch_path,
-            )
+            try:
+                persisted_choice = self.repo.record_story_choice_selection(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    turn_request_id=int(turn_request["id"]),
+                    client_scene_version=client_scene_version,
+                    selected_choice=selected_choice,
+                    parent_event_id=parent_choice_event_id,
+                    expected_scene_last_event_id=expected_scene_last_event_id,
+                    branch_label=_choice_text(selected_choice),
+                    branch_path=branch_path,
+                )
+            except RuntimeError as exc:
+                if str(exc) not in {"choice_not_visible", "scene_state_moved"}:
+                    raise
+                self.repo.update_turn_request(
+                    int(turn_request["id"]),
+                    {
+                        "status": TURN_STATUS_ABANDONED,
+                        "error": {
+                            "code": ERROR_INVALID_CHOICE_ID,
+                            "detail": str(exc),
+                        },
+                    },
+                    owner_user_id=self.owner_user_id,
+                )
+                self.repo.update_session(
+                    session_id,
+                    {"active_turn_request_id": None},
+                    owner_user_id=self.owner_user_id,
+                )
+                raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID) from exc
             turn_events = [
                 persisted_choice["turn_started"],
                 persisted_choice["choice_selected"],

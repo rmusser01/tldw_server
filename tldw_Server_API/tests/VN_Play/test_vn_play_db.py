@@ -211,6 +211,7 @@ def test_record_story_choice_selection_creates_branch_event_turn_and_state(
         client_scene_version=1,
         selected_choice={"id": "open", "text": "Open the door"},
         parent_event_id=choice_presented["id"],
+        expected_scene_last_event_id=choice_presented["id"],
         branch_label="Open the door",
         branch_path=[
             {
@@ -249,6 +250,134 @@ def test_record_story_choice_selection_creates_branch_event_turn_and_state(
     assert updated_turn["status"] == "model_calling"
     assert updated_turn["turn_started_event_id"] == result["turn_started"]["id"]
     assert updated_turn["input_event_id"] == result["choice_selected"]["id"]
+
+
+def test_record_story_choice_selection_rejects_choice_not_visible_without_mutations(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Door",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    choice_presented = repo.append_event(
+        session_id=session["id"],
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": "Open the door"}],
+            "scene_version": 1,
+        },
+    )
+    repo.set_scene_state(
+        session_id=session["id"],
+        owner_user_id=42,
+        last_event_id=choice_presented["id"],
+        visible_choices=[{"id": "wait", "text": "Wait outside"}],
+        scene_version=1,
+    )
+    turn = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="choice-1",
+        request_payload_hash="hash-choice-1",
+        base_scene_version=1,
+    )
+    branches_before = repo.list_branches(session["id"], owner_user_id=42)
+    events_before = repo.list_events(session["id"])
+    state_before = repo.get_scene_state(session["id"], owner_user_id=42)
+
+    with pytest.raises(RuntimeError, match="choice_not_visible"):
+        repo.record_story_choice_selection(
+            session_id=session["id"],
+            owner_user_id=42,
+            turn_request_id=turn["id"],
+            client_scene_version=1,
+            selected_choice={"id": "open", "text": "Open the door"},
+            parent_event_id=choice_presented["id"],
+            expected_scene_last_event_id=choice_presented["id"],
+            branch_label="Open the door",
+            branch_path=[{"choice_id": "open"}],
+        )
+
+    assert repo.list_branches(session["id"], owner_user_id=42) == branches_before
+    assert repo.list_events(session["id"]) == events_before
+    assert repo.get_scene_state(session["id"], owner_user_id=42) == state_before
+    updated_turn = repo.get_turn_request(turn["id"])
+    assert updated_turn["status"] == "pending"
+    assert updated_turn["turn_started_event_id"] is None
+    assert updated_turn["input_event_id"] is None
+
+
+def test_record_story_choice_selection_rejects_moved_scene_state_without_mutations(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Door",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    choice_presented = repo.append_event(
+        session_id=session["id"],
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": "Open the door"}],
+            "scene_version": 1,
+        },
+    )
+    scene_moved = repo.append_event(
+        session_id=session["id"],
+        owner_user_id=42,
+        event_type="scene_state_changed",
+        event_payload={"scene_version": 1},
+    )
+    repo.set_scene_state(
+        session_id=session["id"],
+        owner_user_id=42,
+        last_event_id=scene_moved["id"],
+        visible_choices=[{"id": "open", "text": "Open the door"}],
+        scene_version=1,
+    )
+    turn = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="choice-1",
+        request_payload_hash="hash-choice-1",
+        base_scene_version=1,
+    )
+    branches_before = repo.list_branches(session["id"], owner_user_id=42)
+    events_before = repo.list_events(session["id"])
+    state_before = repo.get_scene_state(session["id"], owner_user_id=42)
+
+    with pytest.raises(RuntimeError, match="scene_state_moved"):
+        repo.record_story_choice_selection(
+            session_id=session["id"],
+            owner_user_id=42,
+            turn_request_id=turn["id"],
+            client_scene_version=1,
+            selected_choice={"id": "open", "text": "Open the door"},
+            parent_event_id=choice_presented["id"],
+            expected_scene_last_event_id=choice_presented["id"],
+            branch_label="Open the door",
+            branch_path=[{"choice_id": "open"}],
+        )
+
+    assert repo.list_branches(session["id"], owner_user_id=42) == branches_before
+    assert repo.list_events(session["id"]) == events_before
+    assert repo.get_scene_state(session["id"], owner_user_id=42) == state_before
+    updated_turn = repo.get_turn_request(turn["id"])
+    assert updated_turn["status"] == "pending"
+    assert updated_turn["turn_started_event_id"] is None
+    assert updated_turn["input_event_id"] is None
 
 
 def test_record_story_choice_selection_rejects_replayed_turn_without_mutations(
@@ -293,6 +422,7 @@ def test_record_story_choice_selection_rejects_replayed_turn_without_mutations(
         client_scene_version=1,
         selected_choice={"id": "open", "text": "Open the door"},
         parent_event_id=choice_presented["id"],
+        expected_scene_last_event_id=choice_presented["id"],
         branch_label="Open the door",
         branch_path=[{"choice_id": "open"}],
     )
@@ -308,6 +438,7 @@ def test_record_story_choice_selection_rejects_replayed_turn_without_mutations(
             client_scene_version=1,
             selected_choice={"id": "open", "text": "Open the door"},
             parent_event_id=choice_presented["id"],
+            expected_scene_last_event_id=first_result["choice_selected"]["id"],
             branch_label="Open the door again",
             branch_path=[{"choice_id": "open", "replayed": True}],
         )
@@ -367,6 +498,7 @@ def test_record_story_choice_selection_rejects_scene_version_mismatch_without_mu
             client_scene_version=2,
             selected_choice={"id": "open", "text": "Open the door"},
             parent_event_id=choice_presented["id"],
+            expected_scene_last_event_id=choice_presented["id"],
             branch_label="Open the door",
             branch_path=[{"choice_id": "open", "scene_version": 2}],
         )
