@@ -1636,13 +1636,6 @@ class SandboxService:
                             dur_ms = max(0.0, (status.finished_at - status.started_at).total_seconds() * 1000.0)
                     except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
                         dur_ms = None
-                    # Include reason_code for non-success outcomes when available
-                    reason_code = None
-                    try:
-                        if outcome in ("timeout", "failed"):
-                            reason_code = (status.message or None)
-                    except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
-                        reason_code = None
                     metadata = build_run_completion_audit_metadata(
                         status=status,
                         spec_version=spec_version,
@@ -1651,8 +1644,6 @@ class SandboxService:
                         network_policy=(spec.network_policy if spec else None),
                         capture_patterns=(spec.capture_patterns if spec else None),
                     )
-                    if reason_code is not None:
-                        metadata["reason_code"] = reason_code
                     limit_metadata = build_limit_audit_metadata(status.resource_usage)
                     await svc.log_event(
                         event_type=AuditEventType.API_RESPONSE,

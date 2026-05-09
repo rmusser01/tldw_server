@@ -1492,13 +1492,6 @@ async def start_run(
                         method=(request.method if request else "POST"),
                         session_id=payload.session_id,
                     )
-                    # Map reason_code for non-success outcomes
-                    reason_code = None
-                    try:
-                        if outcome in ("timeout", "failed"):
-                            reason_code = (status.message or None)
-                    except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-                        reason_code = None
                     await audit_service.log_event(
                         event_type=AuditEventType.API_RESPONSE,
                         category=AuditEventCategory.API_CALL,
@@ -1517,7 +1510,6 @@ async def start_run(
                             network_policy=spec.network_policy,
                             capture_patterns=spec.capture_patterns,
                         )
-                        | ({"reason_code": reason_code} if reason_code is not None else {}),
                     )
             except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"sandbox audit(run.complete) failed: {e}")

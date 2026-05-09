@@ -18,6 +18,8 @@ from .run_status_taxonomy import normalize_run_status_reason
 
 
 def _enum_value(value: object) -> str | None:
+    """Return a stripped string value for enums and scalar metadata fields."""
+
     if value is None:
         return None
     raw = getattr(value, "value", value)
@@ -26,6 +28,8 @@ def _enum_value(value: object) -> str | None:
 
 
 def _run_completion_outcome(status: RunStatus) -> str:
+    """Map a run status into the stable audit outcome vocabulary."""
+
     phase = status.phase
     phase_value = phase.value if isinstance(phase, RunPhase) else str(phase)
     if phase == RunPhase.completed and (status.exit_code or 0) == 0:
@@ -40,17 +44,24 @@ def _run_completion_outcome(status: RunStatus) -> str:
 
 
 def _pathlike_base_image(base_image: str) -> bool:
+    """Detect base image strings that look like local host filesystem paths."""
+
     text = base_image.strip()
     if not text:
         return False
     if text.startswith(("/", "~", "./", "../")):
         return True
-    if PureWindowsPath(text).is_absolute() or PurePosixPath(text).is_absolute():
+    windows_path = PureWindowsPath(text)
+    if windows_path.drive or "\\" in text:
+        return True
+    if windows_path.is_absolute() or PurePosixPath(text).is_absolute():
         return True
     return False
 
 
 def _safe_base_image(base_image: str | None) -> tuple[str | None, str | None]:
+    """Return a redacted-safe base image reference and its audit-visible kind."""
+
     text = str(base_image or "").strip()
     if not text:
         return None, None
@@ -60,6 +71,8 @@ def _safe_base_image(base_image: str | None) -> tuple[str | None, str | None]:
 
 
 def _capture_pattern_count(capture_patterns: Iterable[object] | None) -> int | None:
+    """Count non-empty capture patterns without recording their raw values."""
+
     if capture_patterns is None:
         return None
     count = 0
@@ -85,7 +98,7 @@ def build_run_completion_audit_metadata(
     """
 
     effective_runtime = _enum_value(status.runtime)
-    requested_runtime_value = _enum_value(requested_runtime) or effective_runtime
+    requested_runtime_value = _enum_value(requested_runtime)
     base_image, base_image_kind = _safe_base_image(status.base_image)
     outcome = _run_completion_outcome(status)
     status_reason_code = normalize_run_status_reason(
