@@ -475,6 +475,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
+  const duplicateTargetsRequestIdRef = React.useRef(0)
 
   const selectedPack =
     packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
@@ -627,30 +628,36 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   const loadDuplicateTargets = React.useCallback(async () => {
     if (!isActive || !selectedPersonaId || !selectedPack) {
+      duplicateTargetsRequestIdRef.current += 1
       setDuplicateTargets([])
       setDuplicateTargetId("")
+      setDuplicateTargetsLoading(false)
       return
     }
+    const requestId = duplicateTargetsRequestIdRef.current + 1
+    duplicateTargetsRequestIdRef.current = requestId
+    const isLatestRequest = () => duplicateTargetsRequestIdRef.current === requestId
+    setDuplicateTargets([])
+    setDuplicateTargetId("")
     setDuplicateTargetsLoading(true)
     try {
       const targets = await listPersonaVisualDuplicateTargets()
+      if (!isLatestRequest()) return
       const available = targets.filter((target) => target.id !== selectedPersonaId)
       setDuplicateTargets(targets)
-      setDuplicateTargetId((current) =>
-        current && available.some((target) => target.id === current)
-          ? current
-          : available[0]?.id ?? ""
-      )
+      setDuplicateTargetId(available[0]?.id ?? "")
     } catch (loadError) {
-      setDuplicateTargets([])
-      setDuplicateTargetId("")
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Failed to load persona duplicate targets."
-      )
+      if (isLatestRequest()) {
+        setDuplicateTargets([])
+        setDuplicateTargetId("")
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load persona duplicate targets."
+        )
+      }
     } finally {
-      setDuplicateTargetsLoading(false)
+      if (isLatestRequest()) setDuplicateTargetsLoading(false)
     }
   }, [isActive, selectedPersonaId, selectedPack?.id])
 

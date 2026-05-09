@@ -1035,6 +1035,133 @@ describe("VisualPackEditor", () => {
     )
   })
 
+  it("ignores stale duplicate target responses after switching personas", async () => {
+    const delayedPersonaOneTargets = deferredResponse<Awaited<ReturnType<typeof okResponse>>>()
+    const personaOnePack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Source pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const personaTwoPack = {
+      ...personaOnePack,
+      id: "pack-2",
+      persona_id: "persona-2",
+      title: "Target pack",
+      assets: visualAssets.map((asset) => ({
+        ...asset,
+        pack_id: "pack-2",
+        persona_id: "persona-2"
+      }))
+    }
+    let catalogCalls = 0
+    const calls: string[] = []
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([personaOnePack])
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse([personaTwoPack])
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        catalogCalls += 1
+        if (catalogCalls === 1) return delayedPersonaOneTargets.promise
+        return okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Target Persona" }
+        ])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-2/visual-packs/pack-2/duplicate" &&
+        method === "POST"
+      ) {
+        expect(parseJsonBody(init?.body)).toEqual({
+          target_persona_id: "persona-1",
+          title: "Copy of Target pack"
+        })
+        return okResponse({
+          ...personaTwoPack,
+          id: "pack-copy",
+          persona_id: "persona-1",
+          status: "draft",
+          parent_pack_id: "pack-2"
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Source Persona"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-1")
+    )
+    await waitFor(() => expect(catalogCalls).toBe(1))
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Target Persona"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-2")
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-duplicate-target-select")).toHaveValue(
+        "persona-1"
+      )
+    )
+
+    await act(async () => {
+      delayedPersonaOneTargets.resolve(
+        await okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Target Persona" }
+        ])
+      )
+      await delayedPersonaOneTargets.promise
+    })
+
+    expect(screen.getByTestId("persona-visual-duplicate-target-select")).toHaveValue(
+      "persona-1"
+    )
+    expect(screen.getByTestId("persona-visual-duplicate-target-select")).not.toHaveTextContent(
+      "Target Persona"
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-duplicate-button"))
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-2/visual-packs/pack-2/duplicate"
+      )
+    )
+  })
+
   it("duplicates a visual pack to another persona as a draft", async () => {
     const sourcePack = {
       id: "pack-1",

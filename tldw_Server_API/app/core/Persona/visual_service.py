@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from PIL import Image, UnidentifiedImageError
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
@@ -255,7 +256,7 @@ class PersonaVisualService:
             )
 
         target_persona = self._db.get_persona_profile(
-            target_persona_id,
+            persona_id=target_persona_id,
             user_id=user_id,
         )
         if not target_persona:
@@ -281,7 +282,7 @@ class PersonaVisualService:
                 details={"asset_ids": missing_asset_ids},
             )
 
-        preflight_assets: list[tuple[dict[str, Any], bytes]] = []
+        preflight_assets: list[tuple[dict[str, Any], Path]] = []
         for asset_id in sorted(referenced_asset_ids):
             asset = source_assets_by_id[asset_id]
             source_path = self._asset_storage_path(
@@ -294,15 +295,14 @@ class PersonaVisualService:
                     "Persona visual source asset file is missing.",
                     details={"asset_id": asset_id},
                 )
-            content = source_path.read_bytes()
-            checksum = hashlib.sha256(content).hexdigest()
+            checksum = self._sha256_file(source_path)
             if checksum != str(asset.get("checksum_sha256") or ""):
                 raise PersonaVisualServiceError(
                     "source_asset_checksum_mismatch",
                     "Persona visual source asset checksum does not match metadata.",
                     details={"asset_id": asset_id},
                 )
-            preflight_assets.append((asset, content))
+            preflight_assets.append((asset, source_path))
 
         title_value = str(title or "").strip()
         if not title_value:
@@ -328,12 +328,12 @@ class PersonaVisualService:
         try:
             asset_id_map: dict[str, str] = {}
             copied_assets: list[dict[str, Any]] = []
-            for source_asset, content in preflight_assets:
+            for source_asset, source_path in preflight_assets:
                 copied = self.create_asset_from_upload(
                     persona_id=target_persona_id,
                     user_id=user_id,
                     pack_id=str(target_pack["id"]),
-                    content=content,
+                    content=source_path.read_bytes(),
                     mime_type=str(source_asset.get("mime_type") or "application/octet-stream"),
                     original_filename=source_asset.get("original_filename"),
                     asset_role=str(source_asset.get("asset_role") or "frame"),
@@ -379,8 +379,27 @@ class PersonaVisualService:
                 expected_version=int(updated_pack["version"]),
             )
         except Exception:
+            try:
+                self._db.soft_delete_persona_visual_pack_with_assets(
+                    pack_id=str(target_pack["id"]),
+                    persona_id=target_persona_id,
+                    user_id=user_id,
+                )
+            except Exception as cleanup_error:  # pragma: no cover - defensive cleanup logging
+                logger.warning(
+                    "Failed to soft-delete partially duplicated persona visual pack {}: {}",
+                    target_pack.get("id"),
+                    cleanup_error,
+                )
             for path in copied_file_paths:
-                path.unlink(missing_ok=True)
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as cleanup_error:  # pragma: no cover - defensive cleanup logging
+                    logger.warning(
+                        "Failed to unlink partially duplicated persona visual asset {}: {}",
+                        path,
+                        cleanup_error,
+                    )
             raise
 
         assets = self._db.list_persona_visual_assets(
@@ -661,6 +680,15 @@ class PersonaVisualService:
                 "Persona visual storage path escapes the user visual directory.",
             )
         return target_path
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        """Hash a source asset without keeping every duplicate asset in memory."""
+        digest = hashlib.sha256()
+        with path.open("rb") as file_obj:
+            for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
 
 __all__ = [

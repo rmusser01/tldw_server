@@ -55,3 +55,27 @@ def test_remap_visual_manifest_assets_returns_copy_with_supported_references_rem
     ]
     assert animation["asset_ids"] == ["target-a", "source-c"]
     assert animation["preview_asset_id"] == "target-b"
+
+
+def test_remap_visual_manifest_assets_matches_collector_normalization() -> None:
+    manifest = {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": {"idle": {"animation_id": "idle"}},
+        "animations": {
+            "idle": {
+                "frames": [{"asset_id": " source-a "}],
+                "asset_ids": [" source-a ", "source-b"],
+                "preview_asset_id": " source-a ",
+            }
+        },
+    }
+
+    assert collect_visual_manifest_asset_ids(manifest) == {"source-a", "source-b"}
+
+    remapped = remap_visual_manifest_assets(manifest, {"source-a": "target-a"})
+    animation = remapped["animations"]["idle"]
+
+    assert animation["frames"] == [{"asset_id": "target-a"}]
+    assert animation["asset_ids"] == ["target-a", "source-b"]
+    assert animation["preview_asset_id"] == "target-a"

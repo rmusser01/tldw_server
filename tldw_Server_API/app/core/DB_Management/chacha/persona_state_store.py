@@ -2427,6 +2427,65 @@ class PersonaStateStore:
                 )
         return self.get_persona_visual_pack(pack_id=pack_id, persona_id=persona_id, user_id=user_id)
 
+    def soft_delete_persona_visual_pack_with_assets(
+        self,
+        *,
+        pack_id: str,
+        persona_id: str,
+        user_id: str,
+    ) -> bool:
+        """Soft-delete a persona visual pack and all of its asset rows."""
+        now = self._get_current_utc_timestamp_iso()
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        deleted_false = bool_cast(False)
+        deleted_true = bool_cast(True)
+        with self.transaction() as conn:
+            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
+            self._require_persona_visual_pack_owner(
+                conn,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            asset_query = (
+                "UPDATE persona_visual_assets "
+                "SET deleted = ?, last_modified = ?, version = version + 1 "
+                "WHERE pack_id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+            )
+            asset_params = (
+                deleted_true,
+                now,
+                pack_id,
+                user_id,
+                persona_id,
+                deleted_false,
+            )
+            prepared_asset_query, prepared_asset_params = self._prepare_backend_statement(
+                asset_query,
+                asset_params,
+            )
+            conn.execute(prepared_asset_query, prepared_asset_params or ())
+
+            pack_query = (
+                "UPDATE persona_visual_packs "
+                "SET deleted = ?, active_at = NULL, last_modified = ?, version = version + 1 "
+                "WHERE id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+            )
+            pack_params = (
+                deleted_true,
+                now,
+                pack_id,
+                user_id,
+                persona_id,
+                deleted_false,
+            )
+            prepared_pack_query, prepared_pack_params = self._prepare_backend_statement(
+                pack_query,
+                pack_params,
+            )
+            cursor = conn.execute(prepared_pack_query, prepared_pack_params or ())
+            return cursor.rowcount > 0
+
     def create_persona_visual_asset(
         self,
         *,

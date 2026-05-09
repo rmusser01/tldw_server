@@ -188,6 +188,22 @@ def test_duplicate_pack_to_persona_copies_referenced_assets_and_remaps_manifest(
         manifest=_manifest_with_all_reference_shapes(asset_a["id"], asset_b["id"]),
         expected_version=source_pack["version"],
     )
+    db_instance.activate_persona_visual_pack(
+        persona_id=source_persona_id,
+        user_id=user_id,
+        pack_id=updated_source["id"],
+    )
+    target_active = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id=user_id,
+        title="Existing Target Active",
+        status="draft",
+    )
+    db_instance.activate_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id=user_id,
+        pack_id=target_active["id"],
+    )
 
     duplicated = service.duplicate_pack_to_persona(
         source_persona_id=source_persona_id,
@@ -218,6 +234,14 @@ def test_duplicate_pack_to_persona_copies_referenced_assets_and_remaps_manifest(
     assert {frame["asset_id"] for frame in remapped_animation["frames"]} == copied_ids
     assert set(remapped_animation["asset_ids"]).issubset(copied_ids)
     assert remapped_animation["preview_asset_id"] in copied_ids
+    assert db_instance.get_active_persona_visual_pack(
+        persona_id=source_persona_id,
+        user_id=user_id,
+    )["id"] == updated_source["id"]
+    assert db_instance.get_active_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id=user_id,
+    )["id"] == target_active["id"]
 
 
 def test_duplicate_pack_rejects_same_persona_target(
@@ -424,16 +448,24 @@ def test_duplicate_pack_cleans_up_copied_files_after_partial_failure(
         persona_id=target_persona_id,
         user_id=user_id,
     )
-    assert [pack["status"] for pack in target_packs] == ["failed"]
-    copied_assets = db_instance.list_persona_visual_assets(
-        pack_id=target_packs[0]["id"],
+    assert target_packs == []
+    deleted_target_packs = db_instance.list_persona_visual_packs(
         persona_id=target_persona_id,
         user_id=user_id,
+        include_deleted=True,
     )
-    assert len(copied_assets) == 1
+    assert len(deleted_target_packs) == 1
+    assert deleted_target_packs[0]["status"] == "failed"
+    assert deleted_target_packs[0]["deleted"] is True
+    copied_asset_rows = db_instance.execute_query(
+        "SELECT deleted, storage_key FROM persona_visual_assets WHERE user_id = ? AND persona_id = ?",
+        (user_id, target_persona_id),
+    ).fetchall()
+    assert len(copied_asset_rows) == 1
+    assert bool(copied_asset_rows[0]["deleted"]) is True
     copied_path = service._asset_storage_path(
         user_id=user_id,
-        storage_key=str(copied_assets[0]["storage_key"]),
+        storage_key=str(copied_asset_rows[0]["storage_key"]),
     )
     assert not copied_path.exists()
     assert db_instance.get_active_persona_visual_pack(
