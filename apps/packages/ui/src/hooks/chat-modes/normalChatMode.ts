@@ -153,6 +153,7 @@ type NormalChatModeParams = {
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
+  messageForModel?: string
   regenerateFromMessage?: Message
 }
 
@@ -368,11 +369,12 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     let promptContent: string | undefined = undefined
     let webSearchSources: any[] = []
     let webSearchSystemMessage: any | null = null
+    const messageForModel = ctx.messageForModel ?? ctx.message
 
     let humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: ctx.message,
+          text: messageForModel,
           type: "text"
         }
       ],
@@ -383,7 +385,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       humanMessage = await humanMessageFormatter({
         content: [
           {
-            text: ctx.message,
+            text: messageForModel,
             type: "text"
           },
           {

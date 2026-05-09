@@ -45,6 +45,8 @@ const CHAT_SETTINGS_OPTIONAL_KEYS = [
   "authorNotePosition",
   "characterMemoryById",
   "chatGenerationOverride",
+  "conversationContext",
+  "chat_dictionary_ids",
   "summary",
   "imageEventSyncMode"
 ] as const
