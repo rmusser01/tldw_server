@@ -405,43 +405,17 @@ class VNPlayRepository:
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
-            sequence_cursor = conn.execute(
-                """
-                SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next_sequence
-                FROM vn_play_events
-                WHERE session_id = ?
-                """,
-                (session_id,),
+            event_id = _insert_event(
+                conn,
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                event_type=event_type,
+                event_payload=event_payload,
+                source=source,
+                model_provider=model_provider,
+                model_name=model_name,
+                branch_node_id=branch_node_id,
             )
-            sequence_number = int(sequence_cursor.fetchone()["next_sequence"])
-            cursor = conn.execute(
-                """
-                INSERT INTO vn_play_events (
-                    session_id,
-                    owner_user_id,
-                    sequence_number,
-                    event_type,
-                    event_payload_json,
-                    source,
-                    model_provider,
-                    model_name,
-                    branch_node_id
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    owner_user_id,
-                    sequence_number,
-                    event_type,
-                    _json_dump(dict(event_payload or {})),
-                    source,
-                    model_provider,
-                    model_name,
-                    branch_node_id,
-                ),
-            )
-            event_id = int(cursor.lastrowid)
 
         event = self.get_event(event_id)
         if event is None:
@@ -580,6 +554,153 @@ class VNPlayRepository:
                     (value, turn_request_id, owner_user_id, owner_user_id),
                 )
         return self.get_turn_request(turn_request_id)
+
+    def record_story_choice_selection(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        turn_request_id: int,
+        client_scene_version: int,
+        selected_choice: Mapping[str, Any],
+        parent_event_id: int | None,
+        branch_label: str | None,
+        branch_path: Sequence[Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        self._ensure_schema_initialized()
+        choice = dict(selected_choice)
+        with self.db.transaction() as conn:
+            branch_cursor = conn.execute(
+                """
+                INSERT INTO vn_play_branches (
+                    session_id,
+                    owner_user_id,
+                    parent_event_id,
+                    branch_label,
+                    branch_path_json
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    parent_event_id,
+                    branch_label,
+                    _json_dump(list(branch_path or [])),
+                ),
+            )
+            branch_id = int(branch_cursor.lastrowid)
+            turn_started_event_id = _insert_event(
+                conn,
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                event_type="turn_started",
+                event_payload={
+                    "turn_request_id": turn_request_id,
+                    "scene_version": client_scene_version,
+                },
+                source="runtime",
+            )
+            choice_selected_event_id = _insert_event(
+                conn,
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                event_type="choice_selected",
+                event_payload={
+                    "schema_version": 1,
+                    "turn_request_id": turn_request_id,
+                    "choice_id": choice.get("id"),
+                    "choice": choice,
+                    "branch_node_id": branch_id,
+                    "scene_version": client_scene_version,
+                },
+                source="user",
+                branch_node_id=branch_id,
+            )
+            turn_cursor = conn.execute(
+                """
+                UPDATE vn_play_turn_requests
+                SET status = ?,
+                    turn_started_event_id = ?,
+                    input_event_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND session_id = ?
+                  AND owner_user_id = ?
+                """,
+                (
+                    "model_calling",
+                    turn_started_event_id,
+                    choice_selected_event_id,
+                    turn_request_id,
+                    session_id,
+                    owner_user_id,
+                ),
+            )
+            if turn_cursor.rowcount != 1:
+                raise RuntimeError("turn_request_not_found")
+            conn.execute(
+                """
+                INSERT INTO vn_play_scene_state (
+                    session_id,
+                    owner_user_id,
+                    last_event_id,
+                    active_branch_node_id,
+                    visible_choices_json,
+                    scene_version
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    owner_user_id = excluded.owner_user_id,
+                    last_event_id = excluded.last_event_id,
+                    active_branch_node_id = excluded.active_branch_node_id,
+                    visible_choices_json = excluded.visible_choices_json,
+                    scene_version = excluded.scene_version,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    choice_selected_event_id,
+                    branch_id,
+                    _json_dump([]),
+                    client_scene_version,
+                ),
+            )
+            branch_row = conn.execute(
+                "SELECT * FROM vn_play_branches WHERE id = ?",
+                (branch_id,),
+            ).fetchone()
+            turn_started_row = conn.execute(
+                "SELECT * FROM vn_play_events WHERE id = ?",
+                (turn_started_event_id,),
+            ).fetchone()
+            choice_selected_row = conn.execute(
+                "SELECT * FROM vn_play_events WHERE id = ?",
+                (choice_selected_event_id,),
+            ).fetchone()
+            scene_state_row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_scene_state
+                WHERE session_id = ? AND owner_user_id = ?
+                """,
+                (session_id, owner_user_id),
+            ).fetchone()
+
+        if (
+            branch_row is None
+            or turn_started_row is None
+            or choice_selected_row is None
+            or scene_state_row is None
+        ):
+            raise RuntimeError("story_choice_selection_not_found")
+        return {
+            "branch": _decode_branch(branch_row),
+            "turn_started": _decode_event(turn_started_row),
+            "choice_selected": _decode_event(choice_selected_row),
+            "scene_state": _decode_scene_state(scene_state_row),
+        }
 
     def set_scene_state(
         self,
@@ -985,6 +1106,57 @@ def _require_sqlite_chacha_db(db: CharactersRAGDB) -> None:
         raise NotImplementedError(
             "VN Play metadata currently supports SQLite ChaChaNotes databases only."
         )
+
+
+def _insert_event(
+    conn: Any,
+    *,
+    session_id: int,
+    owner_user_id: int,
+    event_type: str,
+    event_payload: Mapping[str, Any] | None = None,
+    source: str = "runtime",
+    model_provider: str | None = None,
+    model_name: str | None = None,
+    branch_node_id: int | None = None,
+) -> int:
+    sequence_cursor = conn.execute(
+        """
+        SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next_sequence
+        FROM vn_play_events
+        WHERE session_id = ?
+        """,
+        (session_id,),
+    )
+    sequence_number = int(sequence_cursor.fetchone()["next_sequence"])
+    cursor = conn.execute(
+        """
+        INSERT INTO vn_play_events (
+            session_id,
+            owner_user_id,
+            sequence_number,
+            event_type,
+            event_payload_json,
+            source,
+            model_provider,
+            model_name,
+            branch_node_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            session_id,
+            owner_user_id,
+            sequence_number,
+            event_type,
+            _json_dump(dict(event_payload or {})),
+            source,
+            model_provider,
+            model_name,
+            branch_node_id,
+        ),
+    )
+    return int(cursor.lastrowid)
 
 
 def _mapped_update_values(

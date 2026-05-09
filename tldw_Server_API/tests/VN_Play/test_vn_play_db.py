@@ -158,6 +158,99 @@ def test_scene_branches_and_checkpoints_round_trip_json(chacha_db: CharactersRAG
     assert repo.list_checkpoints(session["id"]) == [checkpoint]
 
 
+def test_record_story_choice_selection_creates_branch_event_turn_and_state(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Door",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    choice_presented = repo.append_event(
+        session_id=session["id"],
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": "Open the door"}],
+            "scene_version": 1,
+        },
+    )
+    repo.set_scene_state(
+        session_id=session["id"],
+        owner_user_id=42,
+        last_event_id=choice_presented["id"],
+        visible_choices=[{"id": "open", "text": "Open the door"}],
+        current_background_item_id=100,
+        current_depth_item_id=101,
+        active_sprite_items=[{"character_id": 1, "item_id": 200}],
+        location_key="hall",
+        mood="curious",
+        time_of_day="night",
+        weather="rain",
+        transcript_cursor=7,
+        scene_version=1,
+        warnings=["low_confidence_asset"],
+    )
+    repo.update_session(session["id"], {"scene_version": 1}, owner_user_id=42)
+    turn = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="choice-1",
+        request_payload_hash="hash-choice-1",
+        base_scene_version=1,
+    )
+
+    result = repo.record_story_choice_selection(
+        session_id=session["id"],
+        owner_user_id=42,
+        turn_request_id=turn["id"],
+        client_scene_version=1,
+        selected_choice={"id": "open", "text": "Open the door"},
+        parent_event_id=choice_presented["id"],
+        branch_label="Open the door",
+        branch_path=[
+            {
+                "schema_version": 1,
+                "type": "choice",
+                "choice_id": "open",
+                "choice_text": "Open the door",
+                "choice_presented_event_id": choice_presented["id"],
+                "scene_version": 1,
+            }
+        ],
+    )
+
+    assert result["branch"]["branch_path"][0]["choice_id"] == "open"
+    assert result["turn_started"]["event_type"] == "turn_started"
+    assert result["choice_selected"]["event_type"] == "choice_selected"
+    assert result["choice_selected"]["branch_node_id"] == result["branch"]["id"]
+
+    state = repo.get_scene_state(session["id"], owner_user_id=42)
+    assert state["last_event_id"] == result["choice_selected"]["id"]
+    assert state["active_branch_node_id"] == result["branch"]["id"]
+    assert state["visible_choices"] == []
+    assert state["current_background_item_id"] == 100
+    assert state["current_depth_item_id"] == 101
+    assert state["active_sprite_items"] == [{"character_id": 1, "item_id": 200}]
+    assert state["location_key"] == "hall"
+    assert state["mood"] == "curious"
+    assert state["time_of_day"] == "night"
+    assert state["weather"] == "rain"
+    assert state["transcript_cursor"] == 7
+    assert state["scene_version"] == 1
+    assert state["warnings"] == ["low_confidence_asset"]
+    assert result["scene_state"] == state
+
+    updated_turn = repo.get_turn_request(turn["id"])
+    assert updated_turn["status"] == "model_calling"
+    assert updated_turn["turn_started_event_id"] == result["turn_started"]["id"]
+    assert updated_turn["input_event_id"] == result["choice_selected"]["id"]
+
+
 def test_ensure_vn_play_tables_preserves_outer_transaction_rollback(
     chacha_db: CharactersRAGDB,
 ) -> None:
