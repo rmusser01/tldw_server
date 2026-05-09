@@ -17,8 +17,10 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_CHOICE_NOT_ALLOWED,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
     ERROR_INVALID_CHOICE_ID,
+    ERROR_RETRY_LAST_TURN_NOT_FAILED,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
+    EVENT_CHOICE_SELECTED,
     EVENT_CHOICE_PRESENTED,
     EVENT_MODEL_TURN,
     EVENT_SCENE_STATE_CHANGED,
@@ -438,21 +440,122 @@ class VNPlayService:
         client_scene_version: int,
         idempotency_key: str,
     ) -> VNPlayTurnResponse:
-        events = list(reversed(self.list_events(session_id)))
-        for event in events:
-            if event.get("event_type") != EVENT_USER_TURN:
-                continue
-            payload = dict(event.get("event_payload") or {})
-            input_payload = dict(payload.get("input") or {})
-            return await self.submit_turn(
-                session_id,
-                input_text=input_payload.get("input_text"),
-                choice_id=input_payload.get("choice_id"),
-                custom_action=input_payload.get("custom_action"),
-                client_scene_version=client_scene_version,
-                idempotency_key=idempotency_key,
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+
+        existing = self.repo.get_turn_request_by_key(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            return self._response_for_existing_turn(
+                existing,
+                str(existing["request_payload_hash"]),
             )
-        raise VNPlayTurnError("retry_last_turn_no_user_turn")
+
+        session = self.get_session(session_id)
+        if session.scene_version != client_scene_version:
+            raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
+        if session.active_turn_request_id is not None:
+            raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+
+        retry_source = self.repo.latest_retryable_turn_request(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if retry_source is None:
+            raise VNPlayTurnError(ERROR_RETRY_LAST_TURN_NOT_FAILED)
+        source_event = self.repo.get_event(int(retry_source["input_event_id"]))
+        if source_event is None:
+            raise VNPlayTurnError(ERROR_RETRY_LAST_TURN_NOT_FAILED)
+        input_payload = _retry_input_payload_from_event(source_event)
+        request_payload_hash = _payload_hash(
+            {
+                "session_id": session_id,
+                "retry_of_turn_request_id": int(retry_source["id"]),
+                "retry_source_event_id": int(source_event["id"]),
+                "input": input_payload,
+            }
+        )
+
+        turn_request = self.repo.create_turn_request(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+            base_scene_version=client_scene_version,
+            status=TURN_STATUS_PENDING,
+        )
+        lock_acquired = self.repo.try_acquire_turn_lock(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            turn_request_id=int(turn_request["id"]),
+            expected_scene_version=client_scene_version,
+        )
+        if not lock_acquired:
+            return self._abandon_conflicting_turn(turn_request, session_id)
+
+        turn_started = self.repo.append_event(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            event_type=EVENT_TURN_STARTED,
+            event_payload={
+                "turn_request_id": int(turn_request["id"]),
+                "retry_of_turn_request_id": int(retry_source["id"]),
+                "retry_source_event_id": int(source_event["id"]),
+                "scene_version": client_scene_version,
+            },
+            source="runtime",
+        )
+        self.repo.update_turn_request(
+            int(turn_request["id"]),
+            {
+                "status": TURN_STATUS_MODEL_CALLING,
+                "turn_started_event_id": turn_started["id"],
+                "input_event_id": source_event["id"],
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        scene_state = derive_scene_state(self.repo.list_events(session_id))
+        context = VNPlayTurnContext(
+            session=session,
+            input_payload=input_payload,
+            scene_state=scene_state,
+            recent_events=self.repo.list_events(session_id, limit=50),
+            turn_request_id=int(turn_request["id"]),
+        )
+
+        try:
+            result = coerce_turn_result(await self.adapter.generate_turn(context))
+        except VNPlayParseError as exc:
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_PARSE_FAILED,
+                error_message=str(exc),
+                client_scene_version=client_scene_version,
+                event_type=EVENT_MODEL_TURN_PARSE_FAILED,
+            )
+            raise VNPlayTurnError(TURN_STATUS_PARSE_FAILED) from exc
+        except Exception as exc:
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_MODEL_FAILED,
+                error_message=str(exc),
+                client_scene_version=client_scene_version,
+            )
+            raise VNPlayTurnError(TURN_STATUS_MODEL_FAILED) from exc
+
+        return self._complete_turn(
+            session=session,
+            session_id=session_id,
+            turn_request_id=int(turn_request["id"]),
+            prior_events=[turn_started],
+            result=result,
+            next_scene_version=client_scene_version + 1,
+        )
 
     def list_events(self, session_id: int) -> list[dict[str, Any]]:
         self.get_session(session_id)
@@ -1080,6 +1183,34 @@ def _normalize_input_payload(
     if choice_id is not None:
         return {"choice_id": choice_id}
     return {"custom_action": dict(custom_action or {})}
+
+
+def _retry_input_payload_from_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Rebuild adapter input from the persisted event accepted by the failed turn."""
+    payload = event.get("event_payload")
+    if not isinstance(payload, Mapping):
+        raise VNPlayTurnError(ERROR_RETRY_LAST_TURN_NOT_FAILED)
+
+    event_type = event.get("event_type")
+    if event_type == EVENT_CHOICE_SELECTED:
+        choice_id = payload.get("choice_id")
+        if choice_id is None:
+            raise VNPlayTurnError(ERROR_RETRY_LAST_TURN_NOT_FAILED)
+        retry_payload: dict[str, Any] = {"choice_id": str(choice_id)}
+        choice = payload.get("choice")
+        if isinstance(choice, Mapping):
+            retry_payload["choice"] = dict(choice)
+        branch_node_id = payload.get("branch_node_id", event.get("branch_node_id"))
+        if branch_node_id is not None:
+            retry_payload["branch_node_id"] = branch_node_id
+        return retry_payload
+
+    if event_type == EVENT_USER_TURN:
+        input_payload = payload.get("input")
+        if isinstance(input_payload, Mapping):
+            return dict(input_payload)
+
+    raise VNPlayTurnError(ERROR_RETRY_LAST_TURN_NOT_FAILED)
 
 
 def _visual_asset_type(

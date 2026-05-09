@@ -140,6 +140,11 @@ class CountingStoryAdapter:
         return TurnResult(narrative_text="Unused")
 
 
+class FailingStoryAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        raise RuntimeError("story provider unavailable")
+
+
 def create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
     character_id = chacha_db.add_character_card(
         {
@@ -447,6 +452,76 @@ def test_parent_choice_lookup_stays_within_restore_and_scene_state_window() -> N
     assert _parent_choice_event_id(events, 3, "open") == 3
     assert _parent_choice_event_id(events, 3, "stale") is None
     assert _parent_choice_event_id(events, 3, "future") is None
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_story_choice_reuses_original_branch(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    failing = VNPlayService(repo=repo, owner_user_id=42, adapter=FailingStoryAdapter())
+    session = create_story_session_with_visible_choice(failing, repo)
+
+    with pytest.raises(VNPlayTurnError, match="model_failed"):
+        await failing.submit_turn(
+            session.id,
+            choice_id="open",
+            client_scene_version=1,
+            idempotency_key="story-fail-1",
+        )
+
+    branches_before = failing.list_branches(session.id)
+    retry_adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    retrying = VNPlayService(repo=repo, owner_user_id=42, adapter=retry_adapter)
+
+    response = await retrying.retry_last_turn(
+        session.id,
+        client_scene_version=1,
+        idempotency_key="story-retry-1",
+    )
+
+    assert response.status == "completed"
+    assert retrying.list_branches(session.id) == branches_before
+    events = retrying.list_events(session.id)
+    assert [event["event_type"] for event in events].count("choice_selected") == 1
+    assert retry_adapter.seen_contexts[0].input_payload["choice_id"] == "open"
+    assert (
+        retry_adapter.seen_contexts[0].input_payload["branch_node_id"]
+        == branches_before[0]["id"]
+    )
+
+    with pytest.raises(VNPlayTurnError, match="retry_last_turn_not_failed"):
+        await retrying.retry_last_turn(
+            session.id,
+            client_scene_version=2,
+            idempotency_key="story-retry-after-success",
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_completed_story_choice_is_not_failed(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-choice-completed",
+    )
+
+    with pytest.raises(VNPlayTurnError, match="retry_last_turn_not_failed"):
+        await service.retry_last_turn(
+            session.id,
+            client_scene_version=2,
+            idempotency_key="retry-completed",
+        )
 
 
 @pytest.mark.asyncio

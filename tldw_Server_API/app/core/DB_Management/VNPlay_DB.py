@@ -530,6 +530,38 @@ class VNPlayRepository:
         row = cursor.fetchone()
         return _decode_turn_request(row) if row is not None else None
 
+    def latest_retryable_turn_request(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+    ) -> dict[str, Any] | None:
+        """Return the newest input-bearing turn request only if it is retryable."""
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_turn_requests
+            WHERE session_id = ?
+              AND owner_user_id = ?
+              AND input_event_id IS NOT NULL
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (session_id, owner_user_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        turn_request = _decode_turn_request(row)
+        if turn_request["status"] not in {
+            "model_failed",
+            "parse_failed",
+            "abandoned",
+        }:
+            return None
+        return turn_request
+
     def update_turn_request(
         self,
         turn_request_id: int,
