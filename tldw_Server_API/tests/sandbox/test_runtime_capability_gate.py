@@ -116,6 +116,21 @@ def _runtime_reason_details_contract_is_documented(text: str) -> bool:
     )
 
 
+def _session_contract_gap_is_documented(text: str) -> bool:
+    current_gaps = _markdown_section(text, "Current Gaps")
+    has_portable_gate = re.search(
+        r"\bportable\b.*\bsession[- ]contract\b.*\bgate\b",
+        current_gaps,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    has_host_gated_recovery_gap = re.search(
+        r"\bhost[- ]gated\b.*\brecovery\b",
+        current_gaps,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return bool(has_portable_gate and has_host_gated_recovery_gap)
+
+
 def test_portable_runtime_capability_gate_covers_all_runtime_discovery_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -199,7 +214,10 @@ def test_portable_session_contract_gate_projects_to_admin_diagnostics(
         expected_repair_supported = contract.repair_state in {"supported", "host_gated"}
 
         assert row.session_contract.reuse_model == contract.reuse_model
-        assert row.session_contract.requires_live_health_check is contract.requires_live_health_check
+        assert (
+            row.session_contract.requires_live_health_check
+            is contract.requires_live_health_check
+        )
         assert item["session_reuse_model"] == contract.reuse_model
         assert item["requires_live_health_check"] is contract.requires_live_health_check
         assert item["repair_supported"] is expected_repair_supported
@@ -272,9 +290,12 @@ def test_inventory_documents_portable_session_contract_gate_scope(
     text = inventory.read_text(encoding="utf-8")
     current_gaps = _markdown_section(text, "Current Gaps")
 
-    assert "beyond the discovery-level `session_contract`" not in current_gaps
-    assert "portable session-contract gate" in current_gaps
-    assert "host-gated recovery" in current_gaps
+    assert not re.search(
+        r"\bincomplete\b.*\bbeyond\b.*\bdiscovery[- ]level\b.*`?session_contract`?",
+        current_gaps,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    assert _session_contract_gap_is_documented(text)
 
 
 def test_inventory_documents_status_reason_details_metadata(

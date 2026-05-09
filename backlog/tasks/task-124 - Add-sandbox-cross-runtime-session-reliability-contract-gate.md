@@ -4,7 +4,7 @@ title: Add sandbox cross-runtime session reliability contract gate
 status: In Progress
 assignee: []
 created_date: '2026-05-08 19:35'
-updated_date: '2026-05-08 19:37'
+updated_date: '2026-05-09 00:16'
 labels:
   - sandbox
   - runtime-reliability
@@ -37,17 +37,29 @@ Add a narrow Phase 4 sandbox reliability slice that turns the current session_co
 <!-- SECTION:NOTES:BEGIN -->
 Plan/design review: kept the slice contract-only. The implementation does not generalize repair, add warm reuse to host-local runtimes, change helper behavior, or change runtime execution/admission.
 
-RED: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q` failed on `test_inventory_documents_portable_session_contract_gate_scope` because the inventory still claimed session behavior tests were incomplete beyond discovery-level `session_contract`.
+RED: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q` failed on `test_inventory_documents_portable_session_contract_gate_scope` because the inventory still claimed session behavior tests were incomplete beyond discovery-level `session_contract`.
 
-GREEN: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q` passed with 8 tests.
+GREEN: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q` passed with 8 tests.
 
-Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py -q` passed with 36 tests.
+Verification: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py -q` passed with 36 tests.
 
-Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed.
+Verification: `python -m py_compile tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed.
 
-Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -s B101 -f json -o /tmp/bandit_sandbox_session_contract_gate_tests.json` reported zero findings after excluding pytest assert-use noise.
+Verification: `python -m bandit -r tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -s B101 -f json -o /tmp/bandit_sandbox_session_contract_gate_tests.json` reported zero findings after excluding pytest assert-use noise.
 
 Verification: `git diff --check` passed.
+
+PR review fixes: wrapped the overlong session-contract assertion, replaced exact docs-prose checks with case-insensitive semantic regexes, and changed task verification snippets from local absolute interpreter paths to portable `python -m ...` commands.
+
+Review verification: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py -q` passed with 36 tests.
+
+Review verification: `python -m py_compile tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed.
+
+Review verification: `python -m ruff check tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py` passed.
+
+Review verification: `python -m bandit -r tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -s B101 -f json -o /tmp/bandit_sandbox_session_contract_gate_tests_review_fixes.json` reported zero findings after excluding pytest assert-use noise.
+
+Review verification: `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
