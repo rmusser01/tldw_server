@@ -577,7 +577,7 @@ git commit -m "Make VN Play story choice retry branch-safe"
 - Modify: `Docs/API-related/VN_PLAY_API.md`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 In `test_vn_play_api.py`, add tests for:
 
@@ -588,7 +588,7 @@ In `test_vn_play_api.py`, add tests for:
 
 Use the existing TestClient fixture and direct `VNPlayService` setup where necessary to seed a Story session with visible choices.
 
-- [ ] **Step 2: Run API tests and verify failures**
+- [x] **Step 2: Run API tests and verify failures**
 
 Run:
 
@@ -604,11 +604,11 @@ python -m pytest \
 
 Expected: fail until endpoint-visible behavior and docs are updated.
 
-- [ ] **Step 3: Adjust endpoint error imports if needed**
+- [x] **Step 3: Adjust endpoint error imports if needed**
 
 `_http_error_for_service_exception()` already returns HTTP 400 for generic `VNPlayTurnError`, which is correct for `choice_not_allowed`, `invalid_choice_id`, and `retry_last_turn_not_failed`. Only import constants into `vn_play.py` if tests or schema documentation require explicit mapping.
 
-- [ ] **Step 4: Update API docs**
+- [x] **Step 4: Update API docs**
 
 In `Docs/API-related/VN_PLAY_API.md`, document:
 
@@ -619,7 +619,7 @@ In `Docs/API-related/VN_PLAY_API.md`, document:
 - `invalid_choice_id`, `choice_not_allowed`, and `retry_last_turn_not_failed`.
 - Failure-only retry semantics.
 
-- [ ] **Step 5: Run API tests**
+- [x] **Step 5: Run API tests**
 
 Run:
 
@@ -630,7 +630,7 @@ python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q
 
 Expected: all VN Play API tests pass.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 Run:
 
