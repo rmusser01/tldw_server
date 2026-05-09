@@ -97,6 +97,34 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("flags mixed bespoke recovery markup with a nested RecoveryCallout", () => {
+    const findings = analyze(
+      "src/components/Common/MixedRecoveryBanner.tsx",
+      `
+        import { RecoveryCallout } from "@/components/ui/state"
+
+        export function MixedRecoveryBanner() {
+          return (
+            <div className="rounded border p-3">
+              <p>Disconnected from backend</p>
+              <RecoveryCallout
+                state="unavailable"
+                title="Can't reach your tldw server"
+              />
+            </div>
+          )
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-recovery-banner",
+        subject: "MixedRecoveryBanner"
+      })
+    )
+  })
+
   it("flags local empty, loading, and status wrappers", () => {
     const findings = [
       ...analyze(

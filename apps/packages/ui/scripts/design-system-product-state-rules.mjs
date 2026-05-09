@@ -492,7 +492,7 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
   )
 
   return {
-    recoveryStateOwners: collectReturnedJsxTreeTagOwners(
+    recoveryStateOwners: collectReturnedJsxBoundaryTagOwners(
       sourceFile,
       imports.recoveryState,
       fileSubject
@@ -757,6 +757,34 @@ function collectReturnedJsxTreeTagOwners(sourceFile, localNames, fallbackOwner) 
   return owners
 }
 
+function collectReturnedJsxBoundaryTagOwners(sourceFile, localNames, fallbackOwner) {
+  const owners = new Set()
+
+  if (!localNames || localNames.size === 0) {
+    return owners
+  }
+
+  walk(sourceFile, (node) => {
+    if (!isFunctionLikeNode(node)) {
+      return
+    }
+
+    const ownerName = returnedJsxOwnerName(node, fallbackOwner)
+    if (!ownerName) {
+      return
+    }
+
+    const returnsMatchingTag = collectOwnReturnExpressions(node).some(
+      (expression) => returnedExpressionHasJsxBoundaryTag(expression, localNames)
+    )
+    if (returnsMatchingTag) {
+      owners.add(ownerName)
+    }
+  })
+
+  return owners
+}
+
 function returnedJsxOwnerName(functionNode, fallbackOwner) {
   if (functionNode.name && ts.isIdentifier(functionNode.name)) {
     return functionNode.name.text
@@ -903,6 +931,56 @@ function returnedExpressionContainsJsxTag(expression, localNames) {
 
   visit(unwrapped)
   return found
+}
+
+function returnedExpressionHasJsxBoundaryTag(expression, localNames) {
+  const unwrapped = unwrapReturnedExpression(expression)
+
+  if (ts.isConditionalExpression(unwrapped)) {
+    return (
+      returnedExpressionHasJsxBoundaryTag(unwrapped.whenTrue, localNames) ||
+      returnedExpressionHasJsxBoundaryTag(unwrapped.whenFalse, localNames)
+    )
+  }
+
+  if (jsxNodeMatchesTag(unwrapped, localNames)) {
+    return true
+  }
+
+  const children = substantiveJsxChildren(unwrapped)
+  return children.length === 1 && jsxNodeMatchesTag(children[0], localNames)
+}
+
+function jsxNodeMatchesTag(node, localNames) {
+  if (ts.isJsxSelfClosingElement(node)) {
+    const localName = jsxTagName(node.tagName)
+    return Boolean(localName && localNames.has(localName))
+  }
+
+  if (ts.isJsxElement(node)) {
+    const localName = jsxTagName(node.openingElement.tagName)
+    return Boolean(localName && localNames.has(localName))
+  }
+
+  return false
+}
+
+function substantiveJsxChildren(node) {
+  if (!ts.isJsxElement(node) && !ts.isJsxFragment(node)) {
+    return []
+  }
+
+  return node.children.filter((child) => {
+    if (ts.isJsxText(child)) {
+      return child.text.trim().length > 0
+    }
+
+    if (ts.isJsxExpression(child)) {
+      return Boolean(child.expression)
+    }
+
+    return true
+  })
 }
 
 function isReturnedCollectionRenderCallback(functionNode) {
