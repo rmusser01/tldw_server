@@ -1046,9 +1046,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         {!loading && !packs.length ? (
           <div
             data-testid="persona-visual-pack-empty"
-            className="mt-3 rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted"
+            className="mt-3 rounded border border-dashed border-border bg-bg px-3 py-3 text-xs text-text-muted"
           >
-            No visual packs yet.
+            <div className="font-medium text-text">
+              {selectedPersonaName || selectedPersonaId}
+              {"'s Persona Buddy does not have a visual pack yet."}
+            </div>
+            <div className="mt-1">
+              Create a draft visual pack first.
+            </div>
+            <div className="mt-1">
+              After a draft exists, upload frames, map states, import or export
+              packs, queue generation, review candidates, and activate a valid pack.
+            </div>
           </div>
         ) : null}
         {selectedPack ? (
