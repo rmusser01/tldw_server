@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any
 
@@ -8,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play import adapters as vn_play_adapters
+from tldw_Server_API.app.core.VN_Play.constants import STORY_BRANCH_LABEL_MAX_LENGTH
 from tldw_Server_API.app.core.VN_Play.models import (
     SceneState,
     TurnResult,
@@ -21,6 +23,7 @@ from tldw_Server_API.app.core.VN_Play.service import (
     VNPlaySession,
     VNPlayTurnContext,
     VNPlayTurnError,
+    _parent_choice_event_id,
 )
 
 
@@ -105,6 +108,45 @@ class MissingVisualDirectiveAdapter:
         )
 
 
+class InspectingStoryAdapter:
+    def __init__(self, repo: VNPlayRepository, owner_user_id: int) -> None:
+        self.repo = repo
+        self.owner_user_id = owner_user_id
+        self.seen_contexts: list[VNPlayTurnContext] = []
+
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        self.seen_contexts.append(context)
+        persisted = self.repo.get_scene_state(
+            context.session.id,
+            owner_user_id=self.owner_user_id,
+        )
+        assert persisted is not None
+        assert persisted["active_branch_node_id"] is not None
+        assert persisted["visible_choices"] == []
+        return TurnResult(
+            narrative_text="The door opens.",
+            dialogue=[{"speaker": "Narrator", "text": "The door opens."}],
+            choices=[
+                {"id": "inside", "text": "Step inside"},
+                {"id": "wait", "text": "Wait outside"},
+            ],
+        )
+
+
+class CountingStoryAdapter:
+    def __init__(self) -> None:
+        self.seen_contexts: list[VNPlayTurnContext] = []
+
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        self.seen_contexts.append(context)
+        return TurnResult(narrative_text="Unused")
+
+
+class FailingStoryAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        raise RuntimeError("story provider unavailable")
+
+
 def create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
     character_id = chacha_db.add_character_card(
         {
@@ -154,6 +196,42 @@ def create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
     )
 
 
+def create_story_session_with_visible_choice(
+    service: VNPlayService,
+    repo: VNPlayRepository,
+    *,
+    choice_text: str = "Open the door",
+) -> VNPlaySession:
+    session = service.create_session(
+        mode="story",
+        title="Door",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-story",
+        settings={},
+    )
+    choice_presented = repo.append_event(
+        session_id=session.id,
+        owner_user_id=42,
+        event_type="choice_presented",
+        event_payload={
+            "choices": [{"id": "open", "text": choice_text}],
+            "scene_version": 1,
+        },
+        source="runtime",
+    )
+    repo.set_scene_state(
+        session_id=session.id,
+        owner_user_id=42,
+        last_event_id=int(choice_presented["id"]),
+        visible_choices=[{"id": "open", "text": choice_text}],
+        scene_version=1,
+    )
+    repo.update_session(session.id, {"scene_version": 1}, owner_user_id=42)
+    return service.get_session(session.id)
+
+
 @pytest.fixture
 def ready_session(service: VNPlayService):
     return service.create_session(
@@ -178,6 +256,361 @@ def failing_ready_session(service_with_failing_adapter: VNPlayService):
         seed="seed-1",
         settings={},
     )
+
+
+@pytest.mark.asyncio
+async def test_story_choice_creates_branch_and_choice_selected_before_model(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+
+    response = await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-choice-1",
+    )
+
+    event_types = [event["event_type"] for event in response.events]
+    assert event_types[:2] == ["turn_started", "choice_selected"]
+    assert adapter.seen_contexts[0].scene_state.active_branch_node_id is not None
+    assert adapter.seen_contexts[0].input_payload == {
+        "choice_id": "open",
+        "choice": {"id": "open", "text": "Open the door"},
+    }
+
+    branches = service.list_branches(session.id)
+    assert len(branches) == 1
+    assert branches[0]["branch_path"][0]["choice_id"] == "open"
+
+    state = repo.get_scene_state(session.id, owner_user_id=42)
+    assert state is not None
+    assert state["active_branch_node_id"] == branches[0]["id"]
+    assert state["visible_choices"] == [
+        {"id": "inside", "text": "Step inside"},
+        {"id": "wait", "text": "Wait outside"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_story_choice_branch_labels_are_bounded(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=DeterministicVNPlayTurnAdapter(),
+    )
+    long_choice_text = "Open " + ("the sealed archive door " * 20)
+    session = create_story_session_with_visible_choice(
+        service,
+        repo,
+        choice_text=long_choice_text,
+    )
+
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-choice-long-label",
+    )
+
+    branch = service.list_branches(session.id)[0]
+    expected_label = long_choice_text[:STORY_BRANCH_LABEL_MAX_LENGTH]
+    assert branch["branch_label"] == expected_label
+    assert branch["branch_path"][0]["choice_text"] == expected_label
+
+
+@pytest.mark.asyncio
+async def test_freeform_turn_defers_full_event_history_until_after_input_events(
+    service: VNPlayService,
+    ready_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_list_events = service.repo.list_events
+    unbounded_event_counts: list[int] = []
+
+    def tracking_list_events(
+        session_id: int,
+        *,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if after_sequence is None and limit is None:
+            cursor = service.repo.db.execute_query(
+                "SELECT COUNT(*) AS count FROM vn_play_events WHERE session_id = ?",
+                (session_id,),
+            )
+            unbounded_event_counts.append(int(cursor.fetchone()["count"]))
+        return original_list_events(
+            session_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
+    monkeypatch.setattr(service.repo, "list_events", tracking_list_events)
+
+    await service.submit_turn(
+        ready_session.id,
+        input_text="Look around",
+        client_scene_version=0,
+        idempotency_key="freeform-query-deferral",
+    )
+
+    assert unbounded_event_counts
+    assert unbounded_event_counts[0] >= 3
+
+
+def test_story_choice_repository_signature_keeps_required_params_first() -> None:
+    parameters = list(
+        inspect.signature(
+            VNPlayRepository.record_story_choice_selection,
+        ).parameters
+    )
+
+    assert parameters.index("branch_label") < parameters.index(
+        "expected_scene_last_event_id"
+    )
+    assert parameters.index("branch_path") < parameters.index(
+        "expected_scene_last_event_id"
+    )
+
+
+@pytest.mark.asyncio
+async def test_story_unknown_choice_id_fails_before_model(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+
+    with pytest.raises(VNPlayTurnError, match="invalid_choice_id"):
+        await service.submit_turn(
+            session.id,
+            choice_id="locked",
+            client_scene_version=1,
+            idempotency_key="story-choice-invalid",
+        )
+
+    assert adapter.seen_contexts == []
+
+
+@pytest.mark.asyncio
+async def test_freeform_choice_id_is_not_allowed(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    with pytest.raises(VNPlayTurnError, match="choice_not_allowed"):
+        await service.submit_turn(
+            ready_session.id,
+            choice_id="open",
+            client_scene_version=0,
+            idempotency_key="freeform-choice",
+        )
+
+
+@pytest.mark.asyncio
+async def test_story_input_text_is_not_allowed(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+
+    with pytest.raises(VNPlayTurnError, match="choice_not_allowed"):
+        await service.submit_turn(
+            session.id,
+            input_text="Open the door",
+            client_scene_version=1,
+            idempotency_key="story-input-text",
+        )
+
+    assert adapter.seen_contexts == []
+
+
+@pytest.mark.asyncio
+async def test_story_custom_action_remains_non_branching(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=DeterministicVNPlayTurnAdapter(),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+
+    response = await service.submit_turn(
+        session.id,
+        custom_action={"verb": "inspect", "target": "door"},
+        client_scene_version=1,
+        idempotency_key="story-custom-action",
+    )
+
+    event_types = [event["event_type"] for event in response.events]
+    assert event_types[:2] == ["turn_started", "user_turn"]
+    assert "choice_selected" not in event_types
+    assert service.list_branches(session.id) == []
+
+
+@pytest.mark.asyncio
+async def test_story_choice_disappearing_after_validation_fails_before_model(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    adapter = CountingStoryAdapter()
+    service = VNPlayService(repo=repo, owner_user_id=42, adapter=adapter)
+    session = create_story_session_with_visible_choice(service, repo)
+    original_try_acquire = repo.try_acquire_turn_lock
+
+    def acquire_and_hide_choice(*args: Any, **kwargs: Any) -> bool:
+        acquired = original_try_acquire(*args, **kwargs)
+        if acquired:
+            state = repo.get_scene_state(session.id, owner_user_id=42)
+            assert state is not None
+            repo.set_scene_state(
+                session_id=session.id,
+                owner_user_id=42,
+                last_event_id=state["last_event_id"],
+                visible_choices=[],
+                scene_version=state["scene_version"],
+            )
+        return acquired
+
+    monkeypatch.setattr(repo, "try_acquire_turn_lock", acquire_and_hide_choice)
+
+    with pytest.raises(VNPlayTurnError, match="invalid_choice_id"):
+        await service.submit_turn(
+            session.id,
+            choice_id="open",
+            client_scene_version=1,
+            idempotency_key="story-choice-hidden",
+        )
+
+    assert adapter.seen_contexts == []
+    assert service.list_branches(session.id) == []
+    event_types = [event["event_type"] for event in repo.list_events(session.id)]
+    assert "turn_started" not in event_types
+    assert "choice_selected" not in event_types
+    assert service.get_session(session.id).active_turn_request_id is None
+    turn = repo.get_turn_request_by_key(
+        session_id=session.id,
+        owner_user_id=42,
+        idempotency_key="story-choice-hidden",
+    )
+    assert turn is not None
+    assert turn["status"] == "abandoned"
+    assert turn["error"]["code"] == "invalid_choice_id"
+
+
+def test_parent_choice_lookup_stays_within_restore_and_scene_state_window() -> None:
+    events = [
+        {
+            "id": 1,
+            "sequence_number": 1,
+            "event_type": "choice_presented",
+            "event_payload": {"choices": [{"id": "stale", "text": "Old door"}]},
+        },
+        {
+            "id": 2,
+            "sequence_number": 2,
+            "event_type": "session_restored",
+            "event_payload": {"scene_version": 1},
+        },
+        {
+            "id": 3,
+            "sequence_number": 3,
+            "event_type": "choice_presented",
+            "event_payload": {"choices": [{"id": "open", "text": "Open"}]},
+        },
+        {
+            "id": 4,
+            "sequence_number": 4,
+            "event_type": "choice_presented",
+            "event_payload": {"choices": [{"id": "future", "text": "Future"}]},
+        },
+    ]
+
+    assert _parent_choice_event_id(events, 3, "open") == 3
+    assert _parent_choice_event_id(events, 3, "stale") is None
+    assert _parent_choice_event_id(events, 3, "future") is None
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_story_choice_reuses_original_branch(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    failing = VNPlayService(repo=repo, owner_user_id=42, adapter=FailingStoryAdapter())
+    session = create_story_session_with_visible_choice(failing, repo)
+
+    with pytest.raises(VNPlayTurnError, match="model_failed"):
+        await failing.submit_turn(
+            session.id,
+            choice_id="open",
+            client_scene_version=1,
+            idempotency_key="story-fail-1",
+        )
+
+    branches_before = failing.list_branches(session.id)
+    retry_adapter = InspectingStoryAdapter(repo, owner_user_id=42)
+    retrying = VNPlayService(repo=repo, owner_user_id=42, adapter=retry_adapter)
+
+    response = await retrying.retry_last_turn(
+        session.id,
+        client_scene_version=1,
+        idempotency_key="story-retry-1",
+    )
+
+    assert response.status == "completed"
+    assert retrying.list_branches(session.id) == branches_before
+    events = retrying.list_events(session.id)
+    assert [event["event_type"] for event in events].count("choice_selected") == 1
+    assert retry_adapter.seen_contexts[0].input_payload["choice_id"] == "open"
+    assert (
+        retry_adapter.seen_contexts[0].input_payload["branch_node_id"]
+        == branches_before[0]["id"]
+    )
+
+    with pytest.raises(VNPlayTurnError, match="retry_last_turn_not_failed"):
+        await retrying.retry_last_turn(
+            session.id,
+            client_scene_version=2,
+            idempotency_key="story-retry-after-success",
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_completed_story_choice_is_not_failed(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-choice-completed",
+    )
+
+    with pytest.raises(VNPlayTurnError, match="retry_last_turn_not_failed"):
+        await service.retry_last_turn(
+            session.id,
+            client_scene_version=2,
+            idempotency_key="retry-completed",
+        )
 
 
 @pytest.mark.asyncio

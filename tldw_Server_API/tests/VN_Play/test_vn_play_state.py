@@ -79,12 +79,17 @@ def test_replay_replaces_visible_choices_after_selection() -> None:
             },
             {
                 "event_type": "choice_selected",
-                "event_payload": {"choice_id": "b", "scene_version": 3},
+                "event_payload": {
+                    "choice_id": "b",
+                    "branch_node_id": 12,
+                    "scene_version": 3,
+                },
             },
         ]
     )
 
     assert state.visible_choices == []
+    assert state.active_branch_node_id == 12
     assert state.scene_version == 3
 
 
