@@ -755,12 +755,23 @@ describe("VisualPackEditor", () => {
       assets: visualAssets,
       version: 3
     }
+    const importedPack = {
+      id: "pack-imported",
+      persona_id: "persona-1",
+      title: "Imported Visuals",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 1
+    }
+    let importCommitted = false
 
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
       const method = init?.method || "GET"
       calls.push(`${method} ${path}`)
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
-        return okResponse([pack])
+        return okResponse(importCommitted ? [pack, importedPack] : [pack])
       }
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
@@ -811,6 +822,43 @@ describe("VisualPackEditor", () => {
           quota_estimate: { asset_bytes: 512 },
           required_choices: [],
           target_warnings: ["Review target persona before import"]
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
+        method === "POST"
+      ) {
+        expect(parseJsonBody(init?.body)).toMatchObject({
+          trust_mode: "untrusted_import",
+          target_mode: "create_new"
+        })
+        return okResponse({
+          job_id: "import-job-1",
+          portability_job_id: "portability-import-1",
+          operation: "import_commit",
+          preview_id: "preview-1",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/imports/import-job-1" &&
+        method === "GET"
+      ) {
+        importCommitted = true
+        return okResponse({
+          job_id: "import-job-1",
+          portability_job_id: "portability-import-1",
+          operation: "import_commit",
+          persona_id: "persona-1",
+          pack_id: "pack-imported",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          progress: { asset_count: 2 },
+          warnings: []
         })
       }
       return Promise.resolve({
@@ -867,6 +915,32 @@ describe("VisualPackEditor", () => {
     )
     expect(screen.getByTestId("persona-visual-import-preview-plan")).toHaveTextContent(
       "create_new"
+    )
+
+    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeEnabled()
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-import-commit-stage")).toHaveTextContent(
+      "queued"
+    )
+    expect(screen.getByTestId("persona-visual-import-commit-job-id")).toHaveTextContent(
+      "import-job-1"
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveTextContent(
+        "Imported Visuals"
+      )
     )
     expect(
       calls.some((call) => call.includes("/activate") || call.includes("/manifest"))

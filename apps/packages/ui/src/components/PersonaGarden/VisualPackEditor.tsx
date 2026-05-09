@@ -21,12 +21,14 @@ import {
   createPersonaVisualPack,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
+  getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
   listPersonaVisualCandidates,
   listPersonaVisualPacks,
   PersonaVisualApiError,
   reviewPersonaVisualCandidate,
+  startPersonaVisualImportCommit,
   startPersonaVisualPackExport,
   updatePersonaVisualManifest,
   uploadPersonaVisualAsset
@@ -37,6 +39,7 @@ import type {
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
   PersonaVisualCandidate,
+  PersonaVisualImportCommitStartResponse,
   PersonaVisualFrame,
   PersonaVisualImportPreviewResponse,
   PersonaVisualImportPreviewStartResponse,
@@ -298,8 +301,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [importPreview, setImportPreview] = React.useState<
     PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
   >(null)
+  const [importCommitJob, setImportCommitJob] = React.useState<
+    PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null
+  >(null)
   const [previewingImport, setPreviewingImport] = React.useState(false)
   const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
+  const [committingImport, setCommittingImport] = React.useState(false)
+  const [refreshingImportCommit, setRefreshingImportCommit] = React.useState(false)
   const [triggerDraft, setTriggerDraft] =
     React.useState<TriggerDraft>(DEFAULT_TRIGGER_DRAFT)
   const [loading, setLoading] = React.useState(false)
@@ -436,6 +444,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     setExportJob(null)
     setImportPreview(null)
+    setImportCommitJob(null)
     setSelectedImportPreviewFile(null)
     if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
   }, [selectedPersonaId, selectedPack?.id])
@@ -589,6 +598,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         selectedImportPreviewFile
       )
       setImportPreview(preview)
+      setImportCommitJob(null)
       setSelectedImportPreviewFile(null)
       if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
       setStatusMessage("Import preview queued.")
@@ -621,6 +631,62 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setRefreshingImportPreview(false)
+    }
+  }
+
+  const handleStartImportCommit = async () => {
+    if (!selectedPersonaId || !fullImportPreview?.preview_id) return
+    if (fullImportPreview.status !== "completed") return
+    setCommittingImport(true)
+    setError(null)
+    try {
+      const job = await startPersonaVisualImportCommit(
+        selectedPersonaId,
+        fullImportPreview.preview_id,
+        {
+          trust_mode: "untrusted_import",
+          target_mode: "create_new"
+        }
+      )
+      setImportCommitJob(job)
+      setStatusMessage(
+        "Import commit queued. Imported packs remain drafts until activated."
+      )
+    } catch (commitError) {
+      setError(
+        commitError instanceof Error
+          ? commitError.message
+          : "Failed to queue visual pack import commit."
+      )
+    } finally {
+      setCommittingImport(false)
+    }
+  }
+
+  const handleRefreshImportCommit = async () => {
+    if (!selectedPersonaId || !importCommitJob?.job_id) return
+    setRefreshingImportCommit(true)
+    setError(null)
+    try {
+      const job = await getPersonaVisualImportCommitStatus(
+        selectedPersonaId,
+        importCommitJob.job_id
+      )
+      setImportCommitJob(job)
+      if (job.status === "completed" && job.pack_id) {
+        await loadPacks()
+        setStatusMessage(
+          "Import commit completed. Review and activate the new draft when ready."
+        )
+      }
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Failed to refresh visual pack import commit."
+      )
+    } finally {
+      setRefreshingImportCommit(false)
     }
   }
 
@@ -982,6 +1048,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     : []
   const importPreviewConflicts = fullImportPreview?.conflicts || []
   const importPreviewPlan = fullImportPreview?.proposed_plan || null
+  const canCommitImportPreview = fullImportPreview?.status === "completed"
 
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
@@ -1265,6 +1332,58 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     {importPreviewPlan ? (
                       <div data-testid="persona-visual-import-preview-plan">
                         {stringifyPreviewValue(importPreviewPlan)}
+                      </div>
+                    ) : null}
+                    {canCommitImportPreview ? (
+                      <div className="mt-2 border-t border-border pt-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-medium text-text">
+                            Commit reviewed import
+                          </div>
+                          <Tag>creates draft</Tag>
+                        </div>
+                        <div className="mt-1 text-text-muted">
+                          Commit creates a new draft pack. Activation remains separate.
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Button
+                            data-testid="persona-visual-import-commit-button"
+                            size="small"
+                            icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                            loading={committingImport}
+                            disabled={Boolean(importCommitJob?.job_id)}
+                            onClick={() => void handleStartImportCommit()}
+                          >
+                            Commit as draft
+                          </Button>
+                          <Button
+                            data-testid="persona-visual-import-commit-refresh-button"
+                            size="small"
+                            icon={<RefreshCw className="h-3.5 w-3.5" />}
+                            loading={refreshingImportCommit}
+                            disabled={!importCommitJob?.job_id}
+                            onClick={() => void handleRefreshImportCommit()}
+                          >
+                            Refresh commit
+                          </Button>
+                        </div>
+                        {importCommitJob ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-text-muted">
+                            <Tag data-testid="persona-visual-import-commit-status">
+                              {importCommitJob.status}
+                            </Tag>
+                            <span data-testid="persona-visual-import-commit-stage">
+                              {importCommitJob.stage}
+                            </span>
+                            <span data-testid="persona-visual-import-commit-job-id">
+                              {importCommitJob.job_id}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-text-muted">
+                            No import commit job.
+                          </div>
+                        )}
                       </div>
                     ) : null}
                   </div>
