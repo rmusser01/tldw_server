@@ -18,6 +18,16 @@ test.describe('VN play smoke', () => {
     });
 
     const events: Array<Record<string, unknown>> = [];
+    const branches: Array<Record<string, unknown>> = [
+      {
+        id: 1,
+        session_id: 1,
+        owner_user_id: 42,
+        branch_label: 'Smoke path',
+        status: 'active',
+      },
+    ];
+    const checkpoints: Array<Record<string, unknown>> = [];
     let session: Record<string, unknown> | null = null;
 
     await page.route(/\/api\/v1\/health(?:\/.*)?$/, async (route) => {
@@ -73,6 +83,31 @@ test.describe('VN play smoke', () => {
         return;
       }
 
+      if (method === 'GET' && path === '/sessions/1/branches') {
+        await fulfillJson(route, 200, branches);
+        return;
+      }
+
+      if (method === 'GET' && path === '/sessions/1/checkpoints') {
+        await fulfillJson(route, 200, checkpoints);
+        return;
+      }
+
+      if (method === 'POST' && path === '/sessions/1/checkpoint') {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        const checkpoint = {
+          id: checkpoints.length + 1,
+          session_id: 1,
+          owner_user_id: 42,
+          label: body.label,
+          scene_version: body.scene_version ?? (session?.scene_version as number | undefined) ?? 0,
+          scene_state_snapshot: session?.scene_state ?? { scene_version: 0 },
+        };
+        checkpoints.push(checkpoint);
+        await fulfillJson(route, 201, checkpoint);
+        return;
+      }
+
       if (method === 'POST' && path === '/sessions/1/turn') {
         const modelTurn = {
           id: 2,
@@ -119,6 +154,11 @@ test.describe('VN play smoke', () => {
     await page.getByRole('button', { name: 'Create session' }).click();
 
     await expect(page.getByText('Selected session: Smoke Story')).toBeVisible();
+    await expect(page.getByText('Smoke path')).toBeVisible();
+    await page.getByLabel('Checkpoint label').fill('Before door');
+    await page.getByRole('button', { name: 'Create checkpoint' }).click();
+    await expect(page.getByRole('button', { name: 'Restore checkpoint Before door' })).toBeVisible();
+
     await page.getByRole('button', { name: 'Open the door' }).click();
 
     await expect(page.getByText('The door opens onto the archive.')).toBeVisible();
