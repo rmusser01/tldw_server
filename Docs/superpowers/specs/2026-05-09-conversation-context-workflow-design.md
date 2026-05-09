@@ -77,9 +77,36 @@ The user-facing model is:
   this chat actually use?"
 - Progressive disclosure: first-time users get plain readiness states; power
   users can inspect diagnostics, matches, transformations, and scope.
+- Single source of truth: preview, send-time assembly, and diagnostics should
+  come from the same backend effective-context contract. The UI may format and
+  filter results, but it should not independently reimplement worldbook
+  matching, dictionary transformation, or scope precedence.
+- Explicit inheritance: when context can come from several scopes, the UI should
+  distinguish explicit chat attachments from workspace, character-start, and
+  global defaults.
 - Preserve existing capability: underlying storage and APIs can remain separate
   where that matches the codebase. The UX should assemble them coherently at the
   conversation boundary.
+
+## Design Review Amendments
+
+The review pass before implementation planning found four guardrails that should
+be treated as part of the design:
+
+- Do not make the context inspector a frontend-only synthesis. It should be
+  driven by the same backend contract used to assemble the actual chat payload,
+  otherwise preview and send behavior can drift.
+- Do not reuse a character-only prompt preview path as the final architecture.
+  Character chats are one consumer; blank chats, worldbook-started chats,
+  dictionary-started chats, and workspace chats need the same effective-context
+  visibility.
+- Do not add multiple attachment scopes without making inheritance and
+  precedence visible. Users need to know whether context was explicitly attached
+  to the chat, inherited from a workspace, prefilled from a character-start
+  shortcut, or active globally.
+- Do not force the setup flow to become a blocking wizard. First-time users need
+  guidance, but blank chat should remain fast, skippable, and usable with sane
+  defaults when no optional context is selected.
 
 ## Personas And Primary Jobs
 
@@ -167,7 +194,9 @@ Context slots:
 - Provider/model: selected, missing, or blocked
 
 The setup flow should not force character selection. If the user enters from a
-character card, character is simply prefilled.
+character card, character is simply prefilled. The setup surface should also be
+skippable: a user who wants a plain blank chat should not have to pass through
+worldbook, dictionary, or workspace decisions.
 
 ### In-Chat Flow
 
@@ -210,6 +239,7 @@ dictionaries belong only to characters.
 ### 3. Prompt Preview And Diagnostics Unification
 
 Prompt preview should show worldbook and dictionary diagnostics together.
+This should be a conversation-scoped preview, not only a character-chat preview.
 
 It should answer:
 
@@ -218,6 +248,8 @@ It should answer:
 - Which context assets were skipped, and why?
 - Which provider, model, workspace, or context blocker prevents a real chat?
 - Does the preview match the payload that will be used for the next message?
+- Which scopes contributed context: explicit chat, workspace, character-start
+  shortcut, or global default?
 
 Worldbook diagnostics already have a stronger visible path than dictionary
 diagnostics. The unified preview should close that parity gap.
@@ -231,7 +263,7 @@ Recommended terms:
 
 - Attach to chat
 - Attach to workspace
-- Use with character-started chats
+- Use when starting chats from this character
 - Active globally
 
 Avoid terms that imply character ownership when the target is actually a chat,
@@ -285,12 +317,33 @@ The UI should assemble effective context at the conversation boundary:
 2. UI loads conversation metadata and scope.
 3. UI loads selected context assets by type: character, worldbooks,
    dictionaries, workspace, provider/model.
-4. UI requests or computes preview diagnostics for the next message.
+4. UI requests backend-computed preview diagnostics for the next message.
 5. User sees effective context before sending.
 6. Send path uses the same effective context contract as preview.
 7. Post-send diagnostics remain inspectable for debugging and confidence.
 
 The design goal is parity between "what preview says" and "what send uses."
+If implementation requires interim frontend aggregation while backend work is
+underway, that aggregation should be treated as a temporary display adapter, not
+as the authoritative context engine.
+
+## Scope And Precedence Requirements
+
+The implementation plan must define how effective context is resolved when more
+than one scope contributes worldbooks or dictionaries. The exact precedence can
+be chosen during implementation after reviewing current storage boundaries, but
+the shipped UX must show:
+
+- Explicit chat attachments.
+- Workspace-inherited context.
+- Character-start-prefilled context.
+- Global defaults.
+- Disabled or unavailable inherited assets.
+- Conflicts, duplicates, or deterministic ordering where multiple assets match.
+
+The user does not need to understand every backend table. They do need enough
+source attribution to explain why a term changed, why a lore entry appeared, or
+why an expected asset did not apply.
 
 ## Terminology Guidance
 
@@ -299,6 +352,8 @@ Preferred language:
 - Conversation context
 - Attached to chat
 - Attached to workspace
+- Inherited from workspace
+- Inherited from global defaults
 - Active for this conversation
 - Matched this message
 - No matches yet
@@ -308,8 +363,8 @@ Use carefully:
 
 - Character chat: only when a character card is selected.
 - Active globally: only for context that truly applies beyond one chat.
-- Use with character-started chats: for shortcuts or defaults that prefill
-  context when a character initiates a conversation.
+- Use when starting chats from this character: for shortcuts or defaults that
+  prefill context when a character initiates a conversation.
 
 Avoid:
 
@@ -332,6 +387,13 @@ Future implementation should be validated against these scenarios:
 - Context-first entry from a worldbook into a new chat.
 - Context-first entry from a dictionary into a new chat.
 - Existing chat with changed context assets.
+- Explicit chat context overriding or coexisting with workspace/global context.
+- Multiple worldbooks with overlapping matching keys.
+- Multiple dictionaries with overlapping terms and deterministic processing
+  order.
+- Dictionary transformation before/after worldbook scanning, with the selected
+  ordering visible in diagnostics.
+- Removing or disabling an inherited context asset after a chat already exists.
 - Prompt preview parity with actual chat payload.
 - Missing provider/model blocker.
 - Invalid workspace/context ID recoverability.
@@ -352,6 +414,8 @@ The workflow succeeds when:
   states.
 - Workspace context controls expose capabilities that already exist at the API
   level.
+- Inherited and explicit context sources are visible enough that users can
+  explain why context applied or did not apply.
 
 ## Open Questions For Implementation Planning
 
@@ -359,6 +423,10 @@ The workflow succeeds when:
   tabbed panel in the current WebUI layout?
 - Which backend endpoint should become the source of truth for effective
   context preview, especially dictionary diagnostics?
+- What is the minimal backend effective-context response shape that can support
+  both first-time readiness copy and power-user diagnostics?
+- What deterministic precedence or merge rule should apply when chat,
+  workspace, character-start, and global context all contribute assets?
 - Should assignment controls support bulk operations in the first implementation
   slice, or should bulk assignment be deferred after parity is established?
 - How should global context defaults be represented so users understand when a
