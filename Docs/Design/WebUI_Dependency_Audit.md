@@ -8,7 +8,8 @@ Status: Draft audit for issue #1346
 - GitHub issue: https://github.com/rmusser01/tldw_server/issues/1346
 - Design spec: ../superpowers/specs/2026-05-07-webui-dependency-trimming-design.md
 - Parent design task: TASK-100
-- Backlog task: TASK-104
+- Audit task: TASK-104
+- Lockfile follow-up task: TASK-134
 
 ## Scope
 
@@ -171,6 +172,19 @@ This audit does not remove packages or rewrite runtime code.
 
 ## Ranked Follow-Up Queue
 
+### Completed Follow-Ups
+
+- TASK-134 removed unused direct declarations for `react-syntax-highlighter`,
+  `@types/react-syntax-highlighter`, `react-toastify`, `rehype-mathjax`,
+  `unist-util-visit`, and `zod` after confirming no current WebUI, shared UI,
+  or extension source/config/script references. `unist-util-visit` and `zod`
+  remain in `apps/bun.lock` only as transitive dependencies owned by markdown
+  and tooling packages.
+- TASK-134 retained `@dnd-kit/abstract`, `@dnd-kit/dom`, and `@tiptap/pm` in
+  direct manifests. The DnD packages are still owned by the active
+  `@dnd-kit/react`/helpers graph, and Tiptap packages declare `@tiptap/pm` as
+  a peer/runtime dependency.
+
 ### Quick Cleanup Candidates
 
 1. `pubsub-js` and `@types/pubsub-js`: no import/config/package-script usage found in the corrected scan. Safe enough for the first small PR because removal is declaration-only; verify with install, typecheck, and WebUI/shared UI tests that consume shared package surfaces.
@@ -185,8 +199,8 @@ This audit does not remove packages or rewrite runtime code.
 ### Deferred Design Candidates
 
 - Icon-stack consolidation: `lucide-react`, `@heroicons/react`, `@ant-design/icons`, and `react-icons` are active visible UI dependencies and should be handled with a visual/design pass.
-- PDF, ePub, document rendering, rich text editor, Mermaid, KaTeX, markdown, parser, graph/layout, OCR, tokenizer, schema, Monaco, Tiptap, and archive packages with active evidence are kept or deferred rather than replaced with hand-rolled browser code. Zero-evidence complex declarations are marked `investigate-lockfile` before any manifest edit.
-- DnD package declarations with no direct import evidence, such as `@dnd-kit/abstract` and `@dnd-kit/dom`, should be checked against the DnD package graph before manifest edits.
+- PDF, ePub, document rendering, rich text editor, Mermaid, KaTeX, markdown, parser, graph/layout, OCR, tokenizer, schema, Monaco, Tiptap, and archive packages with active evidence are kept or deferred rather than replaced with hand-rolled browser code. Remaining zero-evidence complex declarations should keep using the `investigate-lockfile` path before any manifest edit.
+- DnD package declarations with no direct import evidence, such as `@dnd-kit/abstract` and `@dnd-kit/dom`, are retained after TASK-134 because the current lockfile still routes active DnD packages through the DnD abstract/dom graph.
 
 ### Explicit Keeps
 
@@ -239,8 +253,30 @@ This audit does not remove packages or rewrite runtime code.
   `apps/tldw-frontend/scripts/copy-pdf-worker.mjs` and the shared PDF viewer's
   runtime worker/version reference in
   `apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx`.
-- Bandit: skipped for this slice because changes are documentation and Backlog
-  task metadata only; no Python or runtime code was modified.
+- 2026-05-07 Bandit: skipped for the initial audit slice because changes were
+  documentation and Backlog task metadata only; no Python or runtime code was
+  modified.
+- 2026-05-08 TASK-134 lockfile follow-up: confirmed no exact source, config,
+  script, or manifest references remained for `react-syntax-highlighter`,
+  `@types/react-syntax-highlighter`, `react-toastify`, `rehype-mathjax`,
+  `unist-util-visit`, or `zod` after direct manifest removal. Regenerated
+  `apps/bun.lock` with `bun install`; the lockfile removed the direct
+  `react-toastify`, `react-syntax-highlighter`, and `rehype-mathjax` trees.
+  `unist-util-visit` and `zod` remain only through markdown/tooling transitives.
+- 2026-05-08 TASK-134 retained-package check: `@dnd-kit/abstract` and
+  `@dnd-kit/dom` remain in the lockfile through active `@dnd-kit/collision`,
+  `@dnd-kit/helpers`, and `@dnd-kit/react` dependencies. `@tiptap/pm` remains
+  declared because current Tiptap packages list it as a peer/runtime dependency.
+- 2026-05-08 TASK-134 verification: `bun install --frozen-lockfile` from
+  `apps`, `bun run compile` from `apps/extension`,
+  `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` from
+  `apps/tldw-frontend`, `bun run lint` from `apps/tldw-frontend`,
+  `bunx vitest run --changed=origin/dev` from `apps/tldw-frontend`, and
+  `git diff --check` all exited 0. The Vitest changed-file probe reported no
+  matching test files for this manifest-only change.
+- Bandit: skipped for TASK-134 because the slice changed TypeScript package
+  manifests, `apps/bun.lock`, documentation, and Backlog metadata only; no
+  Python files were modified.
 
 ## Known Skips And Blockers
 
