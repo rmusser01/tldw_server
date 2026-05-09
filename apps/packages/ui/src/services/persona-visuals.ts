@@ -9,6 +9,8 @@ import type {
   PersonaVisualDeactivateResponse,
   PersonaVisualGenerationJobResponse,
   PersonaVisualGenerationRequest,
+  PersonaVisualImportCommitRequest,
+  PersonaVisualImportCommitStartResponse,
   PersonaVisualImportPreviewResponse,
   PersonaVisualImportPreviewStartResponse,
   PersonaVisualManifestUpdate,
@@ -273,7 +275,12 @@ export async function downloadPersonaVisualPackExportArchive(
   if (data instanceof ArrayBuffer) {
     blobPart = data
   } else if (ArrayBuffer.isView(data)) {
-    blobPart = data
+    if (data.buffer instanceof ArrayBuffer) {
+      blobPart = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    } else {
+      const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      blobPart = Uint8Array.from(view)
+    }
   } else if (Array.isArray(data)) {
     blobPart = Uint8Array.from(data)
   }
@@ -314,6 +321,35 @@ export async function getPersonaVisualImportPreview(
     personaVisualPath(
       personaId,
       `/visual-packs/import-previews/${encodeURIComponent(previewId)}`
+    )
+  )
+}
+
+export async function startPersonaVisualImportCommit(
+  personaId: string,
+  previewId: string,
+  payload: PersonaVisualImportCommitRequest = {}
+): Promise<PersonaVisualImportCommitStartResponse> {
+  return fetchPersonaVisualJson<PersonaVisualImportCommitStartResponse>(
+    personaVisualPath(
+      personaId,
+      `/visual-packs/import-previews/${encodeURIComponent(previewId)}/commit`
+    ),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualImportCommitStatus(
+  personaId: string,
+  jobId: string
+): Promise<PersonaVisualPortabilityJobResponse> {
+  return fetchPersonaVisualJson<PersonaVisualPortabilityJobResponse>(
+    personaVisualPath(
+      personaId,
+      `/visual-packs/imports/${encodeURIComponent(jobId)}`
     )
   )
 }

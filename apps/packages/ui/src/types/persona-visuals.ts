@@ -35,7 +35,10 @@ export type PersonaVisualCandidateStatus =
   | "rejected"
   | "failed"
 
-export type PersonaVisualPortabilityOperation = "export" | "import_preview"
+export type PersonaVisualPortabilityOperation =
+  | "export"
+  | "import_preview"
+  | "import_commit"
 
 export interface PersonaVisualRegion {
   x: number
@@ -234,6 +237,22 @@ export interface PersonaVisualImportPreviewResponse {
   error_code?: string | null
   error_message?: string | null
   expires_at?: string | null
+}
+
+export interface PersonaVisualImportCommitRequest {
+  request_id?: string | null
+  trust_mode?: "trusted_restore" | "untrusted_import"
+  target_mode?: "create_new"
+}
+
+export interface PersonaVisualImportCommitStartResponse {
+  job_id: string
+  portability_job_id: string
+  operation: "import_commit"
+  preview_id: string
+  target_persona_id: string
+  status: string
+  stage: string
 }
 
 export interface PersonaVisualCandidateReviewRequest {
