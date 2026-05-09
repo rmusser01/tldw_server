@@ -466,7 +466,7 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
     }
   }
 
-  const stateRegistryOwners = collectIdentifierOwners(
+  const stateRegistryOwners = collectCallExpressionOwners(
     sourceFile,
     imports.stateRegistry,
     fileSubject
@@ -617,7 +617,7 @@ function collectJsxTagOwners(sourceFile, localNames, fallbackOwner) {
   return owners
 }
 
-function collectIdentifierOwners(sourceFile, localNames, fallbackOwner) {
+function collectCallExpressionOwners(sourceFile, localNames, fallbackOwner) {
   const owners = new Set()
 
   if (!localNames || localNames.size === 0) {
@@ -629,7 +629,11 @@ function collectIdentifierOwners(sourceFile, localNames, fallbackOwner) {
       return
     }
 
-    if (isImportIdentifier(node) || isTypeQueryIdentifier(node)) {
+    if (
+      isImportIdentifier(node) ||
+      isTypeQueryIdentifier(node) ||
+      !isCallExpressionCallee(node)
+    ) {
       return
     }
 
@@ -653,6 +657,14 @@ function isImportIdentifier(node) {
 
 function isTypeQueryIdentifier(node) {
   return Boolean(node.parent && ts.isTypeQueryNode(node.parent))
+}
+
+function isCallExpressionCallee(node) {
+  return Boolean(
+    node.parent &&
+      ts.isCallExpression(node.parent) &&
+      node.parent.expression === node
+  )
 }
 
 function intersectSets(left, right) {

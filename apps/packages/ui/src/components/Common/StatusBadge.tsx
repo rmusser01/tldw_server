@@ -21,24 +21,17 @@ const SEVERITY_BADGE_VARIANTS = {
   neutral: "secondary",
 } satisfies Record<ReturnType<typeof getDesignSystemState>["severity"], BadgeVariant>
 
-const getBadgeVariant = (variant: StatusBadgeProps["variant"]): BadgeVariant => {
-  if (variant === "demo") {
-    return "demo"
-  }
-
-  const state = getDesignSystemState(VARIANT_STATES[variant])
-  return SEVERITY_BADGE_VARIANTS[state.severity]
-}
-
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   variant,
   children
 }) => {
   const state = getDesignSystemState(VARIANT_STATES[variant])
+  const badgeVariant: BadgeVariant =
+    variant === "demo" ? "demo" : SEVERITY_BADGE_VARIANTS[state.severity]
 
   return (
     <Badge
-      variant={getBadgeVariant(variant)}
+      variant={badgeVariant}
       size="md"
       className="text-[11px]"
       srLabel={state.label}

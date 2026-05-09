@@ -161,6 +161,28 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("still flags status-badge adapters when the state registry import is referenced but not called", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge() {
+          const stateResolver = getDesignSystemState
+          return <Badge variant="warning">{stateResolver.name}</Badge>
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+  })
+
   it("allows compatibility empty-state adapters that render the canonical EmptyState", () => {
     const findings = analyze(
       "src/components/Common/FeatureEmptyState.tsx",
