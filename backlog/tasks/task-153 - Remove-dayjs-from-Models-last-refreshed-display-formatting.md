@@ -4,7 +4,7 @@ title: Remove dayjs from Models last-refreshed display formatting
 status: Done
 assignee: []
 created_date: '2026-05-09 04:59'
-updated_date: '2026-05-09 05:04'
+updated_date: '2026-05-09 05:09'
 labels:
   - webui
   - dependencies
@@ -15,6 +15,7 @@ dependencies:
   - TASK-149
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
+  - 'https://github.com/rmusser01/tldw_server/pull/1405'
 documentation:
   - Docs/Design/WebUI_Dependency_Audit.md
 priority: medium
@@ -61,6 +62,8 @@ Implemented a native Intl.DateTimeFormat helper for the Models last-refreshed HH
 Updated the WebUI dependency audit to record the dayjs import count dropping from 17 to 15 and to keep remaining Flashcards display formatting plus Ant Design Dayjs value contracts explicit.
 
 Verification: bunx vitest run src/components/Option/Models/__tests__/modelsDisplayUtils.test.ts passed with 3 tests; bunx vitest run src/components/Option/Models/__tests__ passed with 2 files and 5 tests; git diff --check passed; exact dayjs package-import scan listed 15 remaining shared UI import lines; bun run lint in apps/tldw-frontend exited 0 with the existing 131 warnings baseline and no touched-file warnings; Bandit skipped because only TypeScript/test/docs/Backlog files changed.
+
+Opened PR #1405 against dev for this Models dayjs cleanup slice: https://github.com/rmusser01/tldw_server/pull/1405
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
