@@ -599,6 +599,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("sharing",),
             route_key="sharing",
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prototype_workspaces",
+            log_name="prototype_workspaces",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("prototype-workspaces",),
+            route_key="prototype-workspaces",
+        ),
     ):
         append_imported_router_spec(specs, collaboration_spec)
 

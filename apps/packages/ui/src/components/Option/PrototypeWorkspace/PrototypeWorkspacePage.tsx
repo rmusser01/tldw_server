@@ -1,10 +1,77 @@
-import React from "react"
+import { useEffect } from "react"
+import { useLocation, useSearchParams } from "react-router-dom"
+import { usePrototypeWorkspace } from "@/hooks/usePrototypeWorkspaces"
+import { usePrototypeWorkspaceStore } from "@/store/prototype-workspace"
+import { PrototypeWorkspaceOwnerView } from "./PrototypeWorkspaceOwnerView"
+import { PrototypeWorkspaceSessionView } from "./PrototypeWorkspaceSessionView"
 
-export function PrototypeWorkspacePage() {
-  const params = new URLSearchParams(window.location.search)
-  const mode = params.get("prototype_session_token")
-    ? "collaborator"
-    : "owner"
+interface PrototypeWorkspaceLocationState {
+  prototypeSharePassword?: unknown
+}
 
-  return <div data-testid="prototype-workspace-mode">{mode}</div>
+export const PrototypeWorkspacePage = () => {
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
+
+  const activeWorkspaceId = usePrototypeWorkspaceStore(
+    (state) => state.activeWorkspaceId
+  )
+  const setActiveWorkspaceId = usePrototypeWorkspaceStore(
+    (state) => state.setActiveWorkspaceId
+  )
+  const setCollaboratorEntry = usePrototypeWorkspaceStore(
+    (state) => state.setCollaboratorEntry
+  )
+
+  const workspaceId = searchParams.get("workspace")
+  const sessionToken = searchParams.get("session_token")
+  const shareToken = searchParams.get("share_token")
+  const navigationState = location.state as PrototypeWorkspaceLocationState | null
+  const initialSharePassword =
+    typeof navigationState?.prototypeSharePassword === "string"
+      ? navigationState.prototypeSharePassword
+      : null
+
+  useEffect(() => {
+    if (workspaceId) {
+      setActiveWorkspaceId(workspaceId)
+    }
+  }, [workspaceId, setActiveWorkspaceId])
+
+  useEffect(() => {
+    if (sessionToken || shareToken) {
+      setCollaboratorEntry({
+        collaboratorSessionToken: sessionToken,
+        collaboratorShareToken: shareToken
+      })
+    }
+  }, [sessionToken, shareToken, setCollaboratorEntry])
+
+  const isCollaboratorEntry = Boolean(sessionToken || shareToken)
+  const resolvedWorkspaceId = isCollaboratorEntry
+    ? workspaceId ?? null
+    : workspaceId ?? activeWorkspaceId
+  const workspaceDetail = usePrototypeWorkspace(
+    isCollaboratorEntry ? null : resolvedWorkspaceId
+  )
+  const viewerRole = workspaceDetail.data?.viewer_role ?? "owner"
+
+  if (isCollaboratorEntry || viewerRole !== "owner") {
+    return (
+      <PrototypeWorkspaceSessionView
+        prototypeWorkspaceId={resolvedWorkspaceId}
+        sessionToken={sessionToken}
+        shareToken={shareToken}
+        initialPassword={initialSharePassword}
+        workspace={workspaceDetail.data}
+      />
+    )
+  }
+
+  return (
+    <PrototypeWorkspaceOwnerView
+      prototypeWorkspaceId={resolvedWorkspaceId}
+      workspace={workspaceDetail.data}
+    />
+  )
 }

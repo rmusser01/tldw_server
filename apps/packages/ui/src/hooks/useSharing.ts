@@ -10,6 +10,7 @@ import type {
   ShareListResponse,
   SharedWithMeResponse,
   CreateTokenRequest,
+  PrototypeLinkExchangeResponse,
   TokenResponse,
   TokenListResponse,
   PublicSharePreview,
@@ -217,5 +218,16 @@ export function useImportFromToken() {
     string
   >({
     mutationFn: (token) => jsonPost(`/public/${token}/import`, {}),
+  })
+}
+
+export function usePrototypePrivateLinkExchange() {
+  return useMutation<
+    PrototypeLinkExchangeResponse,
+    Error,
+    { token: string; display_name?: string; password?: string }
+  >({
+    mutationFn: ({ token, ...body }) =>
+      jsonPost(`/public/${token}/prototype-session`, body)
   })
 }

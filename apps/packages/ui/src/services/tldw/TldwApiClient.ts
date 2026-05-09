@@ -7163,6 +7163,7 @@ import { chatRagMethods } from "./domains/chat-rag"
 import { collectionsMethods } from "./domains/collections"
 import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"
+import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
 
@@ -7185,6 +7186,7 @@ export interface TldwApiClient
     TldwDomainMethods<typeof collectionsMethods>,
     TldwDomainMethods<typeof modelsAudioMethods>,
     TldwDomainMethods<typeof presentationsMethods>,
+    TldwDomainMethods<typeof prototypeWorkspaceMethods>,
     TldwDomainMethods<typeof workspaceApiMethods>,
     TldwDomainMethods<typeof webClipperMethods> {}
 
@@ -7198,6 +7200,7 @@ Object.assign(
   collectionsMethods,
   modelsAudioMethods,
   presentationsMethods,
+  prototypeWorkspaceMethods,
   workspaceApiMethods,
   webClipperMethods
 )

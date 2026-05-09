@@ -6,6 +6,7 @@ import { Navigate } from "react-router-dom"
 import {
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
+  PROTOTYPE_WORKSPACES_PATH,
   REPO2TXT_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
@@ -173,6 +174,7 @@ const OptionSetup = lazy(() => import("./option-setup"))
 const OptionOnboardingTest = lazy(() => import("./option-onboarding-test"))
 const OptionWorkspacePlayground = lazy(() => import("./option-workspace-playground"))
 const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
+const OptionPrototypeWorkspaces = lazy(() => import("./option-prototype-workspaces"))
 const OptionSharedWithMe = lazy(() => import("./option-shared-with-me"))
 const OptionPublicShare = lazy(() => import("./option-public-share"))
 
@@ -469,6 +471,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     kind: "options",
     path: CHAT_WORKSPACE_PATH,
     element: <OptionChatWorkspace />,
+  },
+  {
+    kind: "options",
+    path: PROTOTYPE_WORKSPACES_PATH,
+    element: <OptionPrototypeWorkspaces />,
   },
   {
     kind: "options",

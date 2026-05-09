@@ -60,14 +60,17 @@ class SharedWorkspaceRepo:
 
     db_pool: DatabasePool
 
+    def _is_postgres_backend(self) -> bool:
+        return bool(getattr(self.db_pool, "pool", None))
+
     def _ts(self) -> datetime | str:
         """Return a timestamp suitable for the current backend (native datetime for PG, ISO string for SQLite)."""
         now = datetime.now(timezone.utc)
-        return now if getattr(self.db_pool, "pool", None) is not None else now.isoformat()
+        return now if self._is_postgres_backend() else now.isoformat()
 
     def _bool(self, val: bool) -> bool | int:
         """Return a boolean suitable for the current backend (native bool for PG, int for SQLite)."""
-        return val if getattr(self.db_pool, "pool", None) is not None else int(val)
+        return val if self._is_postgres_backend() else int(val)
 
     async def ensure_tables(self) -> None:
         required = {"shared_workspaces", "share_tokens", "share_audit_log", "sharing_config"}
@@ -98,9 +101,9 @@ class SharedWorkspaceRepo:
         except Exception:
             try:
                 keys = row.keys()
-                return {key: row[key] for key in keys}
             except Exception:
                 return {}
+            return {key: row[key] for key in keys}
 
     @staticmethod
     def _normalize_share_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -365,6 +368,63 @@ class SharedWorkspaceRepo:
     async def increment_token_use_count(self, token_id: int) -> None:
         await self.db_pool.execute(
             "UPDATE share_tokens SET use_count = use_count + 1 WHERE id = ?",
+            (token_id,),
+        )
+
+    async def claim_token_use(self, token_id: int) -> bool:
+        if not hasattr(self.db_pool, "transaction"):
+            await self.db_pool.execute(
+                """
+                UPDATE share_tokens
+                SET use_count = use_count + 1
+                WHERE id = ?
+                  AND revoked_at IS NULL
+                  AND (max_uses IS NULL OR use_count < max_uses)
+                """,
+                (token_id,),
+            )
+            row = await self.db_pool.fetchone("SELECT changes() AS change_count", ())
+            return int(self._row_to_dict(row).get("change_count", 0)) > 0 if row else False
+
+        async with self.db_pool.transaction() as conn:
+            if self._is_postgres_backend():
+                row = await conn.fetchrow(
+                    """
+                    UPDATE share_tokens
+                    SET use_count = use_count + 1
+                    WHERE id = $1
+                      AND revoked_at IS NULL
+                      AND (max_uses IS NULL OR use_count < max_uses)
+                    RETURNING id
+                    """,
+                    token_id,
+                )
+                return row is not None
+
+            await conn.execute(
+                """
+                UPDATE share_tokens
+                SET use_count = use_count + 1
+                WHERE id = ?
+                  AND revoked_at IS NULL
+                  AND (max_uses IS NULL OR use_count < max_uses)
+                """,
+                (token_id,),
+            )
+            cursor = await conn.execute("SELECT changes() AS change_count")
+            row = await cursor.fetchone()
+            return int(self._row_to_dict(row).get("change_count", 0)) > 0 if row else False
+
+    async def release_token_use(self, token_id: int) -> None:
+        await self.db_pool.execute(
+            """
+            UPDATE share_tokens
+            SET use_count = CASE
+                WHEN use_count > 0 THEN use_count - 1
+                ELSE 0
+            END
+            WHERE id = ?
+            """,
             (token_id,),
         )
 
