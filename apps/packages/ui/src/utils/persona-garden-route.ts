@@ -4,6 +4,7 @@ export type PersonaGardenTabKey =
   | "live"
   | "profiles"
   | "voice"
+  | "visuals"
   | "connections"
   | "state"
   | "scopes"
@@ -15,6 +16,7 @@ const PERSONA_GARDEN_TAB_KEYS = new Set<PersonaGardenTabKey>([
   "live",
   "profiles",
   "voice",
+  "visuals",
   "connections",
   "state",
   "scopes",

@@ -128,6 +128,12 @@ const LazyVoiceExamplesPanel = React.lazy(() =>
   }))
 )
 
+const LazyVisualPackEditor = React.lazy(() =>
+  import("@/components/PersonaGarden/VisualPackEditor").then((module) => ({
+    default: module.VisualPackEditor
+  }))
+)
+
 const normalizeWakeTriggerPhrases = (phrases?: string[] | null): string[] => {
   const seen = new Set<string>()
   const next: string[] = []
@@ -1834,6 +1840,21 @@ const SidepanelPersona = ({
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName}
           isActive={activeTab === "voice"}
+        />,
+        {
+          includeSetupHandoff: false
+        }
+      )
+    },
+    {
+      key: "visuals",
+      label: t("sidepanel:persona.tabVisuals", "Visuals"),
+      content: renderLazyPersonaTab(
+        "visuals",
+        <LazyVisualPackEditor
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName}
+          isActive={activeTab === "visuals"}
         />,
         {
           includeSetupHandoff: false

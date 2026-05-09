@@ -1446,7 +1446,7 @@ git commit -m "feat: animate persona buddy shell from live state"
 - Modify: `apps/packages/ui/src/utils/persona-garden-route.ts`
 - Test: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Write failing editor tests**
+- [x] **Step 1: Write failing editor tests**
 
 Cover:
 
@@ -1463,7 +1463,7 @@ Cover:
 - activates pack when validation succeeds
 - deactivates the active pack and returns the shell to derived Buddy rendering
 
-- [ ] **Step 2: Run failing editor tests**
+- [x] **Step 2: Run failing editor tests**
 
 Run:
 
@@ -1473,7 +1473,7 @@ cd apps/packages/ui && bunx vitest run src/components/PersonaGarden/__tests__/Vi
 
 Expected: FAIL because editor does not exist.
 
-- [ ] **Step 3: Build editor component**
+- [x] **Step 3: Build editor component**
 
 Use existing Persona Garden visual language. Keep controls dense and work-focused:
 
@@ -1496,7 +1496,7 @@ Use existing Persona Garden visual language. Keep controls dense and work-focuse
 - deactivate/revert button for the active pack
 - generated candidate review section reserved for Task 9
 
-- [ ] **Step 4: Add tab route**
+- [x] **Step 4: Add tab route**
 
 In `sidepanel-persona.tsx`, lazy-load:
 
@@ -1510,7 +1510,7 @@ const LazyVisualPackEditor = React.lazy(() =>
 
 Add a `visuals` tab only in persona mode.
 
-- [ ] **Step 5: Run editor tests**
+- [x] **Step 5: Run editor tests**
 
 Run:
 
@@ -1520,7 +1520,7 @@ cd apps/packages/ui && bunx vitest run src/components/PersonaGarden/__tests__/Vi
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
