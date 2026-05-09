@@ -5456,17 +5456,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "local-status-badge:src/components/Option/Prompt/SyncStatusBadge.tsx:SyncStatusBadge",
-    "path": "src/components/Option/Prompt/SyncStatusBadge.tsx",
-    "rule": "local-status-badge",
-    "subject": "SyncStatusBadge",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing local SyncStatusBadge status wrapper before the guard.",
-    "replacement": "Badge with design-system state registry mapping",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "local-status-badge:src/components/Sidepanel/Chat/StatusDot.tsx:StatusDot",
     "path": "src/components/Sidepanel/Chat/StatusDot.tsx",
     "rule": "local-status-badge",

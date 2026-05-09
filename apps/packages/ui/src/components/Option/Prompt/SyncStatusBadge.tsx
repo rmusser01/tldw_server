@@ -1,7 +1,9 @@
 import React from "react"
-import { Tag, Tooltip } from "antd"
-import { Cloud, CloudOff, AlertTriangle, RefreshCw, HardDrive } from "lucide-react"
+import { Tooltip } from "antd"
+import { Cloud, AlertTriangle, RefreshCw, HardDrive } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { Badge, getBadgeVariantForDesignSystemSeverity } from "@/components/ui/primitives"
 import type { PromptSyncStatus, PromptSourceSystem } from "@/db/dexie/types"
 
 interface SyncStatusBadgeProps {
@@ -12,6 +14,13 @@ interface SyncStatusBadgeProps {
   compact?: boolean
   onClick?: () => void
   onRetry?: () => void
+}
+
+type SyncStatusConfig = {
+  icon: React.ReactNode
+  stateKey: DesignSystemStateKey
+  label: string
+  tooltip: string
 }
 
 export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
@@ -41,12 +50,12 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
     return t("common:daysAgo", "{{count}}d ago", { count: diffDays })
   }
 
-  const getStatusConfig = () => {
+  const getStatusConfig = (): SyncStatusConfig => {
     switch (syncStatus) {
       case "synced":
         return {
           icon: <Cloud className="size-3" />,
-          color: "green",
+          stateKey: "ready",
           label: t("settings:managePrompts.sync.synced", "Synced"),
           tooltip: t("settings:managePrompts.sync.syncedTooltip", "Synced with server{{time}}", {
             time: lastSyncedAt ? ` (${formatLastSync(lastSyncedAt)})` : ""
@@ -55,14 +64,14 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
       case "pending":
         return {
           icon: <RefreshCw className="size-3" />,
-          color: "gold",
+          stateKey: "degraded",
           label: t("settings:managePrompts.sync.pending", "Pending"),
           tooltip: t("settings:managePrompts.sync.pendingTooltip", "Local changes not yet synced")
         }
       case "conflict":
         return {
           icon: <AlertTriangle className="size-3" />,
-          color: "red",
+          stateKey: "blocked",
           label: t("settings:managePrompts.sync.conflict", "Conflict"),
           tooltip: t("settings:managePrompts.sync.conflictTooltip", "Local and server versions differ")
         }
@@ -70,7 +79,7 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
       default:
         return {
           icon: <HardDrive className="size-3" />,
-          color: "default",
+          stateKey: "empty",
           label: t("settings:managePrompts.sync.local", "Local"),
           tooltip: t("settings:managePrompts.sync.localTooltip", "Stored locally only")
         }
@@ -100,6 +109,8 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
 
   const statusConfig = getStatusConfig()
   const sourceConfig = getSourceConfig()
+  const state = getDesignSystemState(statusConfig.stateKey)
+  const badgeVariant = getBadgeVariantForDesignSystemSeverity(state.severity)
   const showRetry = syncStatus === "pending" && typeof onRetry === "function"
 
   const retryButton = showRetry ? (
@@ -163,22 +174,23 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
               defaultValue: "Resolve conflict"
             })}
           >
-            <Tag
-              color={statusConfig.color}
-              className="inline-flex items-center gap-1 text-xs cursor-pointer"
+            <Badge
+              className="cursor-pointer"
+              size="sm"
+              variant={badgeVariant}
             >
               {statusConfig.icon}
               {statusConfig.label}
-            </Tag>
+            </Badge>
           </button>
         ) : (
-          <Tag
-            color={statusConfig.color}
-            className="inline-flex items-center gap-1 text-xs"
+          <Badge
+            size="sm"
+            variant={badgeVariant}
           >
             {statusConfig.icon}
             {statusConfig.label}
-          </Tag>
+          </Badge>
         )}
       </Tooltip>
       {retryButton}

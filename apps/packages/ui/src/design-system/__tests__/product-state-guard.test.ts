@@ -109,6 +109,36 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("allows status-badge adapters that return compound JSX with Badge and use the state registry", () => {
+    const findings = analyze(
+      "src/components/Option/Prompt/SyncStatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function SyncStatusBadge({ retry }) {
+          const state = getDesignSystemState("ready")
+
+          return (
+            <div>
+              <button>
+                <Badge variant="success">{state.label}</Badge>
+              </button>
+              {retry && <button>Retry</button>}
+            </div>
+          )
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "SyncStatusBadge"
+      })
+    )
+  })
+
   it("still flags status-badge adapters that return Badge without state registry mapping", () => {
     const findings = analyze(
       "src/components/Common/StatusBadge.tsx",
