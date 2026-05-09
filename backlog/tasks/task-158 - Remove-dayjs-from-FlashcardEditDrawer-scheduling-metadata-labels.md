@@ -1,10 +1,10 @@
 ---
 id: TASK-158
 title: Remove dayjs from FlashcardEditDrawer scheduling metadata labels
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 05:33'
-updated_date: '2026-05-09 05:42'
+updated_date: '2026-05-09 05:44'
 labels:
   - webui
   - dependencies
@@ -15,6 +15,7 @@ dependencies:
   - TASK-153
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
+  - 'https://github.com/rmusser01/tldw_server/pull/1411'
 documentation:
   - Docs/Design/WebUI_Dependency_Audit.md
 priority: medium
@@ -53,12 +54,18 @@ TDD red: focused Vitest failed on missing ../../utils/date-display and ../date-d
 Verification: exact shared UI dayjs package-import scan now reports 11 remaining import lines; exact scan over Flashcards/components and Flashcards/utils returns no dayjs package imports. git diff --check passed. bun run lint in apps/tldw-frontend exited 0 with the existing 131-warning baseline. UI package tsc still exits 2 on the existing repo-wide baseline, but a filtered tsc diagnostic check for date-display and FlashcardEditDrawer.scheduling-metadata returned no touched-file diagnostics after adding review_prompt_side to the local test fixture. Bandit skipped because only TypeScript, documentation, and Backlog files changed.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed dayjs from FlashcardEditDrawer scheduling metadata labels by adding native Flashcards date-display helpers for local YYYY-MM-DD HH:mm and dayjs-compatible relative labels, rewiring the drawer to use them, updating scheduling metadata tests to avoid dayjs imports, and refreshing the WebUI dependency audit from 15 to 11 remaining shared UI dayjs package-import lines. Opened PR #1411 against dev.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
