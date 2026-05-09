@@ -75,7 +75,12 @@ export default function DialoguePanel({
       setInputText('');
       onTurn(response);
     } catch (turnError) {
-      setError(turnError instanceof Error ? turnError.message : 'Failed to submit turn');
+      const status = typeof turnError === 'object' && turnError !== null && 'status' in turnError
+        ? Number((turnError as { status?: number }).status)
+        : undefined;
+      const detail = turnError instanceof Error ? turnError.message : String(turnError);
+      const isRecoverableConflict = status === 409 || /stale_scene_version|turn_in_progress/i.test(detail);
+      setError(isRecoverableConflict ? null : detail || 'Failed to submit turn');
       onError?.(turnError);
     } finally {
       setIsSubmitting(false);
