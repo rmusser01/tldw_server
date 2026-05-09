@@ -1,4 +1,3 @@
-import axios from 'axios';
 export interface Voice {
   voice_id: string;
   name: string;
@@ -14,28 +13,127 @@ const DEFAULT_ELEVENLABS_TIMEOUT_MS = 10_000;
 
 type ElevenLabsRequestOptions = {
   timeoutMs?: number;
+  responseType?: 'json' | 'text' | 'arrayBuffer' | 'arraybuffer';
+  includeBrowserTransportFailure?: boolean;
 };
+
+function createTimeoutSignal(timeoutMs: number): {
+  signal: AbortSignal;
+  cleanup: () => void;
+  didTimeout: () => boolean;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId),
+    didTimeout: () => timedOut,
+  };
+}
+
+function isTimeoutLikeFetchFailure(
+  error: unknown,
+  didTimeout: boolean,
+  includeBrowserTransportFailure = false
+): boolean {
+  if (error instanceof DOMException) {
+    return (
+      (error.name === 'AbortError' && didTimeout) ||
+      error.name === 'TimeoutError'
+    );
+  }
+
+  if (error instanceof Error) {
+    const message = `${error.name} ${error.message}`.toLowerCase();
+    return (
+      message.includes('timeout') ||
+      message.includes('timed out') ||
+      message.includes('err_timed_out') ||
+      (includeBrowserTransportFailure && message.includes('failed to fetch'))
+    );
+  }
+
+  return false;
+}
+
+async function fetchElevenLabs<T>(
+  path: string,
+  apiKey: string,
+  init: RequestInit = {},
+  options?: ElevenLabsRequestOptions
+): Promise<T> {
+  const timeout = createTimeoutSignal(
+    options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
+  );
+  const headers = new Headers(init.headers);
+  headers.set('xi-api-key', apiKey);
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      headers,
+      signal: timeout.signal,
+    });
+  } catch (error) {
+    timeout.cleanup();
+    if (
+      isTimeoutLikeFetchFailure(
+        error,
+        timeout.didTimeout(),
+        options?.includeBrowserTransportFailure ?? true
+      )
+    ) {
+      throw new Error('ElevenLabs request timed out');
+    }
+    throw error;
+  }
+  timeout.cleanup();
+
+  if (!response.ok) {
+    throw new Error(`ElevenLabs request failed with status ${response.status}`);
+  }
+
+  switch (options?.responseType ?? 'json') {
+    case 'arrayBuffer':
+    case 'arraybuffer':
+      return response.arrayBuffer() as Promise<T>;
+    case 'text':
+      return response.text() as Promise<T>;
+    case 'json':
+    default:
+      return response.json() as Promise<T>;
+  }
+}
 
 export const getVoices = async (
   apiKey: string,
   options?: ElevenLabsRequestOptions
 ): Promise<Voice[]> => {
-  const response = await axios.get(`${BASE_URL}/voices`, {
-    headers: { 'xi-api-key': apiKey },
-    timeout: options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
-  });
-  return response.data.voices;
+  const response = await fetchElevenLabs<{ voices: Voice[] }>(
+    '/voices',
+    apiKey,
+    { method: 'GET' },
+    options
+  );
+  return response.voices;
 };
 
 export const getModels = async (
   apiKey: string,
   options?: ElevenLabsRequestOptions
 ): Promise<Model[]> => {
-  const response = await axios.get(`${BASE_URL}/models`, {
-    headers: { 'xi-api-key': apiKey },
-    timeout: options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
-  });
-  return response.data;
+  return fetchElevenLabs<Model[]>(
+    '/models',
+    apiKey,
+    { method: 'GET' },
+    options
+  );
 };
 
 export const generateSpeech = async (
@@ -45,7 +143,7 @@ export const generateSpeech = async (
   modelId: string,
   speed?: number
 ): Promise<ArrayBuffer> => {
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     text,
     model_id: modelId
   }
@@ -54,16 +152,19 @@ export const generateSpeech = async (
     payload.voice_settings = { speed }
   }
 
-  const response = await axios.post(
-    `${BASE_URL}/text-to-speech/${voiceId}`,
-    payload,
+  return fetchElevenLabs<ArrayBuffer>(
+    `/text-to-speech/${voiceId}`,
+    apiKey,
     {
+      method: 'POST',
       headers: {
-        'xi-api-key': apiKey,
         'Content-Type': 'application/json',
       },
-      responseType: 'arraybuffer',
+      body: JSON.stringify(payload),
+    },
+    {
+      responseType: 'arrayBuffer',
+      includeBrowserTransportFailure: false,
     }
   );
-  return response.data;
 };

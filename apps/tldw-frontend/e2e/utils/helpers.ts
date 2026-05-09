@@ -246,6 +246,9 @@ export async function seedAuth(
       localStorage.setItem('__tldw_first_run_complete', 'true');
     } catch {}
     try {
+      localStorage.setItem('assistant_setup_dismissed', 'true');
+    } catch {}
+    try {
       if (cfg.allowOffline) {
         localStorage.setItem('__tldw_allow_offline', 'true');
       }

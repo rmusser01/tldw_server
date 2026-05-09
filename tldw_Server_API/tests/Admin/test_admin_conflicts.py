@@ -1,16 +1,15 @@
-import asyncio
 from importlib import import_module
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 
 pytestmark = pytest.mark.integration
 
 
-def _setup_isolated_authnz(monkeypatch, db_path: Path):
+async def _setup_isolated_authnz(monkeypatch, db_path: Path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -19,13 +18,11 @@ def _setup_isolated_authnz(monkeypatch, db_path: Path):
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
     reset_settings()
-    asyncio.run(reset_db_pool())
+    await reset_db_pool()
     ensure_authnz_tables(db_path)
 
 
 def _admin_app():
-
-
     mod = import_module("tldw_Server_API.app.main")
     app = getattr(mod, "app")
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
@@ -37,7 +34,7 @@ def _admin_app():
             user_id=1,
             api_key_id=None,
             subject="admin",
-            token_type="access",
+            token_type="access",  # nosec B106
             jti=None,
             roles=["admin"],
             permissions=["system.configure"],
@@ -61,65 +58,74 @@ def _admin_app():
     return app, get_auth_principal
 
 
-def test_admin_create_team_conflict_returns_409(monkeypatch, tmp_path):
+def _reset_app_lifecycle(app) -> None:
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+    reset_lifecycle_state(app)
 
 
+@pytest.mark.asyncio
+async def test_admin_create_team_conflict_returns_409(monkeypatch, tmp_path):
     base_dir = tmp_path / "admin_conflict_team"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
-    _setup_isolated_authnz(monkeypatch, db_path)
+    await _setup_isolated_authnz(monkeypatch, db_path)
 
     app, dep = _admin_app()
+    _reset_app_lifecycle(app)
     try:
-        with TestClient(app) as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
             # Create org
-            r = client.post("/api/v1/admin/orgs", json={"name": "Org A"})
+            r = await client.post("/api/v1/admin/orgs", json={"name": "Org A"})
             assert r.status_code == 200, r.text
             org_id = r.json()["id"]
             # Create team once OK
-            r1 = client.post(f"/api/v1/admin/orgs/{org_id}/teams", json={"name": "Core"})
+            r1 = await client.post(f"/api/v1/admin/orgs/{org_id}/teams", json={"name": "Core"})
             assert r1.status_code == 200, r1.text
             # Duplicate create -> 409
-            r2 = client.post(f"/api/v1/admin/orgs/{org_id}/teams", json={"name": "Core"})
+            r2 = await client.post(f"/api/v1/admin/orgs/{org_id}/teams", json={"name": "Core"})
             assert r2.status_code == 409, r2.text
     finally:
         app.dependency_overrides.pop(dep, None)
 
 
-def test_admin_create_role_conflict_returns_409(monkeypatch, tmp_path):
-
-
+@pytest.mark.asyncio
+async def test_admin_create_role_conflict_returns_409(monkeypatch, tmp_path):
     base_dir = tmp_path / "admin_conflict_role"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
-    _setup_isolated_authnz(monkeypatch, db_path)
+    await _setup_isolated_authnz(monkeypatch, db_path)
 
     app, dep = _admin_app()
+    _reset_app_lifecycle(app)
     try:
-        with TestClient(app) as client:
-            r1 = client.post("/api/v1/admin/roles", json={"name": "analyst"})
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            r1 = await client.post("/api/v1/admin/roles", json={"name": "analyst"})
             assert r1.status_code == 200, r1.text
-            r2 = client.post("/api/v1/admin/roles", json={"name": "analyst"})
+            r2 = await client.post("/api/v1/admin/roles", json={"name": "analyst"})
             assert r2.status_code == 409, r2.text
     finally:
         app.dependency_overrides.pop(dep, None)
 
 
-def test_admin_create_permission_conflict_returns_409(monkeypatch, tmp_path):
-
-
+@pytest.mark.asyncio
+async def test_admin_create_permission_conflict_returns_409(monkeypatch, tmp_path):
     base_dir = tmp_path / "admin_conflict_perm"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
-    _setup_isolated_authnz(monkeypatch, db_path)
+    await _setup_isolated_authnz(monkeypatch, db_path)
 
     app, dep = _admin_app()
+    _reset_app_lifecycle(app)
     try:
-        with TestClient(app) as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
             body = {"name": "tools.execute:test", "description": "ok", "category": "tools"}
-            r1 = client.post("/api/v1/admin/permissions", json=body)
+            r1 = await client.post("/api/v1/admin/permissions", json=body)
             assert r1.status_code == 200, r1.text
-            r2 = client.post("/api/v1/admin/permissions", json=body)
+            r2 = await client.post("/api/v1/admin/permissions", json=body)
             assert r2.status_code == 409, r2.text
     finally:
         app.dependency_overrides.pop(dep, None)
