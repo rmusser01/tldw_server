@@ -1,11 +1,11 @@
 ---
 id: TASK-164
 title: Remove dayjs from Flashcards Review and Manage display formatting
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-09 15:32'
-updated_date: '2026-05-09 15:43'
+updated_date: '2026-05-09 15:49'
 labels:
   - webui
   - dependencies
@@ -17,6 +17,7 @@ dependencies:
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1346'
   - 'https://github.com/rmusser01/tldw_server/pull/1411'
+  - 'https://github.com/rmusser01/tldw_server/pull/1417'
 documentation:
   - Docs/Design/WebUI_Dependency_Audit.md
 priority: medium
@@ -44,7 +45,7 @@ Continue GitHub issue #1346 after PR #1411 by replacing the remaining display-on
 2. Add focused failing tests around shared Flashcards date-display helper coverage. [done]
 3. Replace ReviewTab and ManageTab display-only dayjs calls with shared native helpers. [done]
 4. Update dependency audit and task metadata. [done]
-5. Run focused Vitest, import scans, lint, diff hygiene, and PR packaging. [in progress]
+5. Run focused Vitest, import scans, lint, diff hygiene, and PR packaging. [done]
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -79,6 +80,12 @@ Bandit skipped because this slice changed TypeScript, documentation, and Backlog
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed the remaining display-only dayjs usage from Flashcards ReviewTab and ManageTab by extending the shared native date-display helpers with long absolute formatting and timestamp-before checks. The dependency audit now records the shared UI dayjs import count reduction from 11 to 7, with all remaining imports limited to Ant Design Dayjs value/type surfaces. Verification passed for focused Flashcards Vitest coverage, exact import scans, WebUI lint, and diff hygiene; the shared UI TypeScript command still fails on existing repo-wide baseline errors outside this slice, and Bandit was skipped because no Python files changed.
+<!-- SECTION:FINAL_SUMMARY:END -->
