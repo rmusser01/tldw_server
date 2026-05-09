@@ -3,7 +3,6 @@ import { Moon, Sun } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
-import { CharacterChatOnboardingLane } from "@/components/Option/Onboarding/CharacterChatOnboardingLane"
 import {
   useConnectionActions,
   useConnectionState,
@@ -15,7 +14,6 @@ import { useDarkMode } from "@/hooks/useDarkmode"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
-  buildCharacterOnboardingRoute,
   CHARACTER_CHAT_ONBOARDING_INTENT,
   getOnboardingReturnToFromSearch,
   resolveOnboardingEntryIntent
@@ -117,32 +115,6 @@ const OptionIndex = () => {
     const onboardingDescription = isCharacterChatOnboarding
       ? "Finish setup, then continue creating and chatting with characters."
       : "Start here to connect your server or try local demo mode."
-    const navigateToCharacterCreate = () => {
-      if (!hasCompletedFirstRun) return
-      navigate(
-        buildCharacterOnboardingRoute({
-          returnTo: onboardingReturnTo,
-          action: "create"
-        })
-      )
-    }
-    const navigateToCharacterImport = () => {
-      if (!hasCompletedFirstRun) return
-      navigate(
-        buildCharacterOnboardingRoute({
-          returnTo: onboardingReturnTo,
-          action: "import"
-        })
-      )
-    }
-    const navigateToModelSettings = () => {
-      if (!hasCompletedFirstRun) return
-      navigate("/settings/model?from=character-chat-onboarding")
-    }
-    const navigateToCharacterChat = () => {
-      if (!hasCompletedFirstRun) return
-      navigate("/chat?from=character-chat-onboarding")
-    }
     return (
       <OptionLayout hideHeader hideSidebar>
         <div className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface px-4 py-3">
@@ -170,16 +142,6 @@ const OptionIndex = () => {
               )}
             </button>
           </div>
-          {isCharacterChatOnboarding && (
-            <CharacterChatOnboardingLane
-              className="mt-3"
-              actionsDisabled
-              onCreateCharacter={navigateToCharacterCreate}
-              onImportCharacter={navigateToCharacterImport}
-              onChooseModel={navigateToModelSettings}
-              onStartCharacterChat={navigateToCharacterChat}
-            />
-          )}
         </div>
         <React.Suspense
           fallback={

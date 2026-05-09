@@ -11,8 +11,19 @@ type LocationLike = {
 
 const SAFE_URL_ORIGIN = "https://tldw.local"
 
-const isCharactersRoute = (path: string | null | undefined): boolean =>
-  path === "/characters" || Boolean(path?.startsWith("/characters/"))
+const getRoutePathname = (path: string | null | undefined): string => {
+  if (!path) return ""
+  try {
+    return new URL(path, SAFE_URL_ORIGIN).pathname
+  } catch {
+    return path.split(/[?#]/, 1)[0] ?? ""
+  }
+}
+
+const isCharactersRoute = (path: string | null | undefined): boolean => {
+  const pathname = getRoutePathname(path)
+  return pathname === "/characters" || pathname.startsWith("/characters/")
+}
 
 export const getSafeOnboardingReturnTo = (
   value: string | null | undefined

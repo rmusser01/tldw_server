@@ -219,7 +219,7 @@ describe("core route identity guardrails", () => {
     expect(toggleDarkModeMock).toHaveBeenCalledTimes(1)
   })
 
-  it("surfaces a character-chat first-run lane from preserved route intent", async () => {
+  it("preserves character-chat first-run context without pre-auth action lane", async () => {
     currentLocation = {
       pathname: "/",
       search:
@@ -234,17 +234,21 @@ describe("core route identity guardrails", () => {
     expect(
       screen.getByText("Finish setup, then continue creating and chatting with characters.")
     ).toBeInTheDocument()
-    expect(screen.getByTestId("character-chat-onboarding-lane")).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Create character" })
-    ).toBeInTheDocument()
+      screen.queryByTestId("character-chat-onboarding-lane")
+    ).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Import character" })
-    ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Choose model" })).toBeInTheDocument()
+      screen.queryByRole("button", { name: "Create character" })
+    ).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Start character chat" })
-    ).toBeInTheDocument()
+      screen.queryByRole("button", { name: "Import character" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Choose model" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Start character chat" })
+    ).not.toBeInTheDocument()
     expect(await screen.findByTestId("onboarding-wizard")).toBeInTheDocument()
   })
 
