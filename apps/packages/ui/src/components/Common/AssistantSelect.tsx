@@ -344,15 +344,15 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const buttonLabel =
     selectedAssistant?.name ||
-    t("option:assistant.selectAssistant", "Select assistant")
+    t("option:assistant.selectAssistant", "Select character or persona")
 
   const searchLabel = t(
     "option:assistant.searchPlaceholder",
-    "Search assistants"
+    "Search characters and personas"
   )
   const actorLabel = t(
     "playground:composer.actorTitle",
-    "Scene Director (Actor)"
+    "Optional scene context"
   )
 
   const tabs = [
@@ -493,7 +493,7 @@ export const AssistantSelect: React.FC<Props> = ({
       </div>
       <div
         role="tablist"
-        aria-label={t("option:assistant.tabList", "Assistant types")}
+        aria-label={t("option:assistant.tabList", "Character or persona")}
         className="flex items-center gap-1 border-b border-border px-2 pt-2"
       >
         {tabs.map((tab) => {

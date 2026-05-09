@@ -525,7 +525,7 @@
     "skip": "Skip tour"
   },
   "actor": {
-    "title": "Scene Director (Actor)",
+    "title": "Optional scene context",
     "help": "Configure per-chat scene context: roles, mood, world, goals, and notes.",
     "addLabel": "Add or remove aspects to focus the scene.",
     "user": "User",
