@@ -168,6 +168,18 @@ export interface PersonaVisualGenerationJobResponse {
   status?: string | null
 }
 
+export interface PersonaVisualGenerationReadinessResponse {
+  available: boolean
+  worker_enabled: boolean
+  queue: string
+  image_backend_available: boolean
+  default_backend?: string | null
+  requested_backend?: string | null
+  requested_backend_available?: boolean | null
+  enabled_backends: string[]
+  reasons: string[]
+}
+
 export interface PersonaVisualPackExportRequest {
   request_id?: string | null
   strict?: boolean

@@ -21,6 +21,7 @@ import {
   createPersonaVisualPack,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
+  getPersonaVisualGenerationReadiness,
   getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
@@ -41,6 +42,7 @@ import type {
   PersonaVisualCandidate,
   PersonaVisualImportCommitStartResponse,
   PersonaVisualFrame,
+  PersonaVisualGenerationReadinessResponse,
   PersonaVisualImportPreviewResponse,
   PersonaVisualImportPreviewStartResponse,
   PersonaVisualManifest,
@@ -55,6 +57,10 @@ import {
   getPrimaryPersonaVisualDiagnostic,
   type PersonaVisualDiagnostic
 } from "../Common/PersonaBuddy/personaVisualDiagnostics"
+import {
+  classifyPersonaVisualGenerationReadiness,
+  type PersonaVisualGenerationReadinessView
+} from "./personaVisualGenerationReadiness"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -68,6 +74,94 @@ type TriggerDraft = {
   state: PersonaVisualStateId
   durationMs: string
   priority: string
+}
+
+const getGenerationReadinessCopy = (
+  view: PersonaVisualGenerationReadinessView,
+  t: (key: string, options?: { defaultValue?: string }) => string
+): { title: string; message: string; toneClassName: string } => {
+  switch (view.status) {
+    case "ready":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationReadyTitle", {
+          defaultValue: "Generation is ready."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationReadyMessage", {
+          defaultValue:
+            "Queued assets will appear here for review before they can be applied."
+        }),
+        toneClassName: "border-success/30 bg-success/5 text-success"
+      }
+    case "jobs_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationWorkerUnavailableTitle", {
+          defaultValue: "Generation worker is not enabled."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationWorkerUnavailableMessage", {
+          defaultValue:
+            "Enable PERSONA_VISUAL_GENERATION_WORKER_ENABLED before queueing Persona Buddy visual generation jobs."
+        }),
+        toneClassName: "border-warning/40 bg-warning/10 text-warning"
+      }
+    case "image_provider_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationProviderUnavailableTitle", {
+          defaultValue: "No image generation provider is configured."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationProviderUnavailableMessage", {
+          defaultValue:
+            "Enable an image backend before queueing a Persona Buddy visual generation job."
+        }),
+        toneClassName: "border-warning/40 bg-warning/10 text-warning"
+      }
+    case "backend_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationBackendUnavailableTitle", {
+          defaultValue: "Selected image backend is unavailable."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationBackendUnavailableMessage", {
+          defaultValue:
+            "Use an enabled backend name or leave the field blank to use the default backend."
+        }),
+        toneClassName: "border-warning/40 bg-warning/10 text-warning"
+      }
+    case "default_backend_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationDefaultBackendUnavailableTitle", {
+          defaultValue: "No default image backend is selected."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationDefaultBackendUnavailableMessage", {
+          defaultValue:
+            "Enter one enabled backend name before queueing this generation job."
+        }),
+        toneClassName: "border-warning/40 bg-warning/10 text-warning"
+      }
+    case "error":
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationReadinessErrorTitle", {
+          defaultValue: "Generation readiness could not be checked."
+        }),
+        message:
+          view.errorMessage ||
+          t("sidepanel:personaGarden.visuals.generationReadinessErrorMessage", {
+            defaultValue:
+              "Refresh the visual pack before queueing a generation job."
+          }),
+        toneClassName: "border-danger/30 bg-danger/5 text-danger"
+      }
+    case "loading":
+    default:
+      return {
+        title: t("sidepanel:personaGarden.visuals.generationReadinessLoadingTitle", {
+          defaultValue: "Checking generation readiness."
+        }),
+        message: t("sidepanel:personaGarden.visuals.generationReadinessLoadingMessage", {
+          defaultValue:
+            "Persona Buddy visual generation will be available after setup checks finish."
+        }),
+        toneClassName: "border-border bg-bg text-text-muted"
+      }
+  }
 }
 
 const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
@@ -332,6 +426,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [generationTargetState, setGenerationTargetState] =
     React.useState<PersonaVisualStateId>("thinking")
   const [generationBackend, setGenerationBackend] = React.useState("")
+  const [generationReadiness, setGenerationReadiness] =
+    React.useState<PersonaVisualGenerationReadinessResponse | null>(null)
+  const [generationReadinessLoading, setGenerationReadinessLoading] =
+    React.useState(false)
+  const [generationReadinessError, setGenerationReadinessError] =
+    React.useState<string | null>(null)
   const [enqueueingGeneration, setEnqueueingGeneration] = React.useState(false)
   const [reviewingCandidateId, setReviewingCandidateId] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
@@ -370,6 +470,18 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           })
         : null,
     [draftManifest, selectedPack]
+  )
+  const generationReadinessView = React.useMemo(
+    () =>
+      classifyPersonaVisualGenerationReadiness(generationReadiness, generationBackend, {
+        isLoading: generationReadinessLoading,
+        errorMessage: generationReadinessError
+      }),
+    [generationBackend, generationReadiness, generationReadinessError, generationReadinessLoading]
+  )
+  const generationReadinessCopy = React.useMemo(
+    () => getGenerationReadinessCopy(generationReadinessView, t),
+    [generationReadinessView, t]
   )
 
   const loadPacks = React.useCallback(async (): Promise<boolean> => {
@@ -436,6 +548,34 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId, selectedPack?.id])
 
+  const loadGenerationReadiness = React.useCallback(async () => {
+    const packId = selectedPack?.id || ""
+    if (!isActive || !selectedPersonaId || !packId) {
+      setGenerationReadiness(null)
+      setGenerationReadinessError(null)
+      setGenerationReadinessLoading(false)
+      return
+    }
+    setGenerationReadinessLoading(true)
+    setGenerationReadinessError(null)
+    try {
+      const response = await getPersonaVisualGenerationReadiness(
+        selectedPersonaId,
+        packId
+      )
+      setGenerationReadiness(response)
+    } catch (loadError) {
+      setGenerationReadiness(null)
+      setGenerationReadinessError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to check generation readiness."
+      )
+    } finally {
+      setGenerationReadinessLoading(false)
+    }
+  }, [isActive, selectedPersonaId, selectedPack?.id])
+
   React.useEffect(() => {
     void loadPacks()
   }, [loadPacks])
@@ -443,6 +583,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     void loadCandidates()
   }, [loadCandidates])
+
+  React.useEffect(() => {
+    void loadGenerationReadiness()
+  }, [loadGenerationReadiness])
 
   React.useEffect(() => {
     if (!selectedPack) {
@@ -822,7 +966,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }
 
   const handleEnqueueGeneration = async () => {
-    if (!selectedPersonaId || !selectedPack || !generationPrompt.trim()) return
+    if (
+      !selectedPersonaId ||
+      !selectedPack ||
+      !generationPrompt.trim() ||
+      !generationReadinessView.canQueue
+    ) {
+      return
+    }
     setEnqueueingGeneration(true)
     setError(null)
     try {
@@ -1902,10 +2053,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               <label className="text-xs text-text-muted">
                 <span className="mb-1 block">Backend</span>
                 <input
+                  data-testid="persona-visual-generation-backend-input"
                   className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
                   value={generationBackend}
                   onChange={(event) => setGenerationBackend(event.target.value)}
+                  list="persona-visual-generation-backends"
                 />
+                {generationReadinessView.enabledBackends.length ? (
+                  <datalist id="persona-visual-generation-backends">
+                    {generationReadinessView.enabledBackends.map((backend) => (
+                      <option key={backend} value={backend} />
+                    ))}
+                  </datalist>
+                ) : null}
               </label>
               <Button
                 data-testid="persona-visual-generation-enqueue-button"
@@ -1913,11 +2073,28 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 size="small"
                 type="primary"
                 loading={enqueueingGeneration}
-                disabled={!generationPrompt.trim()}
+                disabled={!generationPrompt.trim() || !generationReadinessView.canQueue}
                 onClick={() => void handleEnqueueGeneration()}
               >
                 Queue
               </Button>
+            </div>
+            <div
+              data-testid="persona-visual-generation-readiness"
+              className={`mt-3 rounded border px-3 py-2 text-xs ${generationReadinessCopy.toneClassName}`}
+            >
+              <div className="font-medium">{generationReadinessCopy.title}</div>
+              <div className="mt-1 text-current/80">{generationReadinessCopy.message}</div>
+              {generationReadinessView.queue ? (
+                <div className="mt-1 text-current/70">
+                  Jobs queue: {generationReadinessView.queue}
+                </div>
+              ) : null}
+              {generationReadinessView.enabledBackends.length ? (
+                <div className="mt-1 text-current/70">
+                  Enabled image backends: {generationReadinessView.enabledBackends.join(", ")}
+                </div>
+              ) : null}
             </div>
             <div className="mt-3 space-y-2">
               {candidates.length ? (

@@ -117,6 +117,18 @@ class PersonaVisualGenerationJobResponse(BaseModel):
     status: str | None = None
 
 
+class PersonaVisualGenerationReadinessResponse(BaseModel):
+    available: bool
+    worker_enabled: bool
+    queue: str
+    image_backend_available: bool
+    default_backend: str | None = None
+    requested_backend: str | None = None
+    requested_backend_available: bool | None = None
+    enabled_backends: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class PersonaVisualPackExportRequest(BaseModel):
     request_id: str | None = Field(default=None, max_length=120)
     strict: bool = False

@@ -85,6 +85,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualDeactivateResponse,
     PersonaVisualGenerationJobResponse,
     PersonaVisualGenerationRequest,
+    PersonaVisualGenerationReadinessResponse,
     PersonaVisualImportCommitRequest,
     PersonaVisualImportCommitStartResponse,
     PersonaVisualImportPreviewResponse,
@@ -127,6 +128,9 @@ from tldw_Server_API.app.core.feature_flags import (
     is_persona_enabled,
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Image_Generation.adapter_registry import (
+    get_registry as get_image_generation_registry,
+)
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
@@ -141,6 +145,7 @@ from tldw_Server_API.app.core.Persona.visual_jobs import (
     create_visual_pack_export_job,
     create_visual_pack_import_commit_job,
     create_visual_pack_import_preview_job,
+    persona_visual_generation_queue,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
@@ -209,6 +214,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
 from tldw_Server_API.app.core.Personalization.companion_context import load_companion_context
 from tldw_Server_API.app.core.Skills.context_integration import handle_skill_tool_call
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType as VoiceActionTypeInternal,
 )
@@ -1901,6 +1907,44 @@ def get_persona_visual_service(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVisualService:
     return PersonaVisualService(db)
+
+
+def _build_persona_visual_generation_readiness(
+    *,
+    backend: str | None,
+) -> PersonaVisualGenerationReadinessResponse:
+    registry = get_image_generation_registry()
+    enabled_backends = registry.list_backend_names(include_disabled=False)
+    default_backend = registry.resolve_backend(None)
+    requested_backend = str(backend or "").strip() or None
+    resolved_backend = registry.resolve_backend(requested_backend) if requested_backend else default_backend
+    requested_backend_available = None
+    if requested_backend is not None:
+        requested_backend_available = resolved_backend is not None
+
+    worker_enabled = env_flag_enabled("PERSONA_VISUAL_GENERATION_WORKER_ENABLED")
+    image_backend_available = resolved_backend is not None
+    reasons: list[str] = []
+    if not worker_enabled:
+        reasons.append("jobs_worker_disabled")
+    if requested_backend and resolved_backend is None:
+        reasons.append("requested_backend_unavailable")
+    elif not requested_backend and not enabled_backends:
+        reasons.append("image_backend_unavailable")
+    elif not requested_backend and default_backend is None:
+        reasons.append("default_backend_unavailable")
+
+    return PersonaVisualGenerationReadinessResponse(
+        available=worker_enabled and image_backend_available,
+        worker_enabled=worker_enabled,
+        queue=persona_visual_generation_queue(),
+        image_backend_available=image_backend_available,
+        default_backend=default_backend,
+        requested_backend=requested_backend,
+        requested_backend_available=requested_backend_available,
+        enabled_backends=enabled_backends,
+        reasons=reasons,
+    )
 
 
 def _persona_visual_override_payload_from_tool_result(
@@ -3970,6 +4014,46 @@ async def get_persona_visual_generated_candidate(
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona visual candidate") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generation-readiness",
+    response_model=PersonaVisualGenerationReadinessResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_generation_readiness(
+    persona_id: str,
+    pack_id: str,
+    backend: str | None = Query(default=None, max_length=80),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualGenerationReadinessResponse:
+    """Report whether visual generation can be queued for this pack."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        return _build_persona_visual_generation_readiness(backend=backend)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual generation readiness") from exc
 
 
 @router.post(
