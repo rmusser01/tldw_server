@@ -1,7 +1,7 @@
 # Conversation Context Workflow Design
 
 Date: 2026-05-09
-Status: Approved brainstorming design, pending implementation planning
+Status: Approved brainstorming design, architecture amended for client-managed composition
 Backlog: TASK-185
 
 ## Purpose
@@ -77,10 +77,15 @@ The user-facing model is:
   this chat actually use?"
 - Progressive disclosure: first-time users get plain readiness states; power
   users can inspect diagnostics, matches, transformations, and scope.
-- Single source of truth: preview, send-time assembly, and diagnostics should
-  come from the same backend effective-context contract. The UI may format and
-  filter results, but it should not independently reimplement worldbook
-  matching, dictionary transformation, or scope precedence.
+- Client-managed composition: the client owns effective context assembly at the
+  conversation boundary. The server should provide reliable composable pieces
+  for settings, character/prompt fragments, worldbook matching, dictionary
+  transformation, and validation. The client orchestrates those pieces into the
+  preview and send payload.
+- Server-provided primitives: the client should not reimplement domain-specific
+  worldbook matching or dictionary transformation logic. It should call server
+  primitives for those operations and then compose the returned pieces in a
+  visible, inspectable way.
 - Explicit inheritance: when context can come from several scopes, the UI should
   distinguish explicit chat attachments from workspace, character-start, and
   global defaults.
@@ -93,13 +98,13 @@ The user-facing model is:
 The review pass before implementation planning found four guardrails that should
 be treated as part of the design:
 
-- Do not make the context inspector a frontend-only synthesis. It should be
-  driven by the same backend contract used to assemble the actual chat payload,
-  otherwise preview and send behavior can drift.
-- Do not reuse a character-only prompt preview path as the final architecture.
-  Character chats are one consumer; blank chats, worldbook-started chats,
-  dictionary-started chats, and workspace chats need the same effective-context
-  visibility.
+- Do not make the context inspector an opaque frontend guess. It should be a
+  client-owned composition that traces each displayed item back to a server
+  primitive or stored client selection.
+- Do not add a monolithic backend effective-context contract as the final
+  architecture. Character chats are one consumer; blank chats,
+  worldbook-started chats, dictionary-started chats, and workspace chats need
+  the client to compose the same kinds of pieces across entry routes.
 - Do not add multiple attachment scopes without making inheritance and
   precedence visible. Users need to know whether context was explicitly attached
   to the chat, inherited from a workspace, prefilled from a character-start
@@ -236,10 +241,11 @@ context-first entry from worldbooks or dictionaries. It should make character an
 optional context slot and should avoid copy that suggests worldbooks or
 dictionaries belong only to characters.
 
-### 3. Prompt Preview And Diagnostics Unification
+### 3. Client-Composed Prompt Preview And Diagnostics
 
-Prompt preview should show worldbook and dictionary diagnostics together.
-This should be a conversation-scoped preview, not only a character-chat preview.
+Prompt preview should show worldbook and dictionary diagnostics together. This
+should be a conversation-scoped client composition, not only a character-chat
+preview and not a server-owned monolith.
 
 It should answer:
 
@@ -247,7 +253,8 @@ It should answer:
 - Which dictionary terms were transformed?
 - Which context assets were skipped, and why?
 - Which provider, model, workspace, or context blocker prevents a real chat?
-- Does the preview match the payload that will be used for the next message?
+- Does the client-composed preview match the payload that will be used for the
+  next message?
 - Which scopes contributed context: explicit chat, workspace, character-start
   shortcut, or global default?
 
@@ -311,28 +318,35 @@ Errors should be recoverable and tied to user action.
 
 ## Data Flow Concept
 
-The UI should assemble effective context at the conversation boundary:
+The UI should assemble effective context at the conversation boundary. This is
+an intentional client-side orchestration decision:
 
 1. User chooses or opens a chat.
 2. UI loads conversation metadata and scope.
 3. UI loads selected context assets by type: character, worldbooks,
    dictionaries, workspace, provider/model.
-4. UI requests backend-computed preview diagnostics for the next message.
-5. User sees effective context before sending.
-6. Send path uses the same effective context contract as preview.
-7. Post-send diagnostics remain inspectable for debugging and confidence.
+4. UI calls server primitives for domain-specific pieces:
+   - chat settings and metadata
+   - character or prompt fragments
+   - worldbook matching and diagnostics
+   - dictionary transformation and diagnostics
+   - provider/model readiness
+5. UI composes the effective preview for the next message.
+6. User sees the client-composed effective context before sending.
+7. Send path uses the same client-composed context object as preview.
+8. Post-send diagnostics remain inspectable for debugging and confidence.
 
 The design goal is parity between "what preview says" and "what send uses."
-If implementation requires interim frontend aggregation while backend work is
-underway, that aggregation should be treated as a temporary display adapter, not
-as the authoritative context engine.
+That parity should be enforced in client code: one composition path should feed
+both the inspector preview and the send payload. Server endpoints should remain
+composable pieces, not an authoritative all-in-one context engine.
 
 ## Scope And Precedence Requirements
 
-The implementation plan must define how effective context is resolved when more
-than one scope contributes worldbooks or dictionaries. The exact precedence can
-be chosen during implementation after reviewing current storage boundaries, but
-the shipped UX must show:
+The implementation plan must define how the client resolves effective context
+when more than one scope contributes worldbooks or dictionaries. The exact
+precedence can be chosen during implementation after reviewing current storage
+boundaries, but the shipped UX must show:
 
 - Explicit chat attachments.
 - Workspace-inherited context.
@@ -394,7 +408,7 @@ Future implementation should be validated against these scenarios:
 - Dictionary transformation before/after worldbook scanning, with the selected
   ordering visible in diagnostics.
 - Removing or disabling an inherited context asset after a chat already exists.
-- Prompt preview parity with actual chat payload.
+- Client-composed prompt preview parity with actual chat payload.
 - Missing provider/model blocker.
 - Invalid workspace/context ID recoverability.
 - Zero-match worldbook and dictionary states.
@@ -405,8 +419,8 @@ The workflow succeeds when:
 
 - First-time users can start a blank or character conversation with reusable
   context without visiting unrelated pages first.
-- Power users can verify effective context in one place for chat and workspace
-  flows.
+- Power users can verify client-composed effective context in one place for
+  chat and workspace flows.
 - Worldbooks and dictionaries are visibly reusable across conversation types.
 - Prompt preview and diagnostics cover both lore injection and dictionary
   transformations.
@@ -424,10 +438,10 @@ The workflow succeeds when:
   so character selection becomes one slot inside broader conversation context
   instead of a separate control. Implementation planning should validate the
   current picker shape before committing to exact component boundaries.
-- Which backend endpoint should become the source of truth for effective
-  context preview, especially dictionary diagnostics?
-- What is the minimal backend effective-context response shape that can support
-  both first-time readiness copy and power-user diagnostics?
+- Which existing server primitives are sufficient for the client to compose
+  context, and which missing primitives need narrow endpoints?
+- What is the minimal client-side context object that can support both
+  first-time readiness copy and power-user diagnostics?
 - What deterministic precedence or merge rule should apply when chat,
   workspace, character-start, and global context all contribute assets?
 - Should assignment controls support bulk operations in the first implementation
