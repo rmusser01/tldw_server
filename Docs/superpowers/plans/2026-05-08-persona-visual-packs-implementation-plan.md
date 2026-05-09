@@ -2028,7 +2028,57 @@ Result: `19 passed, 5 warnings`.
 
 Result: no findings. `B101` was skipped for test assertions.
 
-Next slice: expose Jobs-backed API endpoints and frontend review UX that mirror PR #1135's export job, import preview, status polling, cleanup, and portability panel flows.
+Next slice: expose API routes for export/import-preview start, status polling, and archive download before frontend review UX.
+
+## Task 14: Portability API Endpoints
+
+**Status:** Complete
+
+**Goal:** Expose PR #1135-style persona visual pack portability routes for export jobs and import-preview jobs.
+
+**Implementation Notes:**
+
+- Added persona visual portability API schemas for export requests, export job status, export start responses, import-preview start responses, and import-preview status responses.
+- Added `POST /profiles/{persona_id}/visual-packs/{pack_id}/export` to create a portability row and enqueue a Jobs payload using the existing persona visual job manager.
+- Added scoped export status and archive download routes under the persona and pack path.
+- Added `POST /profiles/{persona_id}/visual-packs/import-previews` to stage uploaded `.tldw-persona-vpack` archives, create preview rows, and enqueue import-preview Jobs without mutating existing packs.
+- Added scoped import-preview status retrieval with validation summary, proposed plan, quota estimate, choices, and target warnings.
+
+**Verification:**
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short
+```
+
+Result: `14 passed, 5 warnings`.
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_service.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py \
+  -q --tb=short
+```
+
+Result: `33 passed, 5 warnings`.
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r \
+  tldw_Server_API/app/api/v1/endpoints/persona.py \
+  tldw_Server_API/app/api/v1/schemas/persona.py \
+  tldw_Server_API/app/core/DB_Management/PersonaVisualPortability_DB.py \
+  tldw_Server_API/app/core/Persona/visual_jobs_worker.py \
+  tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py \
+  -s B101 -f json -o /tmp/bandit_persona_visual_portability_api.json
+```
+
+Result: no findings. `B101` was skipped for test assertions.
+
+Next slice: frontend review UX for export/import-preview status polling, archive download, and import-review display.
 
 ## Final Verification Gate
 

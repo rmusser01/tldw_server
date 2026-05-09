@@ -382,6 +382,9 @@ class PersonaVisualPortabilityWorker:
     def _resolve_export_staging_root(self, user_id: str) -> Path:
         if self._export_staging_root is not None:
             return self._export_staging_root
+        configured = (os.getenv("PERSONA_VISUAL_PACK_EXPORT_STAGING_ROOT") or "").strip()
+        if configured:
+            return Path(configured) / str(user_id)
         return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_packs"
 
 

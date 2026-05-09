@@ -27,6 +27,7 @@ PersonaVisualRendererType = Literal["sprite_frames", "sprite_sheet", "static_ima
 PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview", "generated_candidate"]
 PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
 PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
+PersonaVisualPortabilityOperation = Literal["export", "import_preview"]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",
@@ -114,6 +115,77 @@ class PersonaVisualGenerationRequest(BaseModel):
 class PersonaVisualGenerationJobResponse(BaseModel):
     job_id: str
     status: str | None = None
+
+
+class PersonaVisualPackExportRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=120)
+    strict: bool = False
+    include_full_provenance: bool = False
+    warn_for_sharing: bool = True
+
+
+class PersonaVisualPortabilityJobResponse(BaseModel):
+    job_id: str
+    portability_job_id: str
+    operation: PersonaVisualPortabilityOperation
+    persona_id: str | None = None
+    pack_id: str | None = None
+    status: str
+    visual_status: str
+    stage: str
+    progress: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[Any] = Field(default_factory=list)
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    download_url: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
+
+
+class PersonaVisualPackExportResponse(BaseModel):
+    job_id: str
+    portability_job_id: str
+    operation: Literal["export"]
+    persona_id: str
+    pack_id: str
+    status: str
+    stage: str
+    download_url: str | None = None
+
+
+class PersonaVisualImportPreviewStartResponse(BaseModel):
+    preview_id: str
+    job_id: str
+    portability_job_id: str
+    operation: Literal["import_preview"]
+    target_persona_id: str | None = None
+    status: str
+    stage: str
+
+
+class PersonaVisualImportPreviewResponse(BaseModel):
+    preview_id: str
+    job_id: str
+    portability_job_id: str
+    operation: Literal["import_preview"]
+    target_persona_id: str | None = None
+    status: str
+    visual_status: str
+    stage: str
+    archive_sha256: str | None = None
+    canonical_payload_fingerprint: str | None = None
+    schema_version: str | None = None
+    bundle_summary: dict[str, Any] = Field(default_factory=dict)
+    validation_warnings: list[Any] = Field(default_factory=list)
+    conflicts: list[Any] = Field(default_factory=list)
+    proposed_plan: dict[str, Any] = Field(default_factory=dict)
+    quota_estimate: dict[str, Any] = Field(default_factory=dict)
+    required_choices: list[Any] = Field(default_factory=list)
+    target_warnings: list[Any] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
 
 
 class PersonaVisualCandidateResponse(BaseModel):

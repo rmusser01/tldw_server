@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
+import aiofiles
+import aiofiles.os
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
@@ -83,9 +85,14 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualDeactivateResponse,
     PersonaVisualGenerationJobResponse,
     PersonaVisualGenerationRequest,
+    PersonaVisualImportPreviewResponse,
+    PersonaVisualImportPreviewStartResponse,
     PersonaVisualManifestUpdate,
+    PersonaVisualPackExportRequest,
+    PersonaVisualPackExportResponse,
     PersonaVisualPackCreate,
     PersonaVisualPackResponse,
+    PersonaVisualPortabilityJobResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
@@ -109,6 +116,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+    PersonaVisualPortabilityRepository,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.feature_flags import (
     is_mcp_hub_policy_enforcement_enabled,
@@ -124,7 +134,17 @@ from tldw_Server_API.app.core.Persona.buddy import (
     build_persona_buddy_summary,
     ensure_persona_buddy_for_profile,
 )
-from tldw_Server_API.app.core.Persona.visual_jobs import create_generate_candidate_job
+from tldw_Server_API.app.core.Persona.visual_jobs import (
+    create_generate_candidate_job,
+    create_visual_pack_export_job,
+    create_visual_pack_import_preview_job,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.archive import (
+    DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+    PERSONA_VISUAL_PACK_EXTENSION,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     MAX_TRIGGER_DURATION_MS,
     MIN_TRIGGER_DURATION_MS,
@@ -237,6 +257,8 @@ _PERSONA_WAKE_DEACTIVATION_REASONS = {
     "route_leave",
     "session_close",
 }
+_PERSONA_VISUAL_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
+_PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 _PERSONA_CONNECTION_MEMORY_TYPE = "persona_connection"
 _PERSONA_CONNECTION_ALLOWED_AUTH_TYPES = {"none", "bearer", "api_key", "basic", "custom_header"}
 _PERSONA_CONNECTION_TEST_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
@@ -2014,6 +2036,160 @@ def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Pat
     return target
 
 
+def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> Any:
+    value = row.get(key)
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except json.JSONDecodeError:
+        return default
+
+
+def _persona_visual_job_for_portability(jobs_manager: JobManager, job_id: str) -> dict[str, Any] | None:
+    try:
+        return jobs_manager.get_job(int(job_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def _persona_visual_export_download_url(*, persona_id: str, pack_id: str, job_id: str) -> str:
+    return f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}/download"
+
+
+def _persona_visual_portability_repo(db: CharactersRAGDB) -> PersonaVisualPortabilityRepository:
+    return PersonaVisualPortabilityRepository.initialized(db)
+
+
+def _persona_visual_pack_export_staging_root(user_id: str) -> Path:
+    configured = (os.getenv("PERSONA_VISUAL_PACK_EXPORT_STAGING_ROOT") or "").strip()
+    if configured:
+        return Path(configured) / str(user_id)
+    return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_packs"
+
+
+def _persona_visual_pack_import_preview_staging_root(user_id: str) -> Path:
+    configured = (os.getenv("PERSONA_VISUAL_PACK_IMPORT_PREVIEW_STAGING_ROOT") or "").strip()
+    if configured:
+        return Path(configured) / str(user_id)
+    return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_pack_import_previews"
+
+
+def _validated_persona_visual_export_archive_path(user_id: str, archive_path: str | None) -> Path:
+    if not archive_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_archive_not_found")
+    root = _persona_visual_pack_export_staging_root(user_id).resolve(strict=False)
+    path = Path(archive_path).resolve(strict=False)
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="export_archive_outside_user_root",
+        ) from exc
+    if path.suffix != PERSONA_VISUAL_PACK_EXTENSION:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid_export_archive_type")
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_archive_not_found")
+    return path
+
+
+async def _save_persona_visual_import_preview_archive(archive: UploadFile, archive_path: Path) -> int:
+    total_bytes = 0
+    try:
+        await aiofiles.os.makedirs(archive_path.parent, exist_ok=True)
+        async with aiofiles.open(archive_path, "wb") as output:
+            while chunk := await archive.read(_PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES):
+                total_bytes += len(chunk)
+                if total_bytes > DEFAULT_MAX_ARCHIVE_SIZE_BYTES:
+                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="archive_too_large")
+                await output.write(chunk)
+    except HTTPException:
+        with contextlib.suppress(OSError):
+            archive_path.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            archive_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="archive_save_failed") from exc
+    finally:
+        await archive.close()
+    return total_bytes
+
+
+def _compose_persona_visual_portability_response(
+    *,
+    portability_job: dict[str, Any],
+    job: dict[str, Any] | None,
+    persona_id: str,
+    pack_id: str,
+) -> PersonaVisualPortabilityJobResponse:
+    visual_status = str(portability_job["status"])
+    job_status = visual_status or str((job or {}).get("status") or "queued")
+    job_id = str(portability_job["job_id"])
+    download_url = portability_job.get("download_url") or _persona_visual_export_download_url(
+        persona_id=persona_id,
+        pack_id=pack_id,
+        job_id=job_id,
+    )
+    return PersonaVisualPortabilityJobResponse(
+        job_id=job_id,
+        portability_job_id=str(portability_job["id"]),
+        operation=str(portability_job["operation"]),
+        persona_id=persona_id,
+        pack_id=pack_id,
+        status=job_status,
+        visual_status=visual_status,
+        stage=str(portability_job["stage"]),
+        progress=_persona_visual_json_field(portability_job, "progress_json", {}),
+        warnings=_persona_visual_json_field(portability_job, "warnings_json", []),
+        archive_sha256=portability_job.get("archive_sha256"),
+        canonical_payload_fingerprint=portability_job.get("canonical_payload_fingerprint"),
+        download_url=download_url,
+        error_code=portability_job.get("error_code"),
+        error_message=portability_job.get("error_message"),
+        expires_at=portability_job.get("expires_at"),
+    )
+
+
+def _compose_persona_visual_import_preview_response(
+    *,
+    preview: dict[str, Any],
+    portability_job: dict[str, Any],
+    job: dict[str, Any] | None,
+) -> PersonaVisualImportPreviewResponse:
+    preview_status = str(preview["status"])
+    job_status = preview_status or str((job or {}).get("status") or portability_job["status"])
+    return PersonaVisualImportPreviewResponse(
+        preview_id=str(preview["id"]),
+        job_id=str(preview["job_id"]),
+        portability_job_id=str(portability_job["id"]),
+        operation=str(portability_job["operation"]),
+        target_persona_id=preview.get("target_persona_id"),
+        status=job_status,
+        visual_status=preview_status,
+        stage=str(preview.get("stage") or portability_job["stage"]),
+        archive_sha256=preview.get("archive_sha256") or portability_job.get("archive_sha256"),
+        canonical_payload_fingerprint=(
+            preview.get("canonical_payload_fingerprint")
+            or portability_job.get("canonical_payload_fingerprint")
+        ),
+        schema_version=preview.get("schema_version"),
+        bundle_summary=_persona_visual_json_field(preview, "bundle_summary_json", {}),
+        validation_warnings=_persona_visual_json_field(preview, "validation_warnings_json", []),
+        conflicts=_persona_visual_json_field(preview, "conflicts_json", []),
+        proposed_plan=_persona_visual_json_field(preview, "proposed_plan_json", {}),
+        quota_estimate=_persona_visual_json_field(preview, "quota_estimate_json", {}),
+        required_choices=_persona_visual_json_field(preview, "required_choices_json", []),
+        target_warnings=_persona_visual_json_field(preview, "target_warnings_json", []),
+        error_code=preview.get("error_code") or portability_job.get("error_code"),
+        error_message=preview.get("error_message") or portability_job.get("error_message"),
+        expires_at=preview.get("expires_at") or portability_job.get("expires_at"),
+    )
+
+
 def _persona_state_response_from_rows(
     *,
     persona_id: str,
@@ -3772,6 +3948,334 @@ async def create_persona_visual_generation_job(
         raise _to_http_exception(exc, action="create persona visual generation job") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/export",
+    response_model=PersonaVisualPackExportResponse,
+    tags=["persona"],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def start_persona_visual_pack_export(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualPackExportRequest | None = None,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPackExportResponse:
+    """Queue a persona visual pack export job for a portable archive."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    export_request = payload or PersonaVisualPackExportRequest()
+    request_id = export_request.request_id or uuid.uuid4().hex
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        options = export_request.model_dump(exclude={"request_id"})
+        job = await _run_persona_db_call(
+            create_visual_pack_export_job,
+            jobs_manager,
+            user_id=user_id,
+            persona_id=persona_id,
+            pack_id=pack_id,
+            portability_job_id="",
+            request_id=request_id,
+            options=options,
+        )
+        job_id = str(job.get("id") or "")
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if portability_job is None:
+            portability_job = await _run_persona_db_call(
+                repo.create_portability_job,
+                owner_user_id=user_id,
+                job_id=job_id,
+                operation="export",
+                status=str(job.get("status") or "queued"),
+                stage="queued",
+                persona_id=persona_id,
+                pack_id=pack_id,
+                progress={"request_id": request_id},
+            )
+        composed = _compose_persona_visual_portability_response(
+            portability_job=portability_job,
+            job=job,
+            persona_id=persona_id,
+            pack_id=pack_id,
+        )
+        return PersonaVisualPackExportResponse(
+            job_id=composed.job_id,
+            portability_job_id=composed.portability_job_id,
+            operation="export",
+            persona_id=persona_id,
+            pack_id=pack_id,
+            status=composed.status,
+            stage=composed.stage,
+            download_url=composed.download_url,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="start persona visual pack export") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}",
+    response_model=PersonaVisualPortabilityJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack_export_status(
+    persona_id: str,
+    pack_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPortabilityJobResponse:
+    """Return one persona visual pack export job row for the current user."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if (
+            portability_job is None
+            or portability_job.get("operation") != "export"
+            or str(portability_job.get("persona_id") or "") != persona_id
+            or str(portability_job.get("pack_id") or "") != pack_id
+        ):
+            raise HTTPException(status_code=404, detail="export_job_not_found")
+        return _compose_persona_visual_portability_response(
+            portability_job=portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, job_id),
+            persona_id=persona_id,
+            pack_id=pack_id,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack export") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}/download",
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def download_persona_visual_pack_export(
+    persona_id: str,
+    pack_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> FileResponse:
+    """Download a completed persona visual pack archive."""
+    response = await get_persona_visual_pack_export_status(
+        persona_id=persona_id,
+        pack_id=pack_id,
+        job_id=job_id,
+        _current_user=_current_user,
+        db=db,
+        jobs_manager=jobs_manager,
+    )
+    if response.status != "completed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="export_not_completed")
+    user_id = _require_current_user_id(_current_user)
+    repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+    portability_job = await _run_persona_db_call(
+        repo.get_portability_job_by_job_id,
+        job_id,
+        owner_user_id=user_id,
+    )
+    archive_path = _validated_persona_visual_export_archive_path(
+        user_id,
+        portability_job.get("archive_path") if portability_job else None,
+    )
+    return FileResponse(
+        path=str(archive_path),
+        filename=archive_path.name,
+        media_type="application/zip",
+    )
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/import-previews",
+    response_model=PersonaVisualImportPreviewStartResponse,
+    tags=["persona"],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def start_persona_visual_pack_import_preview(
+    persona_id: str,
+    archive: UploadFile = File(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportPreviewStartResponse:
+    """Upload a persona visual pack archive and queue import-preview validation."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    filename = str(archive.filename or "")
+    if Path(filename).suffix != PERSONA_VISUAL_PACK_EXTENSION:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_archive_type")
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        request_id = uuid.uuid4().hex
+        archive_root = _persona_visual_pack_import_preview_staging_root(user_id)
+        archive_path = archive_root / f"{request_id}{PERSONA_VISUAL_PACK_EXTENSION}"
+        uploaded_bytes = await _save_persona_visual_import_preview_archive(archive, archive_path)
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.create_import_preview,
+            owner_user_id=user_id,
+            job_id=f"pending:{request_id}",
+            status="queued",
+            archive_path=str(archive_path),
+            target_persona_id=persona_id,
+        )
+        job = await _run_persona_db_call(
+            create_visual_pack_import_preview_job,
+            jobs_manager,
+            user_id=user_id,
+            preview_id=str(preview["id"]),
+            archive_path=str(archive_path),
+            request_id=request_id,
+            target_persona_id=persona_id,
+        )
+        job_id = str(job.get("id") or "")
+        preview = await _run_persona_db_call(
+            repo.update_import_preview,
+            str(preview["id"]),
+            {"job_id": job_id, "status": str(job.get("status") or "queued")},
+            owner_user_id=user_id,
+        ) or preview
+        portability_job = await _run_persona_db_call(
+            repo.create_portability_job,
+            owner_user_id=user_id,
+            job_id=job_id,
+            operation="import_preview",
+            status=str(job.get("status") or "queued"),
+            stage="queued",
+            preview_id=str(preview["id"]),
+            archive_path=str(archive_path),
+            progress={"request_id": request_id, "uploaded_bytes": uploaded_bytes},
+        )
+        return PersonaVisualImportPreviewStartResponse(
+            preview_id=str(preview["id"]),
+            job_id=job_id,
+            portability_job_id=str(portability_job["id"]),
+            operation="import_preview",
+            target_persona_id=persona_id,
+            status=str(job.get("status") or portability_job["status"]),
+            stage=str(portability_job["stage"]),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="start persona visual pack import preview") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/import-previews/{preview_id}",
+    response_model=PersonaVisualImportPreviewResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack_import_preview(
+    persona_id: str,
+    preview_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportPreviewResponse:
+    """Return one import-preview validation row for the current user."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.get_import_preview,
+            preview_id,
+            owner_user_id=user_id,
+        )
+        if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
+            raise HTTPException(status_code=404, detail="import_preview_not_found")
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            str(preview["job_id"]),
+            owner_user_id=user_id,
+        )
+        if portability_job is None or portability_job.get("operation") != "import_preview":
+            raise HTTPException(status_code=404, detail="import_preview_job_not_found")
+        return _compose_persona_visual_import_preview_response(
+            preview=preview,
+            portability_job=portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, str(preview["job_id"])),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack import preview") from exc
 
 
 @router.post(
