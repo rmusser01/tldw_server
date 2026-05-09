@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
 )
 
 from .models import RunPhase, RunStatus, RuntimeType
+from .utils import coerce_optional_nonempty_string
 
 _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -54,14 +55,6 @@ def _coerce_optional_iso_datetime(value: Any) -> str | None:
     if not text or text.lower() == "none":
         return None
     return text
-
-
-def _coerce_optional_nonempty_string(value: Any) -> str | None:
-    """Normalize optional metadata strings and avoid persisting empty placeholders."""
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 def _parse_optional_iso_datetime(value: Any) -> datetime | None:
@@ -743,8 +736,8 @@ class InMemoryStore(SandboxStore):
                 "template_id": (str(template_id) if template_id is not None else None),
                 "workspace_mount": (str(workspace_mount) if workspace_mount is not None else None),
                 "agent_ready": bool(agent_ready),
-                "helper_instance_id": _coerce_optional_nonempty_string(helper_instance_id),
-                "helper_started_at": _coerce_optional_nonempty_string(helper_started_at),
+                "helper_instance_id": coerce_optional_nonempty_string(helper_instance_id),
+                "helper_started_at": coerce_optional_nonempty_string(helper_started_at),
                 "created_at": float(created_at),
                 "updated_at": float(now_ts),
             }
@@ -1916,8 +1909,8 @@ class SQLiteStore(SandboxStore):
                     (str(template_id) if template_id is not None else None),
                     (str(workspace_mount) if workspace_mount is not None else None),
                     1 if agent_ready else 0,
-                    _coerce_optional_nonempty_string(helper_instance_id),
-                    _coerce_optional_nonempty_string(helper_started_at),
+                    coerce_optional_nonempty_string(helper_instance_id),
+                    coerce_optional_nonempty_string(helper_started_at),
                     float(now_ts),
                     float(now_ts),
                 ),
@@ -2471,8 +2464,11 @@ class PostgresStore(SandboxStore):
                     if cur.fetchone():
                         return
                     cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
-                except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
-                    logger.debug(f"Postgres migration: could not add {table}.{col}")
+                except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.exception(f"Postgres migration failed while adding {table}.{col}")
+                    raise ClusterStoreUnavailable(
+                        f"Postgres migration failed while adding required column {table}.{col}"
+                    ) from exc
 
             _ensure_column("sandbox_runs", "resource_usage", "JSONB")
             _ensure_column("sandbox_runs", "runtime_version", "TEXT")
@@ -3216,8 +3212,8 @@ class PostgresStore(SandboxStore):
                         (str(template_id) if template_id is not None else None),
                         (str(workspace_mount) if workspace_mount is not None else None),
                         bool(agent_ready),
-                        _coerce_optional_nonempty_string(helper_instance_id),
-                        _coerce_optional_nonempty_string(helper_started_at),
+                        coerce_optional_nonempty_string(helper_instance_id),
+                        coerce_optional_nonempty_string(helper_started_at),
                         float(now_ts),
                         float(now_ts),
                     ),

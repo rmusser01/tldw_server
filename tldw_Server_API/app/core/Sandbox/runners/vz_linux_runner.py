@@ -22,6 +22,7 @@ from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..policy import SandboxPolicyConfig
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
+from ..utils import coerce_optional_nonempty_string
 from .resource_limits import log_limit_counters
 from .vz_common import _VZ_NONCRITICAL_EXCEPTIONS, VZBaseRunner, vz_host_facts
 
@@ -253,20 +254,14 @@ class VZLinuxRunner(VZBaseRunner):
                 counters[key] = value
         return counters
 
-    @staticmethod
-    def _normalize_optional_text(value: Any) -> str | None:
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
-
     @classmethod
     def _helper_generation_from_details(cls, details: dict[str, Any] | None) -> tuple[str | None, str | None]:
+        """Extract helper-generation identifiers from helper response details."""
         if not isinstance(details, dict):
             return None, None
         return (
-            cls._normalize_optional_text(details.get("helper_instance_id")),
-            cls._normalize_optional_text(details.get("helper_started_at")),
+            coerce_optional_nonempty_string(details.get("helper_instance_id")),
+            coerce_optional_nonempty_string(details.get("helper_started_at")),
         )
 
     @classmethod
@@ -277,10 +272,13 @@ class VZLinuxRunner(VZBaseRunner):
         session_control: dict[str, Any],
         session_id: str | None,
     ) -> bool:
+        """Return true only when live VM metadata proves safe same-session reuse."""
         if not bool(getattr(status, "healthy", False)):
             return False
 
         metadata = getattr(status, "metadata", None)
+        if metadata is None:
+            return False
         owner = str(getattr(metadata, "owner", "") or "").strip()
         runtime = str(getattr(metadata, "runtime", "") or "").strip()
         if owner != "tldw" or runtime != RuntimeType.vz_linux.value:
@@ -291,8 +289,8 @@ class VZLinuxRunner(VZBaseRunner):
         if live_session_id and live_session_id != requested_session_id:
             return False
 
-        stored_instance = cls._normalize_optional_text(session_control.get("helper_instance_id"))
-        stored_started_at = cls._normalize_optional_text(session_control.get("helper_started_at"))
+        stored_instance = coerce_optional_nonempty_string(session_control.get("helper_instance_id"))
+        stored_started_at = coerce_optional_nonempty_string(session_control.get("helper_started_at"))
         live_instance, live_started_at = cls._helper_generation_from_details(getattr(status, "details", None))
         if stored_instance and stored_started_at and live_instance and live_started_at:
             return stored_instance == live_instance and stored_started_at == live_started_at
@@ -336,8 +334,8 @@ class VZLinuxRunner(VZBaseRunner):
             template_id=(str(template_id) if template_id is not None else None),
             workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
             agent_ready=True,
-            helper_instance_id=self._normalize_optional_text(helper_instance_id),
-            helper_started_at=self._normalize_optional_text(helper_started_at),
+            helper_instance_id=coerce_optional_nonempty_string(helper_instance_id),
+            helper_started_at=coerce_optional_nonempty_string(helper_started_at),
         )
 
     def _delete_session_control(self, session_id: str | None) -> None:

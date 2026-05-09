@@ -22,6 +22,7 @@ from .models import RunPhase, RunSpec, RunStatus, RuntimeType, Session, SessionS
 from .policy import SandboxPolicy, SandboxPolicyConfig
 from .store import IdempotencyConflict as StoreIdemConflict
 from .store import get_store
+from .utils import coerce_optional_nonempty_string
 
 _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -43,13 +44,6 @@ _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
 )
 
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
-
-
-def _coerce_optional_nonempty_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 class IdempotencyConflict(Exception):
@@ -1435,8 +1429,8 @@ class SandboxOrchestrator:
             template_id=(str(template_id) if template_id is not None else None),
             workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
             agent_ready=bool(agent_ready),
-            helper_instance_id=_coerce_optional_nonempty_string(helper_instance_id),
-            helper_started_at=_coerce_optional_nonempty_string(helper_started_at),
+            helper_instance_id=coerce_optional_nonempty_string(helper_instance_id),
+            helper_started_at=coerce_optional_nonempty_string(helper_started_at),
         )
 
     def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:

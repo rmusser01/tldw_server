@@ -4,7 +4,7 @@ title: Harden vz_linux helper-generation session recovery
 status: In Progress
 assignee: []
 created_date: '2026-05-09 05:34'
-updated_date: '2026-05-09 16:23'
+updated_date: '2026-05-09 18:43'
 labels:
   - sandbox
   - vz_linux
@@ -71,6 +71,10 @@ Persisted helper_instance_id/helper_started_at across VZ session-control store i
 Hardened VZLinuxRunner reuse so same-generation healthy VMs are reused, generation/status/metadata drift reprovisions, and helper unavailable/protocol mismatch fail closed without deleting or overwriting session-control state.
 
 Verification: swift test --filter 'PingTests|HelperServiceVMTests' passed; pytest test_vz_linux_runner.py test_vz_linux_session_control_store.py test_store_sqlite_migrations.py passed; Bandit touched Python scope wrote /tmp/bandit_vz_helper_generation.json with 0 findings.
+
+PR 1420 review pass plan: add runner docstrings and metadata None guard; move optional nonempty string normalization to a shared Sandbox helper; make Postgres session-control column migrations fail fast with contextual logging; run focused tests and Bandit before pushing.
+
+PR 1420 review verification: focused pytest passed with 27 passed and 2 skipped; git diff --check passed; Bandit review scope wrote /tmp/bandit_vz_helper_generation_review.json with 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
