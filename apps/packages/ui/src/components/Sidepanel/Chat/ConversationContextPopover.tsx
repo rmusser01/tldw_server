@@ -1,5 +1,5 @@
 import React from "react"
-import { Popover, Tooltip } from "antd"
+import { Popover } from "antd"
 import {
   AlertTriangle,
   BookOpen,
@@ -518,34 +518,31 @@ export const ConversationContextPopover: React.FC<
       placement="topLeft"
       content={content}
     >
-      <Tooltip
+      <button
+        type="button"
+        data-testid="conversation-context-trigger"
+        className={`${triggerBaseClass} ${toneClass[readiness.tone]} ${className}`}
+        disabled={disabled}
+        aria-disabled={disabled}
+        aria-label={t(
+          "sidepanel:conversationContext.tooltip",
+          "Conversation context"
+        )}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         title={t(
           "sidepanel:conversationContext.tooltip",
           "Conversation context"
         )}
       >
-        <button
-          type="button"
-          data-testid="conversation-context-trigger"
-          className={`${triggerBaseClass} ${toneClass[readiness.tone]} ${className}`}
-          disabled={disabled}
-          aria-disabled={disabled}
-          aria-label={t(
-            "sidepanel:conversationContext.tooltip",
-            "Conversation context"
-          )}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-        >
-          <Layers className={iconClassName} />
-          <span className="hidden truncate sm:inline">
-            {t("sidepanel:conversationContext.shortLabel", "Context")}
-          </span>
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-            {readinessIcon(readiness.tone)}
-          </span>
-        </button>
-      </Tooltip>
+        <Layers className={iconClassName} />
+        <span className="hidden truncate sm:inline">
+          {t("sidepanel:conversationContext.shortLabel", "Context")}
+        </span>
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+          {readinessIcon(readiness.tone)}
+        </span>
+      </button>
     </Popover>
   )
 }

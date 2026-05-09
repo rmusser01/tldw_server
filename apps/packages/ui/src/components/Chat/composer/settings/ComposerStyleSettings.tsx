@@ -139,7 +139,18 @@ export const ComposerStyleSettings: React.FC = () => {
               type="button"
               role="radio"
               aria-checked={selected}
+              tabIndex={0}
               onClick={() => setVariant(opt.id)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" ||
+                  event.key === " " ||
+                  event.key === "Spacebar"
+                ) {
+                  event.preventDefault()
+                  setVariant(opt.id)
+                }
+              }}
               className={
                 "text-left p-4 rounded-lg border transition-colors " +
                 (selected
