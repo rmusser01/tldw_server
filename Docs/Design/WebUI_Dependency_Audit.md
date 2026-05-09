@@ -9,7 +9,7 @@ Status: Draft audit for issue #1346
 - Design spec: ../superpowers/specs/2026-05-07-webui-dependency-trimming-design.md
 - Parent design task: TASK-100
 - Audit task: TASK-104
-- Lockfile follow-up task: TASK-134
+- Lockfile follow-up tasks: TASK-134, TASK-141
 
 ## Scope
 
@@ -53,7 +53,7 @@ This audit does not remove packages or rewrite runtime code.
 | `@dnd-kit/dom` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 0 | none found | web app, shared UI, extension impact declaration only | drag/drop | `investigate-lockfile` | Low/medium; source usage is absent or indirect, but dependency graph or scripts need confirmation. | Small if removable; avoid manifest churn until confirmed. | Lockfile/manifest investigation slice. |
 | `@dnd-kit/helpers` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 1 | apps/packages/ui/src/components/Option/KanbanPlayground/BoardView.tsx | shared UI | drag/drop | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `@dnd-kit/react` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 10 | apps/packages/ui/src/components/Option/AudiobookStudio/ChapterEditor/ChapterList.tsx, apps/packages/ui/src/components/Option/AudiobookStudio/ChapterEditor/SortableChapterItem.tsx, apps/packages/ui/src/components/Option/DataTables/EditableDataTable.tsx, apps/packages/ui/src/components/Option/DataTables/TablePreview.tsx | shared UI | drag/drop | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
-| `@eslint/eslintrc` | `web:devDependencies` | 0 | none found; flat config uses @eslint/js instead | tooling/dev declaration only | tooling/dev | `investigate-lockfile` | Low/medium; source usage is absent or indirect, but dependency graph or scripts need confirmation. | Small if removable; avoid manifest churn until confirmed. | Lockfile/manifest investigation slice. |
+| `@eslint/eslintrc` | none after TASK-141 | 0 | none found; flat config uses `@eslint/js` and concrete plugins instead | removed WebUI dev declaration | tooling/dev | `removed` | Low; direct declaration had no source/config/script evidence. The package remains in `apps/bun.lock` only as an ESLint transitive dependency. | One direct dev declaration removed; no standalone lockfile package removal because ESLint still owns it transitively. | TASK-141 complete |
 | `@eslint/js` | `web:devDependencies` | 1 | apps/tldw-frontend/eslint.config.mjs | web config/script | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `@heroicons/react` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 2 | apps/packages/ui/src/components/Option/Settings/TldwConnectionSettings.tsx, apps/packages/ui/src/components/Option/Settings/__tests__/tldw-review-comments.test.tsx | shared UI, shared UI tests | icons | `defer-design` | Medium; icon consolidation touches many visible components and needs visual review. | Potentially meaningful bundle reduction only after an icon-system design. | Icon-stack consolidation design. |
 | `@hookform/resolvers` | `web:dependencies` | 0 | none found | web app declaration only | frontend/runtime | `remove-now` | Low; no import/config/package-script evidence in scanned roots. | Small lockfile/install reduction. | Quick cleanup removal PR. |
@@ -112,12 +112,12 @@ This audit does not remove packages or rewrite runtime code.
 | `dompurify` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 11 | apps/packages/ui/src/components/Common/CodeBlock.tsx, apps/packages/ui/src/components/Notes/NotesStudioDiagramCard.tsx, apps/packages/ui/src/components/Notes/export-utils.ts, apps/packages/ui/src/components/Option/Collections/ReadingList/ReadingItemDetail.tsx | shared UI | security/sanitization | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `epubjs` | `web:dependencies`, `shared-ui:peerDependencies` | 8 | apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/EpubViewer/EpubSearch.tsx, apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx, apps/packages/ui/src/hooks/document-workspace/useEpubOutline.ts, apps/packages/ui/src/hooks/document-workspace/useEpubReader.ts | shared UI | document/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `eslint` | `web:devDependencies` | 2 | apps/tldw-frontend/package.json lint scripts, apps/tldw-frontend/eslint.config.mjs | package scripts | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
-| `eslint-config-next` | `web:devDependencies` | 0 | none found; legacy Next ESLint config package not referenced by flat config | tooling/dev declaration only | tooling/dev | `investigate-lockfile` | Low/medium; source usage is absent or indirect, but dependency graph or scripts need confirmation. | Small if removable; avoid manifest churn until confirmed. | Lockfile/manifest investigation slice. |
-| `eslint-config-prettier` | `web:devDependencies` | 0 | none found; no flat config import found | tooling/dev declaration only | tooling/dev | `investigate-lockfile` | Low/medium; source usage is absent or indirect, but dependency graph or scripts need confirmation. | Small if removable; avoid manifest churn until confirmed. | Lockfile/manifest investigation slice. |
+| `eslint-config-next` | none after TASK-141 | 0 | none found; flat config imports `@next/eslint-plugin-next` directly | removed WebUI dev declaration | tooling/dev | `removed` | Low; package scripts call `eslint .`, not Next's legacy ESLint config. | One direct dev declaration removed; `eslint-config-next` and its import/a11y resolver tree dropped from the lockfile. | TASK-141 complete |
+| `eslint-config-prettier` | none after TASK-141 | 0 | none found; no flat config import found | removed WebUI dev declaration | tooling/dev | `removed` | Low; the active flat config does not extend Prettier's ESLint config and no package script invokes its CLI. | One direct dev declaration removed; package record dropped from the lockfile. | TASK-141 complete |
 | `eslint-plugin-react` | `web:devDependencies` | 1 | apps/tldw-frontend/eslint.config.mjs | web config/script | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `eslint-plugin-react-hooks` | `web:devDependencies` | 1 | apps/tldw-frontend/eslint.config.mjs | web config/script | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `exceljs` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 2 | apps/extension/tests/unit/data-table-export.test.ts, apps/packages/ui/src/utils/data-table-export.ts | extension tests/config, shared UI | document/rendering | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
-| `fake-indexeddb` | `web:devDependencies` | 0 | none found; test helper candidate only | tooling/dev declaration only | tooling/dev | `investigate-lockfile` | Low/medium; source usage is absent or indirect, but dependency graph or scripts need confirmation. | Small if removable; avoid manifest churn until confirmed. | Lockfile/manifest investigation slice. |
+| `fake-indexeddb` | none after TASK-141 | 0 | none found; no test setup import found | removed WebUI dev declaration | tooling/dev | `removed` | Low; tests rely on current jsdom/browser shims and had no direct fake IndexedDB package usage. | One direct dev declaration removed; package record dropped from the lockfile. | TASK-141 complete |
 | `globals` | `web:devDependencies` | 1 | apps/tldw-frontend/eslint.config.mjs | web config/script | tooling/dev | `keep` | Low; dev/test/build tool rather than runtime surface. | No runtime bundle impact; keep unless a toolchain cleanup proves it unused. | none |
 | `gpt-tokenizer` | `web:dependencies`, `shared-ui:peerDependencies`, `extension:dependencies` | 2 | apps/packages/ui/src/components/Option/Repo2Txt/formatter/TokenizerWorker.ts, apps/packages/ui/src/components/Option/Repo2Txt/workers/tokenizer.worker.ts | shared UI | parser/conversion | `keep` | Low; import/config/package-script evidence in current WebUI or shared UI paths. | No immediate reduction; keep current behavior. | none |
 | `html-to-text` | `web:dependencies`, `extension:dependencies` | 0 | none found | web app, extension impact declaration only | parser/conversion | `investigate-lockfile` | Medium; no import/config/package-script evidence, but package sits in parser/conversion behavior. Confirm direct-vs-transitive ownership and HTML text-conversion coverage before removal. | Potential install/bundle reduction if direct declaration proves unused. | Lockfile/parser-domain investigation slice. |
@@ -187,6 +187,11 @@ This audit does not remove packages or rewrite runtime code.
   direct manifests. The DnD packages are still owned by the active
   `@dnd-kit/react`/helpers graph, and Tiptap packages declare `@tiptap/pm` as
   a peer/runtime dependency.
+- TASK-141 removed unused direct tooling declarations for `@eslint/eslintrc`,
+  `eslint-config-next`, `eslint-config-prettier`, and `fake-indexeddb`.
+  Measured against `origin/dev`, the three scanned manifests went from 260 to
+  256 direct declaration entries, with all 4 candidate declaration entries
+  removed. `@eslint/eslintrc` remains only as an ESLint transitive dependency.
 
 ### Quick Cleanup Candidates
 
@@ -287,6 +292,21 @@ This audit does not remove packages or rewrite runtime code.
 - Bandit: skipped for TASK-134 because the slice changed TypeScript package
   manifests, `apps/bun.lock`, documentation, and Backlog metadata only; no
   Python files were modified.
+- 2026-05-08 TASK-141 tooling follow-up: confirmed no exact source, config,
+  script, or manifest references remained for `@eslint/eslintrc`,
+  `eslint-config-next`, `eslint-config-prettier`, or `fake-indexeddb` after
+  direct manifest removal. Regenerated `apps/bun.lock` with `bun install`;
+  `eslint-config-next`, `eslint-config-prettier`, and `fake-indexeddb` dropped
+  out completely, while `@eslint/eslintrc` remains through ESLint's transitive
+  dependency graph.
+- 2026-05-08 TASK-141 impact deltas, measured against `origin/dev`: direct
+  declaration entries across `apps/tldw-frontend/package.json`,
+  `apps/extension/package.json`, and `apps/packages/ui/package.json` changed
+  from 260 to 256 (-4). The removed tooling candidate declaration entries
+  changed from 4 to 0 (-4) across 4 unique package names. `apps/bun.lock`
+  changed from 518,386 bytes to 501,563 bytes (-16,823), from 4,473 lines to
+  4,347 lines (-126), and from 2,077 package records to 2,016 package records
+  (-61).
 
 ## Known Skips And Blockers
 
