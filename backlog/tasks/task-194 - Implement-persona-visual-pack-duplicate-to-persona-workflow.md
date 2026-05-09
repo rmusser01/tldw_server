@@ -4,7 +4,7 @@ title: Implement persona visual pack duplicate-to-persona workflow
 status: In Progress
 assignee: []
 created_date: '2026-05-09 21:42'
-updated_date: '2026-05-09 21:48'
+updated_date: '2026-05-09 21:50'
 labels:
   - persona
   - buddy
@@ -43,6 +43,8 @@ Task 1 complete: added shared persona visual manifest asset collection/remapping
 Task 2 complete: added explicit parent_persona_id support for create_persona_visual_pack so same-user duplicate creation can validate a cross-persona parent pack, exported update_persona_visual_pack_status, and added a DB-focused regression for failed-to-draft duplicate lineage. Red verification: focused test failed with unexpected parent_persona_id keyword. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py::test_db_allows_explicit_cross_persona_parent_for_duplicate_path -q => 1 passed, 5 warnings.
 
 Task 3 complete: implemented PersonaVisualService.duplicate_pack_to_persona with same-persona rejection, target persona ownership validation, manifest-referenced asset preflight, source file/checksum checks, physical asset copying through create_asset_from_upload, manifest remapping, failed-to-draft finalization, and copied-file cleanup on partial failures. Red verification: service tests failed because duplicate_pack_to_persona was missing. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q => 14 passed, 5 warnings.
+
+Task 4 complete: added PersonaVisualPackDuplicateRequest, mapped target_persona_not_found to 404 and stale source asset states to 409, and exposed POST /profiles/{persona_id}/visual-packs/{pack_id}/duplicate returning PersonaVisualPackResponse. Red verification: API duplicate tests returned 404 Not Found before route wiring. Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q => 29 passed, 5 warnings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

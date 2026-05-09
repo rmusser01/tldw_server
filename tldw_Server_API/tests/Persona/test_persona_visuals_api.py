@@ -212,6 +212,64 @@ def test_create_list_and_activate_visual_pack(persona_db: CharactersRAGDB) -> No
         assert payload[0]["assets"][0]["id"] == asset["id"]
 
 
+def test_duplicate_visual_pack_to_another_persona_creates_draft(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        source_persona_id = _create_persona(client, name="Source Persona")
+        target_persona_id = _create_persona(client, name="Target Persona")
+        source_pack = _create_visual_pack(client, source_persona_id, title="Source Visuals")
+        asset = _upload_png(client, source_persona_id, source_pack["id"])
+        manifest_response = client.patch(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": source_pack["version"]},
+        )
+        assert manifest_response.status_code == 200, manifest_response.text
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/duplicate",
+            json={"target_persona_id": target_persona_id, "title": "Target Draft"},
+        )
+
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload["title"] == "Target Draft"
+        assert payload["persona_id"] == target_persona_id
+        assert payload["status"] == "draft"
+        assert payload["parent_pack_id"] == source_pack["id"]
+        assert "asset_id_map" not in payload
+        assert len(payload["assets"]) == 1
+        assert payload["assets"][0]["id"] != asset["id"]
+
+
+def test_duplicate_visual_pack_rejects_same_persona_target(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Source Persona")
+        source_pack = _create_visual_pack(client, persona_id, title="Source Visuals")
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{source_pack['id']}/duplicate",
+            json={"target_persona_id": persona_id},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["code"] == "same_persona_target_unsupported"
+
+
+def test_duplicate_visual_pack_rejects_other_user_target(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(2, persona_db) as other_client:
+        other_persona_id = _create_persona(other_client, name="Other User Target")
+    with _client_for_user(1, persona_db) as client:
+        source_persona_id = _create_persona(client, name="Source Persona")
+        source_pack = _create_visual_pack(client, source_persona_id, title="Source Visuals")
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/duplicate",
+            json={"target_persona_id": other_persona_id},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "target_persona_not_found"
+
+
 def test_upload_rejects_unsupported_mime_type(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Visual Upload Persona")

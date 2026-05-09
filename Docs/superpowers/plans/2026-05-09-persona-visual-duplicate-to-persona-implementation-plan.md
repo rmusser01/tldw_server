@@ -821,7 +821,7 @@ git commit -m "Add persona visual pack duplication service"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/persona.py`
 - Test: `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 In `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`, add:
 
@@ -873,7 +873,7 @@ def test_duplicate_visual_pack_rejects_same_persona_target(persona_db: Character
 
 Also test unauthorized target by creating a target persona under a different user DB/client and expecting `404` with `target_persona_not_found`.
 
-- [ ] **Step 2: Run API tests and verify they fail**
+- [x] **Step 2: Run API tests and verify they fail**
 
 Run:
 
@@ -884,7 +884,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q
 
 Expected: duplicate endpoint returns 404 because route does not exist.
 
-- [ ] **Step 3: Add request schema**
+- [x] **Step 3: Add request schema**
 
 In `tldw_Server_API/app/api/v1/schemas/persona.py` near `PersonaVisualPackCreate`:
 
@@ -902,11 +902,11 @@ class PersonaVisualPackDuplicateRequest(BaseModel):
         return normalized
 ```
 
-- [ ] **Step 4: Import the schema in the endpoint**
+- [x] **Step 4: Import the schema in the endpoint**
 
 Add `PersonaVisualPackDuplicateRequest` to the existing imports from `tldw_Server_API.app.api.v1.schemas.persona`.
 
-- [ ] **Step 5: Extend service error mapping**
+- [x] **Step 5: Extend service error mapping**
 
 In `_persona_visual_service_error_to_http()`:
 
@@ -929,7 +929,7 @@ elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch"}:
 
 Leave `same_persona_target_unsupported` and `invalid_manifest` as `400`.
 
-- [ ] **Step 6: Add duplicate endpoint**
+- [x] **Step 6: Add duplicate endpoint**
 
 Place after `get_persona_visual_pack()` or before asset upload in `persona.py`:
 
@@ -969,7 +969,7 @@ async def duplicate_persona_visual_pack(
         raise _to_http_exception(exc, action="duplicate persona visual pack") from exc
 ```
 
-- [ ] **Step 7: Run API tests**
+- [x] **Step 7: Run API tests**
 
 Run:
 
@@ -980,7 +980,7 @@ python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q
 
 Expected: pass.
 
-- [ ] **Step 8: Commit API contract**
+- [x] **Step 8: Commit API contract**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/persona.py \
