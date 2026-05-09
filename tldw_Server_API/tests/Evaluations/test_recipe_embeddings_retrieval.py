@@ -20,6 +20,7 @@ def test_manifest_advertises_guided_media_scoped_rag_flow() -> None:
     assert candidate_discovery["endpoint"].endswith(
         "/recipes/embeddings_model_selection/candidates"
     )
+    assert candidate_discovery["supported"] is True
     assert set(candidate_discovery["runnable_statuses"]) == {
         "ready",
         "missing_key",
@@ -129,6 +130,7 @@ def test_build_report_emits_recommendation_slots_and_confidence_inputs() -> None
         candidate_results=[
             {
                 "candidate_id": "m1",
+                "candidate_run_id": "child-run-m1",
                 "model": "openai:text-embedding-3-small",
                 "provider": "openai",
                 "is_local": False,
@@ -178,8 +180,9 @@ def test_build_report_emits_recommendation_slots_and_confidence_inputs() -> None
     assert report["confidence_summary"]["sample_count"] == 2
     assert report["confidence_summary"]["spread"] > 0.0
     assert "winner_margin" in report["confidence_inputs"]
-    assert report["recommendation_slots"]["best_overall"]["candidate_run_id"] == "m1"
+    assert report["recommendation_slots"]["best_overall"]["candidate_run_id"] == "child-run-m1"
     assert report["recommendation_slots"]["best_overall"]["reason_code"] == "highest_quality_score"
+    assert report["recommendation_slots"]["best_overall"]["metadata"]["candidate_run_id"] == "child-run-m1"
     assert report["recommendation_slots"]["best_overall"]["metadata"]["provider"] == "openai"
     assert report["recommendation_slots"]["best_overall"]["metadata"]["model"] == "text-embedding-3-small"
     assert report["recommendation_slots"]["best_overall"]["metadata"]["apply_eligible"] is True
@@ -187,6 +190,38 @@ def test_build_report_emits_recommendation_slots_and_confidence_inputs() -> None
     assert report["recommendation_slots"]["best_local"]["metadata"]["candidate_id"] == "m2"
     assert candidates_by_id["m1"]["metrics"]["recall_at_k"] > 0.0
     assert candidates_by_id["m1"]["metrics"]["quality_score"] > candidates_by_id["m2"]["metrics"]["quality_score"]
+
+
+def test_build_report_marks_slot_apply_ineligible_without_candidate_run_id() -> None:
+    recipe = EmbeddingsRetrievalRecipe()
+
+    report = recipe.build_report(
+        dataset_mode="labeled",
+        review_sample={"required": False, "sample_size": 0, "sample_query_ids": []},
+        candidate_results=[
+            {
+                "candidate_id": "m1",
+                "model": "openai:text-embedding-3-small",
+                "provider": "openai",
+                "is_local": False,
+                "cost_usd": 0.12,
+                "query_results": [
+                    {
+                        "ranked_ids": ["doc-1", "doc-3"],
+                        "expected_ids": ["doc-1"],
+                        "latency_ms": 110.0,
+                    },
+                ],
+            },
+        ],
+    )
+
+    metadata = report["recommendation_slots"]["best_overall"]["metadata"]
+    assert metadata["provider"] == "openai"
+    assert metadata["model"] == "text-embedding-3-small"
+    assert metadata["candidate_run_id"] is None
+    assert metadata["apply_eligible"] is False
+    assert "missing_candidate_run_id" in metadata["apply_warnings"]
 
 
 def test_build_report_accepts_abtest_result_rows_and_uses_conservative_sample_count() -> None:

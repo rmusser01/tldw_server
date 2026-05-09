@@ -43,6 +43,7 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
                 "advanced_manual_ids": True,
             },
             "candidate_discovery": {
+                "supported": True,
                 "endpoint": "/api/v1/evaluations/recipes/embeddings_model_selection/candidates",
                 "runnable_statuses": [
                     "ready",
@@ -175,8 +176,8 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
                 "run_config.comparison_mode must be one of: embedding_only, retrieval_stack."
             )
         candidates = run_config.get("candidates") or []
-        if not isinstance(candidates, list) or not candidates:
-            raise ValueError("run_config.candidates must contain at least one candidate.")
+        if not isinstance(candidates, list):
+            raise ValueError("run_config.candidates must be a list when provided.")
         normalized_candidates = sorted(
             (dict(candidate) for candidate in candidates),
             key=lambda candidate: (
@@ -198,6 +199,10 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             normalized["top_k"] = int(run_config["top_k"])
         if run_config.get("hybrid_alpha") is not None:
             normalized["hybrid_alpha"] = float(run_config["hybrid_alpha"])
+        if "guided_source_labeling" in run_config:
+            normalized["guided_source_labeling"] = bool(run_config["guided_source_labeling"])
+        if run_config.get("source_id_contract") is not None:
+            normalized["source_id_contract"] = str(run_config["source_id_contract"]).strip()
         return normalized
 
     def build_report(
@@ -502,13 +507,13 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             )
 
         candidate_id = str(candidate_summary.get("candidate_id") or "").strip() or None
+        candidate_run_id = (
+            str(candidate_summary.get("candidate_run_id") or "").strip() or None
+        )
         provider, model = self._provider_and_model_for_metadata(candidate_summary)
         apply_warnings = self._apply_warnings(candidate_summary)
         return RecommendationSlot(
-            candidate_run_id=(
-                str(candidate_summary.get("candidate_run_id") or "").strip()
-                or candidate_id
-            ),
+            candidate_run_id=candidate_run_id,
             reason_code=reason_code,
             explanation=(
                 f"{candidate_summary.get('model') or candidate_summary.get('candidate_id')} "
@@ -517,6 +522,7 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             confidence=confidence,
             metadata={
                 "candidate_id": candidate_id,
+                "candidate_run_id": candidate_run_id,
                 "provider": provider,
                 "model": model,
                 "is_local": candidate_summary.get("is_local"),
@@ -544,6 +550,8 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
     def _apply_warnings(self, candidate_summary: dict[str, Any]) -> list[str]:
         warnings: list[str] = []
         provider, model = self._provider_and_model_for_metadata(candidate_summary)
+        if not str(candidate_summary.get("candidate_run_id") or "").strip():
+            warnings.append("missing_candidate_run_id")
         if not provider:
             warnings.append("missing_provider")
         if not model:
