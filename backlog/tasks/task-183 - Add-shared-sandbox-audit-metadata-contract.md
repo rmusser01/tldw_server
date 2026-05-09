@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-09 19:31'
-updated_date: '2026-05-09 19:42'
+updated_date: '2026-05-09 19:44'
 labels:
   - sandbox
   - security
@@ -57,12 +57,18 @@ User asked to continue after PR #1438 merged. Existing trust-level and runtime c
 Implemented shared run-completion audit metadata helper and wired endpoint/background service paths. Red check: focused audit test file failed on missing helper and missing spec argument. Green checks: python -m pytest tldw_Server_API/tests/sandbox/test_sandbox_run_limit_audit.py -q passed 4 tests; endpoint smoke test passed 1 test; py_compile passed for touched production modules; git diff --check passed; Bandit on touched production files reported 0 results and 0 errors at /tmp/bandit_sandbox_audit_metadata_contract.json.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented a shared sandbox run-completion audit metadata contract and wired it into both REST endpoint and background-service completion audit paths. The helper centralizes runtime, requested/effective runtime, trust/network policy, spec version, outcome, status reason, policy/image identifiers, and bounded limit metadata while omitting raw artifact paths, raw capture patterns, and host-path base image values. Focused tests cover path minimization and service metadata parity; verification passed for focused pytest, endpoint smoke, py_compile, git diff --check, and Bandit. PR: https://github.com/rmusser01/tldw_server/pull/1441
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
