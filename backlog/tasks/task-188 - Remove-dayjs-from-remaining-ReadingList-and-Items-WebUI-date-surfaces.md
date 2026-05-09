@@ -4,7 +4,7 @@ title: Remove dayjs from remaining ReadingList and Items WebUI date surfaces
 status: Done
 assignee: []
 created_date: '2026-05-09 20:06'
-updated_date: '2026-05-09 20:27'
+updated_date: '2026-05-09 20:46'
 labels:
   - webui
   - dependencies
@@ -43,6 +43,10 @@ Implemented in isolated worktree branch codex/webui-final-dayjs-native-dates-134
 Removed direct dayjs declarations from apps/packages/ui/package.json, apps/tldw-frontend/package.json, and apps/extension/package.json after exact active-code import scans across apps returned no direct package imports. Regenerated apps/bun.lock with scripts disabled; dayjs remains only through transitive lockfile ownership from Ant Design, ExcelJS, Mermaid, and optional picker peer metadata.
 
 Verification: focused Vitest first failed on missing native ReadingList/Items date inputs and four remaining dayjs imports, then passed with 3 files and 10 tests after implementation. Exact active-code dayjs import scan returned no matches, direct manifest declaration scan returned no matches, WebUI lint exited 0 with the existing 131-warning baseline, WebUI compile exited 0 and generated 138 static pages with token sync OK, git diff --check exited 0. TypeScript baseline still exits 2 on existing EmbeddingsModelSelectionConfig.tsx and lib/api/vnPlay.ts errors with no task-scope matches. Bandit skipped because no Python files changed.
+
+PR #1446 review follow-up: Gemini Code Assist flagged hardcoded native date filter labels and aria-labels in ItemsWorkspace. ItemsWorkspace already uses useTranslation, so the date labels now use t("items:dateFrom", "Date from") and t("items:dateTo", "Date to") like the sibling ReadingList filters.
+
+PR #1446 review fix verification: focused ItemsWorkspace test passed with 7 tests, focused dependency cleanup Vitest slice passed with 3 files and 10 tests, git diff --check exited 0, and an exact grep for hardcoded Items date aria/text labels returned no matches.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

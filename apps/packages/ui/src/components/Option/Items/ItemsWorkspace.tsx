@@ -668,9 +668,9 @@ export const ItemsWorkspace: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1 text-xs text-text-muted">
-            Date from
+            {t("items:dateFrom", "Date from")}
             <input
-              aria-label="Date from"
+              aria-label={t("items:dateFrom", "Date from")}
               type="date"
               value={formatDateInputValue(dateFrom)}
               onChange={(event) => {
@@ -681,9 +681,9 @@ export const ItemsWorkspace: React.FC = () => {
             />
           </label>
           <label className="flex items-center gap-1 text-xs text-text-muted">
-            Date to
+            {t("items:dateTo", "Date to")}
             <input
-              aria-label="Date to"
+              aria-label={t("items:dateTo", "Date to")}
               type="date"
               value={formatDateInputValue(dateTo)}
               onChange={(event) => {
