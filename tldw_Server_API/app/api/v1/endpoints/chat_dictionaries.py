@@ -1037,6 +1037,72 @@ async def process_text_with_dictionaries(
         service = ChatDictionaryService(db)
 
         start_time = time.time()
+        dictionary_ids = request.dictionary_ids
+        if dictionary_ids is not None and request.dictionary_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Use either dictionary_id or dictionary_ids, not both.",
+            )
+
+        if dictionary_ids is not None:
+            for dictionary_id in dictionary_ids:
+                if service.get_dictionary(dictionary_id=dictionary_id) is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Dictionary {dictionary_id} not found.",
+                    )
+
+            processed_text = request.text
+            replacements = 0
+            iterations = 0
+            entries_used: list[int] = []
+            token_budget_exceeded = False
+            token_budget_used = request.token_budget
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+
+                for dictionary_id in dictionary_ids:
+                    processed_text, stats = service.process_text(
+                        processed_text,
+                        dictionary_id=dictionary_id,
+                        group=request.group,
+                        max_iterations=request.max_iterations,
+                        token_budget=request.token_budget,
+                        return_stats=True,
+                        chat_id=request.chat_id,
+                    )
+
+                    replacements += stats.get("replacements", 0)
+                    iterations += stats.get("iterations", 0)
+                    token_budget_exceeded = (
+                        token_budget_exceeded or stats.get("token_budget_exceeded", False)
+                    )
+                    if stats.get("token_budget_used") is not None:
+                        token_budget_used = stats.get("token_budget_used")
+                    for entry_id in stats.get("entries_used", []):
+                        if entry_id not in entries_used:
+                            entries_used.append(entry_id)
+
+                warning_exceeded_budget = any(
+                    issubclass(warning.category, TokenBudgetExceededWarning)
+                    for warning in caught
+                )
+                if warning_exceeded_budget:
+                    token_budget_exceeded = True
+
+            processing_time_ms = (time.time() - start_time) * 1000
+
+            return ProcessTextResponse(
+                original_text=request.text,
+                processed_text=processed_text,
+                replacements=replacements,
+                iterations=iterations,
+                entries_used=entries_used,
+                token_budget_exceeded=token_budget_exceeded,
+                token_budget_used=token_budget_used,
+                processing_time_ms=processing_time_ms,
+            )
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -1067,6 +1133,8 @@ async def process_text_with_dictionaries(
             token_budget_used=stats.get("token_budget_used"),
             processing_time_ms=processing_time_ms,
         )
+    except HTTPException:
+        raise
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
             logger.error("Error processing text")

@@ -473,6 +473,10 @@ class ProcessTextRequest(BaseModel):
     """Request schema for processing text through dictionaries."""
     text: str = Field(..., max_length=MAX_CHAT_DICTIONARY_TEXT_LENGTH, description="Text to process")
     dictionary_id: Optional[int] = Field(None, description="Specific dictionary to use")
+    dictionary_ids: Optional[list[int]] = Field(
+        None,
+        description="Explicit client-ordered dictionaries to apply. An empty list applies no dictionaries.",
+    )
     group: Optional[str] = Field(None, description="Specific group to filter entries")
     max_iterations: int = Field(5, ge=1, le=20, description="Maximum processing iterations")
     token_budget: Optional[int] = Field(None, ge=1, description="Optional token limit")
@@ -480,6 +484,13 @@ class ProcessTextRequest(BaseModel):
         None,
         description="Optional chat session ID for activity/audit attribution.",
     )
+
+    @field_validator("dictionary_ids", mode="before")
+    @classmethod
+    def normalize_dictionary_ids(cls, value: Any) -> Optional[list[int]]:
+        if value is None:
+            return None
+        return _normalize_included_dictionary_ids(value)
 
 
 class ProcessTextResponse(BaseModel):
