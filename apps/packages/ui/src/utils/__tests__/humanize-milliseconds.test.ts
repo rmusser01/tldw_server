@@ -7,16 +7,18 @@ import { describe, expect, it } from 'vitest'
 import { humanizeMilliseconds } from '../humanize-milliseconds'
 
 describe('humanizeMilliseconds', () => {
-    it('preserves compact duration suffixes across existing thresholds', () => {
-        expect(humanizeMilliseconds(999)).toBe('999ms')
-        expect(humanizeMilliseconds(1000)).toBe('1s')
-        expect(humanizeMilliseconds(59_999)).toBe('59s')
-        expect(humanizeMilliseconds(60_000)).toBe('1m')
-        expect(humanizeMilliseconds(3_599_999)).toBe('59m')
-        expect(humanizeMilliseconds(3_600_000)).toBe('1h')
-        expect(humanizeMilliseconds(86_399_999)).toBe('23h')
-        expect(humanizeMilliseconds(86_400_000)).toBe('1d')
-        expect(humanizeMilliseconds(172_800_000)).toBe('2d')
+    it.each([
+        [999, '999ms'],
+        [1000, '1s'],
+        [59_999, '59s'],
+        [60_000, '1m'],
+        [3_599_999, '59m'],
+        [3_600_000, '1h'],
+        [86_399_999, '23h'],
+        [86_400_000, '1d'],
+        [172_800_000, '2d'],
+    ])('formats %i milliseconds as %s', (milliseconds, expected) => {
+        expect(humanizeMilliseconds(milliseconds)).toBe(expected)
     })
 
     it('does not depend on dayjs for display-only duration formatting', () => {
