@@ -380,7 +380,7 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
           <div>
             <Text strong>Media IDs</Text>
             <Input
-              aria-label="Corpus media IDs"
+              aria-label="Media IDs"
               className="mt-2"
               value={joinMediaIds(normalizedRunConfig.media_ids)}
               onChange={(event) =>

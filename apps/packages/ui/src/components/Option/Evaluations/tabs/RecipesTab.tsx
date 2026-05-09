@@ -30,6 +30,7 @@ import {
   useValidateRecipeDataset
 } from "../hooks/useRecipes"
 import { JsonEditor } from "../components"
+import { EmbeddingsModelSelectionConfig } from "./recipe-configs/EmbeddingsModelSelectionConfig"
 import { RagAnswerQualityConfig } from "./recipe-configs/RagAnswerQualityConfig"
 import { RagRetrievalTuningConfig } from "./recipe-configs/RagRetrievalTuningConfig"
 import type {
@@ -188,6 +189,21 @@ const prettifySlotName = (slotName: string): string =>
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ")
 
+const prettifySentenceSlotName = (slotName: string): string => {
+  const label = slotName.replace(/_/g, " ")
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+const prettifyMetricName = (metricName: string): string =>
+  metricName
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+
+const formatMetricValue = (value: unknown): string =>
+  typeof value === "number"
+    ? value.toFixed(value >= 1 ? 2 : 3).replace(/0+$/, "").replace(/\.$/, "")
+    : String(value)
+
 const parseJsonObject = (text: string, label: string): Record<string, any> => {
   try {
     const parsed = JSON.parse(text)
@@ -327,6 +343,8 @@ export const RecipesTab: React.FC = () => {
   const reportFailureExamples = Array.isArray(reportPayload?.failure_examples)
     ? reportPayload.failure_examples
     : []
+  const isEmbeddingsRecipeReport =
+    report?.run?.recipe_id === "embeddings_model_selection"
   const parsedInlineDataset =
     datasetSource === "inline" ? parseJsonDatasetSafe(inlineDatasetText) : null
   const parsedRunConfig = parseJsonObjectSafe(runConfigText)
@@ -1105,6 +1123,113 @@ export const RecipesTab: React.FC = () => {
     return renderSummarizationRunConfigEditor()
   }
 
+  const renderEmbeddingsRecommendationCards = () => {
+    const recommendationSlots = report?.recommendation_slots || {}
+    const candidateById = new Map<string, any>()
+    reportCandidates.forEach((candidate: any) => {
+      const keys = [
+        candidate.candidate_run_id,
+        candidate.candidate_id,
+        candidate.model ? `${candidate.provider || ""}:${candidate.model}` : null
+      ]
+      keys
+        .map((key) => (key == null ? "" : String(key).trim()))
+        .filter(Boolean)
+        .forEach((key) => candidateById.set(key, candidate))
+    })
+    const reportWarnings = [
+      ...(Array.isArray(reportPayload?.warnings) ? reportPayload.warnings : []),
+      ...(Array.isArray(reportPayload?.confidence_warnings)
+        ? reportPayload.confidence_warnings
+        : [])
+    ]
+
+    return (
+      <div className="space-y-3">
+        {reportWarnings.map((warning: unknown, index: number) => (
+          <Alert
+            key={`embeddings-warning-${index}`}
+            type="warning"
+            showIcon
+            title={String(warning)}
+          />
+        ))}
+        <div className="grid gap-3 md:grid-cols-3">
+          {["best_overall", "best_local", "best_cheap"].map((slotName) => {
+            const slot = (recommendationSlots as Record<string, any>)[slotName] || {}
+            const candidateId = String(slot.candidate_run_id || "").trim()
+            const candidate = candidateById.get(candidateId)
+            const metrics =
+              candidate && typeof candidate.metrics === "object" && candidate.metrics
+                ? candidate.metrics
+                : {}
+            const blockedReason =
+              slot.apply_blocked_reason ||
+              slot.blocked_reason ||
+              slot.apply_ineligible_reason ||
+              slot.ineligible_reason
+
+            return (
+              <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
+                <div className="space-y-2">
+                  <Text strong>{prettifySentenceSlotName(slotName)}</Text>
+                  <div>
+                    <div className="font-medium">
+                      {candidate?.model || candidateId || t("evaluations:recipeNoWinner", {
+                        defaultValue: "No winner yet"
+                      })}
+                    </div>
+                    {candidate?.provider && (
+                      <div className="text-xs text-text-muted">{candidate.provider}</div>
+                    )}
+                  </div>
+                  {slot.explanation && (
+                    <Paragraph className="mb-0 text-xs">{slot.explanation}</Paragraph>
+                  )}
+                  {Object.entries(metrics).length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {Object.entries(metrics).map(([key, value]) => (
+                        <Tag key={`${slotName}-${key}`}>
+                          {prettifyMetricName(key)}: {formatMetricValue(value)}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                  {slot.apply_eligible === true ? (
+                    <Button size="small">
+                      {t("evaluations:recipePreviewRagConfigChange", {
+                        defaultValue: "Preview RAG config change"
+                      })}
+                    </Button>
+                  ) : blockedReason ? (
+                    <div className="text-xs text-text-muted">{String(blockedReason)}</div>
+                  ) : null}
+                </div>
+              </Card>
+            )
+          })}
+        </div>
+        <Collapse
+          ghost
+          destroyOnHidden
+          items={[
+            {
+              key: "embeddings-raw-report",
+              label: t("evaluations:recipeRawReportDetailsLabel", {
+                defaultValue: "Raw report details"
+              }),
+              children: (
+                <pre className="max-h-80 overflow-auto rounded border border-border-subtle bg-surface-subtle p-3 text-xs">
+                  {JSON.stringify(report, null, 2)}
+                </pre>
+              )
+            }
+          ]}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
       <Card
@@ -1296,7 +1421,16 @@ export const RecipesTab: React.FC = () => {
                   )}
 
                   <div>
-                    {selectedManifest.recipe_id === "rag_retrieval_tuning" ? (
+                    {selectedManifest.recipe_id === "embeddings_model_selection" ? (
+                      <EmbeddingsModelSelectionConfig
+                        datasetSource="inline"
+                        dataset={parsedInlineDataset || defaultInlineDatasetForRecipe(selectedRecipeId)}
+                        runConfig={parsedRunConfig || defaultRunConfigForRecipe(selectedRecipeId)}
+                        manifest={selectedManifest}
+                        onDatasetChange={replaceInlineDataset}
+                        onRunConfigChange={replaceRunConfig}
+                      />
+                    ) : selectedManifest.recipe_id === "rag_retrieval_tuning" ? (
                       <RagRetrievalTuningConfig
                         datasetSource="inline"
                         dataset={parsedInlineDataset || defaultInlineDatasetForRecipe(selectedRecipeId)}
@@ -1398,6 +1532,15 @@ export const RecipesTab: React.FC = () => {
                       datasetSource="saved"
                       dataset={[]}
                       runConfig={parsedRunConfig || defaultRunConfigForRecipe(selectedRecipeId)}
+                      onDatasetChange={() => {}}
+                      onRunConfigChange={replaceRunConfig}
+                    />
+                  ) : selectedManifest.recipe_id === "embeddings_model_selection" ? (
+                    <EmbeddingsModelSelectionConfig
+                      datasetSource="saved"
+                      dataset={[]}
+                      runConfig={parsedRunConfig || defaultRunConfigForRecipe(selectedRecipeId)}
+                      manifest={selectedManifest}
                       onDatasetChange={() => {}}
                       onRunConfigChange={replaceRunConfig}
                     />
@@ -1614,25 +1757,29 @@ export const RecipesTab: React.FC = () => {
                   />
                 )}
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  {Object.entries(report.recommendation_slots || {}).map(([slotName, slot]) => (
-                    <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
-                      <div className="space-y-1">
-                        <Text strong>{prettifySlotName(slotName)}</Text>
-                        <div className="text-xs text-text-muted">
-                          {slot.candidate_run_id || t("evaluations:recipeNoWinner", {
-                            defaultValue: "No winner yet"
-                          })}
+                {isEmbeddingsRecipeReport ? (
+                  renderEmbeddingsRecommendationCards()
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {Object.entries(report.recommendation_slots || {}).map(([slotName, slot]) => (
+                      <Card key={slotName} size="small" styles={{ body: { padding: 12 } }}>
+                        <div className="space-y-1">
+                          <Text strong>{prettifySlotName(slotName)}</Text>
+                          <div className="text-xs text-text-muted">
+                            {slot.candidate_run_id || t("evaluations:recipeNoWinner", {
+                              defaultValue: "No winner yet"
+                            })}
+                          </div>
+                          {slot.explanation && (
+                            <Paragraph className="mb-0 text-xs">
+                              {slot.explanation}
+                            </Paragraph>
+                          )}
                         </div>
-                        {slot.explanation && (
-                          <Paragraph className="mb-0 text-xs">
-                            {slot.explanation}
-                          </Paragraph>
-                        )}
-                      </div>
-                    </Card>
-                  ))}
-                </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
 
                 {reportCandidates.length > 0 && (
                   <div className="space-y-2">

@@ -9,6 +9,7 @@ import { useGenerateSyntheticEvalDrafts } from "../../hooks/useSyntheticEval"
 const validateSpy = vi.fn()
 const createSpy = vi.fn()
 const generateSyntheticDraftsSpy = vi.fn()
+const useEmbeddingRecipeCandidatesSpy = vi.fn()
 const setActiveTabSpy = vi.fn()
 const setSyntheticReviewRecipeKindSpy = vi.fn()
 const setSyntheticReviewBatchIdSpy = vi.fn()
@@ -257,6 +258,7 @@ vi.mock("../../hooks/useRecipes", () => ({
     mutateAsync: createSpy,
     isPending: false
   }),
+  useEmbeddingRecipeCandidates: () => useEmbeddingRecipeCandidatesSpy(),
   useRecipeRunReport: (runId: string | null) => ({
     data:
       runId === "recipe-run-1"
@@ -309,6 +311,102 @@ vi.mock("../../hooks/useRecipes", () => ({
               }
             }
           }
+        : runId === "embeddings-run-1"
+          ? {
+              data: {
+                run: {
+                  run_id: "embeddings-run-1",
+                  recipe_id: "embeddings_model_selection",
+                  recipe_version: "1",
+                  status: "completed",
+                  created_at: "2026-03-31T12:00:00Z",
+                  metadata: {
+                    recipe_report: {
+                      warnings: ["Low sample count can reduce confidence."],
+                      candidates: [
+                        {
+                          candidate_id: "arm-openai-small",
+                          candidate_run_id: "arm-openai-small",
+                          model: "text-embedding-3-small",
+                          provider: "openai",
+                          metrics: {
+                            recall_at_10: 0.91,
+                            recall_at_5: 0.84,
+                            cost_per_1k: 0.02
+                          }
+                        },
+                        {
+                          candidate_id: "arm-local-bge",
+                          candidate_run_id: "arm-local-bge",
+                          model: "bge-large",
+                          provider: "local",
+                          metrics: {
+                            recall_at_10: 0.86
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                confidence_summary: {
+                  confidence: 0.73,
+                  sample_count: 5
+                },
+                recommendation_slots: {
+                  best_overall: {
+                    candidate_run_id: "arm-openai-small",
+                    reason_code: "highest_recall",
+                    explanation: "Highest recall across labeled media IDs.",
+                    apply_eligible: true
+                  },
+                  best_local: {
+                    candidate_run_id: "arm-local-bge",
+                    reason_code: "best_local",
+                    explanation: "Best local embedding model."
+                  },
+                  best_cheap: {
+                    candidate_run_id: "arm-openai-small",
+                    reason_code: "lowest_cost_above_threshold",
+                    explanation: "Lowest cost candidate above recall threshold."
+                  }
+                }
+              }
+            }
+        : runId === "embeddings-blocked-run-1"
+          ? {
+              data: {
+                run: {
+                  run_id: "embeddings-blocked-run-1",
+                  recipe_id: "embeddings_model_selection",
+                  recipe_version: "1",
+                  status: "completed",
+                  created_at: "2026-03-31T13:00:00Z",
+                  metadata: {
+                    recipe_report: {
+                      candidates: [
+                        {
+                          candidate_id: "arm-openai-small",
+                          candidate_run_id: "arm-openai-small",
+                          model: "text-embedding-3-small",
+                          provider: "openai",
+                          metrics: {
+                            recall_at_10: 0.91
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                recommendation_slots: {
+                  best_overall: {
+                    candidate_run_id: "arm-openai-small",
+                    explanation: "Highest recall across labeled media IDs.",
+                    apply_eligible: false,
+                    apply_blocked_reason: "Config preview disabled for this server."
+                  }
+                }
+              }
+            }
         : runId === "rag-answer-run-1"
           ? {
               data: {
@@ -560,6 +658,30 @@ describe("RecipesTab recipe launch flow", () => {
         status: "completed"
       }
     })
+    useEmbeddingRecipeCandidatesSpy.mockReturnValue({
+      data: {
+        ok: true,
+        data: {
+          candidates: [
+            {
+              provider: "openai",
+              model: "text-embedding-3-small",
+              status: "ready",
+              is_local: false,
+              default: true
+            },
+            {
+              provider: "local",
+              model: "bge-large",
+              status: "ready",
+              is_local: true,
+              default: false
+            }
+          ]
+        }
+      },
+      isLoading: false
+    })
   })
 
   it("stores synthetic review handoff state after draft generation succeeds", async () => {
@@ -808,13 +930,10 @@ describe("RecipesTab recipe launch flow", () => {
     renderRecipesTab()
 
     fireEvent.click(screen.getByRole("button", { name: "Use Embeddings Model Selection" }))
-    fireEvent.change(screen.getByLabelText("Query ID 1"), {
-      target: { value: "query-42" }
-    })
     fireEvent.change(screen.getByLabelText("Query text 1"), {
       target: { value: "find the beta launch notes" }
     })
-    fireEvent.change(screen.getByLabelText("Relevant media IDs 1 (optional)"), {
+    fireEvent.change(screen.getByLabelText("Expected media IDs 1"), {
       target: { value: "7, 9" }
     })
     fireEvent.change(screen.getByLabelText("Comparison mode"), {
@@ -823,12 +942,7 @@ describe("RecipesTab recipe launch flow", () => {
     fireEvent.change(screen.getByLabelText("Media IDs"), {
       target: { value: "7, 9, 12" }
     })
-    fireEvent.change(screen.getByLabelText("Provider 1"), {
-      target: { value: "local" }
-    })
-    fireEvent.change(screen.getByLabelText("Model 1"), {
-      target: { value: "bge-large" }
-    })
+    fireEvent.click(screen.getByRole("checkbox", { name: /local bge-large/i }))
 
     fireEvent.click(screen.getByRole("button", { name: "Run recipe" }))
 
@@ -838,7 +952,7 @@ describe("RecipesTab recipe launch flow", () => {
           recipeId: "embeddings_model_selection",
           dataset: [
             {
-              query_id: "query-42",
+              query_id: "q-1",
               input: "find the beta launch notes",
               expected_ids: ["7", "9"]
             }
@@ -851,11 +965,64 @@ describe("RecipesTab recipe launch flow", () => {
                 provider: "local",
                 model: "bge-large"
               })
-            ])
+            ]),
+            source_id_contract: "media_id"
           })
         })
       )
     })
+  })
+
+  it("renders embeddings recommendation cards with eligible preview actions", async () => {
+    createSpy.mockResolvedValue({
+      data: {
+        run_id: "embeddings-run-1",
+        recipe_id: "embeddings_model_selection",
+        status: "completed"
+      }
+    })
+
+    renderRecipesTab()
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Embeddings Model Selection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run recipe" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Best overall")).toBeInTheDocument()
+      expect(screen.getAllByText("text-embedding-3-small").length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/Recall/i).length).toBeGreaterThan(0)
+      expect(screen.getByText("Low sample count can reduce confidence.")).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /Preview RAG config change/i })
+      ).toBeInTheDocument()
+      expect(screen.getByText("Candidates")).toBeInTheDocument()
+    })
+  })
+
+  it("shows embeddings blocked apply reasons without preview actions", async () => {
+    createSpy.mockResolvedValue({
+      data: {
+        run_id: "embeddings-blocked-run-1",
+        recipe_id: "embeddings_model_selection",
+        status: "completed"
+      }
+    })
+
+    renderRecipesTab()
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Embeddings Model Selection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run recipe" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Best overall")).toBeInTheDocument()
+      expect(
+        screen.getByText("Config preview disabled for this server.")
+      ).toBeInTheDocument()
+    })
+
+    expect(
+      screen.queryByRole("button", { name: /Preview RAG config change/i })
+    ).not.toBeInTheDocument()
   })
 
   it("serializes guided rag retrieval tuning inputs into runnable recipe payloads", async () => {
