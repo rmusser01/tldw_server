@@ -4,7 +4,7 @@ title: Add persona visual import commit job flow
 status: Done
 assignee: []
 created_date: '2026-05-09 03:02'
-updated_date: '2026-05-09 03:15'
+updated_date: '2026-05-09 03:30'
 labels:
   - persona
   - visual-packs
@@ -19,6 +19,7 @@ references:
   - >-
     Docs/superpowers/plans/2026-05-08-persona-visual-packs-implementation-plan.md
   - 'https://github.com/rmusser01/tldw_server/pull/1135'
+  - 'https://github.com/rmusser01/tldw_server/pull/1393'
 parent_task_id: TASK-126
 priority: medium
 ---
@@ -59,6 +60,8 @@ Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python
 Security/quality checks: Bandit touched scope with `-s B101` wrote `/tmp/bandit_persona_visual_import_commit.json` and exited 0; `git diff --check` exited 0.
 
 Broader regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_jobs.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` -> 39 passed, 5 warnings.
+
+Draft PR opened for the completed persona visual packs branch: https://github.com/rmusser01/tldw_server/pull/1393. PR is draft and linked to tracker #1388 and sub-issue #1389; GitHub checks were pending at creation time.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

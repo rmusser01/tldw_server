@@ -4,13 +4,15 @@ title: Write persona visual packs implementation plan
 status: Done
 assignee: []
 created_date: '2026-05-08 21:37'
-updated_date: '2026-05-09 00:01'
+updated_date: '2026-05-09 03:30'
 labels:
   - persona
   - webui
   - planning
   - mcp
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/1393'
 documentation:
   - Docs/superpowers/specs/2026-05-08-persona-visual-packs-design.md
   - >-
@@ -65,6 +67,8 @@ Plan review iteration 3 result: Issues Found. Blocking gaps were missing sprite-
 Patched Docs/superpowers/plans/2026-05-08-persona-visual-packs-implementation-plan.md to add ordered frame and sprite-sheet region manifest rules, preview_frame/preview_asset_id validation, core/frontend/editor tests for frame order and sprite-sheet crops, live visual-state feedback in AssistantVoiceCard/LiveSessionPanel tests, and explicit startup_optional_workers registration plus test coverage for PERSONA_VISUAL_GENERATION_WORKER_ENABLED. Re-ran placeholder scan and git diff --check; both clean.
 
 Review loop has reached three plan-document-reviewer iterations. No fourth reviewer was dispatched; next step needs user direction to either accept the patched plan or explicitly run another review despite the loop cap.
+
+Implementation branch published as draft PR #1393: https://github.com/rmusser01/tldw_server/pull/1393. The PR contains the staged persona visual packs implementation and PR #1135-aligned portability/import commit flow.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
