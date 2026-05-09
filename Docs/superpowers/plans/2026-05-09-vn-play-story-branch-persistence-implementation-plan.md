@@ -267,7 +267,7 @@ git commit -m "Add VN Play story choice persistence helper"
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_turns.py`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_state.py`
 
-- [ ] **Step 1: Write failing service tests for valid Story choice**
+- [x] **Step 1: Write failing service tests for valid Story choice**
 
 Add a Story helper in `test_vn_play_turns.py`:
 
@@ -333,7 +333,7 @@ async def test_story_choice_creates_branch_and_choice_selected_before_model(
     assert state["visible_choices"] == [{"id": "inside", "text": "Step inside"}, {"id": "wait", "text": "Wait outside"}]
 ```
 
-- [ ] **Step 2: Write failing tests for invalid mode/input rules**
+- [x] **Step 2: Write failing tests for invalid mode/input rules**
 
 Add tests:
 
@@ -342,7 +342,7 @@ Add tests:
 - Story `input_text` raises `VNPlayTurnError("choice_not_allowed")`.
 - Story `custom_action` appends `user_turn` and creates no branch.
 
-- [ ] **Step 3: Run the new service tests and verify they fail**
+- [x] **Step 3: Run the new service tests and verify they fail**
 
 Run:
 
@@ -359,7 +359,7 @@ python -m pytest \
 
 Expected: fail because Story validation/branch persistence is not implemented.
 
-- [ ] **Step 4: Add constants**
+- [x] **Step 4: Add constants**
 
 In `constants.py`, add:
 
@@ -371,7 +371,7 @@ ERROR_RETRY_LAST_TURN_NOT_FAILED = "retry_last_turn_not_failed"
 
 Add them to `VN_PLAY_ERROR_CODES`.
 
-- [ ] **Step 5: Add service helpers**
+- [x] **Step 5: Add service helpers**
 
 In `service.py`, add focused helpers:
 
@@ -384,7 +384,7 @@ In `service.py`, add focused helpers:
 
 Use string extraction that accepts both `text` and `label` because existing tests and state use both shapes.
 
-- [ ] **Step 6: Wire Story choice submit path**
+- [x] **Step 6: Wire Story choice submit path**
 
 In `submit_turn()`:
 
@@ -404,7 +404,7 @@ In `submit_turn()`:
 {"choice_id": "open", "choice": {"id": "open", "text": "Open the door"}}
 ```
 
-- [ ] **Step 7: Tighten replay test for branch ID**
+- [x] **Step 7: Tighten replay test for branch ID**
 
 In `test_vn_play_state.py`, update `test_replay_replaces_visible_choices_after_selection()` so the `choice_selected` event payload includes `branch_node_id`, and assert:
 
@@ -412,7 +412,7 @@ In `test_vn_play_state.py`, update `test_replay_replaces_visible_choices_after_s
 assert state.active_branch_node_id == 12
 ```
 
-- [ ] **Step 8: Run focused service/state tests**
+- [x] **Step 8: Run focused service/state tests**
 
 Run:
 
@@ -423,7 +423,7 @@ python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_turns.py tldw_Server
 
 Expected: all selected tests pass.
 
-- [ ] **Step 9: Commit Task 2**
+- [x] **Step 9: Commit Task 2**
 
 Run:
 
