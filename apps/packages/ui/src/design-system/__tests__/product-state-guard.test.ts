@@ -41,7 +41,7 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
-  it("allows recovery-banner adapters that return RecoveryCallout", () => {
+  it("allows recovery-banner adapters that return a wrapper containing RecoveryCallout", () => {
     const findings = analyze(
       "src/components/Sidepanel/Chat/ConnectionBanner.tsx",
       `
@@ -49,11 +49,13 @@ describe("design-system product-state guard rules", () => {
 
         export function ConnectionBanner() {
           return (
-            <RecoveryCallout
-              state="unavailable"
-              title="Can't reach your tldw server"
-              primaryAction={{ label: "Retry", onClick: () => undefined }}
-            />
+            <div className="px-3 py-2">
+              <RecoveryCallout
+                state="unavailable"
+                title="Can't reach your tldw server"
+                primaryAction={{ label: "Retry", onClick: () => undefined }}
+              />
+            </div>
           )
         }
       `
@@ -67,7 +69,7 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
-  it("allows recovery-banner adapters that return StatePanel", () => {
+  it("allows recovery-banner adapters that return a wrapper containing StatePanel", () => {
     const findings = analyze(
       "src/components/Common/BackendErrorBanner.tsx",
       `
@@ -75,11 +77,13 @@ describe("design-system product-state guard rules", () => {
 
         export function BackendErrorBanner() {
           return (
-            <StatePanel
-              state="error"
-              title="Backend error"
-              primaryAction={{ label: "Retry", onClick: () => undefined }}
-            />
+            <section aria-label="Backend recovery">
+              <StatePanel
+                state="error"
+                title="Backend error"
+                primaryAction={{ label: "Retry", onClick: () => undefined }}
+              />
+            </section>
           )
         }
       `

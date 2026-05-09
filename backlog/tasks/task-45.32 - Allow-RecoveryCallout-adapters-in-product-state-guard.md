@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-09 21:11'
-updated_date: '2026-05-09 21:16'
+updated_date: '2026-05-09 21:31'
 labels:
   - design-system
   - ui
@@ -41,16 +41,22 @@ priority: medium
 Implemented recovery adapter recognition in the product-state guard by collecting returned JSX-tree owners for canonical RecoveryCallout and StatePanel imports. Added focused tests that prove canonical adapters are allowed while bespoke recovery banners remain findings. Removed the now-stale Sidepanel ConnectionBanner local-recovery-banner baseline entry.
 
 Verification: RED run of bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot failed the two new canonical adapter tests with local-recovery-banner findings. GREEN/final run passed 51/51 tests. bun run verify:design-system-state passed with Baseline exceptions: 510 and local-recovery-banner: 3. node --check apps/packages/ui/scripts/design-system-product-state-rules.mjs passed. git diff --check passed. bunx tsc --noEmit --pretty false exited 2 with 236 lines of pre-existing unrelated UI type errors; touched-file filter for design-system-product-state-rules, product-state-guard, design-system-product-state-baseline, task-45.32, RecoveryCallout, StatePanel, and ConnectionBanner returned no diagnostics. Bandit skipped because touched implementation/test/config files are UI JS/TS/JSON/Markdown only, with no Python execution surface. No standalone docs update was needed; the executable guard tests and baseline update document the rule behavior.
+
+PR #1451 review follow-up: Qodo identified that the canonical recovery adapter tests only covered direct primitive returns, while the production motivating ConnectionBanner returns a wrapper element containing RecoveryCallout. Reopening the task to update tests so returned-JSX-tree scanning is covered explicitly before pushing a review-fix commit.
+
+PR #1451 review fix implemented: updated the canonical recovery adapter tests so both RecoveryCallout and StatePanel are nested inside returned wrapper elements. This directly covers collectReturnedJsxTreeTagOwners behavior and matches the real Sidepanel ConnectionBanner shape.
+
+Review-fix verification: bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 51/51. bun run verify:design-system-state passed with Baseline exceptions: 510 and local-recovery-banner: 3. node --check apps/packages/ui/scripts/design-system-product-state-rules.mjs passed. git diff --check passed. bunx tsc --noEmit --pretty false still exits 2 on 236 lines of existing unrelated UI type errors, with no touched-file filter hits.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Change summary: taught the design-system product-state guard to treat components that return shared RecoveryCallout or StatePanel as canonical recovery adapters, added regression tests for both canonical adapter forms, preserved detection for bespoke local recovery banners, and removed the stale Sidepanel ConnectionBanner baseline exception now that the guard recognizes it correctly.
+Change summary: taught the product-state guard to recognize canonical RecoveryCallout and StatePanel recovery adapters, removed the stale ConnectionBanner baseline entry, and updated the adapter tests after review so the canonical primitives are nested inside returned wrapper elements.
 
-Why: the prior guard flagged every recovery-banner-named component even when it was only a compatibility adapter around a canonical primitive. That kept migrated components in the debt baseline and made stale-baseline cleanup unreliable. The new check mirrors the existing returned-loading-primitive approach and keeps the allowance limited to returned canonical recovery UI.
+Why: the production motivating adapter wraps RecoveryCallout in layout markup, so the regression test needs to prove the returned-JSX-tree scan stays intact rather than only proving direct root primitive returns.
 
-Verification: focused guard suite passed 51/51, design-system verifier passed with 510 baseline exceptions and 3 remaining local-recovery-banner entries, JS syntax check passed, git diff whitespace check passed, and a full UI type-check produced only unrelated existing diagnostics with no touched-file hits. Bandit is not applicable for this UI-only JS/TS/JSON/Markdown change.
+Verification: focused guard suite passed 51/51, design-system verifier passed with 510 baseline exceptions and 3 remaining local-recovery-banner entries, JS syntax check passed, git diff whitespace check passed, and full UI type-check still reports only unrelated existing diagnostics with no touched-file hits. Bandit remains not applicable for this UI-only JS/TS/JSON/Markdown change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
