@@ -627,6 +627,10 @@ class VNPlayRepository:
                 WHERE id = ?
                   AND session_id = ?
                   AND owner_user_id = ?
+                  AND status = ?
+                  AND turn_started_event_id IS NULL
+                  AND input_event_id IS NULL
+                  AND base_scene_version = ?
                 """,
                 (
                     "model_calling",
@@ -635,10 +639,12 @@ class VNPlayRepository:
                     turn_request_id,
                     session_id,
                     owner_user_id,
+                    "pending",
+                    client_scene_version,
                 ),
             )
             if turn_cursor.rowcount != 1:
-                raise RuntimeError("turn_request_not_found")
+                raise RuntimeError("turn_request_not_pending")
             conn.execute(
                 """
                 INSERT INTO vn_play_scene_state (
