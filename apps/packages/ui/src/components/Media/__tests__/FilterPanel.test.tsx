@@ -1,6 +1,33 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { FilterPanel } from '../FilterPanel'
+
+const isoForLocalDate = (
+  value: string,
+  boundary: 'start' | 'end'
+): string => {
+  const [year, month, day] = value.split('-').map(Number)
+  const date =
+    boundary === 'start'
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 999)
+  return date.toISOString()
+}
+
+const renderFilterPanel = (
+  props: Partial<ComponentProps<typeof FilterPanel>> = {}
+) =>
+  render(
+    <FilterPanel
+      mediaTypes={[]}
+      selectedMediaTypes={[]}
+      onMediaTypesChange={vi.fn()}
+      selectedKeywords={[]}
+      onKeywordsChange={vi.fn()}
+      {...props}
+    />
+  )
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -33,6 +60,121 @@ describe('FilterPanel', () => {
     expect(screen.getByText('Sort by')).toBeInTheDocument()
     expect(screen.getByText('Date range')).toBeInTheDocument()
     expect(screen.getByText('Exclude keywords')).toBeInTheDocument()
+  })
+
+  it('renders existing date range values in native date inputs', () => {
+    renderFilterPanel({
+      dateRange: {
+        startDate: '2026-01-02T12:00:00.000Z',
+        endDate: '2026-01-31T12:00:00.000Z'
+      },
+      onDateRangeChange: vi.fn()
+    })
+
+    const startDateInput = screen.getByLabelText('Start date') as HTMLInputElement
+    const endDateInput = screen.getByLabelText('End date') as HTMLInputElement
+
+    expect(startDateInput).toHaveAttribute('type', 'date')
+    expect(startDateInput).toHaveValue('2026-01-02')
+    expect(endDateInput).toHaveAttribute('type', 'date')
+    expect(endDateInput).toHaveValue('2026-01-31')
+  })
+
+  it('emits local day-boundary ISO values from native date input changes', () => {
+    const onDateRangeChange = vi.fn()
+    const existingStartDate = '2026-01-01T00:00:00.000Z'
+    const existingEndDate = '2026-01-31T23:59:59.999Z'
+
+    renderFilterPanel({
+      dateRange: {
+        startDate: existingStartDate,
+        endDate: existingEndDate
+      },
+      onDateRangeChange
+    })
+
+    fireEvent.change(screen.getByLabelText('Start date'), {
+      target: { value: '2026-02-03' }
+    })
+    fireEvent.change(screen.getByLabelText('End date'), {
+      target: { value: '2026-02-04' }
+    })
+
+    expect(onDateRangeChange).toHaveBeenNthCalledWith(1, {
+      startDate: isoForLocalDate('2026-02-03', 'start'),
+      endDate: existingEndDate
+    })
+    expect(onDateRangeChange).toHaveBeenNthCalledWith(2, {
+      startDate: existingStartDate,
+      endDate: isoForLocalDate('2026-02-04', 'end')
+    })
+  })
+
+  it('clears native date inputs independently and preserves the other boundary', () => {
+    const onDateRangeChange = vi.fn()
+    const existingStartDate = '2026-01-01T00:00:00.000Z'
+    const existingEndDate = '2026-01-31T23:59:59.999Z'
+    const { rerender } = renderFilterPanel({
+      dateRange: {
+        startDate: existingStartDate,
+        endDate: existingEndDate
+      },
+      onDateRangeChange
+    })
+
+    fireEvent.change(screen.getByLabelText('Start date'), {
+      target: { value: '' }
+    })
+    expect(onDateRangeChange).toHaveBeenLastCalledWith({
+      startDate: null,
+      endDate: existingEndDate
+    })
+
+    onDateRangeChange.mockClear()
+    rerender(
+      <FilterPanel
+        mediaTypes={[]}
+        selectedMediaTypes={[]}
+        onMediaTypesChange={vi.fn()}
+        selectedKeywords={[]}
+        onKeywordsChange={vi.fn()}
+        dateRange={{
+          startDate: existingStartDate,
+          endDate: existingEndDate
+        }}
+        onDateRangeChange={onDateRangeChange}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('End date'), {
+      target: { value: '' }
+    })
+    expect(onDateRangeChange).toHaveBeenLastCalledWith({
+      startDate: existingStartDate,
+      endDate: null
+    })
+
+    onDateRangeChange.mockClear()
+    rerender(
+      <FilterPanel
+        mediaTypes={[]}
+        selectedMediaTypes={[]}
+        onMediaTypesChange={vi.fn()}
+        selectedKeywords={[]}
+        onKeywordsChange={vi.fn()}
+        dateRange={{
+          startDate: null,
+          endDate: existingEndDate
+        }}
+        onDateRangeChange={onDateRangeChange}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('End date'), {
+      target: { value: '' }
+    })
+    expect(onDateRangeChange).toHaveBeenLastCalledWith({
+      startDate: null,
+      endDate: null
+    })
   })
 
   it('clear all resets include/exclude keywords, date range, and sort state', () => {
