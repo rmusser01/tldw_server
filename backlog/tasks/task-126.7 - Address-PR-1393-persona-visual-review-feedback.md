@@ -1,10 +1,10 @@
 ---
 id: TASK-126.7
 title: Address PR 1393 persona visual review feedback
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 03:46'
-updated_date: '2026-05-09 04:00'
+updated_date: '2026-05-09 04:03'
 labels:
   - persona
   - visual-packs
@@ -26,14 +26,14 @@ Review and address all actionable GitHub review comments on PR #1393 for persona
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All open PR #1393 review threads are evaluated against codebase reality and either fixed or answered with technical reasoning.
+- [x] #1 All open PR #1393 review threads are evaluated against codebase reality and either fixed or answered with technical reasoning.
 - [x] #2 Portability export/import-preview job lifecycle supports scoped cancel/delete where appropriate, with tests.
 - [x] #3 Persona visual upload reads enforce caps before buffering unbounded content, with tests.
 - [x] #4 Persona visual generation idempotency distinguishes distinct prompt/backend requests, with tests.
 - [x] #5 Persona visual archive validation tolerates explicit ZIP directory entries while preserving unsafe member rejection, with tests.
 - [x] #6 Persona visual worker async handlers offload blocking DB/file operations and portability worker startup is registered, with tests.
 - [x] #7 Authored trigger patch merges prevent duplicate trigger IDs, with tests.
-- [ ] #8 Focused backend tests and Bandit run successfully, and PR branch is pushed with review-fix commit.
+- [x] #8 Focused backend tests and Bandit run successfully, and PR branch is pushed with review-fix commit.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,14 +51,24 @@ Review and address all actionable GitHub review comments on PR #1393 for persona
 Implemented review fixes: export cancel endpoint; import-preview cancel and delete endpoints; PersonaVisualService FastAPI dependency helper; chunked persona visual asset upload cap enforcement; generation idempotency digest including prompt/backend/target state; ZIP directory member tolerance while preserving unsafe member checks; generation worker DB/persistence offload; portability worker runner and optional startup registration; authored trigger ID replacement on candidate patch merge.
 
 Verification passed before PR replies: focused pytest for persona visual jobs, portability, service, API, and startup worker tests reported 45 passed; py_compile passed for touched production files; Bandit reported zero findings on touched production files and touched tests with B101 skipped; git diff --check passed.
+
+PR #1393 inline review threads were replied to and resolved on GitHub after pushing commit efee5af22. The archive-ingestion-pipeline comment was answered with the technical disposition that persona visual pack archives follow the PR #1135-style portability import-preview boundary rather than media ingestion, while retaining bounded scoped staging and archive validation.
+
+GitHub checks restarted after the push and were still pending at closeout; local focused verification and Bandit were clean.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Addressed all actionable PR #1393 review comments for persona visual packs. Added scoped export cancel and import-preview cancel/delete endpoints, chunked upload cap enforcement, PersonaVisualService dependency injection, prompt/backend-aware generation idempotency, ZIP directory-entry tolerance, generated-candidate persistence offload, portability worker startup registration, and authored trigger ID de-duplication. Replied to and resolved all open inline review threads. Local verification passed: focused pytest 45 passed, py_compile passed for touched production files, Bandit reported zero findings on touched production files and touched tests with B101 skipped, and git diff --check passed. GitHub checks were restarted by the push and remained pending at closeout.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
