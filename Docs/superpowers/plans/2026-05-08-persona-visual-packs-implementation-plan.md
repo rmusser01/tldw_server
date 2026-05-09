@@ -1086,7 +1086,7 @@ git commit -m "feat: add persona visual pack API"
 - Test: `apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts`
 - Test: `apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx`
 
-- [ ] **Step 1: Write failing resolver tests**
+- [x] **Step 1: Write failing resolver tests**
 
 ```ts
 import { resolvePersonaVisualState } from "../personaVisualState"
@@ -1104,7 +1104,7 @@ it("maps active tool status to tool_running", () => {
 })
 ```
 
-- [ ] **Step 2: Write failing renderer tests**
+- [x] **Step 2: Write failing renderer tests**
 
 Test that `SpriteFrameRenderer`:
 
@@ -1116,7 +1116,7 @@ Test that `SpriteFrameRenderer`:
 - falls back to `idle` when the requested state is missing
 - calls `onRenderError` when no state can resolve
 
-- [ ] **Step 3: Run failing frontend tests**
+- [x] **Step 3: Run failing frontend tests**
 
 Run:
 
@@ -1126,7 +1126,7 @@ cd apps/packages/ui && bunx vitest run src/components/Common/PersonaBuddy/__test
 
 Expected: FAIL because files do not exist.
 
-- [ ] **Step 4: Add frontend types**
+- [x] **Step 4: Add frontend types**
 
 In `persona-visuals.ts`:
 
@@ -1195,7 +1195,7 @@ export interface PersonaVisualAsset {
 }
 ```
 
-- [ ] **Step 5: Add API client helpers**
+- [x] **Step 5: Add API client helpers**
 
 In `services/persona-visuals.ts`, wrap `tldwClient.fetchWithAuth`:
 
@@ -1224,7 +1224,7 @@ export async function uploadPersonaVisualAsset(personaId: string, packId: string
 
 Add matching helpers for pack detail, manifest update, activation, and deactivate/revert. The list helper should return `active_pack.assets_by_id` when the backend includes it.
 
-- [ ] **Step 6: Add visual state resolver**
+- [x] **Step 6: Add visual state resolver**
 
 Implement `resolvePersonaVisualState` with priority:
 
@@ -1244,7 +1244,7 @@ Authored trigger matching in V1:
 - `tool_category` matches the prefix or category parsed from active tool status, such as `notes` from `Running notes.search`.
 - `mcp_runtime` matches runtime override reasons emitted by `persona_visuals.trigger_state`.
 
-- [ ] **Step 7: Add sprite renderer**
+- [x] **Step 7: Add sprite renderer**
 
 Implement a small renderer:
 
@@ -1282,7 +1282,7 @@ Renderer details:
 - For a frame with `region`, render a fixed-size element whose `backgroundImage`, `backgroundPosition`, `backgroundSize`, `width`, and `height` crop the sprite-sheet asset to the requested rectangle.
 - Tests should assert the frame order is honored by advancing timers and checking the resulting asset/region, not by inspecting implementation internals.
 
-- [ ] **Step 8: Run frontend tests**
+- [x] **Step 8: Run frontend tests**
 
 Run:
 
@@ -1292,7 +1292,7 @@ cd apps/packages/ui && bunx vitest run src/components/Common/PersonaBuddy/__test
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Run:
 
