@@ -11,6 +11,7 @@ labels:
   - webui
   - notes
   - admin
+  - github-actions
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/1375'
@@ -35,7 +36,8 @@ Resolve the current PR #1375 GitHub Actions failures after the axios-to-fetch We
 - [x] #4 Targeted frontend and backend tests for the changed files pass locally.
 - [x] #5 Admin route tests that do not need the full app lifespan avoid TestClient startup/shutdown hangs and pass in the full Admin module run.
 - [x] #6 CI Admin steps bypass the global xdist `PYTEST_ADDOPTS` setting and run serially to avoid worker-level lifespan hangs.
-- [x] #7 PR #1375 branch is pushed after fixes are verified.
+- [x] #7 actionlint accepts the repository's self-hosted `vz-linux` runner label.
+- [x] #8 PR #1375 branch is pushed after fixes are verified.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,7 +52,8 @@ Resolve the current PR #1375 GitHub Actions failures after the axios-to-fetch We
 7. Convert BYOK validation and Admin conflict route tests to `httpx.ASGITransport` + `AsyncClient`, keeping real FastAPI routing/dependency behavior while bypassing the expensive app lifespan path that stalls in the full Admin suite.
 8. Re-run focused Admin files, the full Admin module locally, whitespace checks, and Bandit on the newly touched Admin test files.
 9. Update CI so the Admin module clears the global xdist `PYTEST_ADDOPTS` while the rest of the heavy suite keeps xdist.
-10. Stage, commit, push the PR branch, then refresh PR #1375 checks and record results in the Backlog task.
+10. Fix the fresh actionlint failure by configuring the self-hosted runner labels used by the VZ Linux host-gated workflow.
+11. Stage, commit, push the PR branch, then refresh PR #1375 checks and record results in the Backlog task.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -67,12 +70,14 @@ Admin timeout fix: converted `test_admin_byok_validation_api.py`, `test_admin_co
 CI xdist follow-up: local Admin with xdist reproduced the CI shape as worker-level crashes rather than assertion failures (`-n auto` failed after 641 passed/15 worker crashes; `-n 4` failed after 648 passed/8 worker crashes). The named crashes are spread across remaining full-lifespan route tests such as bundle ops, org search/STT settings, and backup schedules, while serial Admin completes successfully. The CI workflow now clears `PYTEST_ADDOPTS` only for the Admin module so this module runs serially while the rest of the full suite keeps xdist. Fresh serial verification with pytest-timeout completed with 656 passed tests in 296.81s.
 
 Final verification: focused Admin route files passed with 13 passed tests in 9.86s after the nosec-only Bandit comments; `git diff --check` passed; Bandit on the touched Admin test files with `-s B101` produced 0 findings in `/tmp/bandit_task123_admin.json`.
+
+Fresh PR check follow-up after pushing `b4dd21847`: workflows are now starting instead of staying globally waiting, but `Lint Workflows (actionlint)` failed on the existing self-hosted label `vz-linux` in `.github/workflows/vz-linux-host-gated.yml`. Added `.github/actionlint.yaml` with the custom self-hosted labels and made the actionlint workflow pass that config explicitly. Local actionlint v1.7.12 against the same targeted workflow set passed with the new config.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stabilized PR #1375 CI by keeping the axios-to-fetch WebUI/Notes fixes and addressing the follow-on full-suite Admin timeout. Converted three route-level Admin test files away from full `TestClient` lifespan use, and updated the GitHub Actions Admin module step to clear global xdist settings so Admin runs serially. This keeps parallelism for the rest of the suite while avoiding worker-level app lifespan hangs in Admin.
+Stabilized PR #1375 CI by keeping the axios-to-fetch WebUI/Notes fixes and addressing the follow-on full-suite Admin timeout. Converted three route-level Admin test files away from full `TestClient` lifespan use, updated the GitHub Actions Admin module step to clear global xdist settings so Admin runs serially, and configured actionlint for the existing VZ Linux self-hosted runner labels. This keeps parallelism for the rest of the suite while avoiding worker-level app lifespan hangs in Admin.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
