@@ -354,13 +354,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [draftManifest]
   )
 
-  const loadPacks = React.useCallback(async () => {
+  const loadPacks = React.useCallback(async (): Promise<boolean> => {
     if (!isActive || !selectedPersonaId) {
       setPacks([])
       setSelectedPackId("")
       setDraftManifest(DEFAULT_MANIFEST)
       setCandidates([])
-      return
+      return false
     }
     setLoading(true)
     setError(null)
@@ -378,6 +378,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         setDraftManifest(DEFAULT_MANIFEST)
         setSelectedAnimationId("")
       }
+      return true
     } catch (loadError) {
       setPacks([])
       setSelectedPackId("")
@@ -385,8 +386,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setError(
         loadError instanceof Error
           ? loadError.message
-          : "Failed to load visual packs."
+            : "Failed to load visual packs."
       )
+      return false
     } finally {
       setLoading(false)
     }
@@ -680,10 +682,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportCommitJob(job)
       if (job.status === "completed" && job.pack_id) {
-        await loadPacks()
-        setStatusMessage(
-          "Import commit completed. Review and activate the new draft when ready."
-        )
+        const refreshed = await loadPacks()
+        if (refreshed) {
+          setStatusMessage(
+            "Import commit completed. Review and activate the new draft when ready."
+          )
+        } else {
+          setStatusMessage(null)
+        }
       }
     } catch (refreshError) {
       setError(
