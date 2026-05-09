@@ -1836,7 +1836,7 @@ git commit -m "feat: add persona visuals MCP module"
 - Modify: `Docs/superpowers/specs/2026-05-08-persona-visual-packs-design.md` only if implementation learns a design correction.
 - Modify through MCP: implementation Backlog task for the code slice created by the executor.
 
-- [ ] **Step 1: Add E2E visual-state fixture**
+- [x] **Step 1: Add E2E visual-state fixture**
 
 Extend Persona Live E2E with mocked API responses:
 
@@ -1845,7 +1845,7 @@ Extend Persona Live E2E with mocked API responses:
 - mocked speaking/tool/error events update state
 - broken pack response falls back without blocking live controls
 
-- [ ] **Step 2: Run focused backend tests**
+- [x] **Step 2: Run focused backend tests**
 
 Run:
 
@@ -1862,7 +1862,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run focused frontend tests**
+- [x] **Step 3: Run focused frontend tests**
 
 Run:
 
@@ -1876,7 +1876,7 @@ cd apps/packages/ui && bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run E2E fixture**
+- [x] **Step 4: Run E2E fixture**
 
 Run:
 
@@ -1886,7 +1886,7 @@ cd apps/tldw-frontend && bunx playwright test e2e/workflows/persona-live.spec.ts
 
 Expected: PASS or documented environment blocker.
 
-- [ ] **Step 5: Run Bandit on touched backend scope**
+- [x] **Step 5: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1902,7 +1902,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new findings in touched production code. If Bandit flags test-only or pre-existing noise, document exact finding ids and why they are not new production issues.
 
-- [ ] **Step 6: Update Backlog task final summary**
+- [x] **Step 6: Update Backlog task final summary**
 
 Use Backlog MCP to record:
 
@@ -1912,7 +1912,7 @@ Use Backlog MCP to record:
 - any known skips/blockers
 - PR or branch link if available
 
-- [ ] **Step 7: Final commit**
+- [x] **Step 7: Final commit**
 
 Run:
 
