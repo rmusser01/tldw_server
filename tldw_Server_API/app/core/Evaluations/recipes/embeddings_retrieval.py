@@ -205,6 +205,12 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             normalized["source_id_contract"] = str(run_config["source_id_contract"]).strip()
         return normalized
 
+    def validate_run_config_for_launch(self, run_config: dict[str, Any]) -> list[str]:
+        candidates = run_config.get("candidates") if isinstance(run_config, dict) else None
+        if not isinstance(candidates, list) or not candidates:
+            return ["run_config.candidates must contain at least one candidate for launch."]
+        return []
+
     def build_report(
         self,
         *,
