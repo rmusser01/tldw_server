@@ -43,11 +43,13 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
     get_recipe_runs_service_for_user,
 )
 from tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints import (
+    ConfigUpdater,
     apply_embedding_recipe_recommendation,
     build_embedding_recipe_apply_preview,
     build_embedding_recipe_candidate_hints,
 )
 from tldw_Server_API.app.core.Evaluations.recipes.reporting import RecipeRunReport
+from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.exceptions import RecipeEnqueueError
 
 recipes_router = APIRouter()
@@ -68,6 +70,11 @@ def _get_manifest_or_404(service: RecipeRunsService, recipe_id: str) -> RecipeMa
 def get_recipe_run_job_enqueuer() -> Callable[..., str]:
     """Return the callable used to enqueue recipe-run Jobs."""
     return enqueue_recipe_run
+
+
+def get_recipe_config_updater() -> ConfigUpdater:
+    """Return the callable used to update persisted config during recipe apply."""
+    return setup_manager.update_config
 
 
 def _user_has_eval_permission(current_user: User, permission: str) -> bool:
@@ -380,6 +387,7 @@ async def apply_recipe_recommendation(
     payload: RecipeRecommendationApplyRequest,
     user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
+    config_updater: ConfigUpdater = Depends(get_recipe_config_updater),
 ):
     del user_ctx
     service = _service_for_user(current_user)
@@ -391,6 +399,7 @@ async def apply_recipe_recommendation(
             candidate_run_id=payload.candidate_run_id,
             confirmed_provider=payload.confirmed_provider,
             confirmed_model=payload.confirmed_model,
+            config_updater=config_updater,
         )
     except RecipeRunNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe run not found") from exc
@@ -401,6 +410,12 @@ async def apply_recipe_recommendation(
         ) from exc
     except RuntimeError as exc:
         logger.warning("Recipe recommendation apply failed for run {}: {}", run_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=sanitize_error_message(exc, "applying recipe recommendation"),
+        ) from exc
+    except OSError as exc:
+        logger.warning("Recipe recommendation apply file operation failed for run {}: {}", run_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=sanitize_error_message(exc, "applying recipe recommendation"),

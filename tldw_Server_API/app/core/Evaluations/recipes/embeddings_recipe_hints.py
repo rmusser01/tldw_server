@@ -5,15 +5,19 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
-from typing import Any
+from importlib import import_module
+from typing import Any, Callable
 
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
-from tldw_Server_API.app.core.Setup import setup_manager
 
 RECIPE_ID = "embeddings_model_selection"
 APPLY_AUDIT_METADATA_KEY = "embedding_recipe_apply_audit"
+ConfigUpdater = Callable[..., object]
+_EMBEDDING_POLICY_HELPER_MODULE = (
+    "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced"
+)
 _EMBEDDING_CONFIG_OVERRIDE_ENV_KEYS = (
     "EMBEDDINGS_DEFAULT_PROVIDER",
     "EMBEDDINGS_PROVIDER",
@@ -94,35 +98,44 @@ def get_simplified_embeddings_config() -> dict[str, Any]:
 
 def get_allowed_embedding_providers() -> list[str] | None:
     """Return the configured embedding provider allowlist from the production API policy."""
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import (
-            _get_allowed_providers,
-        )
-    except (ImportError, RuntimeError):
+    helper = _load_embedding_policy_helper("_get_allowed_providers")
+    if helper is None:
         return None
-    return _get_allowed_providers()
+    return helper()
 
 
 def get_allowed_embedding_models() -> list[str] | None:
     """Return the configured embedding model allowlist from the production API policy."""
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import (
-            _get_allowed_models,
-        )
-    except (ImportError, RuntimeError):
+    helper = _load_embedding_policy_helper("_get_allowed_models")
+    if helper is None:
         return None
-    return _get_allowed_models()
+    return helper()
 
 
 def should_enforce_embedding_policy(user: object | None = None) -> bool:
     """Return whether embedding allowlists should be enforced for this request."""
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import (
-            _should_enforce_policy,
-        )
-    except (ImportError, RuntimeError):
+    helper = _load_embedding_policy_helper("_should_enforce_policy")
+    if helper is None:
         return False
-    return bool(_should_enforce_policy(user))
+    return bool(helper(user))
+
+
+def _load_embedding_policy_helper(helper_name: str) -> Callable[..., Any] | None:
+    try:
+        module = import_module(_EMBEDDING_POLICY_HELPER_MODULE)
+    except (ImportError, RuntimeError) as exc:
+        logger.warning(
+            "Embedding policy helper {} unavailable: {}",
+            helper_name,
+            type(exc).__name__,
+        )
+        return None
+
+    helper = getattr(module, helper_name, None)
+    if not callable(helper):
+        logger.warning("Embedding policy helper {} unavailable: missing callable", helper_name)
+        return None
+    return helper
 
 
 def get_current_embedding_config() -> dict[str, str | None]:
@@ -263,6 +276,7 @@ def apply_embedding_recipe_recommendation(
     candidate_run_id: str | None,
     confirmed_provider: str,
     confirmed_model: str,
+    config_updater: ConfigUpdater,
 ) -> dict[str, object]:
     """Apply a completed embeddings recipe recommendation to the RAG embeddings config."""
     preview = build_embedding_recipe_apply_preview(
@@ -320,7 +334,7 @@ def apply_embedding_recipe_recommendation(
     _persist_embedding_apply_audit(service, run_id, audit)
 
     try:
-        backup_path = setup_manager.update_config(updates, create_backup=True)
+        backup_path = config_updater(updates, create_backup=True)
     except Exception:
         failed_audit = {
             **audit,

@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
 from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecommendationSlot
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_recipes import (
+    get_recipe_config_updater,
     get_recipe_run_job_enqueuer,
 )
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import (
@@ -583,6 +584,8 @@ async def test_embeddings_recipe_apply_endpoint_updates_config_and_audits(
     auth_headers,
     monkeypatch,
 ) -> None:
+    from tldw_Server_API.app.main import app
+
     monkeypatch.delenv("EMBEDDINGS_DEFAULT_PROVIDER", raising=False)
     monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
     monkeypatch.delenv("EMBEDDINGS_DEFAULT_MODEL", raising=False)
@@ -610,21 +613,20 @@ async def test_embeddings_recipe_apply_endpoint_updates_config_and_audits(
         lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
     )
     update_config_spy = MagicMock(return_value=Path("/tmp/config.txt.pre-setup-test.bak"))
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.setup_manager.update_config",
-        update_config_spy,
-    )
-
-    response = await async_api_client.post(
-        f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
-        json={
-            "slot_name": "best_overall",
-            "candidate_run_id": "arm-1",
-            "confirmed_provider": "openai",
-            "confirmed_model": "text-embedding-3-small",
-        },
-        headers=auth_headers,
-    )
+    app.dependency_overrides[get_recipe_config_updater] = lambda: update_config_spy
+    try:
+        response = await async_api_client.post(
+            f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
+            json={
+                "slot_name": "best_overall",
+                "candidate_run_id": "arm-1",
+                "confirmed_provider": "openai",
+                "confirmed_model": "text-embedding-3-small",
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app.dependency_overrides.pop(get_recipe_config_updater, None)
 
     assert response.status_code == 200
     assert update_config_spy.call_args.args[0] == {
@@ -660,6 +662,8 @@ async def test_embeddings_recipe_apply_endpoint_refuses_env_override_without_mut
     auth_headers,
     monkeypatch,
 ) -> None:
+    from tldw_Server_API.app.main import app
+
     monkeypatch.setenv("EMBEDDINGS_DEFAULT_PROVIDER", "env-provider")
     db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
     run_id = db.create_recipe_run(
@@ -680,26 +684,79 @@ async def test_embeddings_recipe_apply_endpoint_refuses_env_override_without_mut
         },
     )
     update_config_spy = MagicMock()
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.setup_manager.update_config",
-        update_config_spy,
-    )
-
-    response = await async_api_client.post(
-        f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
-        json={
-            "slot_name": "best_overall",
-            "candidate_run_id": "arm-1",
-            "confirmed_provider": "openai",
-            "confirmed_model": "text-embedding-3-small",
-        },
-        headers=auth_headers,
-    )
+    app.dependency_overrides[get_recipe_config_updater] = lambda: update_config_spy
+    try:
+        response = await async_api_client.post(
+            f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
+            json={
+                "slot_name": "best_overall",
+                "candidate_run_id": "arm-1",
+                "confirmed_provider": "openai",
+                "confirmed_model": "text-embedding-3-small",
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app.dependency_overrides.pop(get_recipe_config_updater, None)
 
     assert response.status_code == 409
     assert "environment variable" in response.json()["detail"]
     update_config_spy.assert_not_called()
     assert "embedding_recipe_apply_audit" not in db.get_recipe_run(run_id).metadata
+
+
+@pytest.mark.asyncio
+async def test_embeddings_recipe_apply_endpoint_sanitizes_config_write_failures(
+    async_api_client,
+    auth_headers,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.main import app
+
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_MODEL", raising=False)
+    db = EvaluationsDatabase(os.environ["EVALUATIONS_TEST_DB_PATH"])
+    run_id = db.create_recipe_run(
+        recipe_id="embeddings_model_selection",
+        recipe_version="1",
+        status=RunStatus.COMPLETED,
+        dataset_content_hash=build_dataset_content_hash(_embeddings_dataset()),
+        metadata={"owner_user_id": get_single_user_instance().id_str},
+        recommendation_slots={
+            "best_overall": RecommendationSlot(
+                candidate_run_id="arm-1",
+                metadata={
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "apply_eligible": True,
+                },
+            )
+        },
+    )
+    update_config_spy = MagicMock(side_effect=FileNotFoundError("/secret/config.txt"))
+    app.dependency_overrides[get_recipe_config_updater] = lambda: update_config_spy
+    try:
+        response = await async_api_client.post(
+            f"/api/v1/evaluations/recipe-runs/{run_id}/apply",
+            json={
+                "slot_name": "best_overall",
+                "candidate_run_id": "arm-1",
+                "confirmed_provider": "openai",
+                "confirmed_model": "text-embedding-3-small",
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app.dependency_overrides.pop(get_recipe_config_updater, None)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "The requested resource was not found"
+    update_config_spy.assert_called_once()
+    audit = db.get_recipe_run(run_id).metadata["embedding_recipe_apply_audit"]
+    assert audit["status"] == "failed"
+    assert audit["failure"] == "config_update_failed"
 
 
 @pytest.mark.asyncio
@@ -739,10 +796,7 @@ async def test_embeddings_recipe_preview_read_only_user_cannot_advertise_live_ap
         },
     )
     update_config_spy = MagicMock()
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.setup_manager.update_config",
-        update_config_spy,
-    )
+    app.dependency_overrides[get_recipe_config_updater] = lambda: update_config_spy
     app.dependency_overrides[get_eval_request_user] = _read_only_request_user
     try:
         preview_response = await async_api_client.post(
@@ -762,6 +816,7 @@ async def test_embeddings_recipe_preview_read_only_user_cannot_advertise_live_ap
         )
     finally:
         app.dependency_overrides.pop(get_eval_request_user, None)
+        app.dependency_overrides.pop(get_recipe_config_updater, None)
 
     assert preview_response.status_code == 200
     preview_body = preview_response.json()

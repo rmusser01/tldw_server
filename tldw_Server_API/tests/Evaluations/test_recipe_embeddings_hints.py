@@ -44,6 +44,25 @@ def test_candidate_hints_include_current_model_and_policy_status(monkeypatch) ->
     assert result["candidates"][0]["default"] is True
 
 
+def test_policy_helper_import_runtime_failure_logs_warning(monkeypatch) -> None:
+    def _raise_runtime_error(_module_name: str):
+        raise RuntimeError("policy import failed")
+
+    warning_spy = MagicMock()
+    monkeypatch.setattr(
+        embeddings_recipe_hints,
+        "import_module",
+        _raise_runtime_error,
+        raising=False,
+    )
+    monkeypatch.setattr(embeddings_recipe_hints.logger, "warning", warning_spy)
+
+    assert embeddings_recipe_hints.get_allowed_embedding_providers() is None
+
+    warning_spy.assert_called_once()
+    assert "embedding policy helper" in warning_spy.call_args.args[0].lower()
+
+
 def test_candidate_hints_mark_disallowed_provider(monkeypatch) -> None:
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints.get_simplified_embeddings_config",
@@ -324,12 +343,6 @@ def test_apply_recommendation_updates_only_embedding_defaults_and_audits(monkeyp
         lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
     )
     update_config_spy = MagicMock(return_value=Path("/tmp/config.txt.pre-setup-test.bak"))
-    monkeypatch.setattr(
-        embeddings_recipe_hints,
-        "setup_manager",
-        SimpleNamespace(update_config=update_config_spy),
-        raising=False,
-    )
 
     class FakeDB:
         def __init__(self) -> None:
@@ -377,6 +390,7 @@ def test_apply_recommendation_updates_only_embedding_defaults_and_audits(monkeyp
         candidate_run_id="arm-1",
         confirmed_provider="openai",
         confirmed_model="text-embedding-3-small",
+        config_updater=update_config_spy,
     )
 
     assert update_config_spy.call_args.args[0] == {
@@ -416,12 +430,6 @@ def test_apply_recommendation_requires_pending_audit_before_config_mutation(monk
         lambda: {"provider": "huggingface", "model": "Qwen/Qwen3-Embedding-0.6B"},
     )
     update_config_spy = MagicMock(return_value=Path("/tmp/config.txt.pre-setup-test.bak"))
-    monkeypatch.setattr(
-        embeddings_recipe_hints,
-        "setup_manager",
-        SimpleNamespace(update_config=update_config_spy),
-        raising=False,
-    )
 
     class FailingDB:
         def update_recipe_run(self, run_id: str, *, metadata: dict[str, object]) -> bool:
@@ -465,6 +473,7 @@ def test_apply_recommendation_requires_pending_audit_before_config_mutation(monk
             candidate_run_id="arm-1",
             confirmed_provider="openai",
             confirmed_model="text-embedding-3-small",
+            config_updater=update_config_spy,
         )
 
     update_config_spy.assert_not_called()
@@ -473,12 +482,6 @@ def test_apply_recommendation_requires_pending_audit_before_config_mutation(monk
 def test_apply_recommendation_refuses_env_override_without_mutation(monkeypatch) -> None:
     monkeypatch.setenv("EMBEDDINGS_MODEL", "env-selected-model")
     update_config_spy = MagicMock()
-    monkeypatch.setattr(
-        embeddings_recipe_hints,
-        "setup_manager",
-        SimpleNamespace(update_config=update_config_spy),
-        raising=False,
-    )
 
     class FakeService:
         def get_report(self, _run_id: str):
@@ -509,6 +512,7 @@ def test_apply_recommendation_refuses_env_override_without_mutation(monkeypatch)
             candidate_run_id="arm-1",
             confirmed_provider="openai",
             confirmed_model="text-embedding-3-small",
+            config_updater=update_config_spy,
         )
 
     update_config_spy.assert_not_called()
