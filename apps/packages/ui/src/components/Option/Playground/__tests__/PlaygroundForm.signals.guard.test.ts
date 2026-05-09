@@ -130,4 +130,21 @@ describe("PlaygroundForm signal surface guard", () => {
       "playground:composer.recommendationsTitle"
     )
   })
+
+  it("routes the character starter through character selection before scene controls", () => {
+    const formSourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
+    const formSource = fs.readFileSync(formSourcePath, "utf8")
+    const characterStarterStart = formSource.indexOf('if (mode === "character")')
+    const ragStarterStart = formSource.indexOf('if (mode === "rag" || mode === "knowledge")')
+    const characterStarterBlock = formSource.slice(
+      characterStarterStart,
+      ragStarterStart
+    )
+
+    expect(characterStarterStart).toBeGreaterThanOrEqual(0)
+    expect(ragStarterStart).toBeGreaterThan(characterStarterStart)
+    expect(formSource).toContain("dispatchOpenAssistantSelect")
+    expect(characterStarterBlock).toContain('source: "playground-starter"')
+    expect(characterStarterBlock).not.toContain("setOpenActorSettings(true)")
+  })
 })

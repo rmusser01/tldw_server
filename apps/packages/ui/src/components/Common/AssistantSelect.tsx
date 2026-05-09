@@ -8,6 +8,11 @@ import type { PersonaInfo } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import {
+  OPEN_ASSISTANT_SELECT_EVENT,
+  type AssistantSelectOpenDetail,
+  type AssistantSelectTab
+} from "@/utils/assistant-select-events"
+import {
   characterToAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection
@@ -119,6 +124,25 @@ export const AssistantSelect: React.FC<Props> = ({
       setActiveTab(selectedAssistant.kind)
     }
   }, [selectedAssistant?.kind])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<AssistantSelectOpenDetail>).detail
+      const requestedTab = detail?.tab
+      if (requestedTab === "character" || requestedTab === "persona") {
+        setActiveTab(requestedTab as AssistantSelectTab)
+      }
+      setSearchText("")
+      setOpen(true)
+    }
+
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
+    return () => {
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!open || typeof window === "undefined") return

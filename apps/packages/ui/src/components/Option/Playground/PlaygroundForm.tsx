@@ -111,6 +111,7 @@ import {
 } from "@/utils/image-generation-chat";
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
 import { handleChatInputKeyDown } from "@/utils/key-down";
+import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events";
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection";
 import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry";
 import { getProviderDisplayName } from "@/utils/provider-registry";
@@ -2941,7 +2942,10 @@ export const PlaygroundForm = ({
         return;
       }
       if (mode === "character") {
-        setOpenActorSettings(true);
+        dispatchOpenAssistantSelect({
+          tab: "character",
+          source: "playground-starter",
+        });
         setModeAnnouncement(
           t(
             "playground:starter.noticeCharacter",

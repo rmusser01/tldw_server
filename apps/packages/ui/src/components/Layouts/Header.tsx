@@ -13,6 +13,7 @@ import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
 import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import type { Character } from "@/types/character"
+import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
 import {
   tldwClient,
   type ConversationShareLinkSummary,
@@ -145,8 +146,11 @@ export const Header: React.FC<Props> = ({
   const startCharacterChat = React.useCallback(() => {
     setTemporaryChat(false)
     clearChat()
-    if (!selectedCharacter && typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:open-actor-settings"))
+    if (!selectedCharacter?.id) {
+      dispatchOpenAssistantSelect({
+        tab: "character",
+        source: "chat-header"
+      })
     }
   }, [clearChat, selectedCharacter, setTemporaryChat])
 

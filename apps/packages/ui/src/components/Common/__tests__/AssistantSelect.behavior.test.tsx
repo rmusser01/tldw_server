@@ -158,6 +158,24 @@ describe("AssistantSelect behavior", () => {
     expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
   })
 
+  it("opens the character tab when character chat requests character selection", async () => {
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: { tab: "character", source: "chat-header" }
+      })
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Alpha" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Characters" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+  })
+
   it("keeps personas accessible and dispatches the actor footer action", async () => {
     const user = userEvent.setup()
     const actorListener = vi.fn()

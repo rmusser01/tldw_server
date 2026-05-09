@@ -26,13 +26,18 @@
 
 **Tests:** Component tests around Chat header/mode selection and selected-character state.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Trace the `Character` / `Character chat` click path.
 - Identify the event that opens Scene Director.
 - Determine whether recent/last character state already exists.
+
+Outcome: The scene-first behavior came from two entry points that opened
+`tldw:open-actor-settings` before character selection: the chat header
+`Character chat` action when no character was selected, and the Playground empty
+state's character starter.
 
 ## Stage 2: Implement Character-First Entry
 
@@ -45,13 +50,19 @@ Steps:
 
 **Tests:** Component tests for no-character, selected-character, and recent-character states.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Reuse `AssistantSelect` or existing character picker primitives.
 - Present recent characters and favorites if available.
 - Do not open actor/scene controls unless the user selects that advanced path.
+
+Outcome: Added a shared `tldw:open-assistant-select` event and reused the
+existing `AssistantSelect` character tab. Header character chat and the
+Playground character starter now open character selection first. The existing
+Scene Director footer remains available from the picker as an optional advanced
+path.
 
 ## Stage 3: Add Readiness And Scene Progression
 
@@ -64,13 +75,18 @@ Steps:
 
 **Tests:** Chat-mode E2E with mocked model state; unit tests for mode state transitions.
 
-**Status:** Not Started
+**Status:** Complete
 
 Steps:
 
 - Consume the shared model-readiness contract.
 - Gate composer send only when required readiness items are missing.
 - Verify switching back to normal chat clears character-only state as intended.
+
+Outcome: This package kept the model-readiness contract from the prior
+readiness work in place. Regression coverage verifies that an already-selected
+character remains active when starting a new character chat, while saved and
+temporary chat starts clear character-specific state.
 
 ## Risks
 
