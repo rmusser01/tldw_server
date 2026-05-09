@@ -2015,6 +2015,7 @@ def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
     pid_file.parent.mkdir(mode=0o700)
     pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
     removed = []
     lookups = []
 
@@ -2029,11 +2030,13 @@ def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
         pid_file,
         socket_path=socket_path,
         process_lookup=process_lookup,
+        process_killer=lambda pid: killed.append(pid),
         socket_identity_reader=lambda path: identity,
         socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(killed, [1234])
     CASE.assertEqual(removed, [(socket_path, identity)])
 
 
@@ -2074,6 +2077,29 @@ def test_smoke_dry_run_delegates_to_host_smoke_script(tmp_path, capsys):
     CASE.assertIn(f"--entitlements {entitlements}", captured.out)
     CASE.assertIn(f"--socket {socket_path}", captured.out)
     CASE.assertIn(f"--serial-log-dir {serial_log_dir}", captured.out)
+
+
+def test_smoke_dry_run_forwards_failure_drills(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+
+    code = helperctl.main(
+        [
+            "smoke",
+            "--dry-run",
+            "--bundle",
+            str(bundle),
+            "--include-failure-drills",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("--include-failure-drills", captured.out)
 
 
 def test_helperctl_executable_smoke_dry_run_works(tmp_path):
