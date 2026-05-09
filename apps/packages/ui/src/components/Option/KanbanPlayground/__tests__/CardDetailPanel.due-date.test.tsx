@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -165,5 +165,27 @@ describe("CardDetailPanel due-date editing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }))
 
     expect(onSave).toHaveBeenCalledWith(card.id, { title: "Updated title" })
+  })
+
+  it("does not keep resending due date after a due-date save in the same drawer session", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const { card } = renderPanel({ onSave })
+
+    fireEvent.change(screen.getByLabelText("Due Date"), {
+      target: { value: "2026-05-09T14:45" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+
+    fireEvent.change(screen.getByPlaceholderText("Card title"), {
+      target: { value: "Updated title" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+    expect(onSave).toHaveBeenNthCalledWith(2, card.id, {
+      title: "Updated title"
+    })
   })
 })

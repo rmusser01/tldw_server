@@ -238,7 +238,10 @@ This audit does not remove packages or rewrite runtime code.
   `datetime-local` input plus local ISO parse/format helpers. The shared UI
   `dayjs` import count dropped from 6 to 5 while leaving the package declared
   for media, reading list, and items date-control value-contract surfaces plus
-  the co-located Items published-date display use.
+  the co-located Items published-date display use. Expected impact for this
+  narrow slice was one active package-import surface removed and no direct
+  manifest, lockfile, install-size, or bundle-size reduction until the
+  remaining `dayjs` surfaces are migrated.
 
 ### Quick Cleanup Candidates
 
@@ -466,7 +469,16 @@ ownership checks, or complex-domain packages that should stay on the
   date-time helper, then passed after the helper/input implementation. The
   focused suite covers local `datetime-local` formatting, clearing, invalid
   input handling, changed due-date ISO saves, cleared `null` saves, and
-  preserving an unchanged existing due date when saving unrelated fields.
+  preserving an unchanged existing due date when saving unrelated fields. PR
+  review follow-up added a same-drawer-session regression test that first
+  failed because a title-only save resent `due_date` after an earlier due-date
+  save, then passed after the async save/reset fix; the focused suite now
+  passes with 9 tests.
+- 2026-05-09 TASK-171 WebUI build verification:
+  `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` from
+  `apps/tldw-frontend` exited 0. Next compiled successfully, generated 138
+  static pages, and `verify-shared-token-sync.mjs` reported OK for the
+  generated CSS.
 - Bandit: skipped for TASK-144 because the slice changed documentation and
   Backlog metadata only; no Python files were modified.
 - Bandit: skipped for TASK-147 because the slice changed TypeScript,

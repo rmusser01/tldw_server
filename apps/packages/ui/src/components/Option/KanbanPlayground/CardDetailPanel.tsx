@@ -26,7 +26,7 @@ interface CardDetailPanelProps {
   lists: ListWithCards[]
   open: boolean
   onClose: () => void
-  onSave: (cardId: number, data: CardUpdate) => void
+  onSave: (cardId: number, data: CardUpdate) => void | Promise<void>
   onDelete: (cardId: number) => void
   onArchive?: (cardId: number, cardTitle: string) => void
   onMove: (cardId: number, targetListId: number) => void
@@ -112,7 +112,7 @@ export const CardDetailPanel = ({
     }
   }, [card])
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!card) return
 
     const updates: CardUpdate = {}
@@ -126,11 +126,16 @@ export const CardDetailPanel = ({
     }
     if (priority !== (card.priority ?? null)) updates.priority = priority
 
-    // Only save if there are changes
-    if (Object.keys(updates).length > 0) {
-      onSave(card.id, updates)
+    try {
+      // Only save if there are changes
+      if (Object.keys(updates).length > 0) {
+        await onSave(card.id, updates)
+      }
+    } catch {
+      return
     }
 
+    setDueDateTouched(false)
     setIsDirty(false)
   }
 
@@ -190,7 +195,7 @@ export const CardDetailPanel = ({
       }
       open={open}
       onClose={onClose}
-      size={400}
+      styles={{ wrapper: { width: 400 } }}
       footer={
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
