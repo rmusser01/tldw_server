@@ -4,7 +4,10 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Download,
+  FileSearch,
   Plus,
+  RefreshCw,
   Save,
   Upload,
   XCircle
@@ -14,12 +17,17 @@ import { useTranslation } from "react-i18next"
 import {
   activatePersonaVisualPack,
   createPersonaVisualGenerationJob,
+  createPersonaVisualImportPreview,
   createPersonaVisualPack,
   deactivatePersonaVisualPack,
+  downloadPersonaVisualPackExportArchive,
+  getPersonaVisualImportPreview,
+  getPersonaVisualPackExportJob,
   listPersonaVisualCandidates,
   listPersonaVisualPacks,
   PersonaVisualApiError,
   reviewPersonaVisualCandidate,
+  startPersonaVisualPackExport,
   updatePersonaVisualManifest,
   uploadPersonaVisualAsset
 } from "@/services/persona-visuals"
@@ -30,8 +38,12 @@ import type {
   PersonaVisualAuthoredTrigger,
   PersonaVisualCandidate,
   PersonaVisualFrame,
+  PersonaVisualImportPreviewResponse,
+  PersonaVisualImportPreviewStartResponse,
   PersonaVisualManifest,
   PersonaVisualPack,
+  PersonaVisualPackExportResponse,
+  PersonaVisualPortabilityJobResponse,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
@@ -82,6 +94,8 @@ const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
   "tool_category",
   "mcp_runtime"
 ]
+
+const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
 
 const DEFAULT_MANIFEST: PersonaVisualManifest = {
   manifest_version: 1,
@@ -141,6 +155,54 @@ const normalizeFrames = (
 
 const formatStateLabel = (state: PersonaVisualStateId): string =>
   state.replace(/_/g, " ")
+
+const stringifyPreviewValue = (value: unknown): string => {
+  if (value == null) return ""
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+const formatPreviewList = (items: unknown[] | null | undefined): string =>
+  (items || [])
+    .map(stringifyPreviewValue)
+    .filter(Boolean)
+    .join(" ")
+
+const isFullImportPreview = (
+  preview: PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
+): preview is PersonaVisualImportPreviewResponse =>
+  Boolean(preview && "bundle_summary" in preview)
+
+const formatImportPreviewSummary = (
+  preview: PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse
+): string => {
+  if (!isFullImportPreview(preview)) return `${preview.status} ${preview.stage}`
+  const summary = preview.bundle_summary || {}
+  const title =
+    typeof summary.pack_title === "string" && summary.pack_title.trim()
+      ? summary.pack_title
+      : "Portable visual pack"
+  const assetCount =
+    typeof summary.asset_count === "number" ? `${summary.asset_count} assets` : null
+  const assetsWithBytes =
+    typeof summary.assets_with_bytes === "number"
+      ? `${summary.assets_with_bytes} with bytes`
+      : null
+  return [title, assetCount, assetsWithBytes].filter(Boolean).join(" / ")
+}
+
+const buildExportFilename = (pack: PersonaVisualPack): string => {
+  const slug = (pack.title || pack.id || "persona-visual-pack")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return `${slug || "persona-visual-pack"}${PORTABLE_VISUAL_PACK_EXTENSION}`
+}
 
 const getAnimationIds = (manifest: PersonaVisualManifest): string[] =>
   Object.keys(manifest.animations || {}).sort((a, b) => a.localeCompare(b))
@@ -222,6 +284,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [selectedAddFrameAssetId, setSelectedAddFrameAssetId] = React.useState("")
   const [uploadRole, setUploadRole] = React.useState<PersonaVisualAssetRole>("frame")
   const [selectedUploadFile, setSelectedUploadFile] = React.useState<File | null>(null)
+  const [exportJob, setExportJob] = React.useState<
+    PersonaVisualPackExportResponse | PersonaVisualPortabilityJobResponse | null
+  >(null)
+  const [exportingPack, setExportingPack] = React.useState(false)
+  const [refreshingExport, setRefreshingExport] = React.useState(false)
+  const [downloadingExport, setDownloadingExport] = React.useState(false)
+  const [selectedImportPreviewFile, setSelectedImportPreviewFile] =
+    React.useState<File | null>(null)
+  const [importPreview, setImportPreview] = React.useState<
+    PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
+  >(null)
+  const [previewingImport, setPreviewingImport] = React.useState(false)
+  const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
   const [triggerDraft, setTriggerDraft] =
     React.useState<TriggerDraft>(DEFAULT_TRIGGER_DRAFT)
   const [loading, setLoading] = React.useState(false)
@@ -240,6 +315,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [error, setError] = React.useState<string | null>(null)
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
+  const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const selectedPack =
     packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
@@ -354,6 +430,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [animationIds, selectedAnimationId])
 
+  React.useEffect(() => {
+    setExportJob(null)
+    setImportPreview(null)
+    setSelectedImportPreviewFile(null)
+    if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
+  }, [selectedPersonaId, selectedPack?.id])
+
   const updateManifest = React.useCallback(
     (updater: (manifest: PersonaVisualManifest) => PersonaVisualManifest) => {
       setDraftManifest((current) => normalizeManifest(updater(normalizeManifest(current))))
@@ -426,6 +509,115 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setUploading(false)
+    }
+  }
+
+  const handleStartExport = async () => {
+    if (!selectedPersonaId || !selectedPack) return
+    setExportingPack(true)
+    setError(null)
+    try {
+      const job = await startPersonaVisualPackExport(selectedPersonaId, selectedPack.id)
+      setExportJob(job)
+      setStatusMessage("Export job queued.")
+    } catch (exportError) {
+      setError(
+        exportError instanceof Error
+          ? exportError.message
+          : "Failed to queue visual pack export."
+      )
+    } finally {
+      setExportingPack(false)
+    }
+  }
+
+  const handleRefreshExport = async () => {
+    if (!selectedPersonaId || !selectedPack || !exportJob?.job_id) return
+    setRefreshingExport(true)
+    setError(null)
+    try {
+      const job = await getPersonaVisualPackExportJob(
+        selectedPersonaId,
+        selectedPack.id,
+        exportJob.job_id
+      )
+      setExportJob(job)
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Failed to refresh visual pack export."
+      )
+    } finally {
+      setRefreshingExport(false)
+    }
+  }
+
+  const handleDownloadExport = async () => {
+    if (!selectedPersonaId || !selectedPack || !exportJob?.job_id) return
+    setDownloadingExport(true)
+    setError(null)
+    try {
+      await downloadPersonaVisualPackExportArchive(
+        selectedPersonaId,
+        selectedPack.id,
+        exportJob.job_id,
+        buildExportFilename(selectedPack)
+      )
+      setStatusMessage("Export archive downloaded.")
+    } catch (downloadError) {
+      setError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : "Failed to download visual pack export."
+      )
+    } finally {
+      setDownloadingExport(false)
+    }
+  }
+
+  const handleStartImportPreview = async () => {
+    if (!selectedPersonaId || !selectedImportPreviewFile) return
+    setPreviewingImport(true)
+    setError(null)
+    try {
+      const preview = await createPersonaVisualImportPreview(
+        selectedPersonaId,
+        selectedImportPreviewFile
+      )
+      setImportPreview(preview)
+      setSelectedImportPreviewFile(null)
+      if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
+      setStatusMessage("Import preview queued.")
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Failed to queue visual pack import preview."
+      )
+    } finally {
+      setPreviewingImport(false)
+    }
+  }
+
+  const handleRefreshImportPreview = async () => {
+    if (!selectedPersonaId || !importPreview?.preview_id) return
+    setRefreshingImportPreview(true)
+    setError(null)
+    try {
+      const preview = await getPersonaVisualImportPreview(
+        selectedPersonaId,
+        importPreview.preview_id
+      )
+      setImportPreview(preview)
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Failed to refresh visual pack import preview."
+      )
+    } finally {
+      setRefreshingImportPreview(false)
     }
   }
 
@@ -774,6 +966,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     </>
   )
 
+  const exportWarnings =
+    exportJob && "warnings" in exportJob && Array.isArray(exportJob.warnings)
+      ? exportJob.warnings
+      : []
+  const fullImportPreview = isFullImportPreview(importPreview) ? importPreview : null
+  const importPreviewWarnings = fullImportPreview
+    ? [
+        ...(fullImportPreview.validation_warnings || []),
+        ...(fullImportPreview.target_warnings || [])
+      ]
+    : []
+  const importPreviewConflicts = fullImportPreview?.conflicts || []
+  const importPreviewPlan = fullImportPreview?.proposed_plan || null
+
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
       <div className="rounded-lg border border-border bg-surface p-3">
@@ -923,6 +1129,138 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   <div className="mt-1 text-text-muted">{asset.id}</div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-surface p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+              Portability
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <div className="rounded border border-border bg-bg p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Typography.Text strong>Export archive</Typography.Text>
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      data-testid="persona-visual-export-button"
+                      size="small"
+                      icon={<Upload className="h-3.5 w-3.5" />}
+                      loading={exportingPack}
+                      onClick={() => void handleStartExport()}
+                    >
+                      Export
+                    </Button>
+                    <Button
+                      data-testid="persona-visual-export-refresh-button"
+                      size="small"
+                      icon={<RefreshCw className="h-3.5 w-3.5" />}
+                      loading={refreshingExport}
+                      disabled={!exportJob?.job_id}
+                      onClick={() => void handleRefreshExport()}
+                    >
+                      Refresh
+                    </Button>
+                    <Button
+                      data-testid="persona-visual-export-download-button"
+                      size="small"
+                      icon={<Download className="h-3.5 w-3.5" />}
+                      loading={downloadingExport}
+                      disabled={exportJob?.status !== "completed"}
+                      onClick={() => void handleDownloadExport()}
+                    >
+                      Download
+                    </Button>
+                  </div>
+                </div>
+                {exportJob ? (
+                  <div className="mt-2 space-y-1 text-xs text-text-muted">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tag data-testid="persona-visual-export-status">
+                        {exportJob.status}
+                      </Tag>
+                      <span data-testid="persona-visual-export-stage">
+                        {exportJob.stage}
+                      </span>
+                      <span>{exportJob.job_id}</span>
+                    </div>
+                    {exportWarnings.length ? (
+                      <div>{formatPreviewList(exportWarnings)}</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-text-muted">No export job.</div>
+                )}
+              </div>
+
+              <div className="rounded border border-border bg-bg p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Typography.Text strong>Import preview</Typography.Text>
+                  <Tag>review only</Tag>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    ref={importPreviewInputRef}
+                    data-testid="persona-visual-import-preview-input"
+                    type="file"
+                    accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+                    className="text-xs text-text"
+                    onChange={(event) =>
+                      setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
+                    }
+                  />
+                  <Button
+                    data-testid="persona-visual-import-preview-button"
+                    size="small"
+                    icon={<FileSearch className="h-3.5 w-3.5" />}
+                    loading={previewingImport}
+                    disabled={!selectedImportPreviewFile}
+                    onClick={() => void handleStartImportPreview()}
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    data-testid="persona-visual-import-preview-refresh-button"
+                    size="small"
+                    icon={<RefreshCw className="h-3.5 w-3.5" />}
+                    loading={refreshingImportPreview}
+                    disabled={!importPreview?.preview_id}
+                    onClick={() => void handleRefreshImportPreview()}
+                  >
+                    Refresh
+                  </Button>
+                </div>
+                {importPreview ? (
+                  <div className="mt-2 space-y-1 text-xs text-text-muted">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tag data-testid="persona-visual-import-preview-status">
+                        {importPreview.status}
+                      </Tag>
+                      <span>{importPreview.stage}</span>
+                      <span>{importPreview.preview_id}</span>
+                    </div>
+                    <div data-testid="persona-visual-import-preview-summary">
+                      {formatImportPreviewSummary(importPreview)}
+                    </div>
+                    {importPreviewWarnings.length ? (
+                      <div data-testid="persona-visual-import-preview-warnings">
+                        {formatPreviewList(importPreviewWarnings)}
+                      </div>
+                    ) : null}
+                    {importPreviewConflicts.length ? (
+                      <div data-testid="persona-visual-import-preview-conflicts">
+                        {formatPreviewList(importPreviewConflicts)}
+                      </div>
+                    ) : null}
+                    {importPreviewPlan ? (
+                      <div data-testid="persona-visual-import-preview-plan">
+                        {stringifyPreviewValue(importPreviewPlan)}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-text-muted">No import preview.</div>
+                )}
+              </div>
             </div>
           </div>
 

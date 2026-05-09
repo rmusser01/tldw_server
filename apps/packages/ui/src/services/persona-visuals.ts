@@ -1,4 +1,5 @@
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { downloadBlob } from "@/utils/download-blob"
 import type {
   PersonaVisualAsset,
   PersonaVisualAssetRole,
@@ -8,10 +9,15 @@ import type {
   PersonaVisualDeactivateResponse,
   PersonaVisualGenerationJobResponse,
   PersonaVisualGenerationRequest,
+  PersonaVisualImportPreviewResponse,
+  PersonaVisualImportPreviewStartResponse,
   PersonaVisualManifestUpdate,
   PersonaVisualPack,
   PersonaVisualPackCreate,
-  PersonaVisualPackListResponse
+  PersonaVisualPackExportRequest,
+  PersonaVisualPackExportResponse,
+  PersonaVisualPackListResponse,
+  PersonaVisualPortabilityJobResponse
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -213,6 +219,102 @@ export async function createPersonaVisualGenerationJob(
       method: "POST",
       body: payload
     }
+  )
+}
+
+export async function startPersonaVisualPackExport(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualPackExportRequest = {}
+): Promise<PersonaVisualPackExportResponse> {
+  return fetchPersonaVisualJson<PersonaVisualPackExportResponse>(
+    packPath(personaId, packId, "/export"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualPackExportJob(
+  personaId: string,
+  packId: string,
+  jobId: string
+): Promise<PersonaVisualPortabilityJobResponse> {
+  return fetchPersonaVisualJson<PersonaVisualPortabilityJobResponse>(
+    packPath(personaId, packId, `/exports/${encodeURIComponent(jobId)}`)
+  )
+}
+
+export async function downloadPersonaVisualPackExportArchive(
+  personaId: string,
+  packId: string,
+  jobId: string,
+  filename = "persona-visual-pack.tldw-persona-vpack"
+): Promise<void> {
+  const response = await tldwClient.fetchWithAuth(
+    packPath(personaId, packId, `/exports/${encodeURIComponent(jobId)}/download`) as any,
+    {
+      method: "GET",
+      responseType: "arrayBuffer"
+    }
+  )
+  if (!response.ok) {
+    throw new PersonaVisualApiError(
+      response.error || "Persona visual export download failed",
+      {
+        status: response.status,
+        detail: response.data
+      }
+    )
+  }
+  const data = response.data
+  let blobPart: BlobPart | null = null
+  if (data instanceof ArrayBuffer) {
+    blobPart = data
+  } else if (ArrayBuffer.isView(data)) {
+    blobPart = data
+  } else if (Array.isArray(data)) {
+    blobPart = Uint8Array.from(data)
+  }
+  if (!blobPart) {
+    throw new PersonaVisualApiError("Persona visual export download was empty", {
+      status: response.status,
+      detail: data
+    })
+  }
+  downloadBlob(
+    new Blob([blobPart], {
+      type: "application/vnd.tldw.persona.visual-pack+zip"
+    }),
+    filename
+  )
+}
+
+export async function createPersonaVisualImportPreview(
+  personaId: string,
+  file: File
+): Promise<PersonaVisualImportPreviewStartResponse> {
+  const formData = new FormData()
+  formData.append("file", file)
+  return fetchPersonaVisualJson<PersonaVisualImportPreviewStartResponse>(
+    personaVisualPath(personaId, "/visual-packs/import-previews"),
+    {
+      method: "POST",
+      body: formData
+    }
+  )
+}
+
+export async function getPersonaVisualImportPreview(
+  personaId: string,
+  previewId: string
+): Promise<PersonaVisualImportPreviewResponse> {
+  return fetchPersonaVisualJson<PersonaVisualImportPreviewResponse>(
+    personaVisualPath(
+      personaId,
+      `/visual-packs/import-previews/${encodeURIComponent(previewId)}`
+    )
   )
 }
 

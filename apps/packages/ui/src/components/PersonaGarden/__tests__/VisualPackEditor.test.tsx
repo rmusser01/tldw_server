@@ -38,6 +38,13 @@ const okResponse = (payload: unknown) =>
     json: async () => payload
   })
 
+const okBinaryResponse = (payload: ArrayBuffer) =>
+  Promise.resolve({
+    ok: true,
+    data: payload,
+    json: async () => payload
+  })
+
 const parseJsonBody = (body: unknown): any => {
   if (typeof body === "string") return JSON.parse(body)
   return body
@@ -101,6 +108,7 @@ const visualAssets = [
 
 describe("VisualPackEditor", () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     mocks.fetchWithAuth.mockReset()
   })
 
@@ -510,5 +518,258 @@ describe("VisualPackEditor", () => {
         )
       ).toHaveLength(2)
     )
+  })
+
+  it("queues, polls, and downloads visual pack exports through the authenticated client", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const createObjectUrl = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:persona-visual-export")
+    const revokeObjectUrl = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined)
+    const clickDownload = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined)
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any; responseType?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/export" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          job_id: "export-job-1",
+          portability_job_id: "portability-1",
+          operation: "export",
+          persona_id: "persona-1",
+          pack_id: "pack-1",
+          status: "queued",
+          stage: "queued",
+          download_url: null
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/exports/export-job-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          job_id: "export-job-1",
+          portability_job_id: "portability-1",
+          operation: "export",
+          persona_id: "persona-1",
+          pack_id: "pack-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          progress: { assets: 2 },
+          warnings: [],
+          archive_sha256: "sha-export",
+          canonical_payload_fingerprint: "fingerprint-export",
+          download_url: "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/exports/export-job-1/download"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/exports/export-job-1/download" &&
+        method === "GET"
+      ) {
+        expect(init?.responseType).toBe("arrayBuffer")
+        return okBinaryResponse(Uint8Array.from([1, 2, 3, 4]).buffer)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-export-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-export-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-export-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-export-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-export-stage")).toHaveTextContent(
+      "completed"
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-export-download-button"))
+    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledTimes(1))
+    expect(clickDownload).toHaveBeenCalledTimes(1)
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:persona-visual-export")
+    expect(calls).toContain(
+      "GET /api/v1/persona/profiles/persona-1/visual-packs/pack-1/exports/export-job-1/download"
+    )
+  })
+
+  it("uploads import-preview archives and renders the review summary without mutating packs", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        const form = init?.body as FormData
+        expect((form.get("file") as File).name).toBe("portable.tldw-persona-vpack")
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          archive_sha256: "sha-preview",
+          canonical_payload_fingerprint: "fingerprint-preview",
+          schema_version: "persona_visual_pack.v1",
+          bundle_summary: {
+            pack_title: "Imported Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: ["Unsigned archive"],
+          conflicts: [{ type: "title", value: "Animated pack" }],
+          proposed_plan: { target_mode: "create_new" },
+          quota_estimate: { asset_bytes: 512 },
+          required_choices: [],
+          target_warnings: ["Review target persona before import"]
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-import-preview-summary")).toHaveTextContent(
+      "Imported Visuals"
+    )
+    expect(screen.getByTestId("persona-visual-import-preview-summary")).toHaveTextContent(
+      "2 assets"
+    )
+    expect(screen.getByTestId("persona-visual-import-preview-warnings")).toHaveTextContent(
+      "Unsigned archive"
+    )
+    expect(screen.getByTestId("persona-visual-import-preview-conflicts")).toHaveTextContent(
+      "Animated pack"
+    )
+    expect(screen.getByTestId("persona-visual-import-preview-plan")).toHaveTextContent(
+      "create_new"
+    )
+    expect(
+      calls.some((call) => call.includes("/activate") || call.includes("/manifest"))
+    ).toBe(false)
   })
 })

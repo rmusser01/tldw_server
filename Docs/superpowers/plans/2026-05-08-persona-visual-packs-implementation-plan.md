@@ -2080,6 +2080,42 @@ Result: no findings. `B101` was skipped for test assertions.
 
 Next slice: frontend review UX for export/import-preview status polling, archive download, and import-review display.
 
+## Task 15: Portability Frontend Review UX
+
+**Status:** Complete
+
+**Goal:** Add the first frontend review surface for PR #1135-style persona visual pack export and import-preview jobs.
+
+**Implementation Notes:**
+
+- Added frontend type contracts for persona visual export jobs, portability job status, import-preview start responses, and full import-preview review responses.
+- Added persona visual API helpers for export start/status, authenticated export archive download, import-preview upload, and import-preview status.
+- Extended `VisualPackEditor` with a focused portability panel for the selected pack.
+- Export UX now queues a background export, lets the user refresh status, and downloads completed archives through `fetchWithAuth` as binary data.
+- Import-preview UX now uploads `.tldw-persona-vpack` archives, polls the preview row, displays the review summary, warnings, conflicts, and proposed plan, and keeps the flow explicitly review-only.
+
+**Verification:**
+
+```bash
+cd apps/packages/ui && bunx vitest run \
+  src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
+```
+
+Result: `6 passed`.
+
+```bash
+cd apps/packages/ui && bunx vitest run \
+  src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts \
+  src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx \
+  src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx \
+  src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx \
+  src/store/__tests__/persona-visual-runtime.test.ts
+```
+
+Result: `37 passed`.
+
+Bandit is not applicable to this frontend-only slice; no Python production code changed.
+
 ## Final Verification Gate
 
 Before declaring implementation complete, run:

@@ -35,6 +35,8 @@ export type PersonaVisualCandidateStatus =
   | "rejected"
   | "failed"
 
+export type PersonaVisualPortabilityOperation = "export" | "import_preview"
+
 export interface PersonaVisualRegion {
   x: number
   y: number
@@ -161,6 +163,77 @@ export interface PersonaVisualGenerationRequest {
 export interface PersonaVisualGenerationJobResponse {
   job_id: string
   status?: string | null
+}
+
+export interface PersonaVisualPackExportRequest {
+  request_id?: string | null
+  strict?: boolean
+  include_full_provenance?: boolean
+  warn_for_sharing?: boolean
+}
+
+export interface PersonaVisualPortabilityJobResponse {
+  job_id: string
+  portability_job_id: string
+  operation: PersonaVisualPortabilityOperation
+  persona_id?: string | null
+  pack_id?: string | null
+  status: string
+  visual_status: string
+  stage: string
+  progress: Record<string, unknown>
+  warnings: unknown[]
+  archive_sha256?: string | null
+  canonical_payload_fingerprint?: string | null
+  download_url?: string | null
+  error_code?: string | null
+  error_message?: string | null
+  expires_at?: string | null
+}
+
+export interface PersonaVisualPackExportResponse {
+  job_id: string
+  portability_job_id: string
+  operation: "export"
+  persona_id: string
+  pack_id: string
+  status: string
+  stage: string
+  download_url?: string | null
+}
+
+export interface PersonaVisualImportPreviewStartResponse {
+  preview_id: string
+  job_id: string
+  portability_job_id: string
+  operation: "import_preview"
+  target_persona_id?: string | null
+  status: string
+  stage: string
+}
+
+export interface PersonaVisualImportPreviewResponse {
+  preview_id: string
+  job_id: string
+  portability_job_id: string
+  operation: "import_preview"
+  target_persona_id?: string | null
+  status: string
+  visual_status: string
+  stage: string
+  archive_sha256?: string | null
+  canonical_payload_fingerprint?: string | null
+  schema_version?: string | null
+  bundle_summary: Record<string, unknown>
+  validation_warnings: unknown[]
+  conflicts: unknown[]
+  proposed_plan: Record<string, unknown>
+  quota_estimate: Record<string, unknown>
+  required_choices: unknown[]
+  target_warnings: unknown[]
+  error_code?: string | null
+  error_message?: string | null
+  expires_at?: string | null
 }
 
 export interface PersonaVisualCandidateReviewRequest {
