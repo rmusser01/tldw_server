@@ -118,6 +118,7 @@ const OptionIndex = () => {
       ? "Finish setup, then continue creating and chatting with characters."
       : "Start here to connect your server or try local demo mode."
     const navigateToCharacterCreate = () => {
+      if (!hasCompletedFirstRun) return
       navigate(
         buildCharacterOnboardingRoute({
           returnTo: onboardingReturnTo,
@@ -126,6 +127,7 @@ const OptionIndex = () => {
       )
     }
     const navigateToCharacterImport = () => {
+      if (!hasCompletedFirstRun) return
       navigate(
         buildCharacterOnboardingRoute({
           returnTo: onboardingReturnTo,
@@ -134,9 +136,11 @@ const OptionIndex = () => {
       )
     }
     const navigateToModelSettings = () => {
+      if (!hasCompletedFirstRun) return
       navigate("/settings/model?from=character-chat-onboarding")
     }
     const navigateToCharacterChat = () => {
+      if (!hasCompletedFirstRun) return
       navigate("/chat?from=character-chat-onboarding")
     }
     return (
@@ -169,6 +173,7 @@ const OptionIndex = () => {
           {isCharacterChatOnboarding && (
             <CharacterChatOnboardingLane
               className="mt-3"
+              actionsDisabled
               onCreateCharacter={navigateToCharacterCreate}
               onImportCharacter={navigateToCharacterImport}
               onChooseModel={navigateToModelSettings}

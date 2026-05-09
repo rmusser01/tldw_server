@@ -6,6 +6,7 @@ import { cn } from "@/libs/utils"
 
 type CharacterChatOnboardingLaneProps = {
   className?: string
+  actionsDisabled?: boolean
   onCreateCharacter: () => void
   onImportCharacter: () => void
   onChooseModel: () => void
@@ -23,6 +24,7 @@ export const CharacterChatOnboardingLane: React.FC<
   CharacterChatOnboardingLaneProps
 > = ({
   className,
+  actionsDisabled = false,
   onCreateCharacter,
   onImportCharacter,
   onChooseModel,
@@ -72,8 +74,13 @@ export const CharacterChatOnboardingLane: React.FC<
               key={action.label}
               type="button"
               aria-label={action.label}
+              disabled={actionsDisabled}
               onClick={action.onClick}
-              className="flex min-h-20 items-start gap-2 rounded-md border border-border bg-surface px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-surface2"
+              className={cn(
+                "flex min-h-20 items-start gap-2 rounded-md border border-border bg-surface px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-surface2",
+                actionsDisabled &&
+                  "cursor-not-allowed opacity-60 hover:border-border hover:bg-surface"
+              )}
             >
               <Icon
                 className="mt-0.5 size-4 shrink-0 text-primary"

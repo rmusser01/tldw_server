@@ -30,6 +30,7 @@ import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { useIsConnected } from "@/hooks/useConnectionState"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
@@ -92,6 +93,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   const { t } = useTranslation(["settings", "common"])
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const isServerConnected = useIsConnected()
   const notification = useAntdNotification()
   const confirmDanger = useConfirmDanger()
   const [createForm] = Form.useForm()
@@ -261,7 +263,12 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     quickChatModelOptions[0]?.value ||
     null
 
-  const quickChat = useCharacterQuickChat({ t, activeQuickChatModel })
+  const quickChat = useCharacterQuickChat({
+    t,
+    activeQuickChatModel,
+    isServerConnected,
+    availableModels: generationModels ?? []
+  })
   const {
     quickChatCharacter, setQuickChatCharacter,
     quickChatMessages, setQuickChatMessages,
@@ -1209,6 +1216,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         closeQuickChat={closeQuickChat}
         quickChatModelOptions={quickChatModelOptions}
         activeQuickChatModel={activeQuickChatModel}
+        isServerConnected={isServerConnected}
         setQuickChatModelOverride={setQuickChatModelOverride}
         quickChatError={quickChatError}
         quickChatMessages={quickChatMessages}

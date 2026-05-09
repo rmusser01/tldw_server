@@ -137,21 +137,23 @@ describe("Header character mode sequencing", () => {
     window.addEventListener("tldw:open-actor-settings", actorListener)
     window.addEventListener("tldw:open-assistant-select", assistantListener)
 
-    render(<Header />)
+    try {
+      render(<Header />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
+      fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
-    expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
-    expect(clearChatMock).toHaveBeenCalledTimes(1)
-    expect(actorListener).not.toHaveBeenCalled()
-    expect(assistantListener).toHaveBeenCalledWith(
-      expect.objectContaining({
-        detail: { tab: "character", source: "chat-header" }
-      })
-    )
-
-    window.removeEventListener("tldw:open-actor-settings", actorListener)
-    window.removeEventListener("tldw:open-assistant-select", assistantListener)
+      expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
+      expect(clearChatMock).toHaveBeenCalledTimes(1)
+      expect(actorListener).not.toHaveBeenCalled()
+      expect(assistantListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: { tab: "character", source: "chat-header" }
+        })
+      )
+    } finally {
+      window.removeEventListener("tldw:open-actor-settings", actorListener)
+      window.removeEventListener("tldw:open-assistant-select", assistantListener)
+    }
   })
 
   it("keeps an active character selected when starting a fresh character chat", () => {
@@ -161,18 +163,20 @@ describe("Header character mode sequencing", () => {
     window.addEventListener("tldw:open-actor-settings", actorListener)
     window.addEventListener("tldw:open-assistant-select", assistantListener)
 
-    render(<Header />)
+    try {
+      render(<Header />)
 
-    expect(screen.getByTestId("active-character")).toHaveTextContent("Rin")
-    fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
+      expect(screen.getByTestId("active-character")).toHaveTextContent("Rin")
+      fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
-    expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
-    expect(clearChatMock).toHaveBeenCalledTimes(1)
-    expect(actorListener).not.toHaveBeenCalled()
-    expect(assistantListener).not.toHaveBeenCalled()
-
-    window.removeEventListener("tldw:open-actor-settings", actorListener)
-    window.removeEventListener("tldw:open-assistant-select", assistantListener)
+      expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
+      expect(clearChatMock).toHaveBeenCalledTimes(1)
+      expect(actorListener).not.toHaveBeenCalled()
+      expect(assistantListener).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("tldw:open-actor-settings", actorListener)
+      window.removeEventListener("tldw:open-assistant-select", assistantListener)
+    }
   })
 
   it("clears character state when switching back to saved or temporary chat", () => {

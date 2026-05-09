@@ -55,6 +55,7 @@ import {
 } from "@/utils/chat-model-availability"
 import type { TFunction } from "i18next"
 import type { NavigateFunction } from "react-router-dom"
+import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
 
 // ---------------------------------------------------------------------------
 // Shared props type for the CharacterDialogs component
@@ -112,6 +113,7 @@ export type CharacterDialogsProps = {
   closeQuickChat: () => Promise<void>
   quickChatModelOptions: Array<{ value: string; label: string }>
   activeQuickChatModel: string | null
+  isServerConnected: boolean
   setQuickChatModelOverride: (v: string | null) => void
   quickChatError: string | null
   quickChatMessages: Array<{ id: string; role: string; content: string }>
@@ -120,7 +122,7 @@ export type CharacterDialogsProps = {
   quickChatSending: boolean
   sendQuickChatMessage: () => Promise<void>
   handlePromoteQuickChat: () => Promise<void>
-  chatIntentBlocker: { record: any; characterSelection: any } | null
+  chatIntentBlocker: CharacterChatIntentBlocker | null
   clearChatIntentBlocker: () => Promise<void>
   retryChatIntentBlocker: () => Promise<void>
 
@@ -318,6 +320,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     closeQuickChat,
     quickChatModelOptions,
     activeQuickChatModel,
+    isServerConnected,
     setQuickChatModelOverride,
     quickChatError,
     quickChatMessages,
@@ -480,13 +483,21 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
   const quickChatReadiness = React.useMemo(
     () =>
       buildCharacterChatReadiness({
+        isServerConnected,
         selectedCharacter: quickChatCharacter,
         selectedModel: activeQuickChatModel,
         availableModels: quickChatModelOptions.map((option) => ({
           model: option.value
-        }))
+        })),
+        isSendBlocked: quickChatSending
       }),
-    [activeQuickChatModel, quickChatCharacter, quickChatModelOptions]
+    [
+      activeQuickChatModel,
+      isServerConnected,
+      quickChatCharacter,
+      quickChatModelOptions,
+      quickChatSending
+    ]
   )
   const quickChatReadinessCopy = React.useMemo(
     () =>
@@ -504,11 +515,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
   const chatIntentReadinessCopy = React.useMemo(() => {
     if (!chatIntentBlocker) return null
     const characterSelection = chatIntentBlocker.characterSelection
-    const readiness = buildCharacterChatReadiness({
-      selectedCharacter: characterSelection,
-      selectedModel: null,
-      availableModels: []
-    })
+    const readiness = chatIntentBlocker.readiness
     return getCharacterChatReadinessCopy(readiness, t, {
       characterName:
         characterSelection?.name ||

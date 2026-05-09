@@ -47,6 +47,64 @@ def test_process_text_dictionary_ids_validation_names_dictionary_ids_field():
     assert "included_dictionary_ids" not in message
 
 
+@pytest.mark.asyncio
+async def test_process_text_dictionary_ids_share_one_token_budget(monkeypatch):
+    calls: list[tuple[int, int | None]] = []
+
+    class FakeChatDictionaryService:
+        def __init__(self, db):
+            self.db = db
+
+        def get_dictionary(self, dictionary_id: int):
+            return {"id": dictionary_id}
+
+        def process_text(
+            self,
+            text: str,
+            *,
+            dictionary_id: int,
+            token_budget: int | None,
+            return_stats: bool,
+            **_kwargs,
+        ):
+            assert return_stats is True
+            calls.append((dictionary_id, token_budget))
+            requested_budget = 3
+            used_budget = (
+                requested_budget
+                if token_budget is None
+                else min(requested_budget, token_budget)
+            )
+            return f"{text}|{dictionary_id}", {
+                "replacements": 1,
+                "iterations": 1,
+                "entries_used": [dictionary_id],
+                "token_budget_used": used_budget,
+                "token_budget_exceeded": token_budget is not None
+                and used_budget < requested_budget,
+            }
+
+    monkeypatch.setattr(
+        chat_dictionary_endpoints,
+        "ChatDictionaryService",
+        FakeChatDictionaryService,
+    )
+
+    response = await chat_dictionary_endpoints.process_text_with_dictionaries(
+        ProcessTextRequest(
+            text="hello",
+            dictionary_ids=[101, 202, 303],
+            token_budget=5,
+        ),
+        db=object(),
+    )
+
+    assert calls == [(101, 5), (202, 2)]
+    assert response.token_budget_used == 5
+    assert response.token_budget_exceeded is True
+    assert response.entries_used == [101, 202]
+
+
 def test_chat_dictionary_service_initializes_legacy_entries_table_without_sort_order(
     chacha_db: CharactersRAGDB,
 ):

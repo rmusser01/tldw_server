@@ -37,6 +37,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 import {
   getChatSettingsStorageKey,
+  normalizeChatSettingsRecord,
   resolveChatSettingsKey,
   syncChatSettingsForServerChat
 } from "@/services/chat-settings"
@@ -143,5 +144,42 @@ describe("syncChatSettingsForServerChat", () => {
       localSettings
     )
     expect(result).toEqual(localSettings)
+  })
+})
+
+describe("normalizeChatSettingsRecord", () => {
+  it("keeps nested and legacy dictionary ids mirrored from nested context", () => {
+    const settings = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-03-08T00:00:00.000Z",
+      conversationContext: {
+        world_book_ids: [9, "10", 0, "bad"],
+        chat_dictionary_ids: [7, "8", 7]
+      },
+      chat_dictionary_ids: [99]
+    })
+
+    expect(settings?.conversationContext).toEqual({
+      world_book_ids: [9, 10],
+      chat_dictionary_ids: [7, 8]
+    })
+    expect(settings?.chat_dictionary_ids).toEqual([7, 8])
+  })
+
+  it("mirrors legacy dictionary ids into conversation context when nested ids are absent", () => {
+    const settings = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-03-08T00:00:00.000Z",
+      conversationContext: {
+        world_book_ids: [1]
+      },
+      chat_dictionary_ids: [3, "4", 3]
+    })
+
+    expect(settings?.conversationContext).toEqual({
+      world_book_ids: [1],
+      chat_dictionary_ids: [3, 4]
+    })
+    expect(settings?.chat_dictionary_ids).toEqual([3, 4])
   })
 })

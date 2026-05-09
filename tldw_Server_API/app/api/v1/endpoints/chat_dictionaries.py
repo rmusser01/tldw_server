@@ -1057,7 +1057,8 @@ async def process_text_with_dictionaries(
             iterations = 0
             entries_used: list[int] = []
             token_budget_exceeded = False
-            token_budget_used = request.token_budget
+            remaining_token_budget = request.token_budget
+            token_budget_used = 0 if request.token_budget is not None else None
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
@@ -1068,21 +1069,32 @@ async def process_text_with_dictionaries(
                         dictionary_id=dictionary_id,
                         group=request.group,
                         max_iterations=request.max_iterations,
-                        token_budget=request.token_budget,
+                        token_budget=remaining_token_budget,
                         return_stats=True,
                         chat_id=request.chat_id,
                     )
 
                     replacements += stats.get("replacements", 0)
                     iterations += stats.get("iterations", 0)
-                    token_budget_exceeded = (
-                        token_budget_exceeded or stats.get("token_budget_exceeded", False)
-                    )
-                    if stats.get("token_budget_used") is not None:
-                        token_budget_used = stats.get("token_budget_used")
+                    step_budget_used = stats.get("token_budget_used")
+                    if isinstance(step_budget_used, (int, float)):
+                        normalized_step_budget_used = int(step_budget_used)
+                        token_budget_used = (
+                            normalized_step_budget_used
+                            if token_budget_used is None
+                            else token_budget_used + normalized_step_budget_used
+                        )
+                        if remaining_token_budget is not None:
+                            remaining_token_budget = max(
+                                remaining_token_budget - normalized_step_budget_used,
+                                0,
+                            )
                     for entry_id in stats.get("entries_used", []):
                         if entry_id not in entries_used:
                             entries_used.append(entry_id)
+                    if stats.get("token_budget_exceeded", False):
+                        token_budget_exceeded = True
+                        break
 
                 warning_exceeded_budget = any(
                     issubclass(warning.category, TokenBudgetExceededWarning)

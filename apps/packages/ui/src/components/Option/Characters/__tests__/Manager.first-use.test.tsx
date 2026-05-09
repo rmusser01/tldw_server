@@ -19,6 +19,7 @@ const {
   useMutationMock,
   useQueryClientMock,
   useNavigateMock,
+  useIsConnectedMock,
   useCharacterShortcutsMock,
   generateFullCharacterMock,
   generateFieldMock,
@@ -41,6 +42,7 @@ const {
   useMutationMock: vi.fn(),
   useQueryClientMock: vi.fn(),
   useNavigateMock: vi.fn(),
+  useIsConnectedMock: vi.fn(() => true),
   useCharacterShortcutsMock: vi.fn((_options?: any) => undefined),
   generateFullCharacterMock: vi.fn(),
   generateFieldMock: vi.fn(
@@ -204,6 +206,10 @@ vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => notificationMock
 }))
 
+vi.mock("@/hooks/useConnectionState", () => ({
+  useIsConnected: () => useIsConnectedMock()
+}))
+
 vi.mock("@/components/Common/confirm-danger", () => ({
   useConfirmDanger: () => confirmDangerMock
 }))
@@ -322,6 +328,7 @@ describe("CharactersManager first-use onboarding", () => {
     ensureLocalStorageApi().clear()
     window.history.replaceState({}, "", "/")
     useNavigateMock.mockReturnValue(navigateMock)
+    useIsConnectedMock.mockReturnValue(true)
     confirmDangerMock.mockResolvedValue(true)
     tldwClientMock.fetchWithAuth.mockReset()
     useStorageMock.mockImplementation(
@@ -2991,6 +2998,13 @@ describe("CharactersManager first-use onboarding", () => {
   it("supports first-run template -> create -> chat handoff", async () => {
     const user = userEvent.setup()
     let listCharactersData: any[] = []
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
 
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined

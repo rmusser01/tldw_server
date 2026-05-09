@@ -275,6 +275,10 @@ export const ConversationContextPopover: React.FC<
       setSaving(true)
       try {
         await saveSelection(nextSelection)
+      } catch (error) {
+        setAssetOptionsError(
+          error instanceof Error ? error.message : String(error)
+        )
       } finally {
         setSaving(false)
       }

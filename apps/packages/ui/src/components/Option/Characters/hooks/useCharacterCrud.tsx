@@ -36,11 +36,17 @@ import {
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 import { createAvatarValue } from "../AvatarField"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
-import { buildCharacterChatReadiness } from "@/utils/chat-model-availability"
+import {
+  buildCharacterChatReadiness,
+  type CharacterChatReadiness
+} from "@/utils/chat-model-availability"
 
 export type CharacterChatIntentBlocker = {
   record: any
   characterSelection: any
+  readiness: CharacterChatReadiness
+  selectedModel: string | null
+  availableChatModels: Array<{ model?: unknown; name?: unknown }>
 }
 
 export interface UseCharacterCrudDeps {
@@ -503,7 +509,13 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       availableModels: availableChatModels
     })
     if (!readiness.canStart && readiness.missingRequirement === "chat-model") {
-      setChatIntentBlocker({ record, characterSelection })
+      setChatIntentBlocker({
+        record,
+        characterSelection,
+        readiness,
+        selectedModel: activeChatModel,
+        availableChatModels: availableChatModels ?? []
+      })
       return
     }
 

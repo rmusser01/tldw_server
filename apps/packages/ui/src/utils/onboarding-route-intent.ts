@@ -11,6 +11,9 @@ type LocationLike = {
 
 const SAFE_URL_ORIGIN = "https://tldw.local"
 
+const isCharactersRoute = (path: string | null | undefined): boolean =>
+  path === "/characters" || Boolean(path?.startsWith("/characters/"))
+
 export const getSafeOnboardingReturnTo = (
   value: string | null | undefined
 ): string | null => {
@@ -44,11 +47,11 @@ export const resolveOnboardingEntryIntent = ({
   }
 
   const returnTo = getSafeOnboardingReturnTo(params.get("returnTo"))
-  if (returnTo?.startsWith("/characters")) {
+  if (isCharactersRoute(returnTo)) {
     return CHARACTER_CHAT_ONBOARDING_INTENT
   }
 
-  if (pathname === "/characters" || pathname.startsWith("/characters/")) {
+  if (isCharactersRoute(pathname)) {
     return CHARACTER_CHAT_ONBOARDING_INTENT
   }
 
@@ -91,7 +94,7 @@ export const buildCharacterOnboardingRoute = ({
     action === "create"
       ? "/characters?from=onboarding&create=true"
       : "/characters?from=onboarding&import=true"
-  const baseRoute = safeReturnTo?.startsWith("/characters")
+  const baseRoute = isCharactersRoute(safeReturnTo)
     ? safeReturnTo
     : fallback
 

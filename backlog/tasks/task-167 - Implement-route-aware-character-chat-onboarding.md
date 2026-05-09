@@ -32,7 +32,7 @@ Execute the route-aware onboarding work package so first-run guidance respects c
 <!-- AC:BEGIN -->
 - [x] #1 Existing first-run onboarding state sources are inventoried and the ingestion-first path remains the default with no character-chat intent.
 - [x] #2 A failing test first captures character-chat route intent being lost or ignored during first-run onboarding.
-- [x] #3 Users arriving from character-chat intent see character-chat aligned actions: create character, import character, choose model, and start character chat.
+- [x] #3 Users arriving from character-chat intent see character-chat-aligned actions: create character, import character, choose model, and start character chat.
 - [x] #4 Onboarding completion or skip behavior preserves or intentionally clears character-chat route intent without trapping returning users.
 - [x] #5 Model-readiness blockers remain local and use the shared readiness contract rather than duplicating model logic.
 - [x] #6 Focused unit/component tests and full UI typecheck are run and recorded.
