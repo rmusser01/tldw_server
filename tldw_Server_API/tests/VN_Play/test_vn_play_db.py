@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from typing import Any
 
 import pytest
 
@@ -194,6 +195,68 @@ def test_session_action_idempotency_key_is_unique_per_session_and_decodes_json(
     )["id"] == first["id"]
 
 
+def test_session_action_duplicate_insert_replays_or_conflicts(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Race target",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    first = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-race",
+        request_payload_hash="branch_restore:hash-a",
+    )
+    original_get = repo.get_session_action_by_key
+    hidden_reads = 0
+
+    def hide_first_read(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        nonlocal hidden_reads
+        if hidden_reads == 0:
+            hidden_reads += 1
+            return None
+        return original_get(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "get_session_action_by_key", hide_first_read)
+
+    replayed = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-race",
+        request_payload_hash="branch_restore:hash-a",
+    )
+
+    assert replayed["id"] == first["id"]
+
+    conflict = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="restore-race-conflict",
+        request_payload_hash="branch_restore:hash-a",
+    )
+    hidden_reads = 0
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_session_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            action_type="branch_restore",
+            idempotency_key="restore-race-conflict",
+            request_payload_hash="branch_restore:hash-b",
+        )
+    assert conflict["id"] != first["id"]
+
+
 def test_turn_and_session_action_locks_share_session_mutation_gate(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -290,6 +353,66 @@ def test_turn_and_session_action_locks_share_session_mutation_gate(
         expected_scene_version=0,
     ) is True
     repo.clear_session_action_lock(session_id=session["id"], owner_user_id=42)
+    assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
+
+
+def test_session_action_terminal_update_clears_only_matching_lock(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Terminal action",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    active_action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="active-action",
+        request_payload_hash="active-hash",
+    )
+    other_action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="branch_restore",
+        idempotency_key="other-action",
+        request_payload_hash="other-hash",
+    )
+    repo.update_session(
+        session["id"],
+        {"active_session_action_id": active_action["id"]},
+        owner_user_id=42,
+    )
+
+    failed_other = repo.mark_session_action_terminal(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=other_action["id"],
+        status="failed",
+        error={"code": "branch_restore_target_unavailable"},
+    )
+
+    assert failed_other["status"] == "failed"
+    assert failed_other["error"] == {"code": "branch_restore_target_unavailable"}
+    assert (
+        repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"]
+        == active_action["id"]
+    )
+
+    abandoned_active = repo.mark_session_action_terminal(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=active_action["id"],
+        status="abandoned",
+        error={"code": "stale_scene_version"},
+    )
+
+    assert abandoned_active["status"] == "abandoned"
+    assert abandoned_active["error"] == {"code": "stale_scene_version"}
     assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
 
 

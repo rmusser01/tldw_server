@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -610,34 +611,63 @@ class VNPlayRepository:
                 raise ValueError("idempotency_key_conflict")
             return existing
 
-        with self.db.transaction() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO vn_play_session_actions (
-                    session_id,
-                    owner_user_id,
-                    action_type,
-                    idempotency_key,
-                    request_payload_hash,
-                    status
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO vn_play_session_actions (
+                        session_id,
+                        owner_user_id,
+                        action_type,
+                        idempotency_key,
+                        request_payload_hash,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        owner_user_id,
+                        action_type,
+                        idempotency_key,
+                        request_payload_hash,
+                        status,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    owner_user_id,
-                    action_type,
-                    idempotency_key,
-                    request_payload_hash,
-                    status,
-                ),
+                action_id = int(cursor.lastrowid)
+        except sqlite3.IntegrityError as exc:
+            return self._recover_session_action_insert_conflict(
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                exc=exc,
             )
-            action_id = int(cursor.lastrowid)
 
         session_action = self.get_session_action(action_id)
         if session_action is None:
             raise RuntimeError("created_session_action_not_found")
         return session_action
+
+    def _recover_session_action_insert_conflict(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        exc: sqlite3.IntegrityError,
+    ) -> dict[str, Any]:
+        existing = self.get_session_action_by_key(
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is None:
+            raise exc
+        if existing["request_payload_hash"] != request_payload_hash:
+            raise ValueError("idempotency_key_conflict") from exc
+        return existing
 
     def get_session_action(
         self,
@@ -726,6 +756,62 @@ class VNPlayRepository:
                     (value, action_id, owner_user_id, owner_user_id),
                 )
         return self.get_session_action(action_id, owner_user_id=owner_user_id)
+
+    def mark_session_action_terminal(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_id: int,
+        status: str,
+        error: Mapping[str, Any] | None = None,
+        response_payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Mark an action terminal and clear its matching active session lock atomically."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE vn_play_session_actions
+                SET status = ?,
+                    response_payload_json = ?,
+                    error_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND session_id = ?
+                  AND owner_user_id = ?
+                """,
+                (
+                    status,
+                    _json_dump(dict(response_payload)) if response_payload is not None else None,
+                    _json_dump(dict(error)) if error is not None else None,
+                    action_id,
+                    session_id,
+                    owner_user_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+            conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET active_session_action_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND active_session_action_id = ?
+                """,
+                (session_id, owner_user_id, action_id),
+            )
+            row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_session_actions
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (action_id, owner_user_id),
+            ).fetchone()
+        return _decode_session_action(row) if row is not None else None
 
     def commit_session_restore_action(
         self,

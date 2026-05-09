@@ -1084,18 +1084,12 @@ class VNPlayService:
         action_id: int,
         error_code: str,
     ) -> None:
-        self.repo.update_session_action(
-            action_id,
-            {
-                "status": SESSION_ACTION_STATUS_ABANDONED,
-                "error": {"code": error_code},
-            },
-            owner_user_id=self.owner_user_id,
-        )
-        self.repo.clear_session_action_lock(
+        self.repo.mark_session_action_terminal(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
             action_id=action_id,
+            status=SESSION_ACTION_STATUS_ABANDONED,
+            error={"code": error_code},
         )
 
     def _mark_session_action_failed(
@@ -1105,18 +1099,12 @@ class VNPlayService:
         action_id: int,
         error_code: str,
     ) -> None:
-        self.repo.update_session_action(
-            action_id,
-            {
-                "status": SESSION_ACTION_STATUS_FAILED,
-                "error": {"code": error_code},
-            },
-            owner_user_id=self.owner_user_id,
-        )
-        self.repo.clear_session_action_lock(
+        self.repo.mark_session_action_terminal(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
             action_id=action_id,
+            status=SESSION_ACTION_STATUS_FAILED,
+            error={"code": error_code},
         )
 
     def _response_for_existing_turn(

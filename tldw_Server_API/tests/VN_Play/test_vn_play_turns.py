@@ -1176,6 +1176,7 @@ def test_branch_restore_rejects_freeform_session(
 
 def test_branch_restore_target_failure_clears_active_restore_action(
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = VNPlayRepository.initialized(chacha_db)
     service = VNPlayService(repo=repo, owner_user_id=42)
@@ -1187,6 +1188,11 @@ def test_branch_restore_target_failure_clears_active_restore_action(
         branch_label="Detached",
         branch_path=[{"choice_id": "detached", "choice_text": "Detached"}],
     )
+
+    def fail_separate_lock_clear(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("separate lock clear should not be used")
+
+    monkeypatch.setattr(repo, "clear_session_action_lock", fail_separate_lock_clear)
 
     with pytest.raises(VNPlayConflictError, match="branch_restore_target_unavailable"):
         service.restore_branch(
