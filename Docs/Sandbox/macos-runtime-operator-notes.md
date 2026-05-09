@@ -306,6 +306,55 @@ the VM is owned by this `tldw` `vz_linux` sandbox control plane. Operators shoul
 inspect the dry-run plan first. Helper unavailable or protocol mismatch
 conditions fail closed and block mutating repair.
 
+## Helper Crash, Restart, And Host Reboot Recovery
+
+`vz_linux` recovery is generation-aware and helper-truth-driven. Persisted
+session-control rows are useful control-plane state, but they are not proof that
+a warm VM still exists. A row should be reused only when the current helper can
+prove live VM health, `tldw/vz_linux` ownership, matching session metadata, and
+matching helper generation.
+
+If the helper crashes or is manually stopped and has not been restored:
+
+- `vz_linux` runs that require helper truth fail closed.
+- persisted session-control rows are preserved.
+- `/api/v1/sandbox/admin/macos-diagnostics` reports recovery as unavailable.
+- mutating reconciliation repair is blocked because helper truth is unavailable.
+- the operator should restore helper readiness before retrying runs or repair.
+
+If the helper is restarted directly or by a future launchd-managed workflow:
+
+- treat the replacement helper as a new helper generation.
+- run `tools/macos-vz-helper/scripts/vz-helperctl.py status` or `check` to
+  verify socket, pid, log-directory, entitlements, ping, and protocol state.
+- re-run macOS sandbox diagnostics.
+- inspect `reconciliation` and `recovery_summary` before mutating anything.
+- retrying a same-session run may clear stale control state and provision a
+  fresh VM after reachable helper truth proves the old row is stale.
+- if stale inactive rows remain, run
+  `POST /api/v1/sandbox/admin/macos-reconciliation/repair` in dry-run mode
+  before applying a mutating repair.
+
+After a host reboot, assume helper process identity, helper in-memory VM state,
+virtiofs state, and guest-agent readiness were lost until proven otherwise.
+Durable image-store manifests and persisted session-control rows may still
+exist, but they are provenance, not live VM proof. The recommended manual
+procedure is:
+
+1. Start or verify the helper through the managed operator workflow.
+2. Run `vz-helperctl.py status` and confirm protocol-compatible helper ping.
+3. Run `/api/v1/sandbox/admin/macos-diagnostics`.
+4. Inspect stale, unhealthy, skipped-active, and orphan classifications.
+5. Run reconciliation repair in dry-run mode if stale inactive rows are
+   reported.
+6. Apply mutating repair only after reviewing the dry-run plan.
+7. Run the real host smoke to verify fresh ephemeral execution and same-session
+   behavior.
+
+Diagnostics, startup warnings, and host smoke must not delete session-control
+rows or terminate VMs automatically. Host reboot is an operator procedure today,
+not a scheduled CI action or hidden startup repair path.
+
 Startup now also records bounded reconciliation/helper warnings during process
 boot through the shared startup warning framework. That startup path is
 read-only and never performs repair or VM termination. The current sandbox
