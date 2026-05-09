@@ -2908,6 +2908,13 @@ export const SidepanelForm = ({
                               setSelectedQuickPrompt={setSelectedQuickPrompt}
                               selectedCharacterId={selectedCharacterId}
                               setSelectedCharacterId={setSelectedCharacterId}
+                              serverChatId={serverChatId}
+                              conversationContextComposition={
+                                conversationContextComposition.composition
+                              }
+                              conversationContextStatus={
+                                conversationContextComposition.status
+                              }
                               webSearch={webSearch}
                               setWebSearch={setWebSearch}
                               chatMode={chatMode}

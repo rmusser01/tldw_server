@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-09 20:05'
-updated_date: '2026-05-09 20:34'
+updated_date: '2026-05-09 20:38'
 labels:
   - implementation
   - frontend
@@ -33,7 +33,7 @@ Execute the approved client-managed Conversation Context implementation plan. Th
 <!-- AC:BEGIN -->
 - [x] #1 Server primitive tests cover explicit worldbook processing without character context, ordered dictionary processing, conversationContext settings preservation, and invalid asset ID domain errors
 - [x] #2 Client context composer assembles preview and send payload from server primitives without a monolithic backend context-preview endpoint
-- [ ] #3 Composer popover replaces or evolves the existing chat-composer character picker and keeps character selection as one slot
+- [x] #3 Composer popover replaces or evolves the existing chat-composer character picker and keeps character selection as one slot
 - [ ] #4 Worldbooks and dictionaries remain conversation-scoped and usable without a selected character
 - [ ] #5 Targeted pytest, Vitest, Playwright/browser checks, Bandit touched-scope scan, and git diff checks are recorded or concrete skips documented
 <!-- AC:END -->
@@ -52,6 +52,8 @@ Task 1 backend primitive hardening complete. Added integration coverage for expl
 Task 2 client composer core complete. Added typed conversation-context models, settings normalization for nested conversationContext plus legacy chat_dictionary_ids fallback/mirror, and a pure composer that calls dictionary processing before worldbook processing and returns shared previewSections/providerMessages from one composition object. Verification: bunx vitest run ../packages/ui/src/services/conversation-context/__tests__/conversationContextComposer.test.ts ../packages/ui/src/services/conversation-context/__tests__/conversationContextSettings.test.ts --config vitest.config.ts (8 passed); bunx tsc --noEmit -p ../packages/ui/tsconfig.json --pretty false (passed); git diff --check (clean).
 
 Task 3 hook/send integration slice complete. Added useConversationContextComposition to compose one shared preview/send object from client-managed settings, debounce background preview composition, compose immediately at send time, and preserve the authored user message while sending transformed model-only text/history overrides. Wired the Sidepanel chat form to read conversationContext settings and pass requestOverrides into the normal/persona/image-backed normal chat send paths; local chat settings now preserve conversationContext and legacy chat_dictionary_ids keys. Verification: bunx vitest run ../packages/ui/src/hooks/chat/__tests__/useConversationContextComposition.test.tsx ../packages/ui/src/services/conversation-context/__tests__/conversationContextComposer.test.ts ../packages/ui/src/services/conversation-context/__tests__/conversationContextSettings.test.ts --config vitest.config.ts (12 passed); bunx tsc --noEmit -p ../packages/ui/tsconfig.json --pretty false (passed); git diff --check (clean). Known remaining scope: visible composer popover/asset selectors and character complete-v2 context pass-through remain for subsequent tasks; this slice intentionally keeps server composition primitive-only.
+
+Task 4 composer popover slice complete. Replaced the direct ControlRow CharacterSelect call with ConversationContextPopover while keeping CharacterSelect as the character slot inside the broader context control. The popover shows readiness, character state, worldbook matched/configured counts, dictionary active/configured counts, source labels, and preview sections from the client composition without adding server-side effective-context assembly. Verification: bunx vitest run ../packages/ui/src/components/Sidepanel/Chat/__tests__/ConversationContextPopover.test.tsx ../packages/ui/src/components/Sidepanel/Chat/__tests__/CharacterSelect.persona-avatar.test.tsx --config vitest.config.ts (6 passed); bunx tsc --noEmit -p ../packages/ui/tsconfig.json --pretty false (passed); git diff --check (clean). Remaining scope: actual worldbook/dictionary selection controls and persistence from the popover are Task 5.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
