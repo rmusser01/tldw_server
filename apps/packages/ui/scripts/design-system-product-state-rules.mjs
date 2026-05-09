@@ -398,7 +398,9 @@ function collectAntdProductStateImports(sourceFile) {
 function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
   const imports = {
     emptyState: new Set(),
-    loadingState: new Set()
+    loadingState: new Set(),
+    badge: new Set(),
+    stateRegistry: new Set()
   }
 
   for (const statement of sourceFile.statements) {
@@ -410,10 +412,14 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
     }
 
     const importPath = statement.moduleSpecifier.text
-    if (
-      !importPath.startsWith("@/components/ui") &&
-      !importPath.startsWith("@tldw/ui/components/ui")
-    ) {
+    const isCanonicalComponentImport =
+      importPath.startsWith("@/components/ui") ||
+      importPath.startsWith("@tldw/ui/components/ui")
+    const isDesignSystemImport =
+      importPath.startsWith("@/design-system") ||
+      importPath.startsWith("@tldw/ui/design-system")
+
+    if (!isCanonicalComponentImport && !isDesignSystemImport) {
       continue
     }
 
@@ -422,22 +428,54 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
     if (namedBindings && ts.isNamedImports(namedBindings)) {
       for (const element of namedBindings.elements) {
         const importedName = element.propertyName?.text ?? element.name.text
-        if (importedName === "EmptyState") {
+        if (isCanonicalComponentImport && importedName === "EmptyState") {
           imports.emptyState.add(element.name.text)
         }
-        if (importedName === "LoadingState") {
+        if (isCanonicalComponentImport && importedName === "LoadingState") {
           imports.loadingState.add(element.name.text)
+        }
+        if (isCanonicalComponentImport && importedName === "Badge") {
+          imports.badge.add(element.name.text)
+        }
+        if (isDesignSystemImport && importedName === "getDesignSystemState") {
+          imports.stateRegistry.add(element.name.text)
         }
       }
     }
 
-    if (importClause?.name && /\/EmptyState$/.test(importPath)) {
+    if (
+      isCanonicalComponentImport &&
+      importClause?.name &&
+      /\/EmptyState$/.test(importPath)
+    ) {
       imports.emptyState.add(importClause.name.text)
     }
-    if (importClause?.name && /\/LoadingState$/.test(importPath)) {
+    if (
+      isCanonicalComponentImport &&
+      importClause?.name &&
+      /\/LoadingState$/.test(importPath)
+    ) {
       imports.loadingState.add(importClause.name.text)
     }
+    if (
+      isCanonicalComponentImport &&
+      importClause?.name &&
+      /\/Badge$/.test(importPath)
+    ) {
+      imports.badge.add(importClause.name.text)
+    }
   }
+
+  const stateRegistryOwners = collectCallExpressionOwners(
+    sourceFile,
+    imports.stateRegistry,
+    fileSubject
+  )
+  const returnedBadgeOwners = collectReturnedJsxTagOwners(
+    sourceFile,
+    imports.badge,
+    fileSubject
+  )
 
   return {
     emptyStateOwners: collectJsxTagOwners(
@@ -449,7 +487,8 @@ function collectCanonicalDesignSystemUsage(sourceFile, fileSubject) {
       sourceFile,
       imports.loadingState,
       fileSubject
-    )
+    ),
+    statusBadgeOwners: intersectSets(returnedBadgeOwners, stateRegistryOwners)
   }
 }
 
@@ -539,7 +578,10 @@ function pushLocalComponentFinding(
     })
   }
 
-  if (STATUS_COMPONENT_PATTERN.test(subject)) {
+  if (
+    STATUS_COMPONENT_PATTERN.test(subject) &&
+    !canonicalUsage.statusBadgeOwners?.has(subject)
+  ) {
     pushFinding(findings, {
       relativePath,
       rule: "local-status-badge",
@@ -573,6 +615,68 @@ function collectJsxTagOwners(sourceFile, localNames, fallbackOwner) {
   })
 
   return owners
+}
+
+function collectCallExpressionOwners(sourceFile, localNames, fallbackOwner) {
+  const owners = new Set()
+
+  if (!localNames || localNames.size === 0) {
+    return owners
+  }
+
+  walk(sourceFile, (node) => {
+    if (!ts.isIdentifier(node) || !localNames.has(node.text)) {
+      return
+    }
+
+    if (
+      isImportIdentifier(node) ||
+      isTypeQueryIdentifier(node) ||
+      !isCallExpressionCallee(node)
+    ) {
+      return
+    }
+
+    const ownerName = findNearestOwnerName(node) ?? fallbackOwner
+    if (ownerName) {
+      owners.add(ownerName)
+    }
+  })
+
+  return owners
+}
+
+function isImportIdentifier(node) {
+  return Boolean(
+    node.parent &&
+      (ts.isImportSpecifier(node.parent) ||
+        ts.isImportClause(node.parent) ||
+        ts.isNamespaceImport(node.parent))
+  )
+}
+
+function isTypeQueryIdentifier(node) {
+  return Boolean(node.parent && ts.isTypeQueryNode(node.parent))
+}
+
+function isCallExpressionCallee(node) {
+  return Boolean(
+    node.parent &&
+      ts.isCallExpression(node.parent) &&
+      node.parent.expression === node
+  )
+}
+
+function intersectSets(left, right) {
+  const intersection = new Set()
+
+  for (const value of left) {
+    if (right.has(value)) {
+      intersection.add(value)
+    }
+  }
+
+  return intersection
 }
 
 function collectReturnedJsxTagOwners(sourceFile, localNames, fallbackOwner) {

@@ -87,6 +87,102 @@ describe("design-system product-state guard rules", () => {
     )
   })
 
+  it("allows compatibility status-badge adapters that return Badge and use the state registry", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge() {
+          const state = getDesignSystemState("degraded")
+          return <Badge variant="warning">{state.label}</Badge>
+        }
+      `
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+  })
+
+  it("still flags status-badge adapters that return Badge without state registry mapping", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge() {
+          return <Badge variant="warning">Setup required</Badge>
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+  })
+
+  it("still flags status-badge adapters when only another component uses the state registry", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge() {
+          return <Badge variant="warning">Setup required</Badge>
+        }
+
+        export function OtherStatusBadge() {
+          const state = getDesignSystemState("degraded")
+          return <Badge variant="warning">{state.label}</Badge>
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "OtherStatusBadge"
+      })
+    )
+  })
+
+  it("still flags status-badge adapters when the state registry import is referenced but not called", () => {
+    const findings = analyze(
+      "src/components/Common/StatusBadge.tsx",
+      `
+        import { getDesignSystemState } from "@/design-system"
+        import { Badge } from "@/components/ui/primitives"
+
+        export function StatusBadge() {
+          const stateResolver = getDesignSystemState
+          return <Badge variant="warning">{stateResolver.name}</Badge>
+        }
+      `
+    )
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        rule: "local-status-badge",
+        subject: "StatusBadge"
+      })
+    )
+  })
+
   it("allows compatibility empty-state adapters that render the canonical EmptyState", () => {
     const findings = analyze(
       "src/components/Common/FeatureEmptyState.tsx",
