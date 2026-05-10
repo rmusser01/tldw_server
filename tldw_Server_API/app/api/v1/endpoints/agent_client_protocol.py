@@ -234,6 +234,60 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_ACP_AUDIT_SENSITIVE_KEYS = {
+    "api_key",
+    "apikey",
+    "args",
+    "arguments",
+    "authorization",
+    "bearer",
+    "command",
+    "content",
+    "cwd",
+    "env",
+    "environment",
+    "mcp_servers",
+    "message_content",
+    "messages",
+    "prompt",
+    "token",
+}
+_ACP_AUDIT_SENSITIVE_MARKERS = (
+    "api_key",
+    "access_token",
+    "authorization",
+    "bearer ",
+    "xoxb-",
+    "sk-",
+)
+
+
+def _sanitize_audit_value(key: str, value: Any) -> Any:
+    """Return a redacted audit-safe representation for one metadata value."""
+    key_l = str(key).strip().lower()
+    if key_l in _ACP_AUDIT_SENSITIVE_KEYS:
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {str(k): _sanitize_audit_value(str(k), v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_audit_value(key_l, item) for item in value]
+    if isinstance(value, str):
+        lowered = value.lower()
+        if any(marker in lowered for marker in _ACP_AUDIT_SENSITIVE_MARKERS):
+            return "[redacted]"
+        if len(value) > 300:
+            return f"{value[:300]}..."
+    return value
+
+
+def _sanitize_audit_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Return audit metadata with sensitive keys, payloads, and long strings removed."""
+    return {
+        str(key): _sanitize_audit_value(str(key), value)
+        for key, value in dict(metadata or {}).items()
+    }
+
+
 def _acp_record_audit_event(
     *,
     action: str,
@@ -241,12 +295,13 @@ def _acp_record_audit_event(
     session_id: str,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    sanitized_metadata = _sanitize_audit_metadata(metadata)
     event = {
         "timestamp": _now_iso(),
         "action": str(action),
         "user_id": int(user_id),
         "session_id": str(session_id),
-        "metadata": dict(metadata or {}),
+        "metadata": sanitized_metadata,
     }
     with _ACP_AUDIT_LOCK:
         _ACP_AUDIT_EVENTS.append(event)
@@ -258,7 +313,7 @@ def _acp_record_audit_event(
             action=action,
             user_id=user_id,
             session_id=session_id,
-            metadata=metadata,
+            metadata=sanitized_metadata,
         )
         # Flush when buffer reaches threshold to balance durability vs performance
         audit_db.flush_if_needed(threshold=10)
@@ -274,8 +329,40 @@ def _acp_record_audit_event(
 
 
 def _acp_list_audit_events(*, session_id: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    try:
+        from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
+
+        audit_db = get_acp_audit_db()
+        audit_db.flush()
+        events.extend(audit_db.query_events(session_id=session_id, limit=5000))
+        events.extend(audit_db.get_hot_cache(session_id=session_id))
+    except Exception:
+        logger.warning("ACP audit DB read failed")
     with _ACP_AUDIT_LOCK:
-        return [dict(item) for item in _ACP_AUDIT_EVENTS if str(item.get("session_id")) == str(session_id)]
+        events.extend(dict(item) for item in _ACP_AUDIT_EVENTS if str(item.get("session_id")) == str(session_id))
+
+    deduped: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
+    for event in events:
+        metadata = event.get("metadata")
+        try:
+            metadata_key = json.dumps(metadata or {}, sort_keys=True, default=str)
+        except TypeError:
+            metadata_key = str(metadata)
+        key = (
+            str(event.get("timestamp") or ""),
+            str(event.get("action") or ""),
+            str(event.get("session_id") or ""),
+            int(event.get("user_id") or 0),
+            metadata_key,
+        )
+        deduped[key] = dict(event)
+    return sorted(deduped.values(), key=lambda item: str(item.get("timestamp") or ""))
+
+
+def _is_agent_audit_scope(session_id: str) -> bool:
+    """Return true when an audit id names an admin-managed agent resource."""
+    return str(session_id).startswith("agent:")
 
 
 def _acp_mark_reconciliation(
@@ -966,6 +1053,7 @@ async def acp_session_ssh(
 
     try:
         client = await get_runner_client()
+        await _require_session_access(client, session_id=session_id, user_id=int(user_id))
         if not hasattr(client, "get_ssh_info"):
             await websocket.close(code=4404)
             return
@@ -1721,6 +1809,16 @@ async def acp_register_agent(
         mcp_max_iterations=request.mcp_max_iterations,
         mcp_refresh_tools=request.mcp_refresh_tools,
     )
+    _acp_record_audit_event(
+        action="agent_registered",
+        user_id=int(user.id),
+        session_id=f"agent:{entry.type}",
+        metadata={
+            "agent_type": entry.type,
+            "mcp_orchestration": request.mcp_orchestration,
+            "requires_api_key": bool(request.requires_api_key),
+        },
+    )
     return ACPAgentRegistrationResponse(status="registered", agent_type=entry.type, name=entry.name)
 
 
@@ -1746,6 +1844,12 @@ async def acp_deregister_agent(
             status_code=404,
             detail=f"Agent '{agent_type}' not found or is a YAML-defined agent",
         )
+    _acp_record_audit_event(
+        action="agent_deregistered",
+        user_id=int(user.id),
+        session_id=f"agent:{agent_type}",
+        metadata={"agent_type": agent_type},
+    )
     return ACPAgentRegistrationResponse(status="deregistered", agent_type=agent_type)
 
 
@@ -1773,6 +1877,16 @@ async def acp_update_agent(
             status_code=404,
             detail=f"Agent '{agent_type}' not found in dynamic registry",
         )
+    _acp_record_audit_event(
+        action="agent_updated",
+        user_id=int(user.id),
+        session_id=f"agent:{entry.type}",
+        metadata={
+            "agent_type": entry.type,
+            "updated_fields": sorted(updates.keys()),
+            "requires_api_key": "requires_api_key" in updates,
+        },
+    )
     return ACPAgentRegistrationResponse(status="updated", agent_type=entry.type, name=entry.name)
 
 
@@ -1985,6 +2099,22 @@ async def acp_session_new(
         }, category="acp")
     except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         pass
+    _acp_record_audit_event(
+        action="session_created",
+        user_id=int(user.id),
+        session_id=session_id,
+        metadata={
+            "agent_type": resolved_agent_type or "custom",
+            "mcp_server_count": len(mcp_servers_dicts or []),
+            "persona_id": resolved_persona_id,
+            "workspace_id": resolved_workspace_id,
+            "workspace_group_id": resolved_workspace_group_id,
+            "scope_snapshot_id": resolved_scope_snapshot_id,
+            "policy_snapshot_version": getattr(persisted_record, "policy_snapshot_version", None),
+            "policy_snapshot_fingerprint": getattr(persisted_record, "policy_snapshot_fingerprint", None),
+            "policy_refresh_failed": bool(getattr(persisted_record, "policy_refresh_error", None)),
+        },
+    )
 
     return ACPSessionNewResponse(
         session_id=session_id,
@@ -2658,8 +2788,12 @@ async def acp_session_audit(
 ) -> dict[str, Any]:
     """Return ACP audit trail for a session."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="audit")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
+    if _is_agent_audit_scope(session_id):
+        if not getattr(user, "is_admin", False):
+            raise HTTPException(status_code=403, detail="Admin role required for agent audit")
+    else:
+        client = await get_runner_client()
+        await _require_session_access(client, session_id=session_id, user_id=int(user.id))
     events = _acp_list_audit_events(session_id=session_id)
     return {
         "session_id": session_id,

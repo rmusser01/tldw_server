@@ -37,6 +37,9 @@ class ACPScheduleCreate(BaseModel):
     sandbox_enabled: bool = Field(False, description="Run in sandbox")
     enabled: bool = Field(True, description="Whether the schedule is active")
     timezone: str = Field("UTC", description="IANA timezone for cron evaluation")
+    concurrency_mode: str = Field("skip", description="Overlapping run behavior: 'skip' or 'queue'")
+    misfire_grace_sec: int = Field(300, ge=0, description="Seconds a missed fire may still enqueue")
+    coalesce: bool = Field(True, description="Coalesce missed runs into one execution")
 
 
 class ACPScheduleUpdate(BaseModel):
@@ -52,6 +55,9 @@ class ACPScheduleUpdate(BaseModel):
     sandbox_enabled: bool | None = None
     enabled: bool | None = None
     timezone: str | None = None
+    concurrency_mode: str | None = None
+    misfire_grace_sec: int | None = Field(None, ge=0)
+    coalesce: bool | None = None
 
 
 class ACPScheduleResponse(BaseModel):
@@ -62,7 +68,11 @@ class ACPScheduleResponse(BaseModel):
     enabled: bool
     timezone: str | None = None
     last_run_at: str | None = None
+    next_run_at: str | None = None
     last_status: str | None = None
+    concurrency_mode: str = "skip"
+    misfire_grace_sec: int = 300
+    coalesce: bool = True
     created_at: str | None = None
 
 
@@ -89,6 +99,15 @@ def _validate_cron(cron: str, timezone: str = "UTC") -> None:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid cron expression '{cron}': {exc}",
+        )
+
+
+def _validate_concurrency_mode(mode: str) -> None:
+    """Validate ACP schedule overlapping-run behavior."""
+    if mode not in {"skip", "queue"}:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid concurrency_mode '{mode}'; must be 'skip' or 'queue'",
         )
 
 
@@ -130,7 +149,11 @@ def _schedule_to_response(s) -> dict[str, Any]:
         "enabled": s.enabled,
         "timezone": s.timezone,
         "last_run_at": s.last_run_at,
+        "next_run_at": s.next_run_at,
         "last_status": s.last_status,
+        "concurrency_mode": s.concurrency_mode,
+        "misfire_grace_sec": s.misfire_grace_sec,
+        "coalesce": s.coalesce,
         "created_at": s.created_at,
     }
 
@@ -146,6 +169,7 @@ async def create_acp_schedule(
 ) -> dict[str, Any]:
     """Create a recurring ACP agent schedule."""
     _validate_cron(body.cron, body.timezone)
+    _validate_concurrency_mode(body.concurrency_mode)
 
     acp_config = _build_acp_config(body)
     acp_config_str = json.dumps(acp_config)
@@ -162,6 +186,9 @@ async def create_acp_schedule(
         run_mode="async",
         validation_mode="block",
         enabled=body.enabled,
+        concurrency_mode=body.concurrency_mode,
+        misfire_grace_sec=body.misfire_grace_sec,
+        coalesce=body.coalesce,
         acp_config_json=acp_config_str,
     )
 
@@ -229,6 +256,13 @@ async def update_acp_schedule(
         update_dict["name"] = body.name
     if body.enabled is not None:
         update_dict["enabled"] = body.enabled
+    if body.concurrency_mode is not None:
+        _validate_concurrency_mode(body.concurrency_mode)
+        update_dict["concurrency_mode"] = body.concurrency_mode
+    if body.misfire_grace_sec is not None:
+        update_dict["misfire_grace_sec"] = body.misfire_grace_sec
+    if body.coalesce is not None:
+        update_dict["coalesce"] = body.coalesce
 
     # Merge ACP config: start from existing, overlay provided fields
     try:

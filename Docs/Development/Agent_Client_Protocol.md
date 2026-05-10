@@ -1,21 +1,39 @@
 # Agent Client Protocol (ACP) Module
 
-This document summarizes the ACP integration status, layout, and how to run the
-current server + runner flow. It is intended as a snapshot of progress and a
-quick reference for the ACP module.
+This document is the authoritative contributor and operator reference for the
+current ACP server + runner flow. It summarizes the implemented architecture,
+route contracts, setup requirements, runtime caveats, and troubleshooting path
+for the ACP module.
+
+## Documentation Map
+
+- Product/design record:
+  [ACP_Agent_Orchestration_PRD.md](../Product/ACP_Agent_Orchestration_PRD.md)
+- Operator and contributor guide: this document.
+- Release readiness and evidence checklist:
+  [ACP_Production_Readiness.md](ACP_Production_Readiness.md)
+- Governance, RBAC, approval, and audit details:
+  [ACP_Governance_Audit.md](ACP_Governance_Audit.md)
 
 ## Status Summary
 
 - Server-side ACP client + endpoints are wired and available behind `/api/v1/acp/*`.
 - **WebSocket endpoint** for real-time session streaming at `/api/v1/acp/sessions/{session_id}/stream`.
 - **Permission UI flow** - Permission requests are sent to connected WebSocket clients for approval.
-- ACP runner exists in `../tldw-agent` and proxies to a downstream ACP agent.
+- ACP runner exists in `tools/tldw-agent` and proxies to a downstream ACP agent.
 - Session lifecycle is supported: `session/new`, `session/prompt`, `session/cancel`,
   and `_tldw/session/close`.
 - Downstream capabilities are reflected in `initialize`.
 - Terminal tooling is allowlisted by config; file read/write is scoped to workspace.
 - Tests added for the ACP runner (Go), server endpoints, and WebSocket (pytest).
 - Smoke test validated via stub agent.
+
+## Production Readiness Tracking
+
+The ACP production readiness matrix and closeout checklist are the release gate
+for the #1471 productionization epic. Keep that matrix in sync with the child
+issues as work lands, and treat this document as the route/setup/troubleshooting
+source that supports the matrix.
 
 ## Architecture
 
@@ -52,29 +70,32 @@ quick reference for the ACP module.
 
 ### Runner (tldw-agent)
 
-- `../tldw-agent/internal/acp/conn.go` - Connection management
-- `../tldw-agent/internal/acp/runner.go` - ACP runner logic
-- `../tldw-agent/internal/acp/terminal.go` - Terminal tool handling
-- `../tldw-agent/internal/acp/stdio.go` - Stdio communication
-- `../tldw-agent/internal/acp/types.go` - Type definitions
-- `../tldw-agent/cmd/tldw-agent-acp/main.go` - Runner entrypoint
+- `tools/tldw-agent/internal/acp/conn.go` - Connection management
+- `tools/tldw-agent/internal/acp/runner.go` - ACP runner logic
+- `tools/tldw-agent/internal/acp/terminal.go` - Terminal tool handling
+- `tools/tldw-agent/internal/acp/stdio.go` - Stdio communication
+- `tools/tldw-agent/internal/acp/types.go` - Type definitions
+- `tools/tldw-agent/cmd/tldw-agent-acp/main.go` - Runner entrypoint
 
 ### Frontend (apps/packages/ui)
 
 - `src/services/acp/types.ts` - TypeScript type definitions
 - `src/services/acp/client.ts` - REST and WebSocket client
 - `src/services/acp/constants.ts` - Tool tiers and configuration
+- `src/services/acp/readiness.ts` - Shared ACP health normalization and setup gap mapping
 - `src/hooks/useACPSession.tsx` - React hook for session management
 - `src/store/acp-sessions.ts` - Zustand store for session state
 - `src/components/Option/ACPPlayground/` - ACP Playground UI components
+- `src/components/Option/AgentRegistry/` - Agent health, transport, and launch surface
+- `src/components/Option/AgentTasks/` - Project/task/run/review surface with ACP setup guidance and run diagnostics
 
 ### Test Assets
 
 - `Helper_Scripts/acp_stub_agent.py` - Stub agent for smoke testing
 - `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_endpoints.py` - REST endpoint tests
 - `tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py` - WebSocket tests
-- `../tldw-agent/internal/acp/runner_test.go` - Runner tests (Go)
-- `../tldw-agent/internal/acp/terminal_test.go` - Terminal tests (Go)
+- `tools/tldw-agent/internal/acp/runner_test.go` - Runner tests (Go)
+- `tools/tldw-agent/internal/acp/terminal_test.go` - Terminal tests (Go)
 
 ## Endpoints
 
@@ -82,11 +103,153 @@ quick reference for the ACP module.
 
 |Endpoint|Method|Description|
 |---|---|---|
+|`/api/v1/acp/health`|GET|Runner, route, downstream-agent, and API-key health|
+|`/api/v1/acp/setup-guide`|GET|Actionable setup guidance for runner and agents|
+|`/api/v1/acp/agents`|GET|Configured ACP agent list and default agent|
+|`/api/v1/acp/agents/health`|GET|Cached/on-demand monitored agent health|
+|`/api/v1/acp/agents/register`|POST|Admin-only dynamic agent registration|
+|`/api/v1/acp/agents/{agent_type}`|PUT/DELETE|Admin-only dynamic agent update or removal|
 |`/api/v1/acp/sessions/new`|POST|Create a new ACP session|
 |`/api/v1/acp/sessions/prompt`|POST|Send a prompt to a session|
 |`/api/v1/acp/sessions/cancel`|POST|Cancel the current operation|
 |`/api/v1/acp/sessions/close`|POST|Close and cleanup a session|
+|`/api/v1/acp/sessions/{session_id}/teardown`|POST|Force teardown and reconciliation for a session|
+|`/api/v1/acp/sessions/{session_id}/reconciliation`|GET|Read teardown/reconcile state|
+|`/api/v1/acp/sessions/{session_id}/reconcile`|POST|Attempt server-side reconciliation for a session|
 |`/api/v1/acp/sessions/{session_id}/updates`|GET|Poll for session updates|
+|`/api/v1/acp/sessions/{session_id}/detail`|GET|Session metadata, usage, messages, and lineage|
+|`/api/v1/acp/sessions/{session_id}/events`|GET|Persisted session event/message timeline|
+|`/api/v1/acp/sessions/{session_id}/events/stream`|GET|SSE stream of persisted ACP session events|
+|`/api/v1/acp/sessions/{session_id}/artifacts`|GET|Artifacts emitted in session messages|
+|`/api/v1/acp/sessions/{session_id}/diagnostics`|GET|Normalized session diagnostics and reconciliation state|
+|`/api/v1/acp/sessions/{session_id}/audit`|GET|Sanitized ACP audit trail for the session|
+|`/api/v1/acp/sessions/{session_id}/fork`|POST|Fork a resumable ACP session from message history|
+|`/api/v1/acp/sessions/prompt-async`|POST|Submit an ACP prompt to Scheduler `acp_run`|
+|`/api/v1/acp/tasks/{task_id}`|GET|Poll async ACP task status/result|
+|`/api/v1/acp/runs`|GET|List ACP run history|
+|`/api/v1/acp/runs/aggregate`|GET|Aggregate ACP usage and cost data|
+|`/api/v1/acp/sessions/{session_id}/rollback`|POST|Rollback a sandbox-backed session to a checkpoint|
+|`/api/v1/acp/sessions/{session_id}/checkpoints`|GET|List available session checkpoints|
+|`/api/v1/agent-orchestration/workspaces`|GET/POST|List or create ACP workspaces|
+|`/api/v1/agent-orchestration/workspaces/{workspace_id}`|GET/PUT/DELETE|Read, update, or delete an ACP workspace|
+|`/api/v1/agent-orchestration/workspaces/{workspace_id}/health`|GET|On-demand workspace health check|
+|`/api/v1/agent-orchestration/workspaces/health/refresh-all`|POST|Refresh workspace health for the current user|
+|`/api/v1/agent-orchestration/workspaces/{workspace_id}/mcp-servers`|GET/POST|List or add workspace MCP servers|
+|`/api/v1/agent-orchestration/workspaces/{workspace_id}/mcp-servers/{server_id}`|DELETE|Remove a workspace MCP server|
+|`/api/v1/agent-orchestration/workspaces/discover`|POST|Discover candidate workspaces under an allowlisted root|
+|`/api/v1/agent-orchestration/projects`|GET/POST|List or create agent projects|
+|`/api/v1/agent-orchestration/projects/{project_id}`|GET/DELETE|Read or delete an agent project|
+|`/api/v1/agent-orchestration/projects/{project_id}/tasks`|GET/POST|List or create project tasks|
+|`/api/v1/agent-orchestration/tasks/{task_id}`|GET|Task detail with reviews and enriched run drill-through|
+|`/api/v1/agent-orchestration/tasks/{task_id}/run`|POST|Dispatch a task run through ACP|
+|`/api/v1/agent-orchestration/tasks/{task_id}/review`|POST|Submit manual review decision|
+|`/api/v1/acp/schedules`|GET/POST|List or create recurring ACP schedules|
+|`/api/v1/acp/schedules/{schedule_id}`|PUT/DELETE|Update or delete an ACP schedule|
+|`/api/v1/acp/triggers`|GET/POST|List or create ACP triggers|
+|`/api/v1/acp/triggers/{trigger_id}`|GET/PUT/DELETE|Read, update, or delete an ACP trigger|
+|`/api/v1/acp/triggers/webhook/{trigger_id}`|POST|Inbound webhook trigger receiver|
+
+### Orchestration Run History Drill-Through
+
+`GET /api/v1/agent-orchestration/tasks/{task_id}` returns task detail with
+`runs[]` and `reviews[]`. Run entries keep the original orchestration run fields
+and add an operator-facing drill-through contract:
+
+```json
+{
+  "id": 1,
+  "task_id": 10,
+  "session_id": "session-abc",
+  "status": "completed",
+  "session": {
+    "session_id": "session-abc",
+    "available": true,
+    "status": "closed",
+    "agent_type": "codex",
+    "message_count": 2,
+    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    "links": {
+      "detail": "/api/v1/acp/sessions/session-abc/detail",
+      "events": "/api/v1/acp/sessions/session-abc/events",
+      "events_stream": "/api/v1/acp/sessions/session-abc/events/stream",
+      "artifacts": "/api/v1/acp/sessions/session-abc/artifacts",
+      "diagnostics": "/api/v1/acp/sessions/session-abc/diagnostics",
+      "audit": "/api/v1/acp/sessions/session-abc/audit",
+      "updates": "/api/v1/acp/sessions/session-abc/updates",
+      "usage": "/api/v1/acp/sessions/session-abc/usage"
+    }
+  },
+  "history": {
+    "event_count": 2,
+    "audit_event_count": 1,
+    "artifact_count": 1,
+    "diagnostic_count": 0,
+    "tool_call_count": 1,
+    "stop_reason": "end",
+    "prompt": {"role": "user", "preview": "Task prompt text"},
+    "result": {"role": "assistant", "preview": "Done"},
+    "artifacts": [{"id": "artifact-1", "type": "summary"}],
+    "diagnostics": []
+  },
+  "failure_context": null,
+  "review_decision": null
+}
+```
+
+Frontend surfaces should use the `session.links` fields instead of constructing
+raw ACP URLs. When the linked session record has been cleaned up or cannot be
+loaded, `session.available` is `false` but links remain present for operators.
+Failed runs prefer normalized session diagnostics for `failure_context`; if no
+session diagnostic exists, the orchestration run error is exposed as the fallback
+failure source. Reviewer runs include a `review_decision` summary when a matching
+durable review row exists.
+
+### Frontend Setup And Diagnostics Surfaces
+
+Agent Tasks, Agent Registry, and ACP Playground share the same browser transport
+and auth helpers so hosted and direct-backend deployments resolve ACP requests
+consistently. Agent Tasks also calls `/api/v1/acp/health` and normalizes the
+response through `src/services/acp/readiness.ts` before showing first-run setup
+guidance. The setup banner should point operators to Agent Registry for runner
+and agent configuration, and to ACP Playground for direct connection checks.
+
+Task cards expose an inspect action backed by
+`GET /api/v1/agent-orchestration/tasks/{task_id}`. The diagnostics modal should
+render run status, review counts, session IDs, normalized failure context,
+result previews, reviewer decisions, and the server-provided `session.links`
+targets for diagnostics, artifacts, and audit history. Frontend code should not
+ask users to manually copy task, run, or session IDs for normal diagnose flows.
+
+### Schedules And Webhook Triggers
+
+ACP schedules are stored in the shared `workflow_schedules` table with
+`acp_config_json` set. The recurring scheduler owns cron registration, then
+submits due ACP work to the core Scheduler as `handler="acp_run"` on the `acp`
+queue. Plain workflow schedules continue to route to `workflow_run`.
+
+Schedule operator state:
+
+- `last_status="pending"` when a due run starts handoff to the Scheduler.
+- `last_status="queued"` after the `acp_run` task is accepted.
+- `last_status="error"` when Scheduler submission fails.
+- `last_status="skipped_disabled"` when a stale APScheduler job fires after the
+  schedule has been disabled.
+- `next_run_at` is exposed in schedule responses so operators can see the next
+  planned fire time.
+
+Concurrency is explicit per ACP schedule:
+
+| `concurrency_mode` | APScheduler behavior | Use when |
+| --- | --- | --- |
+| `skip` | `max_instances=1`, coalescing enabled by default | Only one run should be active and missed fires should collapse. |
+| `queue` | `max_instances=3`, coalescing disabled when requested | A few overlapping runs are acceptable. |
+
+Webhook triggers are managed through `/api/v1/acp/triggers` and inbound webhooks
+arrive at `/api/v1/acp/triggers/webhook/{trigger_id}`. The inbound endpoint is
+not authenticated by user session; it relies on provider-specific HMAC
+verification and replay controls. Trigger secrets are encrypted at rest through
+`ACP_TRIGGER_ENCRYPTION_KEY`, CRUD responses strip stored encrypted secrets, and
+webhook errors are sanitized to stable public error codes.
 
 ### WebSocket Endpoint
 
@@ -196,7 +359,7 @@ enable = tools, jobs, acp
 [ACP]
 runner_command = go
 runner_args = ["run", "./cmd/tldw-agent-acp"]
-runner_cwd = ../tldw-agent
+runner_cwd = tools/tldw-agent
 runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1
 startup_timeout_ms = 10000
 ```
@@ -213,6 +376,41 @@ ACP_RUNNER_CWD=/abs/path/to/runner/dir
 ACP_RUNNER_STARTUP_TIMEOUT_MS=10000
 ```
 
+### Workspace Roots And Session Environment
+
+Agent orchestration workspaces must live under an explicit allowlist before they
+can be attached to projects or used as run working directories. Configure the
+allowlist in `config.txt` or the environment:
+
+```ini
+[ACP-WORKSPACE]
+allowed_base_paths = /Users/me/projects,/srv/acp-workspaces
+```
+
+```bash
+ACP_WORKSPACE_ALLOWED_BASE_PATHS=/Users/me/projects:/srv/acp-workspaces
+```
+
+Workspace root validation fails closed with stable error codes:
+
+| Code | HTTP status | Operator action |
+| --- | --- | --- |
+| `workspace_root_not_absolute` | `400` | Submit an absolute path. |
+| `workspace_roots_not_configured` | `503` | Set `ACP-WORKSPACE.allowed_base_paths` or `ACP_WORKSPACE_ALLOWED_BASE_PATHS`. |
+| `workspace_root_not_allowed` | `403` | Move the workspace under an allowed base path or update the allowlist. |
+
+When an orchestration project is bound to a workspace, dispatch creates ACP
+sessions with:
+
+- `cwd` resolved inside the workspace root.
+- enabled workspace MCP servers converted to `mcpServers`.
+- workspace `env_vars` forwarded as per-session `env`.
+
+For the standard runner, per-session env is sent with `session/new`. For sandbox
+mode, per-session env is merged over `[ACP-SANDBOX].agent_env` and passed to the
+entrypoint as `ACP_AGENT_ENV_JSON`; only the per-session env is also included on
+the sandboxed `session/new` request.
+
 ## ACP Sandbox Mode (Container/VM)
 
 ACP sandbox mode runs `tldw-agent-acp` inside a sandbox container and exposes a web SSH proxy.
@@ -225,14 +423,14 @@ pip install -e ".[acp]"
 
 ### Build the ACP Image
 
-With sibling repos (`../tldw-agent` next to `tldw_server2`), build from the parent directory:
+With the in-repo runner under `tools/tldw-agent`, build from the repository root:
 
 ```bash
 # From tldw_server2/
 docker build -f Dockerfiles/ACP/Dockerfile \
-  --build-arg TLDW_SERVER_DIR=tldw_server2 \
-  --build-arg TLDW_AGENT_DIR=tldw-agent \
-  -t tldw/acp-agent:latest ..
+  --build-arg TLDW_SERVER_DIR=. \
+  --build-arg TLDW_AGENT_DIR=tools/tldw-agent \
+  -t tldw/acp-agent:latest .
 ```
 
 ### Config
@@ -266,6 +464,12 @@ SANDBOX_DOCKER_BIND_WORKSPACE=1
 
 - Each ACP session starts a dedicated sandbox run.
 - The container exposes SSH on a host port (local only) and the UI connects via WS proxy.
+- Docker, Lima, and VZ runtimes depend on host prerequisites. If the selected
+  runtime is unavailable or not opted in, session creation should fail before
+  launching the downstream agent with an operator-facing runtime reason code.
+- Sandbox mode ignores host `cwd` and uses `/workspace` inside the runtime.
+  Workspace setup guidance should make the bind/mount requirement explicit for
+  the selected backend.
 
 ## Agent Configurations
 
@@ -409,8 +613,8 @@ python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.
 ### Runner Tests (Go)
 
 ```bash
-cd ../tldw-agent
-go test ./internal/acp -v
+cd tools/tldw-agent
+./scripts/verify-local-build.sh
 ```
 
 ## Behavior Summary

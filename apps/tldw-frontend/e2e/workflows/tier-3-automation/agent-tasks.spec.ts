@@ -85,6 +85,148 @@ test.describe("Agent Tasks", () => {
 
       await assertNoCriticalErrors(diagnostics)
     })
+
+    test("should guide ACP setup and task diagnostics without manual ID copying", async ({
+      authedPage,
+      diagnostics,
+    }) => {
+      await authedPage.route("**/openapi.json", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            },
+          }),
+        })
+      })
+      await authedPage.route("**/api/v1/acp/health", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok",
+          }),
+        })
+      })
+      await authedPage.route("**/api/v1/agent-orchestration/projects", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            {
+              id: 7,
+              name: "ACP Production Project",
+              user_id: 1,
+              created_at: "2026-05-10T00:00:00Z",
+            },
+          ]),
+        })
+      })
+      await authedPage.route("**/api/v1/agent-orchestration/projects/7/tasks", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            {
+              id: 11,
+              project_id: 7,
+              title: "Harden completion gate",
+              status: "triage",
+              review_count: 1,
+              max_review_attempts: 3,
+              created_at: "2026-05-10T00:00:00Z",
+              updated_at: "2026-05-10T00:05:00Z",
+            },
+          ]),
+        })
+      })
+      await authedPage.route("**/api/v1/agent-orchestration/tasks/11", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: 11,
+            project_id: 7,
+            title: "Harden completion gate",
+            status: "triage",
+            review_count: 1,
+            max_review_attempts: 3,
+            created_at: "2026-05-10T00:00:00Z",
+            updated_at: "2026-05-10T00:05:00Z",
+            runs: [
+              {
+                id: 51,
+                task_id: 11,
+                session_id: "sess-prod-51",
+                agent_type: "codex",
+                status: "failed",
+                error: "Workspace root not allowed",
+                started_at: "2026-05-10T00:01:00Z",
+                session: {
+                  session_id: "sess-prod-51",
+                  available: true,
+                  links: {
+                    diagnostics: "/api/v1/acp/sessions/sess-prod-51/diagnostics",
+                    artifacts: "/api/v1/acp/sessions/sess-prod-51/artifacts",
+                    audit: "/api/v1/acp/sessions/sess-prod-51/audit",
+                  },
+                },
+                history: {
+                  event_count: 3,
+                  audit_event_count: 2,
+                  artifact_count: 1,
+                  diagnostic_count: 1,
+                  tool_call_count: 4,
+                  result: {
+                    role: "assistant",
+                    preview: "I could not access the workspace.",
+                  },
+                },
+                failure_context: {
+                  reason_code: "workspace_root_not_allowed",
+                  message: "Workspace root not allowed",
+                  source: "session_diagnostic",
+                },
+                review_decision: {
+                  available: true,
+                  approved: false,
+                  reviewer: "reviewer-agent",
+                  feedback_preview: "Needs citations",
+                },
+              },
+            ],
+            reviews: [
+              {
+                reviewer: "reviewer-agent",
+                approved: false,
+                feedback: "Needs citations",
+                created_at: "2026-05-10T00:06:00Z",
+              },
+            ],
+          }),
+        })
+      })
+
+      agentTasks = new AgentTasksPage(authedPage)
+      await agentTasks.goto()
+      await agentTasks.assertPageReady()
+
+      await authedPage.getByText("ACP Production Project").click()
+      await expect(authedPage.getByText("Harden completion gate")).toBeVisible()
+      await authedPage.getByRole("button", { name: /inspect/i }).click()
+
+      await expect(authedPage.getByText("Run #51")).toBeVisible()
+      await expect(authedPage.getByText("sess-prod-51")).toBeVisible()
+      await expect(authedPage.getByText("workspace_root_not_allowed")).toBeVisible()
+      await expect(authedPage.getByRole("button", { name: /open diagnostics/i })).toBeVisible()
+      await expect(authedPage.getByRole("button", { name: /open artifacts/i })).toBeVisible()
+
+      await assertNoCriticalErrors(diagnostics)
+    })
   })
 
   // =========================================================================

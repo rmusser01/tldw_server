@@ -12,6 +12,10 @@ const configMocks = vi.hoisted(() => ({
   getConfig: vi.fn()
 }))
 
+const deploymentMocks = vi.hoisted(() => ({
+  isHostedTldwDeployment: vi.fn(() => false)
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
@@ -28,6 +32,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw/deployment-mode", () => ({
+  isHostedTldwDeployment: () => deploymentMocks.isHostedTldwDeployment()
+}))
+
 vi.mock("antd", () => {
   const formApi = {
     resetFields: vi.fn(),
@@ -42,15 +50,17 @@ vi.mock("antd", () => {
   )
 
   return {
-    Alert: ({
+  Alert: ({
+      title,
       message,
       description
     }: {
+      title?: React.ReactNode
       message?: React.ReactNode
       description?: React.ReactNode
     }) => (
       <div>
-        <div>{message}</div>
+        <div>{message ?? title}</div>
         {description ? <div>{description}</div> : null}
       </div>
     ),
@@ -111,6 +121,7 @@ vi.mock("antd", () => {
 describe("AgentTasksPage connection and payload normalization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    deploymentMocks.isHostedTldwDeployment.mockReturnValue(false)
 
     storageMocks.useStorage.mockImplementation((key: string, fallback: string) => {
       if (key === "serverUrl") return ["http://localhost:8000", vi.fn()]
@@ -127,15 +138,12 @@ describe("AgentTasksPage connection and payload normalization", () => {
       accessToken: ""
     })
 
-    let callCount = 0
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        callCount += 1
         const url = String(input)
 
-        if (callCount === 1) {
-          expect(url).toBe("http://127.0.0.1:8000/openapi.json")
+        if (url === "http://127.0.0.1:8000/openapi.json") {
           return {
             ok: true,
             json: async () => ({
@@ -146,8 +154,19 @@ describe("AgentTasksPage connection and payload normalization", () => {
           }
         }
 
-        if (callCount === 2) {
-          expect(url).toBe("http://127.0.0.1:8000/api/v1/agent-orchestration/projects")
+        if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+          expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+          return {
+            ok: true,
+            json: async () => ({
+              runner: "ok",
+              agent: "ok",
+              api_keys: "ok"
+            })
+          }
+        }
+
+        if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
           expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
           return {
             ok: true,
@@ -168,25 +187,26 @@ describe("AgentTasksPage connection and payload normalization", () => {
           }
         }
 
-        expect(url).toBe(
-          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks"
-        )
-        expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
-        return {
-          ok: true,
-          json: async () => [
-            {
-              id: 11,
-              project_id: 7,
-              title: "Draft spec",
-              status: "todo",
-              review_count: 0,
-              max_review_attempts: 3,
-              created_at: "2026-03-20T19:00:00Z",
-              updated_at: "2026-03-20T19:00:00Z"
-            }
-          ]
+        if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks") {
+          expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: 11,
+                project_id: 7,
+                title: "Draft spec",
+                status: "todo",
+                review_count: 0,
+                max_review_attempts: 3,
+                created_at: "2026-03-20T19:00:00Z",
+                updated_at: "2026-03-20T19:00:00Z"
+              }
+            ]
+          }
         }
+
+        throw new Error(`unexpected fetch: ${url}`)
       })
     )
   })
@@ -202,7 +222,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(await screen.findByText("Draft spec")).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledTimes(3)
+      expect(global.fetch).toHaveBeenCalledTimes(4)
     })
   })
 
@@ -240,6 +260,16 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
       throw new Error(`unexpected fetch: ${url}`)
     })
     vi.stubGlobal("fetch", fetchMock)
@@ -247,9 +277,252 @@ describe("AgentTasksPage connection and payload normalization", () => {
     render(<AgentTasksPage />)
 
     expect(await screen.findByText("Agent orchestration unavailable")).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/openapi.json"
     )
+  })
+
+  it("shows actionable ACP setup gaps from the shared health state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+        return {
+          ok: true,
+          json: async () => ({
+            runner: {
+              status: "missing",
+              source: "PATH"
+            },
+            agents: [
+              {
+                agent_type: "codex",
+                status: "unavailable",
+                api_key_set: false
+              }
+            ],
+            overall: "unavailable",
+            message: "ACP runner not found"
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+        return {
+          ok: true,
+          json: async () => []
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<AgentTasksPage />)
+
+    expect(await screen.findByText("ACP setup needs attention")).toBeInTheDocument()
+    expect(screen.getByText("Runner is missing")).toBeInTheDocument()
+    expect(screen.getByText("API keys are missing")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open agent registry/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
+  })
+
+  it("omits stored ACP credentials from hosted-mode proxy requests", async () => {
+    deploymentMocks.isHostedTldwDeployment.mockReturnValue(true)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const headers = (init?.headers as Record<string, string> | undefined) ?? {}
+      if (url === "/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "/api/proxy/acp/health") {
+        expect(headers["X-API-KEY"]).toBeUndefined()
+        expect(headers.Authorization).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === "/api/proxy/agent-orchestration/projects") {
+        expect(headers["X-API-KEY"]).toBeUndefined()
+        expect(headers.Authorization).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => []
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<AgentTasksPage />)
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/proxy/agent-orchestration/projects",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+  })
+
+  it("opens task run diagnostics from enriched task detail without manual ID copying", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Research Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z"
+            }
+          ]
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 11,
+              project_id: 7,
+              title: "Draft spec",
+              status: "triage",
+              review_count: 1,
+              max_review_attempts: 3,
+              created_at: "2026-03-20T19:00:00Z",
+              updated_at: "2026-03-20T19:00:00Z"
+            }
+          ]
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/11") {
+        expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+        return {
+          ok: true,
+          json: async () => ({
+            id: 11,
+            project_id: 7,
+            title: "Draft spec",
+            status: "triage",
+            review_count: 1,
+            max_review_attempts: 3,
+            created_at: "2026-03-20T19:00:00Z",
+            updated_at: "2026-03-20T19:00:00Z",
+            reviews: [
+              {
+                reviewer: "reviewer-agent",
+                approved: false,
+                feedback: "Needs citations",
+                created_at: "2026-03-20T19:10:00Z"
+              }
+            ],
+            runs: [
+              {
+                id: 51,
+                task_id: 11,
+                session_id: "sess-1",
+                agent_type: "codex",
+                status: "failed",
+                error: "Workspace root not allowed",
+                started_at: "2026-03-20T19:00:00Z",
+                session: {
+                  session_id: "sess-1",
+                  available: true,
+                  links: {
+                    diagnostics: "/api/v1/acp/sessions/sess-1/diagnostics",
+                    artifacts: "/api/v1/acp/sessions/sess-1/artifacts",
+                    audit: "/api/v1/acp/sessions/sess-1/audit"
+                  }
+                },
+                history: {
+                  event_count: 3,
+                  audit_event_count: 2,
+                  artifact_count: 1,
+                  diagnostic_count: 1,
+                  tool_call_count: 4,
+                  result: {
+                    role: "assistant",
+                    preview: "I could not access the workspace."
+                  }
+                },
+                failure_context: {
+                  reason_code: "workspace_root_not_allowed",
+                  message: "Workspace root not allowed",
+                  source: "session_diagnostic"
+                },
+                review_decision: {
+                  available: true,
+                  approved: false,
+                  reviewer: "reviewer-agent",
+                  feedback_preview: "Needs citations"
+                }
+              }
+            ]
+          })
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<AgentTasksPage />)
+
+    const projectButton = await screen.findByText("Research Project")
+    fireEvent.click(projectButton)
+    expect(await screen.findByText("Draft spec")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /inspect/i }))
+
+    expect(await screen.findByText("Run #51")).toBeInTheDocument()
+    expect(screen.getByText("sess-1")).toBeInTheDocument()
+    expect(screen.getByText("workspace_root_not_allowed")).toBeInTheDocument()
+    expect(screen.getByText("Workspace root not allowed")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open diagnostics/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open artifacts/i })).toBeInTheDocument()
+    expect(screen.getByText("Needs citations")).toBeInTheDocument()
   })
 })

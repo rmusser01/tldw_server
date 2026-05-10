@@ -1,6 +1,8 @@
 """Tests for Agent Orchestration API endpoints (Phase 4.2)."""
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -105,6 +107,166 @@ async def test_multiple_runs_per_task(svc):
     assert {r.session_id for r in runs} == {"s1", "s2", "s3"}
 
 
+async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+    run = db.create_run(task.id, agent_type="codex", session_id="session-success")
+    db.complete_run(run.id, result_summary="Implemented dispatch work", token_usage={"input_tokens": 10})
+
+    _clear_acp_audit_events()
+    acp_mod._acp_record_audit_event(
+        action="orchestration_task_completed",
+        user_id=1,
+        session_id="session-success",
+        metadata={"task_id": task.id},
+    )
+    session = SimpleNamespace(
+        session_id="session-success",
+        user_id=1,
+        agent_type="codex",
+        name="orchestration-task-1",
+        status="closed",
+        created_at="2026-05-10T01:00:00+00:00",
+        last_activity_at="2026-05-10T01:01:00+00:00",
+        message_count=2,
+        usage=SimpleNamespace(to_dict=lambda: {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+        messages=[
+            {
+                "role": "user",
+                "content": "Task prompt text",
+                "timestamp": "2026-05-10T01:00:00+00:00",
+                "raw_prompt": {"role": "user", "content": "Task prompt text"},
+            },
+            {
+                "role": "assistant",
+                "content": "Done",
+                "timestamp": "2026-05-10T01:01:00+00:00",
+                "raw_result": {
+                    "content": "Done",
+                    "stopReason": "end",
+                    "tool_calls": [{"name": "write_file"}],
+                    "artifacts": [{"id": "artifact-1", "type": "summary"}],
+                },
+            },
+        ],
+    )
+
+    async def fake_store():
+        return _RunHistorySessionStore({"session-success": session})
+
+    def fake_audit_events(*, session_id: str):
+        with acp_mod._ACP_AUDIT_LOCK:
+            return [
+                dict(event)
+                for event in acp_mod._ACP_AUDIT_EVENTS
+                if event.get("session_id") == session_id
+            ]
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+
+    try:
+        detail = await orch_mod.get_task(task.id, user=_TestUser())
+        enriched_run = detail.runs[0]
+
+        assert enriched_run["session"]["available"] is True
+        assert enriched_run["session"]["links"]["detail"] == "/api/v1/acp/sessions/session-success/detail"
+        assert enriched_run["session"]["links"]["events"] == "/api/v1/acp/sessions/session-success/events"
+        assert enriched_run["session"]["links"]["artifacts"] == "/api/v1/acp/sessions/session-success/artifacts"
+        assert enriched_run["session"]["links"]["diagnostics"] == "/api/v1/acp/sessions/session-success/diagnostics"
+        assert enriched_run["history"]["event_count"] == 2
+        assert enriched_run["history"]["audit_event_count"] == 1
+        assert enriched_run["history"]["artifact_count"] == 1
+        assert enriched_run["history"]["tool_call_count"] == 1
+        assert enriched_run["history"]["stop_reason"] == "end"
+        assert enriched_run["history"]["prompt"]["preview"] == "Task prompt text"
+        assert enriched_run["history"]["result"]["preview"] == "Done"
+        assert enriched_run["history"]["artifacts"] == [
+            {"artifact_count": 1, "session_id": "session-success"}
+        ]
+        assert enriched_run["failure_context"] is None
+    finally:
+        db.close()
+
+
+async def test_get_task_run_history_includes_failed_session_diagnostics(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+    run = db.create_run(task.id, agent_type="codex", session_id="session-failed")
+    db.fail_run(run.id, error="ACP prompt failed")
+
+    session = SimpleNamespace(
+        session_id="session-failed",
+        user_id=1,
+        agent_type="codex",
+        name="orchestration-task-1",
+        status="error",
+        created_at="2026-05-10T01:00:00+00:00",
+        last_activity_at="2026-05-10T01:01:00+00:00",
+        message_count=2,
+        usage=SimpleNamespace(to_dict=lambda: {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4}),
+        messages=[
+            {
+                "role": "user",
+                "content": "Task prompt text",
+                "timestamp": "2026-05-10T01:00:00+00:00",
+                "raw_prompt": {"role": "user", "content": "Task prompt text"},
+            },
+            {
+                "role": "assistant",
+                "content": {
+                    "status": "timeout",
+                    "error": "Execution timed out",
+                    "diagnostic_uri": "file:///tmp/acp-timeout.json",
+                },
+                "timestamp": "2026-05-10T01:01:00+00:00",
+                "raw_result": {
+                    "status": "timeout",
+                    "error": "Execution timed out",
+                    "diagnostic_uri": "file:///tmp/acp-timeout.json",
+                },
+            },
+        ],
+    )
+
+    async def fake_store():
+        return _RunHistorySessionStore({"session-failed": session})
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+
+    try:
+        detail = await orch_mod.get_task(task.id, user=_TestUser())
+        enriched_run = detail.runs[0]
+
+        assert enriched_run["session"]["available"] is True
+        assert enriched_run["history"]["diagnostic_count"] == 1
+        assert enriched_run["history"]["diagnostics"][0]["reason_code"] == "timed_out"
+        assert enriched_run["failure_context"] == {
+            "reason_code": "timed_out",
+            "message": "Execution timed out",
+            "diagnostic_uri": "file:///tmp/acp-timeout.json",
+            "source": "session_diagnostic",
+        }
+        assert enriched_run["session"]["links"]["audit"] == "/api/v1/acp/sessions/session-failed/audit"
+    finally:
+        db.close()
+
+
 class _TestUser:
     id = 1
     id_int = 1
@@ -116,6 +278,14 @@ class _NoopSessionStore:
 
     async def register_session(self, **_kwargs):
         return None
+
+
+class _RunHistorySessionStore(_NoopSessionStore):
+    def __init__(self, sessions):
+        self.sessions = sessions
+
+    async def get_session(self, session_id):
+        return self.sessions.get(session_id)
 
 
 class _RegisterFailingSessionStore(_NoopSessionStore):
@@ -133,7 +303,50 @@ class _SuccessfulClient:
         return "session-private-1"
 
     async def prompt(self, *_args, **_kwargs):
-        return {"stopReason": "complete", "usage": {}}
+        return {
+            "stopReason": "end",
+            "content": (
+                "Done.\n"
+                '<acp-task-completion>{"status":"completed",'
+                '"summary":"Implemented dispatch work"}</acp-task-completion>'
+            ),
+            "usage": {},
+        }
+
+
+class _MissingCompletionClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {"stopReason": "end", "content": "Done without a structured marker", "usage": {}}
+
+
+class _MalformedCompletionClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {
+            "stopReason": "end",
+            "content": '<acp-task-completion>{"status":</acp-task-completion>',
+            "usage": {},
+        }
+
+
+class _RejectedCompletionClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {
+            "stopReason": "end",
+            "taskCompletion": {
+                "status": "rejected",
+                "summary": "Success criteria were not satisfied",
+            },
+            "usage": {},
+        }
 
 
 class _PromptFailingClient:
@@ -144,11 +357,116 @@ class _PromptFailingClient:
         raise RuntimeError("acp prompt backend exploded")
 
 
+class _ReviewerDecisionClient:
+    def __init__(self, review_payload):
+        self.review_payload = review_payload
+        self.create_session_calls = []
+        self.prompt_calls = []
+
+    async def create_session(self, *_args, **kwargs):
+        self.create_session_calls.append(kwargs)
+        return f"session-{len(self.create_session_calls)}"
+
+    async def prompt(self, *_args, **_kwargs):
+        self.prompt_calls.append(_args)
+        if len(self.prompt_calls) == 1:
+            return {
+                "stopReason": "end",
+                "taskCompletion": {
+                    "status": "completed",
+                    "summary": "Implementation ready for review",
+                },
+                "usage": {"input_tokens": 10},
+            }
+        return {
+            "stopReason": "end",
+            "reviewDecision": self.review_payload,
+            "usage": {"input_tokens": 3},
+        }
+
+
+class _WorkspaceSessionCaptureClient:
+    def __init__(self):
+        self.create_session_calls = []
+
+    async def create_session(self, *_args, **kwargs):
+        self.create_session_calls.append(kwargs)
+        return "session-workspace-env"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {
+            "stopReason": "end",
+            "taskCompletion": {
+                "status": "completed",
+                "summary": "Workspace env and MCP server were injected",
+            },
+            "usage": {},
+        }
+
+
+def _clear_acp_audit_events() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+
+    with acp_mod._ACP_AUDIT_LOCK:
+        acp_mod._ACP_AUDIT_EVENTS.clear()
+
+
+def _acp_audit_events_for_task(task_id: int) -> list[dict]:
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+
+    with acp_mod._ACP_AUDIT_LOCK:
+        return [
+            dict(event)
+            for event in acp_mod._ACP_AUDIT_EVENTS
+            if event.get("metadata", {}).get("task_id") == task_id
+        ]
+
+
 async def _build_dispatch_task(tmp_path):
     db = OrchestrationDB(user_id=1, db_dir=tmp_path)
     project = db.create_project(name="P1")
     task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
     return db, task
+
+
+async def test_task_completion_signal_rejects_multiple_markers():
+    """Completion validation should require exactly one structured marker."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        validate_task_completion_signal,
+    )
+
+    with pytest.raises(CompletionSignalValidationError) as exc_info:
+        validate_task_completion_signal(
+            {
+                "content": (
+                    '<acp-task-completion>{"status":"completed","summary":"one"}</acp-task-completion>'
+                    '<acp-task-completion>{"status":"rejected","summary":"two"}</acp-task-completion>'
+                )
+            }
+        )
+
+    assert exc_info.value.reason == "multiple"
+
+
+async def test_review_decision_signal_rejects_multiple_markers():
+    """Reviewer validation should require exactly one structured marker."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        ReviewDecisionValidationError,
+        validate_review_decision_signal,
+    )
+
+    with pytest.raises(ReviewDecisionValidationError) as exc_info:
+        validate_review_decision_signal(
+            {
+                "content": (
+                    '<acp-review-decision>{"approved":true,"feedback":"pass"}</acp-review-decision>'
+                    '<acp-review-decision>{"approved":false,"feedback":"fail"}</acp-review-decision>'
+                )
+            }
+        )
+
+    assert exc_info.value.reason == "multiple"
 
 
 async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_path):
@@ -184,7 +502,7 @@ async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_pa
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.detail == "Failed to create ACP session"
-        fake_logger.error.assert_called_once_with("Failed to create ACP session")
+        fake_logger.exception.assert_called_once_with("Failed to create ACP session")
     finally:
         db.close()
 
@@ -199,7 +517,6 @@ async def test_dispatch_run_sanitizes_register_session_warning(monkeypatch, tmp_
         title="T1",
         description="Dispatch me",
         agent_type="codex",
-        reviewer_agent_type="reviewer",
     )
     fake_logger = MagicMock()
 
@@ -228,8 +545,415 @@ async def test_dispatch_run_sanitizes_register_session_warning(monkeypatch, tmp_
         )
 
         assert result["task_id"] == task.id
-        assert result["status"] == TaskStatus.REVIEW
+        assert result["status"] == TaskStatus.COMPLETE
+        runs = db.list_runs(task.id)
+        assert runs[0].status.value == "completed"
+        assert runs[0].result_summary == "Implemented dispatch work"
         fake_logger.warning.assert_called_once_with("Failed to register orchestration ACP session")
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_reviewer_agent_approval_completes_and_records_review(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(
+        project.id,
+        title="T1",
+        description="Dispatch me",
+        agent_type="codex",
+        reviewer_agent_type="reviewer",
+    )
+    client = _ReviewerDecisionClient(
+        {"approved": True, "feedback": "Meets the success criteria"}
+    )
+    _clear_acp_audit_events()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert [call["agent_type"] for call in client.create_session_calls] == [
+            "codex",
+            "reviewer",
+        ]
+        reviews = db.list_reviews(task.id)
+        assert len(reviews) == 1
+        assert reviews[0]["approved"] is True
+        assert reviews[0]["feedback"] == "Meets the success criteria"
+        assert reviews[0]["reviewer"] == "reviewer"
+        detail = await orch_mod.get_task(task.id, user=_TestUser())
+        assert detail.reviews == reviews
+        runs = db.list_runs(task.id)
+        assert [run.agent_type for run in runs] == ["reviewer", "codex"]
+        assert all(run.status.value == "completed" for run in runs)
+        audit_actions = [event["action"] for event in _acp_audit_events_for_task(task.id)]
+        assert audit_actions == [
+            "orchestration_dispatch_started",
+            "orchestration_task_completed",
+            "orchestration_review_started",
+            "orchestration_review_decision",
+            "orchestration_task_finalized",
+        ]
+        serialized = json.dumps(_acp_audit_events_for_task(task.id))
+        assert "Dispatch me" not in serialized
+        assert "Meets the success criteria" not in serialized
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(
+        project.id,
+        title="T1",
+        description="Dispatch me",
+        agent_type="codex",
+        reviewer_agent_type="reviewer",
+        max_review_attempts=2,
+    )
+    client = _ReviewerDecisionClient(
+        {"approved": False, "feedback": "Missing required tests"}
+    )
+    _clear_acp_audit_events()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert result["status"] == TaskStatus.IN_PROGRESS
+        updated_task = db.get_task(task.id)
+        assert updated_task.review_count == 1
+        reviews = db.list_reviews(task.id)
+        assert reviews[0]["approved"] is False
+        assert reviews[0]["feedback"] == "Missing required tests"
+        detail = await orch_mod.get_task(task.id, user=_TestUser())
+        assert detail.reviews == reviews
+        audit_actions = [event["action"] for event in _acp_audit_events_for_task(task.id)]
+        assert "orchestration_task_requeued" in audit_actions
+        serialized = json.dumps(_acp_audit_events_for_task(task.id))
+        assert "Missing required tests" not in serialized
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_reviewer_agent_rejection_max_attempts_triages(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(
+        project.id,
+        title="T1",
+        description="Dispatch me",
+        agent_type="codex",
+        reviewer_agent_type="reviewer",
+        max_review_attempts=1,
+    )
+    client = _ReviewerDecisionClient(
+        {"approved": False, "feedback": "Still fails review"}
+    )
+    _clear_acp_audit_events()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert result["status"] == TaskStatus.TRIAGE
+        detail = await orch_mod.get_task(task.id, user=_TestUser())
+        assert detail.review_count == 1
+        assert detail.reviews[0]["feedback"] == "Still fails review"
+        assert detail.runs[0]["agent_type"] == "reviewer"
+        assert detail.runs[0]["result_summary"] == "Still fails review"
+        audit_actions = [event["action"] for event in _acp_audit_events_for_task(task.id)]
+        assert "orchestration_task_triaged" in audit_actions
+        serialized = json.dumps(_acp_audit_events_for_task(task.id))
+        assert "Still fails review" not in serialized
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_valid_completion_without_reviewer_completes_task(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return _SuccessfulClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        updated_task = db.get_task(task.id)
+        assert updated_task.status == TaskStatus.COMPLETE
+        runs = db.list_runs(task.id)
+        assert runs[0].status.value == "completed"
+        assert runs[0].result_summary == "Implemented dispatch work"
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_injects_workspace_env_and_mcp_servers(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    workspace = db.create_workspace(
+        name="Workspace",
+        root_path=str(workspace_root),
+        env_vars={"WORKSPACE_TOKEN": "abc"},
+    )
+    db.create_workspace_mcp_server(
+        workspace.id,
+        server_name="workspace-files",
+        server_type="stdio",
+        command="workspace-mcp",
+        args=["--root", "."],
+        env={"MCP_TOKEN": "xyz"},
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+    client = _WorkspaceSessionCaptureClient()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+    monkeypatch.setattr(
+        orch_mod,
+        "_resolve_dispatch_cwd",
+        lambda raw_cwd, *, workspace_root=None: workspace_root or raw_cwd,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert client.create_session_calls[0]["session_env"] == {"WORKSPACE_TOKEN": "abc"}
+        assert client.create_session_calls[0]["mcp_servers"] == [
+            {
+                "name": "workspace-files",
+                "type": "stdio",
+                "command": "workspace-mcp",
+                "args": ["--root", "."],
+                "env": {"MCP_TOKEN": "xyz"},
+            }
+        ]
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_requires_completion_signal(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return _MissingCompletionClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 502
+        assert exc_info.value.detail == "ACP completion signal invalid"
+        updated_task = db.get_task(task.id)
+        assert updated_task.status == TaskStatus.TRIAGE
+        runs = db.list_runs(task.id)
+        assert runs[0].status.value == "failed"
+        assert runs[0].error == "completion_signal_invalid"
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_rejects_malformed_completion_signal(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return _MalformedCompletionClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 502
+        updated_task = db.get_task(task.id)
+        assert updated_task.status == TaskStatus.TRIAGE
+        runs = db.list_runs(task.id)
+        assert runs[0].status.value == "failed"
+        assert runs[0].error == "completion_signal_invalid"
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_rejects_rejected_completion_signal(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return _RejectedCompletionClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 502
+        updated_task = db.get_task(task.id)
+        assert updated_task.status == TaskStatus.TRIAGE
+        runs = db.list_runs(task.id)
+        assert runs[0].status.value == "failed"
+        assert runs[0].error == "completion_signal_invalid"
     finally:
         db.close()
 
@@ -267,7 +991,7 @@ async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.detail == "ACP prompt failed"
-        fake_logger.error.assert_called_once_with("ACP prompt failed")
+        fake_logger.exception.assert_called_once_with("ACP prompt failed")
     finally:
         db.close()
 

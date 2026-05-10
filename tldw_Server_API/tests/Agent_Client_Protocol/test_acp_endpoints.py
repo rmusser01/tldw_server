@@ -1,4 +1,5 @@
 import importlib.machinery
+import json
 import sys
 import types
 from uuid import uuid4
@@ -218,6 +219,165 @@ def test_acp_session_new_forwards_tenancy_fields(client_user_only, stub_runner_c
     assert call["workspace_group_id"] == "wsg-2"
     assert call["scope_snapshot_id"] == "scope-3"
     assert isinstance(call["user_id"], int) and call["user_id"] > 0
+
+
+def test_acp_session_new_records_sanitized_audit_event(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    response = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path / "secret-project"),
+            "agent_type": "codex",
+            "mcp_servers": [
+                {
+                    "name": "private-mcp",
+                    "type": "stdio",
+                    "command": "/private/bin/acp-mcp",
+                    "args": ["--token", "sk-should-not-leak"],
+                    "env": {"OPENAI_API_KEY": "sk-should-not-leak"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        events = list(acp_endpoints._ACP_AUDIT_EVENTS)
+    event = next(item for item in events if item["action"] == "session_created")
+    assert event["session_id"] == response.json()["session_id"]
+    assert event["metadata"]["agent_type"] == "codex"
+    assert event["metadata"]["mcp_server_count"] == 1
+    serialized = json.dumps(event["metadata"])
+    assert str(tmp_path) not in serialized
+    assert "sk-should-not-leak" not in serialized
+    assert "OPENAI_API_KEY" not in serialized
+    assert "/private/bin/acp-mcp" not in serialized
+
+
+def test_acp_agent_registration_records_sanitized_audit_event(
+    client_user_only,
+    monkeypatch,
+):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry as registry_mod
+
+    class _Registry:
+        def register_agent(self, **kwargs):
+            return types.SimpleNamespace(type=kwargs["type"], name=kwargs["name"])
+
+    async def _admin_user():
+        return types.SimpleNamespace(id=1, is_admin=True)
+
+    monkeypatch.setattr(registry_mod, "get_agent_registry", lambda: _Registry())
+    client_user_only.app.dependency_overrides[acp_endpoints.get_request_user] = _admin_user
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+    try:
+        response = client_user_only.post(
+            "/api/v1/acp/agents/register",
+            json={
+                "agent_type": "audit_agent",
+                "name": "Audit Agent",
+                "command": "/private/bin/audit-agent",
+                "args": ["--api-key", "sk-should-not-leak"],
+                "env": {"ANTHROPIC_API_KEY": "sk-should-not-leak"},
+                "requires_api_key": "ANTHROPIC_API_KEY",
+            },
+        )
+    finally:
+        client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
+
+    assert response.status_code == 200
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        events = list(acp_endpoints._ACP_AUDIT_EVENTS)
+    event = next(item for item in events if item["action"] == "agent_registered")
+    assert event["session_id"] == "agent:audit_agent"
+    assert event["metadata"]["agent_type"] == "audit_agent"
+    assert event["metadata"]["requires_api_key"] is True
+    serialized = json.dumps(event["metadata"])
+    assert "sk-should-not-leak" not in serialized
+    assert "ANTHROPIC_API_KEY" not in serialized
+    assert "/private/bin/audit-agent" not in serialized
+
+
+def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    audit_db = audit_db_mod.ACPAuditDB(db_path=str(tmp_path / "acp_audit.db"))
+    monkeypatch.setattr(audit_db_mod, "_audit_db", audit_db)
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+    try:
+        audit_db.record_event(
+            action="session_created",
+            user_id=1,
+            session_id="persisted-session",
+            metadata={"agent_type": "codex"},
+        )
+        audit_db.flush()
+
+        events = acp_endpoints._acp_list_audit_events(session_id="persisted-session")
+    finally:
+        audit_db.close()
+
+    assert len(events) == 1
+    assert events[0]["action"] == "session_created"
+    assert events[0]["metadata"]["agent_type"] == "codex"
+
+
+def test_agent_audit_scope_is_admin_readable_without_runner_session(
+    client_user_only,
+    monkeypatch,
+):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    class _EmptyAuditDB:
+        def flush(self):
+            return 0
+
+        def query_events(self, **_kwargs):
+            return []
+
+        def get_hot_cache(self, **_kwargs):
+            return []
+
+    async def _admin_user():
+        return types.SimpleNamespace(id=1, is_admin=True)
+
+    monkeypatch.setattr(audit_db_mod, "get_acp_audit_db", lambda: _EmptyAuditDB())
+    client_user_only.app.dependency_overrides[acp_endpoints.get_request_user] = _admin_user
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2026-05-10T00:00:00+00:00",
+                "action": "agent_registered",
+                "user_id": 1,
+                "session_id": "agent:audit_agent",
+                "metadata": {"agent_type": "audit_agent"},
+            }
+        )
+    try:
+        response = client_user_only.get("/api/v1/acp/sessions/agent:audit_agent/audit")
+    finally:
+        client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
+        with acp_endpoints._ACP_AUDIT_LOCK:
+            acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "agent:audit_agent"
+    assert payload["events"][0]["action"] == "agent_registered"
 
 
 def test_acp_session_prompt_success(client_user_only, stub_runner_client):
