@@ -427,11 +427,27 @@ currently active revision. In V1 this means: if a generated choice from the old
 active revision has already been selected into branch history, activation fails
 with a stable conflict such as `generated_choice_dependency_exists`.
 
-Activation is also blocked when the generation point has later visual or script
-events that depend on the old revision's `scene_update` output and cannot be
-resolved as a read-time overlay. The implementation must choose the conservative
-path: if dependency analysis cannot prove the swap is independent, return
-`revision_activation_blocked`.
+V1 activation uses a deterministic dependency rule instead of open-ended
+dependency analysis. Activation is allowed only while the generation point is
+still the latest material scene/script point. It is blocked if any material
+downstream event was appended after the generation point's active revision event,
+including:
+
+- `script_advanced`;
+- `choice_selected`;
+- generated-choice branch events;
+- `visual_directive_requested`;
+- `visual_directive_applied`;
+- `visual_directive_rejected`;
+- scene-state mutation events;
+- checkpoint restore events.
+
+Non-material history events such as failed regeneration attempts, debug reads,
+and additional inactive revision records do not block activation. When the rule
+blocks activation, return `revision_activation_blocked` with public detail
+`downstream_material_event_exists`. This keeps V1 predictable and avoids trying
+to infer whether authored narrative or later script logic implicitly depended on
+the old generated scene context.
 
 Public/current scene rendering uses a read-time active-revision overlay. Events
 remain immutable audit history, but generated output shown to clients is loaded
@@ -439,6 +455,21 @@ from `vn_play_generations.active_revision_id`. Activation updates that pointer
 and appends `script_generation_revision_activated`; it does not rewrite the
 original generation event payload. Scene-version increments make clients refetch
 the newly active overlay.
+
+Scene derivation must be updated explicitly for this overlay. Existing
+`derive_scene_state`-style logic cannot replay raw generation events blindly once
+revision activation exists. The backend must either:
+
+- build an in-memory derived event stream that substitutes the active revision's
+  stored public output and resolved visual outcomes at each generation point; or
+- teach scene derivation to consult `vn_play_generations.active_revision_id`
+  while applying generation events.
+
+In both implementations, inactive revision event payloads remain visible only as
+history/debug data and are ignored for `current_scene` derivation. For
+`scene_update` revisions, current scene state must use the active revision's
+stored resolver outcomes, not the original inactive revision's
+`visual_directive_applied` event payloads.
 
 ## Data Model
 
@@ -596,6 +627,8 @@ Suggested fields:
   `moderation_blocked`, `moderation_failed`, `canceled`, `abandoned`
 - `output_schema`
 - `public_output_json`
+- `applied_visuals_json`
+- `rejected_visuals_json`
 - `public_error_code`
 - `raw_output_debug_json`
 - `parser_diagnostics_json`
@@ -608,6 +641,12 @@ Suggested fields:
 Revision rows do not have an `active` flag in V1. Active status is derived by
 joining `vn_play_generations.active_revision_id` to the revision row. This avoids
 conflicts between checkpoint restore, activation, and immutable revision history.
+
+For `scene_update` output, `applied_visuals_json` and `rejected_visuals_json`
+store the resolver outcomes needed to re-derive `current_scene` when a revision
+is activated later. Runtime events may still record the originally applied
+visual directives for audit, but public scene derivation must use these stored
+active-revision outcomes instead of stale inactive event payloads.
 
 ### Script Position Additions
 
@@ -953,10 +992,14 @@ Recovery rules:
 
 1. Client calls activate with generation/revision IDs.
 2. Runtime validates revision is `succeeded`.
-3. Runtime checks downstream generated-choice dependency guard.
+3. Runtime checks the deterministic V1 activation guard: no downstream material
+   scene/script event may exist after the generation point's active revision
+   event.
 4. Runtime creates checkpoint.
 5. Runtime updates `vn_play_generations.active_revision_id` in a transaction.
 6. Runtime records activation event and increments scene version.
+7. Runtime re-derives `current_scene` from active revision pointers, using the
+   active revision's stored public output and visual resolver outcomes.
 
 ## WebUI Inspector Path
 

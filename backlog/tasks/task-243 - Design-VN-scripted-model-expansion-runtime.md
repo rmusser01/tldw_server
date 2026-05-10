@@ -4,7 +4,7 @@ title: Design VN scripted model expansion runtime
 status: Done
 assignee: []
 created_date: '2026-05-10 19:52'
-updated_date: '2026-05-10 20:15'
+updated_date: '2026-05-10 21:00'
 labels:
   - vn
   - design
@@ -35,12 +35,16 @@ Create the design spec for GitHub issue #1535: backend-owned model expansion and
 Reviewed and patched spec after two reviewer passes. Addressed generation profile snapshot map/profile_key semantics, generation_id ownership via vn_play_generations, active_revision_id checkpoint/restore semantics, read-time activation overlay, fail-closed moderation, idempotent model-call recovery, strict nested output schemas, exact offset pagination envelope, and debug endpoint path/auth/audit.
 
 Verification: git diff --check passed after the review-fix patch. Final focused subagent review found no blocker/high findings. Bandit skipped because this patch only updates design documentation and Backlog metadata, not executable code.
+
+PR #1549 review pass: live review sweep found two unresolved Gemini threads about active-revision overlay integration with scene-state derivation and deterministic V1 activation blocking. Reopening task to address them.
+
+PR #1549 review fixes: clarified active-revision overlay integration with current scene derivation and replaced vague activation dependency analysis with deterministic V1 blocking when material downstream scene/script events exist. git diff --check passed; Bandit remains skipped because changes are documentation/backlog-only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the VN scripted model generation runtime design review pass. The spec now defines generation profile snapshot identity, generation_id ownership, exact checkpoint/restore active revision behavior, per-action idempotency storage, model-call recovery boundaries, fail-closed moderation, strict nested output schemas, resolver-native visual directive shape, exact offset pagination envelope, and debug detail authorization/audit semantics.
+Completed PR #1549 review fixes. The spec now requires scene derivation to substitute active revision output/resolved visuals instead of replaying inactive generation event payloads, and V1 revision activation now has a deterministic downstream-material-event blocking rule.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
