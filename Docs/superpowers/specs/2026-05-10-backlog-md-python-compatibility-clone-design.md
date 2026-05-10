@@ -2,7 +2,7 @@
 
 Date: 2026-05-10
 Owner: Codex collaboration session
-Status: Approved design direction, revised after critique-first review
+Status: Approved design direction, pending spec review and user review
 Tracking task: TASK-244
 
 ## Summary
@@ -41,23 +41,6 @@ overview, and completion support. Its published package metadata shows a
 Bun/TypeScript source entry and npm optional dependencies for platform-specific
 binaries.
 
-Current upstream docs also describe several compatibility surfaces that can
-easily be underestimated during planning:
-
-- root or folder-local config discovery via `backlog.config.yml`,
-  `backlog/config.yml`, or `.backlog/config.yml`
-- `BACKLOG_CWD` and `backlog mcp start --cwd` for MCP clients that cannot set a
-  process working directory
-- Git-optional initialization with `--no-git`
-- board export, nested documentation paths, modified-file search, draft
-  promotion/demotion, and dependency sequence commands
-- datetime-aware dates plus backward compatibility for date-only historical
-  records
-- `onStatusChange` shell callbacks as an explicitly configured compatibility
-  surface
-- a browser UI implemented upstream with React, React Markdown/editor tooling,
-  Tailwind CSS, mermaid, tooltips, and service-mode documentation
-
 ## Goals
 
 1. Preserve existing Backlog.md repositories without conversion.
@@ -73,9 +56,6 @@ easily be underestimated during planning:
    resolution on the hot path.
 8. Use upstream Backlog.md as a test oracle during development, not as a runtime
    dependency.
-9. Treat upstream drift as a first-class risk by pinning an oracle version for
-   each fixture refresh and recording which upstream docs/package snapshot the
-   Python implementation targets.
 
 ## Non-Goals
 
@@ -87,7 +67,6 @@ easily be underestimated during planning:
    history.
 6. Reimplementing every interactive and browser feature in the first milestone.
 7. Depending on a JavaScript build chain for normal Python package development.
-   Fixture refreshes may use upstream tooling in an isolated oracle job.
 
 ## Approved Approach
 
@@ -148,10 +127,6 @@ captures before/after files, stdout, stderr, exit codes, and MCP responses.
 Those fixtures become the compatibility spec. Golden tests should cover normal
 paths and important errors before the Python implementation claims parity.
 
-Each fixture set should record the upstream Backlog.md version, package
-metadata hash, and source date used to generate it. Do not compare against a
-moving `main` branch during normal CI.
-
 ## Components
 
 ### `backlog_py.core`
@@ -160,19 +135,11 @@ Owns task, document, decision, milestone, and config domain models. It validates
 IDs, statuses, dependencies, parent/subtask relationships, acceptance criteria,
 Definition of Done, and section ownership.
 
-It also owns compatibility normalization for old and new task identifiers,
-zero-padded IDs, datetime/date-only fields, draft states, and status aliases
-observed in upstream fixtures.
-
 ### `backlog_py.storage`
 
 Owns project discovery, config loading, backlog directory resolution, filename
 sanitization, atomic writes, archive/completed moves, lock handling, and
 git-aware branch scans.
-
-Discovery must include root config, folder-local config, `.backlog`, explicit
-CLI/MCP `--cwd`, and `BACKLOG_CWD`. Git-aware behavior must preserve upstream
-defaults while allowing this repository's safer local overrides.
 
 ### `backlog_py.markdown`
 
@@ -195,8 +162,7 @@ It should normalize only fields explicitly owned by the requested operation.
 
 Owns indexing and fuzzy search across tasks, docs, decisions, and milestones.
 It should support upstream-compatible filters for status, priority, assignee,
-labels, milestone, parent, modified file, and related fields where upstream
-supports them.
+labels, milestone, parent, and related fields where upstream supports them.
 
 `rapidfuzz` is acceptable only if supply-chain review approves it. Otherwise the
 first milestone should use a small deterministic Python search implementation
@@ -217,11 +183,6 @@ Owns a stdio MCP server that exposes the same workflow resources and tools used
 by agents. The MCP layer should expose typed operations only. It must not expose
 generic shell execution.
 
-Agent-critical MCP parity must include, at minimum, workflow resources,
-task/document search and view, task create/edit/finalize, document operations,
-milestone operations, and Definition of Done defaults. The first implementation
-plan should turn this list into an explicit checklist with expected schemas.
-
 ### `backlog_py.browser`
 
 Owns the local browser workflow. To avoid Node/Bun at runtime, implement the
@@ -231,14 +192,6 @@ templates, packaged static assets, and optional HTMX-style interactions.
 The browser can lag the CLI/MCP parity milestone, but the final compatibility
 clone must preserve `backlog browser` behavior enough for users to manage tasks
 locally.
-
-This is not a trivial skin over the core API. Current upstream browser
-expectations include a responsive Kanban board, drag-and-drop, task creation and
-editing forms, acceptance criteria editing, settings for Definition of Done
-defaults, real-time updates across views, archive confirmations, and local
-service-mode operation. The Python port may choose a simpler implementation, but
-the plan must list which browser behaviors are parity requirements and which are
-intentional deferrals.
 
 ### `backlog_py.tui`
 
@@ -260,8 +213,8 @@ Owns upstream comparison fixtures. It should support:
 
 All surfaces should follow the same operation path:
 
-1. Discover the project root and backlog directory from `cwd`, `BACKLOG_CWD`,
-   config files, and explicit command or MCP inputs.
+1. Discover the project root and backlog directory from `cwd`, config files, and
+   explicit command or MCP inputs.
 2. Load config using upstream-compatible precedence: explicit operation inputs,
    project config, then built-ins.
 3. Read task, doc, decision, and milestone Markdown through the round-trip
@@ -282,10 +235,6 @@ For this repository, the Python implementation must respect:
 - `remote_operations: false`
 - existing Definition of Done defaults in `backlog/config.yml`
 - existing root `AGENTS.md` instruction to use MCP first and CLI fallback second
-
-The implementation must also support upstream naming variants such as camelCase
-CLI/config display names and snake_case YAML keys where upstream accepts both or
-renders one from the other.
 
 ## Compatibility Rules
 
@@ -311,20 +260,10 @@ MCP resources and tools should keep stable names, schemas, and error shapes.
 Agent workflows should be able to use the same task creation, task execution,
 task finalization, document, milestone, and Definition of Done operations.
 
-The implementation must handle both `backlog://workflow/overview` and currently
-documented workflow-resource aliases such as `backlog://docs/task-workflow` if
-upstream exposes both across versions. Compatibility tests should cover the
-resource names used by this repository's MCP server.
-
 ### Browser
 
 The browser surface should remain local-first and project-bound. It should not
 introduce a separate database or require a build step for normal use.
-
-Browser parity must be specified before Milestone 4 starts. At minimum, the plan
-should decide whether drag-and-drop, live updates, service mode, rich Markdown
-editing, mermaid rendering, and mobile responsive behavior are required for
-compatibility or deferred with explicit non-agent impact.
 
 ## Error Handling
 
@@ -343,8 +282,6 @@ Reject:
 - conflicting parent/subtask relationships
 - malformed frontmatter in fields about to be mutated
 - writes that resolve outside the discovered backlog root
-- unsafe `onStatusChange` callback expansion or execution attempts outside the
-  explicitly configured compatibility path
 
 Parser ambiguity should produce structured errors. It should not silently
 rewrite task files.
@@ -363,14 +300,8 @@ should be extras, such as:
 - `backlog-py[tui]`
 
 Core CLI and MCP operations should avoid shell execution. Command execution
-surfaces such as editor launch, browser open, git operations, completion
-installation, and `onStatusChange` callbacks should exist only behind explicit
-commands or config.
-
-`onStatusChange` is a compatibility exception, not a general command runner. It
-should remain disabled by default, execute only from trusted project config or
-task frontmatter, substitute only documented variables, and be covered by
-security tests for quoting, environment leakage, and disabled-callback behavior.
+surfaces such as editor launch, browser open, git operations, and completion
+installation should exist only behind explicit commands or config.
 
 Never enable `autoCommit` or `bypassGitHooks` by default. If a project sets
 `bypass_git_hooks: true`, the Python implementation should make that behavior
@@ -393,11 +324,6 @@ usage. Mark each behavior as one of:
 - `browser-deferred`
 - `not-supported-with-explicit-reason`
 
-The inventory must start implementation planning. It should include command
-aliases, config keys, MCP resource/tool names, browser routes/actions, file
-formats, generated filenames, and output modes. It should also record the
-upstream version and source snapshot used for comparison.
-
 ### Golden Fixtures
 
 For each golden-required behavior, capture:
@@ -412,12 +338,6 @@ For each golden-required behavior, capture:
 
 Fixtures should include both successful operations and errors.
 
-Fixtures should distinguish:
-
-- agent-critical CLI/MCP behavior that blocks cutover
-- human-interactive behavior that can lag cutover
-- browser behavior that blocks full compatibility but not agent workflow cutover
-
 ### Round-Trip Tests
 
 Run the parser over existing `backlog/` task files and assert read-only commands
@@ -427,7 +347,7 @@ do not change files. Mutating tests should operate only on temporary copies.
 
 Cover traversal, duplicate IDs, invalid parent/dependency graphs, malformed
 Markdown/frontmatter, invalid checklist indexes, lock contention, disabled
-remote operations, status-change callbacks, and blocked generic shell paths.
+remote operations, and blocked generic shell paths.
 
 ### Repository Validation
 
@@ -456,8 +376,6 @@ Success criteria:
 - existing repos load without conversion
 - this repository's backlog files round-trip without diffs
 - read-only CLI and MCP paths pass golden tests
-- config discovery covers root config, folder config, `.backlog`, `BACKLOG_CWD`,
-  `--cwd`, `--no-git`, date-only records, and datetime records
 
 ### Milestone 2: Safe Mutations
 
@@ -483,8 +401,6 @@ Success criteria:
 - upstream binary remains available only as `backlog-upstream` during the
   comparison window
 - no runtime Node/Bun dependency is needed for agent workflows
-- agent-critical CLI/MCP operations are enumerated and green in the golden
-  matrix before any symlink or PATH cutover
 
 ### Milestone 4: Browser And Interactive Surface
 
@@ -496,9 +412,6 @@ Success criteria:
 - browser task management works locally without a Node/Bun build chain
 - packaged static assets are included as Python package data
 - browser actions call the same domain operations as CLI/MCP
-- parity gaps for drag-and-drop, live updates, rich editing, mermaid rendering,
-  service mode, and responsive behavior are closed or explicitly accepted as
-  non-agent deferrals
 
 ### Milestone 5: Packaging And Decommission
 
@@ -524,9 +437,6 @@ Do not cut over this repository until:
    non-agent blockers.
 7. Rollback is simple: `backlog-upstream` remains available during the
    comparison window.
-8. The target upstream version and fixture snapshot are pinned and documented.
-9. `onStatusChange`, remote operations, auto-commit, and hook-bypass behavior are
-   tested in both enabled and disabled states.
 
 ## Open Questions
 
@@ -539,10 +449,6 @@ Do not cut over this repository until:
    PyInstaller or similar tooling?
 5. Which upstream browser behaviors are required before calling the project a
    full compatibility clone?
-6. Should `onStatusChange` be fully compatible at cutover, or disabled in this
-   repository until the callback security model is separately accepted?
-7. Should fixture refresh pin to the npm release package, the GitHub release
-   artifact, or a source commit built locally?
 
 ## Acceptance Criteria
 
