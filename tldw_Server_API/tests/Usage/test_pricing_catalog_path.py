@@ -61,3 +61,20 @@ def test_estimated_catalog_entries_remain_marked_estimated(monkeypatch):
     assert round(in_per_1k, 6) == 0.00104
     assert round(out_per_1k, 6) == 0.00624
     assert estimated is True
+
+
+def test_zai_flash_zero_rates_are_documented_as_free(monkeypatch):
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+
+    mod = importlib.import_module("tldw_Server_API.app.core.Usage.pricing_catalog")
+    importlib.reload(mod)
+    catalog = mod.get_pricing_catalog()
+
+    for model in ("glm-4.7-flash", "glm-4.5-flash"):
+        in_per_1k, out_per_1k, estimated = catalog.get_rates("zai", model)
+        metadata = catalog._catalog["zai"][model]
+
+        assert in_per_1k == 0.0
+        assert out_per_1k == 0.0
+        assert estimated is False
+        assert "free" in metadata["note"].lower()

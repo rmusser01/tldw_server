@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 
 import pytest
 
@@ -44,7 +45,17 @@ def test_pricing_overrides_env(monkeypatch):
 def test_pricing_overrides_env_preserves_estimated_metadata(monkeypatch):
     monkeypatch.setenv(
         "PRICING_OVERRIDES",
-        '{"Qwen": {"qwen-new-current": {"prompt": 0.001, "completion": 0.002, "estimated": true}}}',
+        json.dumps(
+            {
+                "Qwen": {
+                    "qwen-new-current": {
+                        "prompt": 0.001,
+                        "completion": 0.002,
+                        "estimated": True,
+                    }
+                }
+            }
+        ),
     )
 
     from tldw_Server_API.app.core.Usage.pricing_catalog import PricingCatalog
