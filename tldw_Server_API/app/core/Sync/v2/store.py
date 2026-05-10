@@ -67,6 +67,23 @@ class SyncV2Store:
             domains=domains,
         )
 
+    def list_envelopes_for_entity(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str | None = None,
+        stable_key: str | None = None,
+        limit: int = 100,
+    ) -> list[SyncEnvelope]:
+        return self.db.list_envelopes_for_entity(
+            dataset_id,
+            domain,
+            entity_id=entity_id,
+            stable_key=stable_key,
+            limit=limit,
+        )
+
     def update_device_cursor(self, cursor: SyncDeviceCursor) -> SyncDeviceCursor:
         return self.db.update_device_cursor(cursor)
 

@@ -11,7 +11,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.Sync.sync_contract import SyncEntity, SyncOperation as LegacySyncOperation
 
-from ..adapters import AdapterAccepted, AdapterRejected, SyncAdapterOutcome
+from ..adapters import AdapterAccepted, AdapterRejected, SyncAdapterContext, SyncAdapterOutcome
 from ..models import SyncDataset, SyncDomain, SyncEnvelopeCreate
 
 _LEGACY_TO_V2_OPERATION = {
@@ -48,10 +48,12 @@ class MediaCompatibilityAdapter:
         envelope: SyncEnvelopeCreate,
         *,
         dataset: SyncDataset,
+        context: SyncAdapterContext | None = None,
     ) -> SyncAdapterOutcome:
         """Accept or reject media envelopes using the legacy sync contract."""
 
         del dataset
+        del context
         legacy_entity = _legacy_entity(envelope)
         legacy_operation = _legacy_operation(envelope)
 

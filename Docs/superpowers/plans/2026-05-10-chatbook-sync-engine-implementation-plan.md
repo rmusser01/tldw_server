@@ -301,7 +301,7 @@ python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/sync_v2_models.py \
@@ -746,7 +746,7 @@ git commit -m "feat(sync): add media compatibility adapter"
 - Test: `tldw_Server_API/tests/Sync/test_sync_v2_domain_adapters.py`
 - Reuse fixtures from `tldw_Server_API/tests/ChaChaNotesDB/`
 
-- [ ] **Step 1: Write failing domain adapter tests**
+- [x] **Step 1: Write failing domain adapter tests**
 
 Cover the PRD merge rules:
 
@@ -772,7 +772,7 @@ def test_note_body_concurrent_update_creates_conflict(notes_adapter, sync_contex
     assert result.conflict_type == "encrypted_content_edit"
 ```
 
-- [ ] **Step 2: Run adapter tests and verify failure**
+- [x] **Step 2: Run adapter tests and verify failure**
 
 Run:
 
@@ -783,7 +783,7 @@ python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_domain_adapters.py -v
 
 Expected: FAIL until adapters exist.
 
-- [ ] **Step 3: Implement adapters incrementally**
+- [x] **Step 3: Implement adapters incrementally**
 
 Implementation order:
 
@@ -795,7 +795,7 @@ Implementation order:
 Do not introduce broad DB refactors. Add narrow DB helper methods only where
 existing APIs cannot express the required sync operation.
 
-- [ ] **Step 4: Pass focused adapter tests**
+- [x] **Step 4: Pass focused adapter tests**
 
 Run:
 

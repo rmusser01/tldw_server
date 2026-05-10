@@ -108,6 +108,8 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
+    ON sync_envelopes(dataset_id, domain, stable_key);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -230,6 +232,8 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
+    ON sync_envelopes(dataset_id, domain, stable_key);
 
 CREATE TABLE IF NOT EXISTS sync_device_cursors (
     dataset_id TEXT NOT NULL,
@@ -993,6 +997,57 @@ class SyncDatabase:
             sql += f" AND domain IN ({placeholders})"
             params.extend(domains)
         sql += " ORDER BY server_sequence ASC LIMIT ?"
+        params.append(limit)
+        result = self.execute(sql, tuple(params))
+        return [_envelope_from_row(row) for row in result.rows]
+
+    def list_envelopes_for_entity(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str | None = None,
+        stable_key: str | None = None,
+        limit: int = 100,
+    ) -> list[SyncEnvelope]:
+        """List accepted envelopes for one entity identity or stable key."""
+
+        if limit < 1 or (entity_id is None and stable_key is None):
+            return []
+        params: list[Any] = [dataset_id, domain]
+        if entity_id is not None and stable_key is not None:
+            sql = """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain = ?
+                   AND status = 'accepted'
+                   AND (entity_id = ? OR stable_key = ?)
+                 ORDER BY server_sequence DESC
+                 LIMIT ?
+            """
+            params.extend([entity_id, stable_key])
+        elif entity_id is not None:
+            sql = """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain = ?
+                   AND status = 'accepted'
+                   AND entity_id = ?
+                 ORDER BY server_sequence DESC
+                 LIMIT ?
+            """
+            params.append(entity_id)
+        else:
+            sql = """
+                SELECT * FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND domain = ?
+                   AND status = 'accepted'
+                   AND stable_key = ?
+                 ORDER BY server_sequence DESC
+                 LIMIT ?
+            """
+            params.append(stable_key)
         params.append(limit)
         result = self.execute(sql, tuple(params))
         return [_envelope_from_row(row) for row in result.rows]

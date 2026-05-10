@@ -14,6 +14,7 @@ from .adapters import (
     AdapterConflict,
     AdapterDeferred,
     AdapterRejected,
+    SyncAdapterContext,
     SyncAdapterRegistry,
 )
 from .errors import (
@@ -644,9 +645,19 @@ class SyncV2Service:
                 payload_ciphertext=envelope.payload_ciphertext,
                 payload_clear=envelope.payload_clear,
             )
+        context = SyncAdapterContext(
+            prior_envelopes=self.store.list_envelopes_for_entity(
+                dataset.dataset_id,
+                envelope.domain,
+                entity_id=envelope.entity_id,
+                stable_key=envelope.stable_key,
+                limit=100,
+            )
+        )
         return self.adapters.get(envelope.domain).evaluate_envelope(
             envelope,
             dataset=dataset,
+            context=context,
         )
 
     def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:

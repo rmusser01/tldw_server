@@ -51,7 +51,6 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncPushResponse,
     SyncRestoreManifestResponse,
     SyncV2Envelope,
-    V1_SYNC_DOMAINS,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
@@ -65,8 +64,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.Sync_Client import SYNC_BATCH_SIZE
-from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
-from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaCompatibilityAdapter
+from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.domain_adapters import (
+    ChatDomainAdapter,
+    MediaCompatibilityAdapter,
+    NotesDomainAdapter,
+    SourceCacheAdapter,
+    WorkspacesDomainAdapter,
+)
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -169,13 +174,15 @@ def _sync_user_id(user: User) -> str:
 
 
 def _default_sync_v2_registry() -> SyncAdapterRegistry:
-    registry = SyncAdapterRegistry()
-    for domain in V1_SYNC_DOMAINS:
-        if domain == "media":
-            registry.register(MediaCompatibilityAdapter())
-        else:
-            registry.register(StaticSyncAdapter(domain=domain, supported_adapter_versions={1}))
-    return registry
+    return SyncAdapterRegistry(
+        [
+            NotesDomainAdapter(),
+            ChatDomainAdapter(),
+            WorkspacesDomainAdapter(),
+            SourceCacheAdapter(),
+            MediaCompatibilityAdapter(),
+        ]
+    )
 
 
 def get_sync_v2_service(

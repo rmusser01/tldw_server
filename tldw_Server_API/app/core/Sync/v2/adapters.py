@@ -2,11 +2,11 @@ from __future__ import annotations
 
 """Sync v2 domain adapter contracts and registry."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .models import SyncDataset, SyncDomain, SyncEnvelopeCreate
+from .models import SyncDataset, SyncDomain, SyncEnvelope, SyncEnvelopeCreate
 
 KNOWN_SYNC_DOMAINS: frozenset[str] = frozenset(
     {"notes", "chat", "workspaces", "source_cache", "media"}
@@ -54,6 +54,13 @@ class AdapterDeferred:
 SyncAdapterOutcome = AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred
 
 
+@dataclass(frozen=True, slots=True)
+class SyncAdapterContext:
+    """Read-only Sync state provided to adapters during envelope evaluation."""
+
+    prior_envelopes: Sequence[SyncEnvelope] = field(default_factory=tuple)
+
+
 class SyncDomainAdapter(Protocol):
     """Protocol implemented by concrete Sync v2 domain adapters."""
 
@@ -65,6 +72,7 @@ class SyncDomainAdapter(Protocol):
         envelope: SyncEnvelopeCreate,
         *,
         dataset: SyncDataset,
+        context: SyncAdapterContext | None = None,
     ) -> SyncAdapterOutcome:
         """Validate an envelope before the service persists or conflicts it."""
 
@@ -82,9 +90,11 @@ class StaticSyncAdapter:
         envelope: SyncEnvelopeCreate,
         *,
         dataset: SyncDataset,
+        context: SyncAdapterContext | None = None,
     ) -> SyncAdapterOutcome:
         """Return a configured test outcome or accept the envelope."""
 
+        del context
         return self.outcomes.get(
             envelope.client_envelope_id,
             AdapterAccepted(client_envelope_id=envelope.client_envelope_id),
@@ -132,6 +142,7 @@ __all__ = [
     "AdapterRejected",
     "KNOWN_SYNC_DOMAINS",
     "StaticSyncAdapter",
+    "SyncAdapterContext",
     "SyncAdapterOutcome",
     "SyncAdapterRegistry",
     "SyncDomainAdapter",
