@@ -206,24 +206,30 @@ durable review row exists.
 
 ### Retention And Redaction Policy
 
-ACP session history is an authenticated operator drill-through surface, not a
-redacted transcript vault. The current release posture is:
+ACP session history has two supported read modes: authenticated full-fidelity
+operator drill-through for incident reconstruction, and explicit redacted views
+for support-safe sharing. The current release posture is:
 
 - Session metadata and normalized message text are persisted in
   `acp_sessions.db`; prompt and assistant raw payloads are also retained so
   session detail, event replay, artifacts, diagnostics, forking, and run-history
   inspection can reconstruct what happened.
 - `ACP_SESSION_TTL_SECONDS` and `ACP_MAX_SESSION_DURATION_SECONDS` close active
-  sessions through the ACP session cleanup task. They do not hard-delete session
-  rows, message transcripts, or artifact references.
+  sessions through the ACP session cleanup task. `ACP_SESSION_RETENTION_DAYS`
+  then hard-deletes closed/error sessions older than the retention window, with
+  message rows removed by the session table cascade. Active sessions are not
+  hard-deleted until duration limits have closed them.
 - `GET /api/v1/acp/sessions/{session_id}/detail` and
-  `GET /api/v1/acp/sessions/{session_id}/events` return the authenticated
-  session history, including stored message content and raw payload fields.
-  These endpoints are owner-scoped by session access checks, but they are not
-  redacted transcript views.
+  `GET /api/v1/acp/sessions/{session_id}/events` return full-fidelity
+  authenticated session history by default, including stored message content and
+  raw payload fields. Add `?redacted=true` for support-safe views that preserve
+  operational shape such as roles, timestamps, event order, and normalized reason
+  codes while replacing transcript content and raw payloads with `[redacted]`.
 - `/artifacts` returns artifact dictionaries emitted in session messages. The
-  server does not scrub arbitrary agent-provided artifact payloads, file paths,
-  or embedded content before returning them to an authorized caller.
+  default response is full fidelity for authorized operators. Add
+  `?redacted=true` to preserve useful artifact context such as IDs, types, and
+  non-sensitive metadata while scrubbing embedded content, secret-looking values,
+  and local filesystem paths.
 - `/diagnostics` normalizes failure reason codes and redacts diagnostic messages
   that look like API keys, bearer tokens, Slack bot tokens, or OpenAI-style
   secret keys. It also truncates long diagnostic text.
@@ -232,10 +238,9 @@ redacted transcript vault. The current release posture is:
   messages, content, command arguments, `cwd`, environment values, MCP server
   definitions, API keys, and authorization tokens. It also redacts strings with
   common secret markers and truncates long string values.
-- `ACP_AUDIT_RETENTION_DAYS` is parsed by ACP configuration and the audit DB
-  has a purge helper, but automatic audit-retention enforcement is not wired as
-  a release-certified scheduler. Do not claim automatic ACP audit deletion until
-  that wiring is implemented and verified.
+- `ACP_AUDIT_RETENTION_DAYS` is enforced by ACP retention maintenance at store
+  startup and by the periodic cleanup task. The maintenance pass flushes pending
+  audit events before purging old audit rows.
 - Workspace `env_vars` and runner environment configuration are operational
   configuration. They may be stored or forwarded as plaintext in orchestration
   metadata and process environment. Use external secret managers or host-level
@@ -245,23 +250,20 @@ Current policy classification:
 
 | Surface | Status | Release implication |
 | --- | --- | --- |
-| Session detail and event history | Partial | Owner-scoped drill-through is supported, but stored prompts, responses, raw payloads, and normalized messages are full-fidelity. Do not claim transcript redaction. |
-| Session artifacts | Partial | Authorized artifact drill-through is supported, but arbitrary agent-provided artifact payloads, file paths, and embedded content are not scrubbed before return. |
+| Session detail and event history | Compliant | Owner-scoped full-fidelity drill-through is supported by default; `?redacted=true` provides support-safe transcript/event views. |
+| Session artifacts | Compliant | Authorized full-fidelity artifact drill-through is supported by default; `?redacted=true` scrubs sensitive artifact payloads while preserving IDs, types, and safe metadata. |
 | Diagnostics | Compliant | Failure reason codes are normalized, diagnostic text is secret-pattern redacted and truncated, and release notes may claim sanitized diagnostics. |
 | Audit metadata | Compliant | Sensitive metadata keys, common secret markers, and long string values are sanitized before audit events are returned. |
-| Session TTL and max-duration cleanup | Partial | Active sessions are closed by configured duration limits, but session rows, message transcripts, and artifact references are not hard-deleted. |
-| Automatic audit retention enforcement | Blocked | `ACP_AUDIT_RETENTION_DAYS` and the purge helper exist, but no release-certified scheduler enforces automatic deletion. |
+| Session TTL and max-duration cleanup | Compliant | Active sessions are closed by configured duration limits; closed/error sessions older than `ACP_SESSION_RETENTION_DAYS` are hard-deleted with message cascade cleanup. |
+| Automatic audit retention enforcement | Compliant | `ACP_AUDIT_RETENTION_DAYS` is enforced by ACP retention maintenance at startup and during the periodic cleanup task. |
 | Workspace environment and runner env vars | Partial | Operational environment configuration can be stored or forwarded as plaintext; real secrets must come from host-level injection or an external secret manager. |
-| Redacted transcript and artifact views | Blocked | No separate redacted view exists for session transcripts or artifacts yet. |
+| Redacted transcript and artifact views | Compliant | Session detail, event, and artifact endpoints accept `?redacted=true` for support-safe output. |
 
 Release notes may claim authenticated ACP session drill-through, bounded run
-previews, sanitized audit metadata, and sanitized diagnostics. They must not
-claim automatic transcript redaction, artifact payload redaction, or hard-delete
-retention for ACP sessions until dedicated retention/redaction implementation
-work lands and is verified. Follow-up implementation is tracked by
-[#1512](https://github.com/rmusser01/tldw_server/issues/1512) for retention
-cleanup and [#1513](https://github.com/rmusser01/tldw_server/issues/1513) for
-redacted transcript/artifact views.
+previews, sanitized audit metadata, sanitized diagnostics, automatic ACP
+session/audit retention maintenance, and opt-in redacted session/event/artifact
+views. Do not claim that the default drill-through endpoints are redacted; they
+remain intentionally full fidelity for authorized operators.
 
 ### Frontend Setup And Diagnostics Surfaces
 
@@ -433,6 +435,10 @@ ACP_RUNNER_ARGS='["--flag","value"]'
 ACP_RUNNER_ENV='HOME=/abs/path,PYTHONUNBUFFERED=1'
 ACP_RUNNER_CWD=/abs/path/to/runner/dir
 ACP_RUNNER_STARTUP_TIMEOUT_MS=10000
+ACP_SESSION_TTL_SECONDS=86400
+ACP_MAX_SESSION_DURATION_SECONDS=14400
+ACP_SESSION_RETENTION_DAYS=30
+ACP_AUDIT_RETENTION_DAYS=30
 ```
 
 ### Workspace Roots And Session Environment
@@ -504,6 +510,8 @@ base_image = tldw/acp-agent:latest
 network_policy = allow_all
 agent_command = claude
 agent_args = ["code"]
+session_retention_days = 30
+audit_retention_days = 30
 ```
 
 `agent_command` must be the downstream coding agent executable (`claude`, `codex`, `opencode`, etc).

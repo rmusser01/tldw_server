@@ -283,6 +283,8 @@ class ACPSessionStore:
         self._max_concurrent_per_user: int = 5
         self._max_tokens_per_session: int = 1_000_000
         self._max_session_duration_seconds: int = 14400
+        self._session_retention_days: int = 30
+        self._audit_retention_days: int = 30
 
     def get_db(self) -> ACPSessionsDB:
         """Return the underlying database instance."""
@@ -387,6 +389,16 @@ class ACPSessionStore:
             max_session_duration_seconds=max_session_duration_seconds,
         )
 
+    def configure_retention(
+        self,
+        *,
+        session_retention_days: int = 30,
+        audit_retention_days: int = 30,
+    ) -> None:
+        """Set ACP hard-delete retention windows."""
+        self._session_retention_days = int(session_retention_days)
+        self._audit_retention_days = max(0, int(audit_retention_days))
+
     def start_cleanup_task(self) -> None:
         """Start background task to evict expired sessions."""
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -399,11 +411,11 @@ class ACPSessionStore:
             self._cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
-        """Periodically evict expired sessions."""
+        """Periodically evict expired sessions and enforce retention."""
         while True:
             try:
                 await asyncio.sleep(300)  # Check every 5 minutes
-                await self._evict_expired_sessions()
+                await self.run_retention_maintenance()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -413,6 +425,24 @@ class ACPSessionStore:
     async def _evict_expired_sessions(self) -> int:
         """Evict sessions past TTL or max duration. Returns count evicted."""
         return self._db.evict_expired_sessions()
+
+    async def run_retention_maintenance(self, *, audit_db: Any | None = None) -> dict[str, int]:
+        """Enforce ACP TTL and hard-delete retention policies."""
+        sessions_evicted = self._db.evict_expired_sessions()
+        sessions_purged = self._db.purge_retained_sessions(
+            retention_days=self._session_retention_days,
+        )
+        if audit_db is None:
+            from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
+
+            audit_db = get_acp_audit_db(retention_days=self._audit_retention_days)
+        audit_db.flush()
+        audit_events_purged = audit_db.purge_old_events()
+        return {
+            "sessions_evicted": int(sessions_evicted),
+            "sessions_purged": int(sessions_purged),
+            "audit_events_purged": int(audit_events_purged),
+        }
 
     async def check_session_quota(self, user_id: int) -> dict[str, Any] | None:
         """Check if user can create a new session. Returns None if ok, or error dict."""
@@ -929,6 +959,10 @@ async def get_acp_session_store() -> ACPSessionStore:
                         max_tokens_per_session=cfg.max_tokens_per_session,
                         max_session_duration_seconds=cfg.max_session_duration_seconds,
                     )
+                    store.configure_retention(
+                        session_retention_days=cfg.session_retention_days,
+                        audit_retention_days=cfg.audit_retention_days,
+                    )
                 except Exception as exc:
                     logger.warning("Failed to load ACP quota config, using defaults: {}", exc)
 
@@ -950,5 +984,9 @@ async def get_acp_session_store() -> ACPSessionStore:
                     logger.warning("Failed to wire agent registry/health monitor: {}", exc)
 
                 store.start_cleanup_task()
+                try:
+                    await store.run_retention_maintenance()
+                except Exception as exc:
+                    logger.warning("Failed to run ACP retention maintenance at startup: {}", exc)
                 _store = store
     return _store

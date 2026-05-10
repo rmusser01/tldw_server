@@ -121,6 +121,7 @@ def test_sandbox_config_new_fields(monkeypatch):
     assert cfg.max_concurrent_sessions_per_user == 5
     assert cfg.max_tokens_per_session == 1_000_000
     assert cfg.max_session_duration_seconds == 14400
+    assert cfg.session_retention_days == 30
     assert cfg.audit_retention_days == 30
     assert cfg.allowed_egress_hosts == []
 
@@ -129,12 +130,16 @@ def test_sandbox_config_custom_values(monkeypatch):
     """New sandbox config fields can be customized via env vars."""
     monkeypatch.setenv("ACP_SESSION_TTL_SECONDS", "3600")
     monkeypatch.setenv("ACP_MAX_CONCURRENT_SESSIONS_PER_USER", "10")
+    monkeypatch.setenv("ACP_SESSION_RETENTION_DAYS", "7")
+    monkeypatch.setenv("ACP_AUDIT_RETENTION_DAYS", "14")
     monkeypatch.setenv("ACP_SANDBOX_ALLOWED_EGRESS_HOSTS", "api.anthropic.com,api.openai.com")
 
     from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
     cfg = load_acp_sandbox_config()
     assert cfg.session_ttl_seconds == 3600
     assert cfg.max_concurrent_sessions_per_user == 10
+    assert cfg.session_retention_days == 7
+    assert cfg.audit_retention_days == 14
     assert cfg.allowed_egress_hosts == ["api.anthropic.com", "api.openai.com"]
 
 
