@@ -4,7 +4,7 @@ title: MCP Hub walkthrough remediation plan
 status: In Progress
 assignee: []
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 06:15'
+updated_date: '2026-05-10 06:19'
 labels:
   - mcp
   - webui
@@ -24,7 +24,7 @@ Plan and track the two-PR remediation program from the toy MCP server walkthroug
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A reviewed design spec exists under Docs/superpowers/specs for the two-PR remediation program.
+- [x] #1 A reviewed design spec exists under Docs/superpowers/specs for the two-PR remediation program.
 - [x] #2 The plan separates end-to-end blocker fixes from setup polish and diagnostics.
 - [x] #3 The plan includes backend, frontend, chat, readiness, error handling, and verification coverage.
 - [x] #4 Follow-up implementation tasks exist for both PR-sized phases.
@@ -34,14 +34,24 @@ Plan and track the two-PR remediation program from the toy MCP server walkthroug
 
 <!-- SECTION:NOTES:BEGIN -->
 Created two PR-sized child implementation tasks: TASK-223.1 for live discovery/chat/readiness blockers and TASK-223.2 for setup polish/diagnostics. Drafted approved design spec at Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md.
+
+Spec review loop passed on first review. Reviewer status: Approved. Advisory recommendations: resolve open implementation questions at planning start; make PR 2 setup isolation deliverable explicit as docs, tests, or both; keep E2E verification path relative to apps/tldw-frontend.
+
+No blocking spec-review issues found. Human review is the remaining process gate before transitioning to implementation-plan writing.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Design spec created, split into two PR-sized implementation tasks, reviewed by a spec-review subagent, and approved with no blocking issues. Bandit is not applicable because this task only added planning documents and Backlog task records.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
