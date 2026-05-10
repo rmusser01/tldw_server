@@ -119,7 +119,7 @@ Browser, interactive TUI, rich colored terminal output, shell completion install
 - Create: `tools/backlog-py/tests/test_inventory.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing inventory tests**
+- [x] **Step 1: Write failing inventory tests**
 
 Create `tools/backlog-py/tests/test_inventory.py`:
 
@@ -146,7 +146,7 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["cli:interactive-board"].classification == "interactive-deferred"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -157,7 +157,7 @@ python -m pytest tools/backlog-py/tests/test_inventory.py -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'backlog_py'`.
 
-- [ ] **Step 3: Create package skeleton**
+- [x] **Step 3: Create package skeleton**
 
 Create `tools/backlog-py/pyproject.toml`:
 
@@ -229,7 +229,7 @@ This package is experimental. Do not put it on PATH as `backlog` and do not use
 it to mutate the live repository until the cutover gates in the design spec pass.
 ```
 
-- [ ] **Step 4: Implement inventory model**
+- [x] **Step 4: Implement inventory model**
 
 Create `tools/backlog-py/src/backlog_py/compat/inventory.py`:
 
@@ -268,7 +268,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
     return CompatibilityInventory(items=items)
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -280,7 +280,7 @@ python -m pytest tools/backlog-py/tests/test_inventory.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
