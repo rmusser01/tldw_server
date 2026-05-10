@@ -308,6 +308,25 @@ def test_filter_branch_events_with_zero_limit_returns_no_events() -> None:
     assert warnings == []
 
 
+def test_filter_branch_events_missing_branch_warning_matches_public_schema() -> None:
+    filtered, warnings = filter_branch_events(
+        branch_id=999,
+        branches=_door_branches(),
+        events=[],
+    )
+
+    assert filtered == []
+    assert warnings == [
+        {
+            "code": "branch_not_found",
+            "severity": "warning",
+            "recoverable": False,
+            "message": "Branch was not found.",
+            "branch_id": 999,
+        }
+    ]
+
+
 def test_filter_branch_events_includes_descendant_branch_events() -> None:
     events = [
         _event(3, 3, "choice_selected", {"branch_node_id": 10}, 10),

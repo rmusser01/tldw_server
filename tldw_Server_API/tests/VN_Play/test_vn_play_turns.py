@@ -509,6 +509,80 @@ async def test_list_events_with_metadata_honors_after_sequence_and_limit(
 
 
 @pytest.mark.asyncio
+async def test_list_events_with_metadata_uses_tagged_branch_query(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    response = await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="story-branch-tagged-query",
+    )
+    branch_id = int(service.list_branches(session.id)[0]["id"])
+    branch_events = [
+        event for event in response.events if event["branch_node_id"] == branch_id
+    ]
+    original_branch_query = repo.list_events_for_branch_nodes
+    branch_query_calls: list[dict[str, Any]] = []
+
+    def blocked_full_history(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("branch-filtered event reads should use branch-node query")
+
+    def tracking_branch_query(
+        session_id: int,
+        branch_node_ids: Sequence[int],
+        *,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        branch_query_calls.append(
+            {
+                "session_id": session_id,
+                "branch_node_ids": list(branch_node_ids),
+                "after_sequence": after_sequence,
+                "limit": limit,
+            }
+        )
+        return original_branch_query(
+            session_id,
+            branch_node_ids,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
+    monkeypatch.setattr(repo, "list_events", blocked_full_history)
+    monkeypatch.setattr(repo, "list_events_for_branch_nodes", tracking_branch_query)
+
+    result = service.list_events_with_metadata(
+        session.id,
+        branch_id=branch_id,
+        after_sequence=int(branch_events[0]["sequence_number"]),
+        limit=2,
+    )
+
+    assert branch_query_calls == [
+        {
+            "session_id": session.id,
+            "branch_node_ids": [branch_id],
+            "after_sequence": int(branch_events[0]["sequence_number"]),
+            "limit": 2,
+        }
+    ]
+    assert result["warnings"] == []
+    assert [event["id"] for event in result["events"]] == [
+        event["id"] for event in branch_events[1:3]
+    ]
+
+
+@pytest.mark.asyncio
 async def test_story_completion_events_after_selected_branch_are_tagged(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -1204,6 +1278,113 @@ def test_branch_restore_target_failure_clears_active_restore_action(
         )
 
     assert service.get_session(session.id).active_session_action_id is None
+
+
+@pytest.mark.asyncio
+async def test_failed_restore_retry_preserves_terminal_error(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-failed-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+
+    def fail_restore_commit(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("simulated restore write failure")
+
+    monkeypatch.setattr(repo, "commit_session_restore_action", fail_restore_commit)
+
+    with pytest.raises(RuntimeError, match="simulated restore write failure"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=2,
+            idempotency_key="restore-failed-terminal",
+        )
+
+    failed_action = repo.get_session_action_by_key(
+        session_id=session.id,
+        owner_user_id=42,
+        idempotency_key="restore-failed-terminal",
+    )
+    assert failed_action is not None
+    assert failed_action["status"] == "failed"
+    assert failed_action["error"] == {
+        "code": "internal_error",
+        "error_type": "RuntimeError",
+    }
+
+    with pytest.raises(VNPlayConflictError, match="internal_error"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=2,
+            idempotency_key="restore-failed-terminal",
+        )
+
+    retried_action = repo.get_session_action(int(failed_action["id"]), owner_user_id=42)
+    assert retried_action["status"] == "failed"
+    assert retried_action["error"] == failed_action["error"]
+
+
+@pytest.mark.asyncio
+async def test_abandoned_restore_retry_preserves_terminal_error(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-abandoned-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+
+    with pytest.raises(VNPlayConflictError, match="stale_scene_version"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=1,
+            idempotency_key="restore-abandoned-terminal",
+        )
+
+    abandoned_action = repo.get_session_action_by_key(
+        session_id=session.id,
+        owner_user_id=42,
+        idempotency_key="restore-abandoned-terminal",
+    )
+    assert abandoned_action is not None
+    assert abandoned_action["status"] == "abandoned"
+    assert abandoned_action["error"] == {"code": "stale_scene_version"}
+
+    with pytest.raises(VNPlayConflictError, match="stale_scene_version"):
+        service.restore_branch(
+            session.id,
+            branch_id=int(branch["id"]),
+            client_scene_version=1,
+            idempotency_key="restore-abandoned-terminal",
+        )
+
+    retried_action = repo.get_session_action(int(abandoned_action["id"]), owner_user_id=42)
+    assert retried_action["status"] == "abandoned"
+    assert retried_action["error"] == abandoned_action["error"]
 
 
 @pytest.mark.asyncio

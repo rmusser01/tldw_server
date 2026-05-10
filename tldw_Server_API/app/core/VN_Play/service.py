@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
 from tldw_Server_API.app.core.VN_Play.branch_navigation import (
+    branch_filter_ids,
     build_branch_navigation,
     filter_branch_events,
 )
@@ -25,6 +26,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
     ERROR_CHOICE_NOT_ALLOWED,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_INTERNAL_ERROR,
     ERROR_INVALID_CHOICE_ID,
     ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_RETRY_LAST_TURN_NOT_FAILED,
@@ -611,6 +613,22 @@ class VNPlayService:
         if not any(int(branch["id"]) == branch_id for branch in branches):
             raise VNPlayNotFoundError(ERROR_BRANCH_NOT_FOUND)
 
+        branch_ids = branch_filter_ids(
+            branch_id=branch_id,
+            branches=branches,
+            include_descendants=include_descendants,
+        )
+        if self.repo.can_filter_branch_events_by_tags(session_id):
+            return {
+                "events": self.repo.list_events_for_branch_nodes(
+                    session_id,
+                    sorted(branch_ids),
+                    after_sequence=after_sequence,
+                    limit=limit,
+                ),
+                "warnings": [],
+            }
+
         events = self.repo.list_events(session_id)
         filtered_events, warnings = filter_branch_events(
             branch_id=branch_id,
@@ -716,6 +734,12 @@ class VNPlayService:
         idempotency_key: str,
         target: str = BRANCH_RESTORE_TARGET_LATEST,
     ) -> dict[str, Any]:
+        """Restore a story branch with idempotent session-action serialization.
+
+        Completed actions replay their stored response. Failed or abandoned
+        terminal actions return their persisted error code without mutating the
+        original action state.
+        """
         if not idempotency_key:
             raise VNPlayTurnError("idempotency_key_required")
         if target not in {BRANCH_RESTORE_TARGET_LATEST, BRANCH_RESTORE_TARGET_CHOICE_POINT}:
@@ -752,6 +776,7 @@ class VNPlayService:
         )
         if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
             return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
 
         self._validate_restore_can_start(
             session_id=session_id,
@@ -807,11 +832,12 @@ class VNPlayService:
                 error_code=str(exc),
             )
             raise
-        except Exception:
+        except Exception as exc:
             self._mark_session_action_failed(
                 session_id=session_id,
                 action_id=int(action["id"]),
-                error_code=SESSION_ACTION_STATUS_FAILED,
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
             )
             raise
         return response
@@ -823,6 +849,12 @@ class VNPlayService:
         *,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        """Restore a checkpoint through the shared idempotent restore pipeline.
+
+        The stored session action owns replay, active mutation locking, and
+        terminal failure semantics so duplicate client retries cannot fork
+        session state or overwrite prior failure diagnostics.
+        """
         if not idempotency_key:
             raise VNPlayTurnError("idempotency_key_required")
 
@@ -852,6 +884,7 @@ class VNPlayService:
         )
         if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
             return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
 
         self._validate_restore_can_start(
             session_id=session_id,
@@ -888,11 +921,12 @@ class VNPlayService:
                     replayed=False,
                 ),
             )
-        except Exception:
+        except Exception as exc:
             self._mark_session_action_failed(
                 session_id=session_id,
                 action_id=int(action["id"]),
-                error_code=SESSION_ACTION_STATUS_FAILED,
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
             )
             raise
         return response
@@ -936,6 +970,21 @@ class VNPlayService:
         replayed = dict(response_payload)
         replayed["replayed"] = True
         return replayed
+
+    def _raise_for_terminal_session_action(self, action: Mapping[str, Any]) -> None:
+        status = str(action.get("status"))
+        if status not in {
+            SESSION_ACTION_STATUS_FAILED,
+            SESSION_ACTION_STATUS_ABANDONED,
+        }:
+            return
+        error = action.get("error")
+        error_code = (
+            str(error["code"])
+            if isinstance(error, Mapping) and error.get("code")
+            else ERROR_RESTORE_ACTION_IN_PROGRESS
+        )
+        raise VNPlayConflictError(error_code)
 
     def _validate_restore_can_start(
         self,
@@ -1098,13 +1147,17 @@ class VNPlayService:
         session_id: int,
         action_id: int,
         error_code: str,
+        error_type: str | None = None,
     ) -> None:
+        error_payload = {"code": error_code}
+        if error_type:
+            error_payload["error_type"] = error_type
         self.repo.mark_session_action_terminal(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
             action_id=action_id,
             status=SESSION_ACTION_STATUS_FAILED,
-            error={"code": error_code},
+            error=error_payload,
         )
 
     def _response_for_existing_turn(

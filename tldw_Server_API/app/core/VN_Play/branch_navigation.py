@@ -119,7 +119,6 @@ def filter_branch_events(
         return [], [
             _warning(
                 ERROR_BRANCH_NOT_FOUND,
-                severity="error",
                 recoverable=False,
                 message="Branch was not found.",
                 branch_id=branch_id,
@@ -150,6 +149,22 @@ def filter_branch_events(
         if len(filtered) >= bounded_limit:
             break
     return filtered, warnings
+
+
+def branch_filter_ids(
+    *,
+    branch_id: int,
+    branches: Sequence[Mapping[str, Any]],
+    include_descendants: bool = False,
+) -> set[int]:
+    """Return branch ids covered by a direct or subtree branch-event filter."""
+    branch_index = _build_branch_index(branches)
+    if branch_id not in branch_index["by_id"]:
+        return set()
+    branch_ids = {branch_id}
+    if include_descendants:
+        branch_ids.update(_descendant_ids(branch_id, branch_index["parents"]))
+    return branch_ids
 
 
 def _build_branch_index(branches: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

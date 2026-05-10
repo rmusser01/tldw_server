@@ -141,6 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_vn_play_sessions_pack_id
     ON vn_play_sessions(vn_asset_pack_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_events_session_sequence
     ON vn_play_events(session_id, sequence_number);
+CREATE INDEX IF NOT EXISTS idx_vn_play_events_session_branch_sequence
+    ON vn_play_events(session_id, branch_node_id, sequence_number);
 CREATE INDEX IF NOT EXISTS idx_vn_play_events_owner_user_id
     ON vn_play_events(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_turn_requests_session
@@ -539,6 +541,81 @@ class VNPlayRepository:
             (session_id, after_sequence, after_sequence, limit),
         )
         return [_decode_event(row) for row in cursor.fetchall()]
+
+    def can_filter_branch_events_by_tags(self, session_id: int) -> bool:
+        """Return true when explicit branch tags can satisfy branch event filtering."""
+        self._ensure_schema_initialized()
+        first_tagged_cursor = self.db.execute_query(
+            """
+            SELECT MIN(sequence_number) AS first_tagged_sequence
+            FROM vn_play_events
+            WHERE session_id = ?
+              AND branch_node_id IS NOT NULL
+            """,
+            (session_id,),
+        )
+        first_tagged = first_tagged_cursor.fetchone()
+        first_tagged_sequence = (
+            first_tagged["first_tagged_sequence"]
+            if first_tagged is not None
+            else None
+        )
+        if first_tagged_sequence is None:
+            return False
+
+        untagged_cursor = self.db.execute_query(
+            """
+            SELECT 1
+            FROM vn_play_events
+            WHERE session_id = ?
+              AND branch_node_id IS NULL
+              AND sequence_number > ?
+            LIMIT 1
+            """,
+            (session_id, first_tagged_sequence),
+        )
+        return untagged_cursor.fetchone() is None
+
+    def list_events_for_branch_nodes(
+        self,
+        session_id: int,
+        branch_node_ids: Sequence[int],
+        *,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """List events for explicit branch ids using SQL-level filtering."""
+        self._ensure_schema_initialized()
+        normalized_branch_ids = sorted({int(branch_id) for branch_id in branch_node_ids})
+        if not normalized_branch_ids:
+            return []
+
+        events: list[dict[str, Any]] = []
+        for branch_node_id in normalized_branch_ids:
+            cursor = self.db.execute_query(
+                """
+                SELECT *
+                FROM vn_play_events
+                WHERE session_id = ?
+                  AND branch_node_id = ?
+                  AND (? IS NULL OR sequence_number > ?)
+                ORDER BY sequence_number ASC
+                LIMIT COALESCE(?, -1)
+                """,
+                (
+                    session_id,
+                    branch_node_id,
+                    after_sequence,
+                    after_sequence,
+                    limit,
+                ),
+            )
+            events.extend(_decode_event(row) for row in cursor.fetchall())
+
+        events.sort(key=lambda event: int(event["sequence_number"]))
+        if limit is None:
+            return events
+        return events[: max(0, limit)]
 
     def create_turn_request(
         self,
