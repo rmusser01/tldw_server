@@ -290,10 +290,14 @@ def test_visual_library_save_list_update_and_delete(persona_db: CharactersRAGDB)
         assert item["source_pack_id"] == pack["id"]
         assert item["source_available"] is True
         assert item["tags"] == ["research", "calm"]
+        assert "source_persona_name_snapshot" not in item
+        assert "source_pack_title_snapshot" not in item
 
         listed = client.get("/api/v1/persona/visual-library")
         assert listed.status_code == 200, listed.text
         assert [entry["id"] for entry in listed.json()["items"]] == [item["id"]]
+        assert "source_persona_name_snapshot" not in listed.json()["items"][0]
+        assert "source_pack_title_snapshot" not in listed.json()["items"][0]
 
         updated = client.patch(
             f"/api/v1/persona/visual-library/{item['id']}",

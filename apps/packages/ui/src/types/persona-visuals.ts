@@ -146,8 +146,6 @@ export interface PersonaVisualLibraryItem {
   tags: string[]
   source_persona_name?: string | null
   source_pack_title?: string | null
-  source_persona_name_snapshot?: string | null
-  source_pack_title_snapshot?: string | null
   source_pack_version?: number | null
   source_current_version?: number | null
   source_available: boolean

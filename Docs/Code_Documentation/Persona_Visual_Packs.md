@@ -48,8 +48,9 @@ changing the core pack format.
 
 The personal library is a user-scoped metadata layer over existing Persona
 Visual packs. A library item references a source persona and source pack owned by
-the same user, stores editable display metadata, and keeps source display
-snapshots so deleted or stale sources can still be shown and removed.
+the same user and stores only editable library metadata plus the source pack
+version observed at save time. V1 intentionally does not store source display
+snapshots.
 
 Saving a source pack to the library is idempotent for the same user, source
 persona, and source pack. It updates the library metadata without copying assets,
@@ -61,7 +62,9 @@ Listing derives source state from the live source rows:
    longer present.
 2. `source_changed` is true when the saved source pack version differs from the
    current source pack version.
-3. snapshot fields remain available for unavailable entries.
+3. live source display names come only from source rows that still resolve; if a
+   referenced persona or pack is unavailable, its corresponding display field is
+   null because V1 stores references only.
 
 Using a library item duplicates the referenced source pack to a target persona as
 a draft through the existing duplicate-to-persona service path. It does not

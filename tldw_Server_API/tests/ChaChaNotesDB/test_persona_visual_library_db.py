@@ -80,6 +80,12 @@ def test_migration_v45_to_latest_creates_persona_visual_library_table(db_path: P
     }
     assert "idx_persona_visual_library_items_user_time" in indexes
     assert "idx_persona_visual_library_items_live_source" in indexes
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info('persona_visual_library_items')").fetchall()
+    }
+    assert "source_persona_name_snapshot" not in columns
+    assert "source_pack_title_snapshot" not in columns
     migrated.close_connection()
 
 
@@ -129,8 +135,8 @@ def test_upsert_and_list_persona_visual_library_item_with_source_status(
     assert item["source_pack_id"] == pack["id"]
     assert item["source_persona_name"] == "Research Buddy"
     assert item["source_pack_title"] == "Warm desk assistant"
-    assert item["source_persona_name_snapshot"] == "Research Buddy"
-    assert item["source_pack_title_snapshot"] == "Warm desk assistant"
+    assert "source_persona_name_snapshot" not in item
+    assert "source_pack_title_snapshot" not in item
     assert item["source_pack_version"] == pack["version"]
     assert item["source_current_version"] == updated_pack["version"]
     assert item["source_changed"] is True
@@ -173,8 +179,6 @@ def test_upsert_persona_visual_library_item_recovers_from_duplicate_source_race(
                         "Concurrent helper",
                         None,
                         "[]",
-                        "Research Buddy",
-                        "Warm desk assistant",
                         int(pack["version"]),
                         "2026-05-09T00:00:00+00:00",
                         "2026-05-09T00:00:00+00:00",
@@ -233,7 +237,9 @@ def test_stale_source_library_item_lists_unavailable_and_remains_removable(
     assert listed[0]["id"] == item["id"]
     assert listed[0]["source_available"] is False
     assert listed[0]["source_persona_name"] == "Research Buddy"
-    assert listed[0]["source_pack_title"] == "Warm desk assistant"
+    assert listed[0]["source_pack_title"] is None
+    assert "source_persona_name_snapshot" not in listed[0]
+    assert "source_pack_title_snapshot" not in listed[0]
 
     assert db_instance.soft_delete_persona_visual_library_item(
         item_id=item["id"],

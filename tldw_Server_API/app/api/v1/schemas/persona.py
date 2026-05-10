@@ -236,8 +236,6 @@ class PersonaVisualLibraryItemResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     source_persona_name: str | None = None
     source_pack_title: str | None = None
-    source_persona_name_snapshot: str | None = None
-    source_pack_title_snapshot: str | None = None
     source_pack_version: int | None = None
     source_current_version: int | None = None
     source_available: bool = False

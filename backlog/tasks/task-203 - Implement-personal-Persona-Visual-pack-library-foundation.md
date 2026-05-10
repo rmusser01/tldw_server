@@ -4,7 +4,7 @@ title: Implement personal Persona Visual pack library foundation
 status: In Progress
 assignee: []
 created_date: '2026-05-09 23:41'
-updated_date: '2026-05-10 01:05'
+updated_date: '2026-05-10 01:37'
 labels:
   - persona
   - buddy
@@ -40,7 +40,9 @@ Implement GitHub issue #1468: a reference-backed, user-scoped personal library f
 <!-- SECTION:PLAN:BEGIN -->
 Implementation plan: Docs/superpowers/plans/2026-05-09-persona-visual-personal-library-implementation-plan.md
 
-Review-fix pass for PR #1482: add regressions for metadata-preserving re-save, library visibility/use when a persona has no local packs, forbidden error mapping, and duplicate-key recovery in library upsert; then patch the UI/backend/docs-tracking accordingly. Keep source display snapshots because they are stale-entry display metadata required for removability, not copied asset snapshots; verify and respond to that false-positive review thread. Verify ChaChaNotes_DB method delegation and respond to that false-positive review thread instead of duplicating delegated implementations.
+Review-fix pass for PR #1482: add regressions for metadata-preserving re-save, library visibility/use when a persona has no local packs, forbidden error mapping, and duplicate-key recovery in library upsert; then patch the UI/backend/docs-tracking accordingly. Verify ChaChaNotes_DB method delegation and respond to that false-positive review thread instead of duplicating delegated implementations.
+
+Snapshot compliance revision for PR #1482: add failing tests that assert the personal visual library V1 has no source display snapshot columns or API fields, then remove source_persona_name_snapshot and source_pack_title_snapshot from the database migration, DB upsert/row mapping, API schema, frontend types/UI fallbacks, and docs.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -59,6 +61,10 @@ Final verification for TASK-203: backend library/API suite 41 passed; existing p
 PR tracking: draft PR #1482 opened at https://github.com/rmusser01/tldw_server/pull/1482. Issue #1468 was updated with PR and verification link. The overarching #1449 tracker was updated with the active PR/workstream link in https://github.com/rmusser01/tldw_server/issues/1449#issuecomment-4414095201; its completion checklist should move only after PR #1482 merges.
 
 PR #1482 review-fix pass completed. Fixed metadata-preserving re-save in both WebUI and API by preserving omitted library metadata for existing source entries while still allowing explicit clears. Moved the Personal library panel outside selected-pack-only rendering and loaded duplicate/library targets without requiring a local pack, so empty target personas can use saved library items. Added forbidden-to-403 mapping, a module docstring, deterministic duplicate-key race recovery for library upsert, and a source lookup helper used by the save endpoint. Updated #1449 with active PR tracking. Verification after fixes: backend focused suite 43 passed; VisualPackEditor Vitest 20 passed; Bandit touched backend production files results []; git diff --check clean.
+
+Review feedback supersedes the prior snapshot false-positive response. PR Compliance ID 1 disallows snapshots in this V1 slice, so library items must remain reference-backed with no source display snapshot columns or API fields.
+
+Snapshot compliance review fix completed: removed source display snapshot columns and fields from the persona visual library migration, DB row mapping, API response schema, endpoint converter, frontend types, UI fallbacks, tests, and docs. Verification: backend persona visual library/API suite 43 passed; VisualPackEditor Vitest 20 passed; Bandit wrote /tmp/bandit_persona_visual_library_no_snapshots.json with no failures; git diff --check clean; grep for source_persona_name_snapshot/source_pack_title_snapshot over app UI docs returned no matches outside negative test assertions and task notes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -66,7 +72,7 @@ PR #1482 review-fix pass completed. Fixed metadata-preserving re-save in both We
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the personal Persona Visual pack library foundation for issue #1468. The backend adds a user-scoped reference-backed library table, DB helpers, service layer, and REST endpoints for save/list/update/delete/use. The WebUI adds typed service helpers plus a Personal library panel in VisualPackEditor for saving the selected pack, showing available/source-changed/unavailable states, editing/removing entries, and using entries as draft copies on target personas. Docs now describe V1 reference-backed behavior and non-goals. Verification covered focused backend suites, visual regressions, focused frontend Vitest, Bandit, and diff checks.
 
-Review follow-up addressed PR comments: metadata-preserving re-save now works in WebUI and API, empty target personas can use library items, upsert handles duplicate-key races idempotently, forbidden library errors map to 403, #1449 has active tracker linkage, and false-positive snapshot/delegation review threads were documented for response.
+Review follow-up addressed PR comments: metadata-preserving re-save now works in WebUI and API, empty target personas can use library items, upsert handles duplicate-key races idempotently, forbidden library errors map to 403, #1449 has active tracker linkage, ChaChaNotes_DB delegation was verified, and the personal library V1 no longer stores or exposes source display snapshots.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

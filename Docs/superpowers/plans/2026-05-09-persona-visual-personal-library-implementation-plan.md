@@ -40,7 +40,8 @@
   Create a source persona and pack, save a library entry twice for `user-1`, and assert:
   - only one active entry exists
   - title/notes/tags are updated on the second save
-  - source persona/pack display metadata and snapshots are present
+  - live source persona/pack display metadata is derived from references
+  - no source display snapshot columns or response fields are present
   - `source_available` is true and `source_changed` reflects version drift
 
 - [x] **Step 3: Write stale-source and ownership tests**
@@ -71,8 +72,7 @@
   Bump `_CURRENT_SCHEMA_VERSION` to 46. Add `_MIGRATION_SQL_V45_TO_V46` and `_MIGRATION_SQL_V45_TO_V46_POSTGRES` with:
   - nullable `source_persona_id`
   - nullable `source_pack_id`
-  - `source_persona_name_snapshot`
-  - `source_pack_title_snapshot`
+  - no source display snapshot columns in this V1 slice
   - `ON DELETE SET NULL` FKs where supported
   - `(user_id, deleted, last_modified)` listing index
   - partial unique active live-source index for `(user_id, source_persona_id, source_pack_id)` where not deleted and refs are not null
@@ -101,7 +101,7 @@
   - `source_available`
   - `source_current_version`
   - `source_changed`
-  - live display fields with snapshot fallbacks
+  - live display fields from referenced source rows only
 
 - [x] **Step 5: Run DB test and verify GREEN**
 

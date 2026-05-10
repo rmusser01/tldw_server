@@ -369,13 +369,11 @@ const parseLibraryTagsInput = (value: string): string[] => {
 
 const getLibrarySourcePersonaName = (item: PersonaVisualLibraryItem): string =>
   item.source_persona_name ||
-  item.source_persona_name_snapshot ||
   item.source_persona_id ||
   "Unavailable persona"
 
 const getLibrarySourcePackTitle = (item: PersonaVisualLibraryItem): string =>
   item.source_pack_title ||
-  item.source_pack_title_snapshot ||
   item.source_pack_id ||
   "Unavailable pack"
 

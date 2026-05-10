@@ -993,8 +993,8 @@ class PersonaStateStore:
 
         live_persona_name = item.pop("live_source_persona_name", None)
         live_pack_title = item.pop("live_source_pack_title", None)
-        item["source_persona_name"] = live_persona_name or item.get("source_persona_name_snapshot")
-        item["source_pack_title"] = live_pack_title or item.get("source_pack_title_snapshot")
+        item["source_persona_name"] = live_persona_name
+        item["source_pack_title"] = live_pack_title
         return item
 
     def _normalize_persona_visual_library_tags(self, value: Any) -> list[str]:
@@ -2669,8 +2669,7 @@ class PersonaStateStore:
             def _update_existing_library_item(existing_item_id: str) -> None:
                 update_query = (
                     "UPDATE persona_visual_library_items "
-                    "SET title = ?, notes = ?, tags_json = ?, source_persona_name_snapshot = ?, "
-                    "source_pack_title_snapshot = ?, source_pack_version = ?, "
+                    "SET title = ?, notes = ?, tags_json = ?, source_pack_version = ?, "
                     "last_modified = ?, version = version + 1 "
                     "WHERE id = ? AND user_id = ? AND deleted = ?"
                 )
@@ -2678,8 +2677,6 @@ class PersonaStateStore:
                     title_value,
                     notes_value,
                     tags_json,
-                    source["source_persona_name"],
-                    source["source_pack_title"],
                     int(source["source_pack_version"]),
                     now,
                     existing_item_id,
@@ -2697,9 +2694,9 @@ class PersonaStateStore:
                 insert_query = (
                     "INSERT INTO persona_visual_library_items("
                     "id, user_id, source_persona_id, source_pack_id, title, notes, tags_json, "
-                    "source_persona_name_snapshot, source_pack_title_snapshot, source_pack_version, "
+                    "source_pack_version, "
                     "created_at, last_modified, deleted, version"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 insert_params = (
                     item_id_value,
@@ -2709,8 +2706,6 @@ class PersonaStateStore:
                     title_value,
                     notes_value,
                     tags_json,
-                    source["source_persona_name"],
-                    source["source_pack_title"],
                     int(source["source_pack_version"]),
                     now,
                     now,

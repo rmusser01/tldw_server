@@ -2068,8 +2068,6 @@ def _persona_visual_library_item_to_response(item: dict[str, Any]) -> PersonaVis
         tags=[str(tag) for tag in list(item.get("tags") or [])],
         source_persona_name=item.get("source_persona_name"),
         source_pack_title=item.get("source_pack_title"),
-        source_persona_name_snapshot=item.get("source_persona_name_snapshot"),
-        source_pack_title_snapshot=item.get("source_pack_title_snapshot"),
         source_pack_version=item.get("source_pack_version"),
         source_current_version=item.get("source_current_version"),
         source_available=bool(item.get("source_available")),
