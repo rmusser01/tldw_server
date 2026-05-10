@@ -150,6 +150,96 @@ describe("buildPersonaBuddyDiagnostics", () => {
     )
   })
 
+  it("uses live voice reason codes for recovery-oriented diagnostics copy", () => {
+    const diagnostics = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: true, connecting: false, sessionId: "session-1" },
+      liveVoice: {
+        state: "idle",
+        recoveryMode: "none",
+        warning:
+          "Server VAD unavailable for this live session. Use Send now to commit heard speech manually.",
+        warningReasonCode: "voice_manual_mode_required",
+        manualModeRequired: true
+      },
+      wake: { armed: false, detectorState: "idle" },
+      visual: { packLoadStatus: "loaded", diagnostic: null }
+    })
+
+    expect(diagnostics.state).toBe("degraded")
+    expect(diagnostics.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Live voice",
+          value: "Manual commit required",
+          state: "degraded",
+          detail: expect.stringMatching(/manual controls remain available/i)
+        })
+      ])
+    )
+  })
+
+  it("uses wake reason codes without treating disabled wake as broken Persona Live", () => {
+    const permissionNeeded = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: true, connecting: false, sessionId: "session-1" },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: {
+        armed: true,
+        detectorState: "error",
+        warning: "Microphone permission is blocked.",
+        warningReasonCode: "wake_detector_permission_denied"
+      },
+      visual: { packLoadStatus: "loaded", diagnostic: null }
+    })
+
+    expect(permissionNeeded.state).toBe("degraded")
+    expect(permissionNeeded.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Wake",
+          value: "Permission needed",
+          state: "degraded",
+          detail: expect.stringMatching(/manual controls remain available/i)
+        })
+      ])
+    )
+
+    const notConfigured = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: true, connecting: false, sessionId: "session-1" },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: {
+        armed: false,
+        detectorState: "idle",
+        warning: "Add a persona trigger phrase before arming wake listening.",
+        warningReasonCode: "wake_not_configured"
+      },
+      visual: { packLoadStatus: "loaded", diagnostic: null }
+    })
+
+    expect(notConfigured.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Wake",
+          value: "Not configured",
+          state: "healthy",
+          detail: expect.stringMatching(/manual controls remain available/i)
+        })
+      ])
+    )
+    expect(notConfigured.state).toBe("healthy")
+  })
+
   it("does not mark intentionally dormant Buddy summaries as degraded", () => {
     const diagnostics = buildPersonaBuddyDiagnostics({
       selectedPersona: { id: "persona-1", name: "Ada" },

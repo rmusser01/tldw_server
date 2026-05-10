@@ -24,6 +24,30 @@ export type PersonaLiveVoiceState =
 
 export type PersonaLiveVoiceRecoveryMode = "none" | "listening_stuck" | "thinking_stuck"
 export type PersonaLiveVadPreset = "conservative" | "balanced" | "fast" | "custom"
+export type PersonaLiveVoiceWarningReasonCode =
+  | "barge_in_disabled"
+  | "live_voice_disconnected"
+  | "server_stt_unavailable"
+  | "voice_capture_error"
+  | "voice_no_transcript"
+  | "voice_manual_mode_required"
+  | "voice_tts_unavailable_text_only"
+  | "voice_commit_ignored_already_committed"
+  | "voice_trigger_not_heard"
+  | "voice_empty_command_after_trigger"
+
+export type PersonaWakeWarningReasonCode =
+  | "wake_not_configured"
+  | "wake_detector_unavailable"
+  | "wake_detector_permission_denied"
+  | "wake_detector_error"
+  | "wake_activation_disconnected"
+  | "wake_activation_send_failed"
+  | "wake_activation_rejected_not_saved_in_profile"
+  | "wake_activation_rejected_missing_from_runtime_config"
+  | "wake_activation_rejected_phrase_not_configured"
+  | "wake_activation_rejected"
+
 type PersonaWakeStopReason =
   | "disarmed"
   | "route_leave"
@@ -115,6 +139,12 @@ const WAKE_REJECTION_MESSAGES: Record<string, string> = {
     "session. Check the selected persona's saved trigger phrases."
 }
 
+const WAKE_REJECTION_REASON_CODES: Record<string, PersonaWakeWarningReasonCode> = {
+  not_saved_in_profile: "wake_activation_rejected_not_saved_in_profile",
+  missing_from_runtime_config: "wake_activation_rejected_missing_from_runtime_config",
+  phrase_not_configured: "wake_activation_rejected_phrase_not_configured"
+}
+
 const formatWakeActivationRejectedMessage = (
   payload: PersonaLiveVoicePayload
 ): string => {
@@ -123,6 +153,23 @@ const formatWakeActivationRejectedMessage = (
     WAKE_REJECTION_MESSAGES[reason] ||
     String(payload?.message || "Wake activation was rejected.")
   )
+}
+
+const getWakeActivationRejectedReasonCode = (
+  payload: PersonaLiveVoicePayload
+): PersonaWakeWarningReasonCode => {
+  const reason = String(payload?.wake_rejection_reason || "").trim()
+  return WAKE_REJECTION_REASON_CODES[reason] || "wake_activation_rejected"
+}
+
+const getWakeDetectorErrorReasonCode = (
+  code: string | null | undefined
+): PersonaWakeWarningReasonCode => {
+  const normalized = String(code || "").trim().toLowerCase()
+  if (normalized === "not-allowed" || normalized === "service-not-allowed") {
+    return "wake_detector_permission_denied"
+  }
+  return "wake_detector_error"
 }
 
 export const usePersonaLiveVoiceController = ({
@@ -140,6 +187,8 @@ export const usePersonaLiveVoiceController = ({
   const [lastCommittedText, setLastCommittedText] = React.useState("")
   const [activeToolStatus, setActiveToolStatus] = React.useState("")
   const [warning, setWarning] = React.useState<string | null>(null)
+  const [warningReasonCode, setWarningReasonCode] =
+    React.useState<PersonaLiveVoiceWarningReasonCode | null>(null)
   const [manualModeRequired, setManualModeRequired] = React.useState(false)
   const [textOnlyDueToTtsFailure, setTextOnlyDueToTtsFailure] = React.useState(false)
   const [sessionAutoResume, setSessionAutoResume] = React.useState(resolvedDefaults.autoResume)
@@ -177,6 +226,8 @@ export const usePersonaLiveVoiceController = ({
   const [wakeDetectorState, setWakeDetectorState] =
     React.useState<WakeDetectorState>("idle")
   const [wakeWarning, setWakeWarning] = React.useState<string | null>(null)
+  const [wakeWarningReasonCode, setWakeWarningReasonCode] =
+    React.useState<PersonaWakeWarningReasonCode | null>(null)
   const [sessionWakeBehavior, setSessionWakeBehavior] =
     React.useState<PersonaWakeBehavior>(resolvedDefaults.wakeBehavior)
 
@@ -264,11 +315,33 @@ export const usePersonaLiveVoiceController = ({
     setMinUtteranceSecs(next.minUtteranceSecs)
   }, [])
 
+  const setVoiceWarning = React.useCallback(
+    (
+      message: string | null,
+      reasonCode: PersonaLiveVoiceWarningReasonCode | null = null
+    ) => {
+      setWarning(message)
+      setWarningReasonCode(message ? reasonCode : null)
+    },
+    []
+  )
+
+  const setWakeRecoveryWarning = React.useCallback(
+    (
+      message: string | null,
+      reasonCode: PersonaWakeWarningReasonCode | null = null
+    ) => {
+      setWakeWarning(message)
+      setWakeWarningReasonCode(message ? reasonCode : null)
+    },
+    []
+  )
+
   const clearTransientWarning = React.useCallback(() => {
     if (textOnlyDueToTtsFailureRef.current) return
     if (manualModeRequiredRef.current) return
-    setWarning(null)
-  }, [])
+    setVoiceWarning(null)
+  }, [setVoiceWarning])
 
   const clearAwaitingTtsTimeout = React.useCallback(() => {
     if (awaitingTtsTimeoutRef.current != null && typeof window !== "undefined") {
@@ -309,9 +382,9 @@ export const usePersonaLiveVoiceController = ({
       error instanceof Error
         ? error.message
         : "Live voice capture failed. Check microphone permissions and audio setup."
-    setWarning(message)
+    setVoiceWarning(message, "voice_capture_error")
     setState("error")
-  }, [])
+  }, [setVoiceWarning])
 
   const {
     start: audioStart,
@@ -343,14 +416,20 @@ export const usePersonaLiveVoiceController = ({
   const sendVoiceCommit = React.useCallback(
     (transcript: string, source = "persona_live_voice_manual") => {
       if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) {
-        setWarning("Live voice is disconnected. Reconnect Persona Garden to send spoken commands.")
+        setVoiceWarning(
+          "Live voice is disconnected. Reconnect Persona Garden to send spoken commands.",
+          "live_voice_disconnected"
+        )
         setState("error")
         return
       }
 
       const normalizedTranscript = String(transcript || "").trim()
       if (!normalizedTranscript) {
-        setWarning("No speech transcript was captured for that live turn.")
+        setVoiceWarning(
+          "No speech transcript was captured for that live turn.",
+          "voice_no_transcript"
+        )
         setState("idle")
         return
       }
@@ -371,13 +450,24 @@ export const usePersonaLiveVoiceController = ({
         handleVoiceError(error)
       }
     },
-    [armThinkingRecovery, clearTransientWarning, connected, handleVoiceError, sessionId, ws]
+    [
+      armThinkingRecovery,
+      clearTransientWarning,
+      connected,
+      handleVoiceError,
+      sessionId,
+      setVoiceWarning,
+      ws
+    ]
   )
 
   const sendWakeActivation = React.useCallback(
     (event: WakeDetectedEvent): boolean => {
       if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) {
-        setWakeWarning("Wake phrase heard, but Persona Live is not connected.")
+        setWakeRecoveryWarning(
+          "Wake phrase heard, but Persona Live is not connected.",
+          "wake_activation_disconnected"
+        )
         return false
       }
 
@@ -393,11 +483,14 @@ export const usePersonaLiveVoiceController = ({
         )
         return true
       } catch {
-        setWakeWarning("Wake phrase heard, but activation could not be sent.")
+        setWakeRecoveryWarning(
+          "Wake phrase heard, but activation could not be sent.",
+          "wake_activation_send_failed"
+        )
         return false
       }
     },
-    [connected, sessionId, ws]
+    [connected, sessionId, setWakeRecoveryWarning, ws]
   )
 
   const sendWakeDeactivation = React.useCallback(
@@ -439,12 +532,18 @@ export const usePersonaLiveVoiceController = ({
 
   const startMicCapture = React.useCallback(async () => {
     if (!canUseServerStt) {
-      setWarning("This tldw connection does not expose server speech transcription.")
+      setVoiceWarning(
+        "This tldw connection does not expose server speech transcription.",
+        "server_stt_unavailable"
+      )
       setState("error")
       return false
     }
     if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) {
-      setWarning("Connect Persona Garden before starting live voice.")
+      setVoiceWarning(
+        "Connect Persona Garden before starting live voice.",
+        "live_voice_disconnected"
+      )
       setState("error")
       return false
     }
@@ -476,6 +575,7 @@ export const usePersonaLiveVoiceController = ({
     liveVoiceSourceReady,
     sessionId,
     startMicStream,
+    setVoiceWarning,
     ws
   ])
 
@@ -569,10 +669,16 @@ export const usePersonaLiveVoiceController = ({
     setLastCommittedText("")
     setActiveToolStatus("")
     if (!manualModeRequiredRef.current && !textOnlyDueToTtsFailureRef.current) {
-      setWarning(null)
+      setVoiceWarning(null)
     }
     setState("idle")
-  }, [clearListeningRecoveryTimeout, clearThinkingRecovery, micActive, stopMicStream])
+  }, [
+    clearListeningRecoveryTimeout,
+    clearThinkingRecovery,
+    micActive,
+    setVoiceWarning,
+    stopMicStream
+  ])
 
   const keepListening = React.useCallback(() => {
     clearListeningRecoveryTimeout()
@@ -651,18 +757,24 @@ export const usePersonaLiveVoiceController = ({
   const startListening = React.useCallback(async () => {
     if (state === "speaking") {
       if (!sessionBargeIn) {
-        setWarning("Barge-in is off for this live session.")
+        setVoiceWarning("Barge-in is off for this live session.", "barge_in_disabled")
         return
       }
       stopCurrentPlayback()
     }
     if (!canUseServerStt) {
-      setWarning("This tldw connection does not expose server speech transcription.")
+      setVoiceWarning(
+        "This tldw connection does not expose server speech transcription.",
+        "server_stt_unavailable"
+      )
       setState("error")
       return
     }
     if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) {
-      setWarning("Connect Persona Garden before starting live voice.")
+      setVoiceWarning(
+        "Connect Persona Garden before starting live voice.",
+        "live_voice_disconnected"
+      )
       setState("error")
       return
     }
@@ -693,6 +805,7 @@ export const usePersonaLiveVoiceController = ({
     startMicCapture,
     stopCurrentPlayback,
     suspendWakeDetectorForLiveCapture,
+    setVoiceWarning,
     ws
   ])
 
@@ -703,7 +816,10 @@ export const usePersonaLiveVoiceController = ({
       .map((phrase) => String(phrase || "").trim())
       .filter(Boolean)
     if (phrases.length === 0) {
-      setWakeWarning("Add a persona trigger phrase before arming wake listening.")
+      setWakeRecoveryWarning(
+        "Add a persona trigger phrase before arming wake listening.",
+        "wake_not_configured"
+      )
       return
     }
 
@@ -714,7 +830,7 @@ export const usePersonaLiveVoiceController = ({
     wakeActiveRef.current = false
     setWakeArmed(true)
     if (!options.preserveWarning) {
-      setWakeWarning(null)
+      setWakeRecoveryWarning(null)
     }
     setWakeDetectorState("starting")
 
@@ -729,7 +845,10 @@ export const usePersonaLiveVoiceController = ({
       wakeActiveRef.current = false
       setWakeArmed(false)
       setWakeDetectorState("unavailable")
-      setWakeWarning("Wake listening is unavailable in this browser context.")
+      setWakeRecoveryWarning(
+        "Wake listening is unavailable in this browser context.",
+        "wake_detector_unavailable"
+      )
       return
     }
 
@@ -746,7 +865,11 @@ export const usePersonaLiveVoiceController = ({
         phrases,
         locale: resolvedDefaults.sttLanguage,
         onStateChange: setWakeDetectorState,
-        onError: (error) => setWakeWarning(error.message),
+        onError: (error) =>
+          setWakeRecoveryWarning(
+            error.message,
+            getWakeDetectorErrorReasonCode(error.code)
+          ),
         onWake: (event) => {
           if (!isCurrentStart() || wakeDetectorRef.current !== detector) return
           if (wakeActiveRef.current) return
@@ -776,13 +899,15 @@ export const usePersonaLiveVoiceController = ({
       wakeDetectorRef.current = null
       setWakeArmed(false)
       setWakeDetectorState("error")
-      setWakeWarning(
-        error instanceof Error ? error.message : "Wake listening could not start."
+      setWakeRecoveryWarning(
+        error instanceof Error ? error.message : "Wake listening could not start.",
+        "wake_detector_error"
       )
     }
   }, [
     resolvedDefaults.sttLanguage,
     sendWakeActivation,
+    setWakeRecoveryWarning,
     sessionWakeBehavior,
     startListening,
     wakeDetectorFactory,
@@ -850,7 +975,10 @@ export const usePersonaLiveVoiceController = ({
       if (!browserSpeechSupported()) {
         textOnlyDueToTtsFailureRef.current = true
         setTextOnlyDueToTtsFailure(true)
-        setWarning("Browser speech playback is unavailable. Continuing in text-only mode.")
+        setVoiceWarning(
+          "Browser speech playback is unavailable. Continuing in text-only mode.",
+          "voice_tts_unavailable_text_only"
+        )
         finishVoiceTurn()
         return
       }
@@ -879,7 +1007,10 @@ export const usePersonaLiveVoiceController = ({
         browserUtteranceActiveRef.current = false
         textOnlyDueToTtsFailureRef.current = true
         setTextOnlyDueToTtsFailure(true)
-        setWarning("Browser speech playback failed. Continuing in text-only mode.")
+        setVoiceWarning(
+          "Browser speech playback failed. Continuing in text-only mode.",
+          "voice_tts_unavailable_text_only"
+        )
         finishVoiceTurn()
       }
       setState("speaking")
@@ -889,6 +1020,7 @@ export const usePersonaLiveVoiceController = ({
       finishVoiceTurn,
       resolvedDefaults.sttLanguage,
       resolvedDefaults.ttsVoice,
+      setVoiceWarning,
       stopBrowserSpeech
     ]
   )
@@ -906,8 +1038,8 @@ export const usePersonaLiveVoiceController = ({
     setManualModeRequired(false)
     textOnlyDueToTtsFailureRef.current = false
     setTextOnlyDueToTtsFailure(false)
-    setWarning(null)
-    setWakeWarning(null)
+    setVoiceWarning(null)
+    setWakeRecoveryWarning(null)
     setHeardText("")
     heardTranscriptRef.current = ""
     setLastCommittedText("")
@@ -941,6 +1073,8 @@ export const usePersonaLiveVoiceController = ({
     resolvedDefaults.turnStopSecs,
     resolvedDefaults.vadThreshold,
     sessionId,
+    setVoiceWarning,
+    setWakeRecoveryWarning,
     stopMicStream,
     stopCurrentPlayback
   ])
@@ -962,7 +1096,7 @@ export const usePersonaLiveVoiceController = ({
       setListeningRecoveryCount(0)
       setThinkingRecoveryCount(0)
       setActiveToolStatus("")
-      setWakeWarning(null)
+      setWakeRecoveryWarning(null)
       setListeningRecoveryRestartKey(0)
       setThinkingRecoveryArmed(false)
       setThinkingRecoveryRestartKey(0)
@@ -987,6 +1121,7 @@ export const usePersonaLiveVoiceController = ({
     resolvedDefaults.turnStopSecs,
     resolvedDefaults.vadThreshold,
     resolvedDefaults.wakeBehavior,
+    setWakeRecoveryWarning,
     stopMicStream,
     stopCurrentPlayback
   ])
@@ -1192,12 +1327,15 @@ export const usePersonaLiveVoiceController = ({
       if (eventType === "notice") {
         const reasonCode = String(payload?.reason_code || "").trim().toUpperCase()
         if (reasonCode === "WAKE_ACTIVATION_ACCEPTED") {
-          setWakeWarning(null)
+          setWakeRecoveryWarning(null)
           return
         }
         if (reasonCode === "WAKE_ACTIVATION_REJECTED") {
           wakeActiveRef.current = false
-          setWakeWarning(formatWakeActivationRejectedMessage(payload))
+          setWakeRecoveryWarning(
+            formatWakeActivationRejectedMessage(payload),
+            getWakeActivationRejectedReasonCode(payload)
+          )
           if (wakeArmedRef.current) {
             void startWakeListening({ preserveWarning: true })
           }
@@ -1225,8 +1363,9 @@ export const usePersonaLiveVoiceController = ({
           clearThinkingRecovery()
           textOnlyDueToTtsFailureRef.current = true
           setTextOnlyDueToTtsFailure(true)
-          setWarning(
-            String(payload?.message || "Live TTS is unavailable. Continuing in text-only mode.")
+          setVoiceWarning(
+            String(payload?.message || "Live TTS is unavailable. Continuing in text-only mode."),
+            "voice_tts_unavailable_text_only"
           )
           finishVoiceTurn()
           return
@@ -1234,11 +1373,12 @@ export const usePersonaLiveVoiceController = ({
         if (reasonCode === "VOICE_MANUAL_MODE_REQUIRED") {
           manualModeRequiredRef.current = true
           setManualModeRequired(true)
-          setWarning(
+          setVoiceWarning(
             String(
               payload?.message ||
                 "Server VAD unavailable for this live session. Use Send now to commit heard speech manually."
-            )
+            ),
+            "voice_manual_mode_required"
           )
           return
         }
@@ -1254,7 +1394,7 @@ export const usePersonaLiveVoiceController = ({
           }
           setActiveToolStatus("")
           if (!manualModeRequiredRef.current && !textOnlyDueToTtsFailureRef.current) {
-            setWarning(null)
+            setVoiceWarning(null)
           }
           setRecoveryMode("none")
           armThinkingRecovery()
@@ -1263,7 +1403,10 @@ export const usePersonaLiveVoiceController = ({
         }
         if (reasonCode === "VOICE_COMMIT_IGNORED_ALREADY_COMMITTED") {
           setActiveToolStatus("")
-          setWarning(String(payload?.message || "This utterance was already committed."))
+          setVoiceWarning(
+            String(payload?.message || "This utterance was already committed."),
+            "voice_commit_ignored_already_committed"
+          )
           setState("thinking")
           return
         }
@@ -1271,8 +1414,9 @@ export const usePersonaLiveVoiceController = ({
           setActiveToolStatus("")
           setHeardText("")
           heardTranscriptRef.current = ""
-          setWarning(
-            String(payload?.message || "No trigger phrase was heard, so the transcript was ignored.")
+          setVoiceWarning(
+            String(payload?.message || "No trigger phrase was heard, so the transcript was ignored."),
+            "voice_trigger_not_heard"
           )
           if (wakeArmedRef.current) {
             wakeActiveRef.current = false
@@ -1285,11 +1429,12 @@ export const usePersonaLiveVoiceController = ({
           setActiveToolStatus("")
           setHeardText("")
           heardTranscriptRef.current = ""
-          setWarning(
+          setVoiceWarning(
             String(
               payload?.message ||
                 "The trigger phrase was removed, but no spoken command remained."
-            )
+            ),
+            "voice_empty_command_after_trigger"
           )
           if (wakeArmedRef.current) {
             wakeActiveRef.current = false
@@ -1300,7 +1445,10 @@ export const usePersonaLiveVoiceController = ({
         }
         if (reasonCode === "TRANSCRIPT_REQUIRED") {
           setActiveToolStatus("")
-          setWarning("No speech transcript was captured for that live turn.")
+          setVoiceWarning(
+            "No speech transcript was captured for that live turn.",
+            "voice_no_transcript"
+          )
           setState(micActive ? "listening" : "idle")
         }
       }
@@ -1316,6 +1464,8 @@ export const usePersonaLiveVoiceController = ({
       micActive,
       playBrowserSpeech,
       activeToolStatus,
+      setVoiceWarning,
+      setWakeRecoveryWarning,
       startWakeListening,
       state,
       stopMicStream,
@@ -1345,9 +1495,11 @@ export const usePersonaLiveVoiceController = ({
     lastCommittedText,
     activeToolStatus,
     warning,
+    warningReasonCode,
     wakeArmed,
     wakeDetectorState,
     wakeWarning,
+    wakeWarningReasonCode,
     sessionWakeBehavior,
     wakeTriggerPhrases,
     manualModeRequired,

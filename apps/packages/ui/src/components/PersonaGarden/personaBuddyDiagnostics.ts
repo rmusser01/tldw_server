@@ -1,4 +1,8 @@
 import type { PersonaVisualDiagnostic } from "@/components/Common/PersonaBuddy/personaVisualDiagnostics"
+import type {
+  PersonaLiveVoiceWarningReasonCode,
+  PersonaWakeWarningReasonCode
+} from "@/hooks/usePersonaLiveVoiceController"
 
 export type PersonaBuddyDiagnosticState =
   | "healthy"
@@ -53,6 +57,7 @@ export type PersonaBuddyDiagnosticsInput = {
     state?: string | null
     recoveryMode?: string | null
     warning?: string | null
+    warningReasonCode?: PersonaLiveVoiceWarningReasonCode | null
     activeToolStatus?: string | null
     textOnlyDueToTtsFailure?: boolean
     manualModeRequired?: boolean
@@ -61,6 +66,7 @@ export type PersonaBuddyDiagnosticsInput = {
     armed?: boolean
     detectorState?: string | null
     warning?: string | null
+    warningReasonCode?: PersonaWakeWarningReasonCode | null
     triggerPhrases?: string[] | null
     behavior?: string | null
   } | null
@@ -242,6 +248,137 @@ const summarizeLiveSession = (
   }
 }
 
+const LIVE_VOICE_WARNING_DIAGNOSTICS: Record<
+  PersonaLiveVoiceWarningReasonCode,
+  {
+    value: string
+    state: PersonaBuddyDiagnosticState
+    detail: string
+  }
+> = {
+  barge_in_disabled: {
+    value: "Barge-in off",
+    state: "healthy",
+    detail: "Wait for speech playback to finish before starting the next voice turn."
+  },
+  live_voice_disconnected: {
+    value: "Reconnect needed",
+    state: "recovering",
+    detail: "Reconnect Persona Live to send spoken commands; text controls remain available."
+  },
+  server_stt_unavailable: {
+    value: "Speech input unavailable",
+    state: "degraded",
+    detail:
+      "Server speech transcription is unavailable. Text chat and manual controls remain available."
+  },
+  voice_capture_error: {
+    value: "Capture issue",
+    state: "degraded",
+    detail:
+      "Check microphone permissions or device selection; text and manual controls remain available."
+  },
+  voice_no_transcript: {
+    value: "No transcript captured",
+    state: "healthy",
+    detail: "Try speaking again or use text input; manual controls remain available."
+  },
+  voice_manual_mode_required: {
+    value: "Manual commit required",
+    state: "degraded",
+    detail:
+      "Server auto-commit is unavailable. Use Send now; manual controls remain available."
+  },
+  voice_tts_unavailable_text_only: {
+    value: "Text-only fallback",
+    state: "degraded",
+    detail:
+      "Speech playback is unavailable. Text responses and manual controls remain available."
+  },
+  voice_commit_ignored_already_committed: {
+    value: "Already sent",
+    state: "healthy",
+    detail: "The current utterance was already committed; continue with the next turn."
+  },
+  voice_trigger_not_heard: {
+    value: "Wake phrase required",
+    state: "healthy",
+    detail:
+      "The last transcript did not include a configured trigger phrase. Manual controls remain available."
+  },
+  voice_empty_command_after_trigger: {
+    value: "Command missing",
+    state: "healthy",
+    detail:
+      "The wake phrase was removed, but no command remained. Try again or use manual controls."
+  }
+}
+
+const WAKE_WARNING_DIAGNOSTICS: Record<
+  PersonaWakeWarningReasonCode,
+  {
+    value: string
+    state: PersonaBuddyDiagnosticState
+    detail: string
+  }
+> = {
+  wake_not_configured: {
+    value: "Not configured",
+    state: "healthy",
+    detail: "Add a saved persona trigger phrase to arm wake; manual controls remain available."
+  },
+  wake_detector_unavailable: {
+    value: "Browser unsupported",
+    state: "degraded",
+    detail:
+      "This browser context cannot run wake listening. Start and Send now controls remain available."
+  },
+  wake_detector_permission_denied: {
+    value: "Permission needed",
+    state: "degraded",
+    detail: "Allow microphone access for wake listening; manual controls remain available."
+  },
+  wake_detector_error: {
+    value: "Detector issue",
+    state: "degraded",
+    detail: "Wake listening hit a browser detector error; manual controls remain available."
+  },
+  wake_activation_disconnected: {
+    value: "Reconnect needed",
+    state: "recovering",
+    detail:
+      "Wake phrase was heard while Persona Live was disconnected. Manual controls remain available."
+  },
+  wake_activation_send_failed: {
+    value: "Activation send failed",
+    state: "recovering",
+    detail: "Wake remains armed when possible; manual controls remain available."
+  },
+  wake_activation_rejected_not_saved_in_profile: {
+    value: "Wake phrase rejected",
+    state: "degraded",
+    detail:
+      "The heard phrase is not saved on this persona. Save it before relying on wake listening."
+  },
+  wake_activation_rejected_missing_from_runtime_config: {
+    value: "Wake config stale",
+    state: "recovering",
+    detail:
+      "Reconnect Persona Live or save voice defaults again; manual controls remain available."
+  },
+  wake_activation_rejected_phrase_not_configured: {
+    value: "Wake phrase rejected",
+    state: "degraded",
+    detail:
+      "The phrase is not configured for this live session. Check the selected persona trigger phrases."
+  },
+  wake_activation_rejected: {
+    value: "Wake rejected",
+    state: "degraded",
+    detail: "Wake activation was rejected. Manual controls remain available."
+  }
+}
+
 const summarizeLiveVoice = (
   liveVoice: PersonaBuddyDiagnosticsInput["liveVoice"]
 ): PersonaBuddyDiagnosticRow => {
@@ -252,6 +389,17 @@ const summarizeLiveVoice = (
       value: "Recovering",
       state: "recovering",
       detail: titleCase(recoveryMode)
+    }
+  }
+
+  const reasonCode = liveVoice?.warningReasonCode || null
+  const mappedWarning = reasonCode ? LIVE_VOICE_WARNING_DIAGNOSTICS[reasonCode] : null
+  if (mappedWarning) {
+    return {
+      label: "Live voice",
+      value: mappedWarning.value,
+      state: mappedWarning.state,
+      detail: joinDetails([mappedWarning.detail, liveVoice?.warning])
     }
   }
 
@@ -280,6 +428,17 @@ const summarizeWake = (
   wake: PersonaBuddyDiagnosticsInput["wake"]
 ): PersonaBuddyDiagnosticRow => {
   const detectorState = String(wake?.detectorState || "idle").trim()
+  const reasonCode = wake?.warningReasonCode || null
+  const mappedWarning = reasonCode ? WAKE_WARNING_DIAGNOSTICS[reasonCode] : null
+  if (mappedWarning) {
+    return {
+      label: "Wake",
+      value: mappedWarning.value,
+      state: mappedWarning.state,
+      detail: joinDetails([mappedWarning.detail, wake?.warning])
+    }
+  }
+
   if (wake?.warning || detectorState === "unavailable" || detectorState === "error") {
     return {
       label: "Wake",

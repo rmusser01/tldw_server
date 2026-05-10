@@ -1189,6 +1189,7 @@ const SidepanelPersona = ({
       state: liveVoiceController.state,
       recoveryMode: liveVoiceController.recoveryMode,
       warning: liveVoiceController.warning,
+      warningReasonCode: liveVoiceController.warningReasonCode,
       activeToolStatus: liveVoiceController.activeToolStatus,
       textOnlyDueToTtsFailure: liveVoiceController.textOnlyDueToTtsFailure,
       manualModeRequired: liveVoiceController.manualModeRequired
@@ -1197,6 +1198,7 @@ const SidepanelPersona = ({
       armed: liveVoiceController.wakeArmed,
       detectorState: liveVoiceController.wakeDetectorState,
       warning: liveVoiceController.wakeWarning,
+      warningReasonCode: liveVoiceController.wakeWarningReasonCode,
       triggerPhrases: liveVoiceController.wakeTriggerPhrases,
       behavior: liveVoiceController.sessionWakeBehavior
     },
