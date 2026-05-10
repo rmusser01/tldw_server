@@ -17,6 +17,23 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.chats_module i
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.template_module import TemplateModule
 
 
+class _MinimalModule(BaseModule):
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict]:
+        return []
+
+    async def execute_tool(self, tool_name: str, arguments: dict, context=None):  # noqa: ANN001
+        return None
+
+
 @pytest.mark.asyncio
 async def test_write_tools_have_ingestion_or_management_category():
     modules = [
@@ -44,3 +61,35 @@ async def test_write_tools_have_ingestion_or_management_category():
         "Write-capable tools must set metadata.category to 'ingestion' or 'management':\n" +
         "\n".join(f"module={m}, tool={t}, category='{c or 'missing'}'" for m, t, c in violations)
     )
+
+
+def test_write_classification_conflicting_flags_prefers_write_capable():
+    module = _MinimalModule(ModuleConfig(name="minimal"))
+
+    assert module.is_write_tool_def(
+        {
+            "name": "read.report",
+            "metadata": {
+                "write_capable": False,
+                "is_write": True,
+                "mutates_state": False,
+                "category": "read",
+            },
+        }
+    ) is True
+
+
+def test_write_classification_all_false_flags_skip_write_category_fallback():
+    module = _MinimalModule(ModuleConfig(name="minimal"))
+
+    assert module.is_write_tool_def(
+        {
+            "name": "read.report",
+            "metadata": {
+                "write_capable": False,
+                "is_write": False,
+                "mutates_state": False,
+                "category": "management",
+            },
+        }
+    ) is False

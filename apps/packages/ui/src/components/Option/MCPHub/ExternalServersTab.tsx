@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Alert, Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
 import { QuestionCircleOutlined } from "@ant-design/icons"
+import { useQueryClient } from "@tanstack/react-query"
 
 import {
   clearExternalServerSlotSecret,
@@ -11,6 +12,8 @@ import {
   getExternalServerAuthTemplate,
   importExternalServer,
   listExternalServers,
+  describeExternalServerDiscoveryRefreshFailure,
+  refreshExternalServerDiscovery,
   setExternalServerSecret,
   setExternalServerSlotSecret,
   type McpHubDrillTarget,
@@ -27,6 +30,7 @@ import {
   getManagedExternalServers,
   getManagedExternalServerSlots
 } from "./policyHelpers"
+import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
 const DEFAULT_SLOT_SECRET_KIND = "bearer_token"
 const DEFAULT_SLOT_PRIVILEGE_CLASS = "read"
@@ -52,10 +56,16 @@ type ExternalServersTabProps = {
   onDrillHandled?: (requestId: number) => void
 }
 
+type RuntimeRefreshResult = { ok: true } | { ok: false; message: string }
+
+const getRuntimeRefreshFailureMessage = (result: RuntimeRefreshResult) =>
+  "message" in result ? result.message : ""
+
 export const ExternalServersTab = ({
   drillTarget = null,
   onDrillHandled
 }: ExternalServersTabProps) => {
+  const queryClient = useQueryClient()
   const handledDrillRequestRef = useRef<number | null>(null)
   const [servers, setServers] = useState<McpHubExternalServer[]>([])
   const [serversLoaded, setServersLoaded] = useState(false)
@@ -75,6 +85,8 @@ export const ExternalServersTab = ({
   const [enabledValue, setEnabledValue] = useState(true)
   const [configText, setConfigText] = useState("{}")
   const [serverSaving, setServerSaving] = useState(false)
+  const [runtimeRefreshCount, setRuntimeRefreshCount] = useState(0)
+  const runtimeRefreshing = runtimeRefreshCount > 0
   const [slotFormOpen, setSlotFormOpen] = useState(false)
   const [editingSlotName, setEditingSlotName] = useState<string | null>(null)
   const [slotNameValue, setSlotNameValue] = useState("")
@@ -152,6 +164,30 @@ export const ExternalServersTab = ({
     } finally {
       setLoading(false)
       setServersLoaded(true)
+    }
+  }
+
+  const refreshRuntimeDiscovery = async (
+    serverId?: string
+  ): Promise<RuntimeRefreshResult> => {
+    setRuntimeRefreshCount((count) => count + 1)
+    try {
+      const refreshResult = serverId
+        ? await refreshExternalServerDiscovery(serverId)
+        : await refreshExternalServerDiscovery()
+      await invalidateMcpRuntimeQueries(queryClient)
+      if (!refreshResult.ok) {
+        return {
+          ok: false,
+          message: describeExternalServerDiscoveryRefreshFailure(refreshResult)
+        }
+      }
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      return { ok: false, message: msg }
+    } finally {
+      setRuntimeRefreshCount((count) => Math.max(0, count - 1))
     }
   }
 
@@ -304,9 +340,16 @@ export const ExternalServersTab = ({
     setSuccessMessage(null)
     try {
       const imported = await importExternalServer(serverId)
+      const refreshResult = await refreshRuntimeDiscovery(imported.id)
       await loadServers()
       setActiveServerId(imported.id)
-      setSuccessMessage("Legacy server imported")
+      if (refreshResult.ok) {
+        setSuccessMessage("Legacy server imported and tools refreshed")
+      } else {
+        setSuccessMessage(
+          `Legacy server imported, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+        )
+      }
     } catch {
       setErrorMessage("Failed to import legacy external server.")
     } finally {
@@ -373,17 +416,28 @@ export const ExternalServersTab = ({
         owner_scope_type: ownerScopeType,
         enabled: enabledValue
       }
+      let refreshServerId: string | undefined
       if (editingServerId) {
         await updateExternalServer(editingServerId, payload)
+        refreshServerId = enabledValue ? editingServerId : undefined
       } else {
-        await createExternalServer({
+        const created = await createExternalServer({
           server_id: serverIdValue.trim(),
           ...payload
         })
+        refreshServerId = enabledValue ? created.id : undefined
       }
       resetServerForm()
+      const refreshResult = await refreshRuntimeDiscovery(refreshServerId)
       await loadServers()
-      setSuccessMessage(editingServerId ? "Server updated" : "Server created")
+      const action = editingServerId ? "updated" : "created"
+      if (refreshResult.ok) {
+        setSuccessMessage(`Server ${action} and tools refreshed`)
+      } else {
+        setSuccessMessage(
+          `Server ${action}, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+        )
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(editingServerId ? `Failed to update external server: ${msg}` : `Failed to create external server: ${msg}`)
@@ -404,8 +458,15 @@ export const ExternalServersTab = ({
         setSuccessMessage(null)
         try {
           await deleteExternalServer(server.id)
+          const refreshResult = await refreshRuntimeDiscovery()
           await loadServers()
-          setSuccessMessage("Server deleted")
+          if (refreshResult.ok) {
+            setSuccessMessage("Server deleted and tools refreshed")
+          } else {
+            setSuccessMessage(
+              `Server deleted, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+            )
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error"
           setErrorMessage(`Failed to delete external server: ${msg}`)
@@ -672,7 +733,7 @@ export const ExternalServersTab = ({
             </Checkbox>
 
             <Space>
-              <Button type="primary" onClick={handleSaveServer} loading={serverSaving}>
+              <Button type="primary" onClick={handleSaveServer} loading={serverSaving || runtimeRefreshing}>
                 {editingServerId ? "Update Server" : "Save Server"}
               </Button>
               <Button onClick={resetServerForm}>Cancel</Button>

@@ -156,6 +156,34 @@ describe("TldwChatService message sanitization", () => {
     ])
   })
 
+  it("forwards non-stream debug metadata to the lower-level client capture", async () => {
+    const service = new TldwChatService()
+    const chatDebugMetadata = {
+      model: "gpt-test",
+      toolChoice: "auto" as const,
+      toolOmissionReason: "mcp_unhealthy" as const,
+      toolCounts: {
+        discovered: 3,
+        executable: 2,
+        disabled: 0,
+        colliding: 0,
+        chatEnabled: 2
+      }
+    }
+
+    await service.sendMessage([{ role: "user", content: "hello there" }], {
+      model: "gpt-test",
+      chatDebugMetadata
+    })
+
+    expect(mocks.createChatCompletion.mock.calls[0][1]).toMatchObject({
+      debugMetadata: chatDebugMetadata
+    })
+    expect(getLastChatCompletionDebugSnapshot()?.metadata).toMatchObject(
+      chatDebugMetadata
+    )
+  })
+
   it("captures the last stream payload for debugging", async () => {
     const service = new TldwChatService()
     for await (const _ of service.streamMessage(
@@ -177,6 +205,39 @@ describe("TldwChatService message sanitization", () => {
     expect(snapshot?.request.messages).toEqual([
       { role: "user", content: "stream hello" }
     ])
+  })
+
+  it("forwards stream debug metadata to the lower-level client capture", async () => {
+    const service = new TldwChatService()
+    const chatDebugMetadata = {
+      model: "gpt-test",
+      toolChoice: "required" as const,
+      toolOmissionReason: "no_enabled_executable_tools" as const,
+      toolCounts: {
+        discovered: 1,
+        executable: 0,
+        disabled: 1,
+        colliding: 0,
+        chatEnabled: 0
+      }
+    }
+
+    for await (const _ of service.streamMessage(
+      [{ role: "user", content: "stream hello" }],
+      {
+        model: "gpt-test",
+        chatDebugMetadata
+      }
+    )) {
+      break
+    }
+
+    expect(mocks.streamChatCompletion.mock.calls[0][1]).toMatchObject({
+      debugMetadata: chatDebugMetadata
+    })
+    expect(getLastChatCompletionDebugSnapshot()?.metadata).toMatchObject(
+      chatDebugMetadata
+    )
   })
 
   it("includes bounded research context in non-stream requests", async () => {

@@ -18,18 +18,25 @@ const MAX_WAIT_MS = 15_000
 const RETRY_INTERVAL_MS = 2_000
 
 type GateState = "checking" | "ready" | "waiting" | "timeout"
+type ReadinessResult = { enterable: boolean }
 
-async function checkHealth(): Promise<boolean> {
+const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
+const ENTERABLE_HEALTH_STATUSES = new Set(["degraded", "healthy", "ok"])
+
+async function checkHealth(): Promise<ReadinessResult> {
   try {
     const res = await fetch(HEALTH_URL, {
       method: "GET",
       signal: AbortSignal.timeout(3000)
     })
-    if (!res.ok) return false
+    if (!ENTERABLE_HTTP_STATUSES.has(res.status)) {
+      return { enterable: false }
+    }
     const body = await res.json()
-    return body.status === "ok" || body.status === "healthy"
+    const status = typeof body?.status === "string" ? body.status : ""
+    return { enterable: ENTERABLE_HEALTH_STATUSES.has(status) }
   } catch {
-    return false
+    return { enterable: false }
   }
 }
 
@@ -53,10 +60,10 @@ export const ServerReadinessGate: React.FC<{
     const deadline = Date.now() + MAX_WAIT_MS
 
     const attempt = async () => {
-      const ok = await checkHealth()
+      const result = await checkHealth()
       if (cancelled) return
 
-      if (ok) {
+      if (result.enterable) {
         setGate("ready")
         return
       }

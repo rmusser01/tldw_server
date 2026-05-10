@@ -10,7 +10,10 @@ import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
-import { captureChatRequestDebugSnapshot } from "@/services/tldw/chat-request-debug"
+import {
+  captureChatRequestDebugSnapshot,
+  type ChatRequestDebugMetadata
+} from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { toTrimmedStringArray } from "@/services/tldw/client-utils"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
@@ -701,6 +704,15 @@ export interface ChatCompletionRequest {
   grammar_override?: string
   response_format?: { type: "json_object" | "text" }
   research_context?: ChatResearchContext
+}
+
+export type ChatCompletionRequestOptions = {
+  signal?: AbortSignal
+  debugMetadata?: ChatRequestDebugMetadata
+}
+
+export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
+  streamIdleTimeoutMs?: number
 }
 
 export interface ServerChatSummary {
@@ -2180,14 +2192,15 @@ export class TldwApiClientBase {
 
   async createChatCompletion(
     request: ChatCompletionRequest,
-    options?: { signal?: AbortSignal }
+    options?: ChatCompletionRequestOptions
   ): Promise<Response> {
     // Non-stream request via background
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "non-stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     const res = await bgRequest<Response>({
       path: '/api/v1/chat/completions',
@@ -2203,13 +2216,14 @@ export class TldwApiClientBase {
     return createJsonResponseLike(safeData, { status: 200 })
   }
 
-  async *streamChatCompletion(request: ChatCompletionRequest, options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }): AsyncGenerator<any, void, unknown> {
+  async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
     request.stream = true
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
       try {
