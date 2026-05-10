@@ -876,6 +876,51 @@ def test_pull_does_not_persist_empty_explicit_high_cursor(sync_service: SyncV2Se
     assert [envelope.client_envelope_id for envelope in later.envelopes] == ["env-1"]
 
 
+def test_pull_does_not_persist_visible_empty_explicit_cursor_over_echoes(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    first = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="remote-before-echo")],
+    )
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[
+            _envelope(
+                client_envelope_id="own-echo",
+                entity_id="note-own-echo",
+                stable_key="note:own-echo",
+                device_id="device-2",
+                payload_hash="sha256:own-echo",
+            )
+        ],
+    )
+
+    poisoned = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor=str(first.next_cursor),
+        include_own_changes=False,
+    )
+    later = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        include_own_changes=False,
+    )
+
+    assert poisoned.envelopes == []
+    assert [envelope.client_envelope_id for envelope in later.envelopes] == [
+        "remote-before-echo"
+    ]
+
+
 def test_pull_rejects_invalid_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
 
@@ -950,7 +995,6 @@ def test_pull_propagates_cursor_persistence_errors(
             user_id="user-1",
             dataset_id="dataset-1",
             device_id="device-2",
-            cursor="0",
             include_own_changes=True,
         )
 

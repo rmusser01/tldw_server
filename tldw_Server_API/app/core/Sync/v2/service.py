@@ -459,7 +459,7 @@ class SyncV2Service:
             if page
             else max((envelope.server_sequence for envelope in raw_envelopes), default=since_sequence)
         )
-        if raw_envelopes:
+        if cursor is None and raw_envelopes:
             self._update_cursors(dataset_id, device_id, selected_domains, next_sequence)
         return SyncPullResult(
             dataset_id=dataset_id,

@@ -4,7 +4,7 @@ title: Expose Sync v2 API endpoints
 status: Done
 assignee: []
 created_date: '2026-05-10 04:56'
-updated_date: '2026-05-10 05:49'
+updated_date: '2026-05-10 05:56'
 labels:
   - sync
   - api
@@ -55,6 +55,8 @@ Code-quality review fix pass: persisted submitted conflict resolution envelopes 
 Second quality re-review fix pass: SyncV2Service now requires registered, non-revoked user-owned devices for push, pull, conflict resolution attribution/resolution envelopes, and key recovery metadata. Conflict resolution now maps private resolution-envelope payload validation failures to SyncStoreError so endpoints return a safe client error instead of a generic 500. Added regression coverage for unregistered device rejection across device-scoped service paths and invalid private resolution envelope handling. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 83 passed.
 
 Final quality re-review fix pass: SyncV2Service no longer persists a device cursor for empty explicit-cursor pulls, preventing a registered sibling device ID from being advanced by an arbitrary high cursor without any server-observed envelopes. Added regression coverage that an empty high cursor does not poison the target device cursor and a later normal pull still receives pending envelopes. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 84 passed.
+
+Final cursor poisoning variant fix: explicit-cursor pulls are now stateless for server-side cursor storage. Server-side device cursors only advance when the service resolved the cursor from stored state, so a caller cannot use another registered device ID plus a high explicit cursor over echo-only raw envelopes to skip that device past pending visible envelopes. Added regression coverage for both raw-empty and visible-empty-over-echo explicit-cursor poisoning variants. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 85 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
