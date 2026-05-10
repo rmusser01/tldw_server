@@ -15,7 +15,7 @@ export interface StatePanelProps {
   title: React.ReactNode
   message?: React.ReactNode
   diagnostics?: StatePanelDiagnostic[]
-  primaryAction: StateAction
+  primaryAction?: StateAction
   secondaryActions?: StateAction[]
   className?: string
   children?: React.ReactNode
