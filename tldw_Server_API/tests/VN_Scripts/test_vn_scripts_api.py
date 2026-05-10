@@ -1,0 +1,454 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.vn_scripts import (
+    _resolve_accessible_audio_refs,
+    router as vn_scripts_router,
+)
+from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
+    VNAssetPackCreate,
+    VNAssetReviewRequest,
+    VNAssetSlotCreate,
+)
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import (
+    LOCAL_DEFAULT_POLICY_DEFINITION,
+    STORY_DEFAULT_GENERATION_DEFINITION,
+    VNProfileSnapshotRepository,
+    VNPolicyProfileStore,
+)
+from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def chacha_dbs(tmp_path) -> Iterator[dict[int, CharactersRAGDB]]:
+    databases = {
+        42: CharactersRAGDB(str(tmp_path / "user-42" / "ChaChaNotes.db"), client_id="vn-scripts-user-42"),
+        7: CharactersRAGDB(str(tmp_path / "user-7" / "ChaChaNotes.db"), client_id="vn-scripts-user-7"),
+    }
+    yield databases
+    for database in databases.values():
+        database.close_connection()
+
+
+@pytest.fixture
+def current_user() -> dict[str, Any]:
+    return {
+        "id": 42,
+        "username": "user-42",
+        "role": "user",
+        "roles": ["user"],
+        "permissions": [],
+        "is_admin": False,
+    }
+
+
+@pytest.fixture
+def authnz_pool(tmp_path) -> Iterator[DatabasePool]:
+    pool = DatabasePool(Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{tmp_path / 'authnz.db'}"))
+    yield pool
+    asyncio.run(pool.close())
+
+
+@pytest.fixture
+def client(
+    chacha_dbs: dict[int, CharactersRAGDB],
+    current_user: dict[str, Any],
+    authnz_pool: DatabasePool,
+) -> Iterator[TestClient]:
+    app = FastAPI()
+    app.include_router(vn_scripts_router, prefix="/api/v1/vn")
+
+    async def override_user() -> User:
+        return User(**current_user)
+
+    async def override_chacha_db() -> CharactersRAGDB:
+        return chacha_dbs[int(current_user["id"])]
+
+    async def override_db_pool() -> DatabasePool:
+        return authnz_pool
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+    app.dependency_overrides[get_db_pool] = override_db_pool
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def _create_asset_pack(chacha_db: CharactersRAGDB, *, owner_user_id: int = 42) -> tuple[int, str]:
+    character_id = chacha_db.add_character_card(
+        {
+            "name": "Mira",
+            "description": "A careful archivist.",
+            "personality": "Patient and exacting.",
+            "scenario": "Cataloging an orbital library.",
+        }
+    )
+    service = VNAssetPackService(chacha_db, owner_user_id=owner_user_id)
+    pack = service.create_pack(VNAssetPackCreate(title="Starter Pack", primary_character_id=character_id))
+    slot = service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(
+            asset_type="background",
+            slot_key="background.archive.default",
+            variant_count=1,
+        ),
+    )
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    item = repo.create_item(
+        pack_id=pack.id,
+        slot_id=slot.id,
+        variant_index=0,
+        generated_file_id=1001,
+        mime_type="image/png",
+    )
+    service.review_item(item["id"], VNAssetReviewRequest(review_status="approved"))
+    return pack.id, slot.slot_key
+
+
+def _program(asset_pack_id: int, *, slot_key: str | None = None) -> dict:
+    body = [{"op": "narrate", "text": "The archive door hums."}, {"op": "end"}]
+    if slot_key is not None:
+        body.insert(0, {"op": "set_background", "slot_key": slot_key})
+    return {
+        "schema_version": "vn_script_program.v1",
+        "title": "Archive Door",
+        "primary_asset_pack_id": asset_pack_id,
+        "entry_label": "start",
+        "variables": {},
+        "generation_defaults": {"profile_id": "story_default", "persist_model_outputs": True},
+        "labels": {"start": body},
+    }
+
+
+def _create_script(client: TestClient, *, asset_pack_id: int) -> int:
+    response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "description": "A short route.",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "local_default",
+            "generation_profile_id": "story_default",
+            "content_rating": "general",
+        },
+    )
+    assert response.status_code == 201
+    return int(response.json()["id"])
+
+
+def test_create_rejects_unknown_profiles(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "missing_policy",
+            "generation_profile_id": "story_default",
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["details"]["reason"] == "policy_profile_not_found"
+
+
+def test_create_accepts_admin_created_profile_rows(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    authnz_pool: DatabasePool,
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    async def seed_profiles() -> None:
+        store = VNPolicyProfileStore(authnz_pool)
+        await store.initialize()
+        await store.create_policy_profile(
+            profile_id="custom_local",
+            display_name="Custom Local",
+            description=None,
+            definition=LOCAL_DEFAULT_POLICY_DEFINITION,
+            created_by_user_id=42,
+        )
+        await store.create_generation_profile(
+            profile_id="custom_story",
+            display_name="Custom Story",
+            description=None,
+            definition=STORY_DEFAULT_GENERATION_DEFINITION,
+            created_by_user_id=42,
+        )
+
+    asyncio.run(seed_profiles())
+
+    response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "custom_local",
+            "generation_profile_id": "custom_story",
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["policy_profile_id"] == "custom_local"
+    assert response.json()["generation_profile_id"] == "custom_story"
+
+
+def test_draft_and_publish_use_custom_authnz_profile_versions(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    authnz_pool: DatabasePool,
+) -> None:
+    asset_pack_id, slot_key = _create_asset_pack(chacha_dbs[42])
+
+    async def seed_profiles() -> None:
+        store = VNPolicyProfileStore(authnz_pool)
+        await store.initialize()
+        await store.create_policy_profile(
+            profile_id="custom_local",
+            display_name="Custom Local",
+            description=None,
+            definition=LOCAL_DEFAULT_POLICY_DEFINITION,
+            created_by_user_id=42,
+        )
+        await store.update_policy_profile(
+            "custom_local",
+            display_name="Custom Local V2",
+            description=None,
+            definition=LOCAL_DEFAULT_POLICY_DEFINITION,
+            updated_by_user_id=42,
+        )
+        generation_definition = dict(STORY_DEFAULT_GENERATION_DEFINITION)
+        generation_definition["max_choices"] = 2
+        await store.create_generation_profile(
+            profile_id="custom_story",
+            display_name="Custom Story",
+            description=None,
+            definition=generation_definition,
+            created_by_user_id=42,
+        )
+        generation_definition["max_choices"] = 3
+        await store.update_generation_profile(
+            "custom_story",
+            display_name="Custom Story V2",
+            description=None,
+            definition=generation_definition,
+            updated_by_user_id=42,
+        )
+
+    asyncio.run(seed_profiles())
+    create_response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "custom_local",
+            "generation_profile_id": "custom_story",
+            "content_rating": "general",
+        },
+    )
+    script_id = int(create_response.json()["id"])
+    program = _program(asset_pack_id, slot_key=slot_key)
+    program["generation_defaults"]["profile_id"] = "custom_story"
+    save_response = client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": program},
+    )
+    publish_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "custom-v2",
+            "idempotency_key": "custom-publish-v2",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+    snapshots = VNProfileSnapshotRepository.initialized(chacha_dbs[42])
+
+    assert create_response.status_code == 201
+    assert save_response.status_code == 200
+    assert publish_response.status_code == 201
+    policy_snapshot = snapshots.get_profile_snapshot(publish_response.json()["policy_snapshot_id"], owner_user_id=42)
+    generation_snapshot = snapshots.get_profile_snapshot(
+        publish_response.json()["generation_profile_snapshot_id"],
+        owner_user_id=42,
+    )
+    assert policy_snapshot["profile_id"] == "custom_local"
+    assert policy_snapshot["profile_version"] == 2
+    assert generation_snapshot["profile_id"] == "custom_story"
+    assert generation_snapshot["profile_version"] == 2
+
+
+def test_script_crud_delete_and_owner_scoping(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    current_user: dict[str, Any],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    list_response = client.get("/api/v1/vn/vn-scripts/scripts?limit=20&offset=0")
+    patch_response = client.patch(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}",
+        json={"title": "Archive Door Revised", "status": "draft"},
+    )
+    get_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}")
+
+    current_user["id"] = 7
+    other_user_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}")
+    current_user["id"] = 42
+    delete_response = client.delete(f"/api/v1/vn/vn-scripts/scripts/{script_id}")
+    deleted_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}")
+
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["id"] == script_id
+    assert get_response.status_code == 200
+    assert patch_response.status_code == 200
+    assert patch_response.json()["title"] == "Archive Door Revised"
+    assert other_user_response.status_code == 404
+    assert delete_response.status_code == 204
+    assert deleted_response.status_code == 404
+
+
+def test_draft_save_validate_and_diagnostics(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    stale_response = client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 2, "draft": _program(asset_pack_id)},
+    )
+    save_response = client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+    get_draft_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft")
+    invalid_program = _program(asset_pack_id)
+    invalid_program["labels"]["start"][1] = {"op": "jump", "target": "missing"}
+    validate_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/validate",
+        json={"draft": invalid_program},
+    )
+    diagnostics_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/diagnostics")
+
+    assert stale_response.status_code == 409
+    assert stale_response.json()["detail"]["details"]["reason"] == "draft_revision_conflict"
+    assert save_response.status_code == 200
+    assert save_response.json()["revision"] == 1
+    assert get_draft_response.status_code == 200
+    assert get_draft_response.json()["revision"] == 1
+    assert validate_response.status_code == 200
+    assert validate_response.json()["valid"] is False
+    assert validate_response.json()["errors"][0]["code"] == "jump_target_missing"
+    assert diagnostics_response.status_code == 200
+    assert diagnostics_response.json()["revision"] == 1
+
+
+def test_publish_versions_manifest_snapshot_and_policy_evaluate(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, slot_key = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id, slot_key=slot_key)},
+    )
+
+    publish_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "v1",
+            "idempotency_key": "publish-v1",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+    replay_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "v1",
+            "idempotency_key": "publish-v1",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+    conflict_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "v1-conflict",
+            "idempotency_key": "publish-v1",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+
+    version_id = publish_response.json()["version_id"]
+    versions_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/versions")
+    version_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}")
+    manifest_response = client.get(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/manifest-snapshot"
+    )
+    policy_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/policy/evaluate",
+        json={"context": {"character_safety": {"metadata_status": "adult"}}},
+    )
+
+    assert publish_response.status_code == 201
+    assert replay_response.status_code == 200
+    assert replay_response.json() == publish_response.json()
+    assert conflict_response.status_code == 409
+    assert versions_response.status_code == 200
+    assert versions_response.json()["items"][0]["id"] == version_id
+    assert version_response.status_code == 200
+    assert manifest_response.status_code == 200
+    assert manifest_response.json()["manifest"]["assets"]["backgrounds"][0]["slot_key"] == slot_key
+    assert policy_response.status_code == 200
+    assert policy_response.json()["decision"] == "allow"
+
+
+@pytest.mark.anyio
+async def test_audio_ref_resolver_requires_generated_file_ownership_and_audio_mime() -> None:
+    class FakeFilesRepo:
+        async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
+            return [
+                {"id": 1, "user_id": 42, "mime_type": "audio/mpeg", "is_deleted": False},
+                {"id": 2, "user_id": 7, "mime_type": "audio/mpeg", "is_deleted": False},
+                {"id": 3, "user_id": 42, "mime_type": "image/png", "is_deleted": False},
+            ]
+
+    program = {
+        "media_refs": {
+            "valid": {"generated_file_id": 1},
+            "wrong_owner": {"generated_file_id": 2},
+            "wrong_type": {"generated_file_id": 3},
+            "missing": {"generated_file_id": 4},
+        }
+    }
+
+    resolved = await _resolve_accessible_audio_refs(program, files_repo=FakeFilesRepo(), owner_user_id=42)
+
+    assert resolved == {"valid": {"generated_file_id": 1, "mime_type": "audio/mpeg", "owner_user_id": 42}}

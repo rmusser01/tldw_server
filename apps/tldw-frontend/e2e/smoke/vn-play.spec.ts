@@ -32,11 +32,11 @@ test.describe('VN play smoke', () => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
     });
 
-    await page.route(/\/api\/v1\/vn-play(?:\/.*)?$/, async (route) => {
+    await page.route(/\/api\/v1\/vn\/vn-play(?:\/.*)?$/, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const method = request.method().toUpperCase();
-      const path = url.pathname.replace('/api/v1/vn-play', '');
+      const path = url.pathname.replace('/api/v1/vn/vn-play', '');
 
       if (method === 'GET' && path === '/setup-options') {
         await fulfillJson(route, 200, {

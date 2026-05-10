@@ -70,6 +70,11 @@ const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancel
 const IMPORT_PREVIEW_POLL_INTERVAL_MS = 1000;
 const IMPORT_PREVIEW_MAX_POLLS = 60;
 
+function createVNAssetIdempotencyKey(prefix: string): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+}
+
 function waitForImportPreviewPoll(): Promise<void> {
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, IMPORT_PREVIEW_POLL_INTERVAL_MS);
@@ -130,6 +135,7 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
         include_full_provenance: includeFullProvenance,
         strict: strictExport,
         warn_for_sharing: true,
+        idempotency_key: createVNAssetIdempotencyKey('vn-export'),
       });
       setExportJob(response);
     } catch (exportError) {
@@ -148,7 +154,10 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
     setImportJob(null);
     setConfirmRiskyDiffs(false);
     try {
-      const previewStart = await createVNPackImportPreview(archive);
+      const previewStart = await createVNPackImportPreview(
+        archive,
+        createVNAssetIdempotencyKey('vn-import-preview')
+      );
       await pollVNPackImportPreview(previewStart.preview_id, setImportPreview);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Failed to create import preview');
@@ -177,6 +186,7 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
         conflict_decisions: {
           confirm_all_risky_diffs: riskyUpdateDiffs.length > 0 && confirmRiskyDiffs,
         },
+        idempotency_key: createVNAssetIdempotencyKey('vn-import-commit'),
       });
       setImportJob(response);
     } catch (commitError) {

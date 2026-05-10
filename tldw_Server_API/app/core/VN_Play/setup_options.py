@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
 from loguru import logger
 
@@ -22,6 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlaySetupOptionsResponse,
     VNPlaySetupPagination,
     VNPlaySetupPaginationSet,
+    VNPlaySetupScriptVersionOption,
     VNPlaySetupTrustLevel,
     VNPlaySetupTrustSource,
     VNPlaySetupWarning,
@@ -29,7 +30,11 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlaySetupWarningSummary,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
+from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety_definition
+from tldw_Server_API.app.core.VN_Scripts.service import _character_safety_status
 
 DEFAULT_SETUP_LIMIT = 25
 MAX_SETUP_LIMIT = 100
@@ -60,6 +65,9 @@ WARNING_MESSAGES = {
     "pack_untrusted_import": "This pack was last committed from an untrusted import.",
     "pack_deleted_or_archived": "This pack is hidden from normal use.",
     "readiness_unavailable": "Readiness could not be computed for this pack.",
+    "script_pack_unavailable": "The script's asset pack could not be loaded.",
+    "policy_snapshot_unavailable": "The script policy snapshot could not be loaded.",
+    "character_safety_missing": "Character safety metadata is missing.",
 }
 
 
@@ -116,17 +124,26 @@ def build_vn_play_setup_options(
         for pack in pack_rows
     ]
     asset_packs = _sort_pack_options(asset_packs)
+    script_versions = _script_version_options(
+        db=db,
+        asset_service=asset_service,
+        owner_user_id=owner_user_id,
+        selected_character=selected_character,
+        requested_rating=requested_rating,
+    ) if mode == "scripted_story" else []
 
     return VNPlaySetupOptionsResponse(
         characters=characters,
         selected_character=selected_character,
         asset_packs=asset_packs,
+        script_versions=script_versions,
         defaults=_setup_defaults(
             mode=mode,
             content_rating=requested_rating,
             selected_character=selected_character,
             characters=characters,
             asset_packs=asset_packs,
+            script_versions=script_versions,
         ),
         pagination=VNPlaySetupPaginationSet(
             characters=VNPlaySetupPagination(
@@ -152,6 +169,8 @@ def build_vn_play_setup_options(
             pack_offset=pack_offset,
             selected_character_id=selected_character_id,
             selected_character=selected_character,
+            script_versions=script_versions,
+            mode=mode,
         ),
         generated_at=_utc_now_iso(),
     )
@@ -286,6 +305,138 @@ def _latest_import_provenance(
         return {}, True
 
 
+def _script_version_options(
+    *,
+    db: CharactersRAGDB,
+    asset_service: VNAssetPackService,
+    owner_user_id: int,
+    selected_character: VNPlaySetupCharacterOption | None,
+    requested_rating: str,
+) -> list[VNPlaySetupScriptVersionOption]:
+    """Return latest published script versions with runtime readiness hints."""
+    script_repo = VNScriptsRepository.initialized(db)
+    profile_snapshots = VNProfileSnapshotRepository.initialized(db)
+    versions = script_repo.list_latest_versions_for_setup(
+        owner_user_id=owner_user_id,
+        limit=DEFAULT_SETUP_LIMIT,
+        offset=0,
+    )
+    options: list[VNPlaySetupScriptVersionOption] = []
+    for version in versions:
+        pack = _pack_for_script_version(asset_service, int(version["asset_pack_id"]))
+        warnings: list[VNPlaySetupWarning] = []
+        pack_ready = False
+        compatible = True
+        if pack is None:
+            warnings.append(_warning("script_pack_unavailable", "high_risk"))
+        else:
+            pack_option = _asset_pack_option(
+                asset_service=asset_service,
+                pack=pack,
+                selected_character=selected_character,
+                requested_rating=requested_rating,
+                provenance=None,
+                provenance_lookup_failed=False,
+            )
+            pack_ready = pack_option.ready
+            compatible = pack_option.compatibility.status in {"compatible", "unknown"}
+            warnings.extend(pack_option.warning_summary.warnings)
+
+        policy_blocked = False
+        policy_snapshot = profile_snapshots.get_profile_snapshot(
+            int(version["policy_snapshot_id"]),
+            owner_user_id=owner_user_id,
+        )
+        if policy_snapshot is None:
+            warnings.append(_warning("policy_snapshot_unavailable", "high_risk"))
+            policy_blocked = True
+        else:
+            decision = evaluate_character_safety_definition(
+                profile_definition=policy_snapshot["definition"],
+                policy_profile_id=str(policy_snapshot["profile_id"]),
+                content_rating=str(version.get("content_rating") or requested_rating),
+                metadata_status=_script_character_safety_status(db, pack),
+            )
+            policy_blocked = bool(decision.get("blocked"))
+            warnings.extend(_policy_warnings(decision))
+
+        warning_summary = _warning_summary(_dedupe_warnings(warnings))
+        ready = pack_ready and not policy_blocked
+        options.append(
+            VNPlaySetupScriptVersionOption(
+                id=int(version["id"]),
+                script_id=int(version["script_id"]),
+                title=str(version.get("title") or f"Script {version['script_id']}"),
+                version_number=int(version["version_number"]),
+                label=version.get("label"),
+                asset_pack_id=int(version["asset_pack_id"]),
+                manifest_snapshot_id=int(version["manifest_snapshot_id"]),
+                policy_snapshot_id=int(version["policy_snapshot_id"]),
+                generation_profile_snapshot_id=int(version["generation_profile_snapshot_id"]),
+                policy_profile_id=str(version.get("policy_profile_id") or ""),
+                generation_profile_id=str(version.get("generation_profile_id") or ""),
+                content_rating=str(version.get("content_rating") or "general"),
+                ready=ready,
+                warning_summary=warning_summary,
+                recommended=ready and compatible and not warning_summary.requires_acknowledgement,
+            )
+        )
+    return _sort_script_version_options(options)
+
+
+def _pack_for_script_version(
+    asset_service: VNAssetPackService,
+    pack_id: int,
+) -> VNAssetPackResponse | None:
+    try:
+        return asset_service.get_pack(pack_id)
+    except Exception as exc:
+        logger.warning("Failed to load VN script setup pack {}: {}", pack_id, exc)
+        return None
+
+
+def _script_character_safety_status(
+    db: CharactersRAGDB,
+    pack: VNAssetPackResponse | None,
+) -> str:
+    if pack is None:
+        return "missing"
+    character = db.get_character_card_by_id(pack.primary_character_id)
+    if not isinstance(character, Mapping):
+        return "missing"
+    return _character_safety_status(character)
+
+
+def _policy_warnings(decision: Mapping[str, Any]) -> list[VNPlaySetupWarning]:
+    warnings: list[VNPlaySetupWarning] = []
+    reasons = decision.get("reasons")
+    if not isinstance(reasons, list):
+        return warnings
+    for reason in reasons:
+        if not isinstance(reason, Mapping):
+            continue
+        code = str(reason.get("code") or "policy_warning")
+        severity = _policy_warning_severity(reason)
+        warnings.append(
+            VNPlaySetupWarning(
+                code=code,
+                severity=severity,
+                message=str(reason.get("message") or WARNING_MESSAGES.get(code) or code),
+                requires_acknowledgement=bool(reason.get("requires_acknowledgement")),
+            )
+        )
+    return warnings
+
+
+def _policy_warning_severity(reason: Mapping[str, Any]) -> VNPlaySetupWarningSeverity:
+    raw_severity = str(reason.get("severity") or "").strip().lower()
+    if raw_severity == "error":
+        return "high_risk"
+    if raw_severity == "warning":
+        return "warning"
+    return "info"
+
+
 def _readiness_for_pack(
     asset_service: VNAssetPackService,
     pack_id: int,
@@ -383,6 +534,7 @@ def _setup_defaults(
     selected_character: VNPlaySetupCharacterOption | None,
     characters: list[VNPlaySetupCharacterOption],
     asset_packs: list[VNPlaySetupAssetPackOption],
+    script_versions: list[VNPlaySetupScriptVersionOption],
 ) -> VNPlaySetupDefaults:
     """Choose conservative setup defaults from selected and recommended options."""
     default_character_id = selected_character.id if selected_character is not None else None
@@ -391,10 +543,19 @@ def _setup_defaults(
 
     recommended_pack_ids = [pack.id for pack in asset_packs if pack.recommended]
     default_pack_id = recommended_pack_ids[0] if len(recommended_pack_ids) == 1 else None
+    default_script = _default_script_version(script_versions)
+    if default_pack_id is None and default_script is not None:
+        default_pack_id = default_script.asset_pack_id
     return VNPlaySetupDefaults(
         mode=mode,
         character_id=default_character_id,
         asset_pack_id=default_pack_id,
+        script_id=default_script.script_id if default_script is not None else None,
+        script_version_id=default_script.id if default_script is not None else None,
+        policy_profile_id=default_script.policy_profile_id if default_script is not None else None,
+        generation_profile_id=(
+            default_script.generation_profile_id if default_script is not None else None
+        ),
         content_rating=content_rating,
     )
 
@@ -410,6 +571,8 @@ def _empty_states(
     pack_offset: int,
     selected_character_id: int | None,
     selected_character: VNPlaySetupCharacterOption | None,
+    script_versions: list[VNPlaySetupScriptVersionOption],
+    mode: VNPlayMode | None,
 ) -> list[VNPlaySetupEmptyState]:
     """Build scoped empty-state hints for selector pages and filters."""
     states: list[VNPlaySetupEmptyState] = []
@@ -453,6 +616,14 @@ def _empty_states(
                 message="No VN asset packs were found.",
             )
         )
+        if mode == "scripted_story" and not script_versions:
+            states.append(
+                VNPlaySetupEmptyState(
+                    code="no_script_versions",
+                    scope="global",
+                    message="No published VN scripts were found.",
+                )
+            )
         return states
 
     if not any(pack.ready for pack in asset_packs):
@@ -471,6 +642,14 @@ def _empty_states(
                 code="no_compatible_packs",
                 scope="page",
                 message="No compatible packs were found in this page of results.",
+            )
+        )
+    if mode == "scripted_story" and not script_versions:
+        states.append(
+            VNPlaySetupEmptyState(
+                code="no_script_versions",
+                scope="global",
+                message="No published VN scripts were found.",
             )
         )
     return states
@@ -493,6 +672,53 @@ def _sort_pack_options(
         return group, index
 
     return [pack for _, pack in sorted(enumerate(packs), key=sort_key)]
+
+
+def _sort_script_version_options(
+    script_versions: list[VNPlaySetupScriptVersionOption],
+) -> list[VNPlaySetupScriptVersionOption]:
+    """Sort script versions with ready and recommended options first."""
+    def sort_key(indexed_script: tuple[int, VNPlaySetupScriptVersionOption]) -> tuple[int, int]:
+        index, script_version = indexed_script
+        if script_version.recommended:
+            group = 0
+        elif script_version.ready:
+            group = 1
+        else:
+            group = 2
+        return group, index
+
+    return [
+        script_version
+        for _, script_version in sorted(enumerate(script_versions), key=sort_key)
+    ]
+
+
+def _default_script_version(
+    script_versions: list[VNPlaySetupScriptVersionOption],
+) -> VNPlaySetupScriptVersionOption | None:
+    """Choose a default script without hiding required acknowledgement state."""
+    recommended = [script for script in script_versions if script.recommended]
+    if len(recommended) == 1:
+        return recommended[0]
+    ready = [script for script in script_versions if script.ready]
+    if len(ready) == 1:
+        return ready[0]
+    return None
+
+
+def _dedupe_warnings(
+    warnings: list[VNPlaySetupWarning],
+) -> list[VNPlaySetupWarning]:
+    """Deduplicate warning codes while preserving first occurrence order."""
+    seen: set[str] = set()
+    deduped: list[VNPlaySetupWarning] = []
+    for warning in warnings:
+        if warning.code in seen:
+            continue
+        seen.add(warning.code)
+        deduped.append(warning)
+    return deduped
 
 
 def _missing_required_assets(readiness_errors: list[str]) -> bool:

@@ -1409,11 +1409,13 @@ async def test_checkpoint_restore_duplicate_same_key_replays_response(
     first = service.restore_checkpoint(
         ready_session.id,
         int(checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-replay",
     )
     second = service.restore_checkpoint(
         ready_session.id,
         int(checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-replay",
     )
 
@@ -1447,6 +1449,7 @@ async def test_checkpoint_restore_same_key_different_checkpoint_conflicts(
     service.restore_checkpoint(
         ready_session.id,
         int(first_checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-conflict",
     )
 
@@ -1454,6 +1457,7 @@ async def test_checkpoint_restore_same_key_different_checkpoint_conflicts(
         service.restore_checkpoint(
             ready_session.id,
             int(second_checkpoint["id"]),
+            client_scene_version=2,
             idempotency_key="checkpoint-conflict",
         )
 
@@ -1480,6 +1484,7 @@ async def test_checkpoint_restore_advances_scene_version_by_one(
     response = service.restore_checkpoint(
         ready_session.id,
         int(checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-version",
     )
 
@@ -1776,13 +1781,29 @@ async def test_stale_scene_version_conflicts(
             idempotency_key="second",
         )
 
+    with pytest.raises(VNPlayConflictError, match="stale_scene_version"):
+        await service.submit_turn(
+            ready_session.id,
+            input_text="Second",
+            client_scene_version=0,
+            idempotency_key="second",
+        )
+
 
 @pytest.mark.asyncio
 async def test_model_failure_marks_turn_failed_and_clears_lock(
     service_with_failing_adapter: VNPlayService,
     failing_ready_session,
 ) -> None:
-    with pytest.raises(VNPlayTurnError):
+    with pytest.raises(VNPlayTurnError, match="model_failed"):
+        await service_with_failing_adapter.submit_turn(
+            failing_ready_session.id,
+            input_text="Break",
+            client_scene_version=0,
+            idempotency_key="fail-1",
+        )
+
+    with pytest.raises(VNPlayTurnError, match="model_failed"):
         await service_with_failing_adapter.submit_turn(
             failing_ready_session.id,
             input_text="Break",

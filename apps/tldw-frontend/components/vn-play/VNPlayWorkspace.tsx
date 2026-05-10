@@ -315,6 +315,7 @@ export default function VNPlayWorkspace() {
     try {
       const restored = await restoreVNPlaySession(selectedSession.id, {
         checkpoint_id: checkpointId,
+        client_scene_version: sceneVersion,
         idempotency_key: createVNPlayIdempotencyKey('restore'),
       });
       setSelectedSession(restored);
@@ -327,7 +328,7 @@ export default function VNPlayWorkspace() {
     } finally {
       setRestoringCheckpointId(null);
     }
-  }, [reloadSessionCollections, selectedSession]);
+  }, [reloadSessionCollections, sceneVersion, selectedSession]);
 
   const handleRetryLastTurn = useCallback(async () => {
     if (!selectedSession) return;

@@ -239,6 +239,7 @@ class VNAssetGenerationRequest(BaseModel):
         le=DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
     )
     options: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class VNAssetGenerationStatusResponse(BaseModel):
@@ -267,6 +268,7 @@ class VNPackExportRequest(BaseModel):
     include_full_provenance: StrictBool = False
     strict: StrictBool = False
     warn_for_sharing: StrictBool = True
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
     request_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
@@ -354,6 +356,7 @@ class VNPackImportCommitRequest(BaseModel):
     target_character_id: int | None = Field(default=None, ge=1)
     target_pack_id: int | None = Field(default=None, ge=1)
     conflict_decisions: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
     request_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
@@ -440,6 +443,7 @@ class VNAssetCleanupRequest(BaseModel):
     include_approved: bool = False
     confirmation_text: str | None = None
     confirmation_token: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class VNAssetCleanupResponse(BaseModel):
@@ -451,6 +455,8 @@ class VNAssetCleanupResponse(BaseModel):
     files_would_delete: int = 0
     files_deleted: int = 0
     skipped_file_ids: list[int] = Field(default_factory=list)
+    blocked_count: int = 0
+    cleanup_blocked: list[dict[str, Any]] = Field(default_factory=list)
     reclaimed_bytes: int = 0
 
 

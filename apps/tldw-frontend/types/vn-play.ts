@@ -252,6 +252,7 @@ export interface VNPlayCheckpoint {
 
 export interface VNPlayRestoreRequest {
   checkpoint_id: number;
+  client_scene_version: number;
   idempotency_key: string;
 }
 

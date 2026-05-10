@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS vn_play_sessions (
     linked_chat_mode TEXT NOT NULL DEFAULT 'read_only_context',
     seed TEXT,
     settings_json TEXT NOT NULL DEFAULT '{}',
+    script_id INTEGER,
+    script_version_id INTEGER,
+    script_manifest_snapshot_id INTEGER,
+    script_policy_snapshot_id INTEGER,
+    script_generation_profile_snapshot_id INTEGER,
+    script_position_json TEXT NOT NULL DEFAULT '{}',
     scene_version INTEGER NOT NULL DEFAULT 0,
     active_turn_request_id INTEGER,
     active_session_action_id INTEGER,
@@ -133,6 +139,20 @@ CREATE TABLE IF NOT EXISTS vn_play_checkpoints (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS vn_play_save_slots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL,
+    slot_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    checkpoint_id INTEGER NOT NULL REFERENCES vn_play_checkpoints(id) ON DELETE RESTRICT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    deleted BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, session_id, slot_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_vn_play_sessions_owner_user_id
     ON vn_play_sessions(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_sessions_owner_status
@@ -159,6 +179,8 @@ CREATE INDEX IF NOT EXISTS idx_vn_play_branches_session
     ON vn_play_branches(session_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_checkpoints_session
     ON vn_play_checkpoints(session_id);
+CREATE INDEX IF NOT EXISTS idx_vn_play_save_slots_session
+    ON vn_play_save_slots(session_id, deleted);
 """
 
 VN_PLAY_SCHEMA_STATEMENTS = tuple(
@@ -212,6 +234,12 @@ class VNPlayRepository:
         linked_chat_mode: str = "read_only_context",
         seed: str | None = None,
         settings: Mapping[str, Any] | None = None,
+        script_id: int | None = None,
+        script_version_id: int | None = None,
+        script_manifest_snapshot_id: int | None = None,
+        script_policy_snapshot_id: int | None = None,
+        script_generation_profile_snapshot_id: int | None = None,
+        script_position: Mapping[str, Any] | None = None,
         status: str = "active",
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
@@ -233,9 +261,15 @@ class VNPlayRepository:
                     trust_level,
                     linked_chat_mode,
                     seed,
-                    settings_json
+                    settings_json,
+                    script_id,
+                    script_version_id,
+                    script_manifest_snapshot_id,
+                    script_policy_snapshot_id,
+                    script_generation_profile_snapshot_id,
+                    script_position_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_user_id,
@@ -253,6 +287,12 @@ class VNPlayRepository:
                     linked_chat_mode,
                     seed,
                     _json_dump(dict(settings or {})),
+                    script_id,
+                    script_version_id,
+                    script_manifest_snapshot_id,
+                    script_policy_snapshot_id,
+                    script_generation_profile_snapshot_id,
+                    _json_dump(dict(script_position or {})),
                 ),
             )
             session_id = int(cursor.lastrowid)
@@ -375,6 +415,7 @@ class VNPlayRepository:
                 "additional_character_ids",
                 "source_world_book_ids",
                 "settings",
+                "script_position",
             },
         )
         if not update_values:
@@ -901,6 +942,7 @@ class VNPlayRepository:
         scene_version: int,
         response_payload_factory: Callable[[Mapping[str, Any]], Mapping[str, Any]],
         branch_node_id: int | None = None,
+        script_position: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically persist a restore event, scene state, session state, and action response."""
         self._ensure_schema_initialized()
@@ -987,13 +1029,32 @@ class VNPlayRepository:
                 """
                 UPDATE vn_play_sessions
                 SET scene_version = ?,
+                    script_position_json = CASE
+                        WHEN ? IS NULL THEN script_position_json
+                        ELSE ?
+                    END,
                     active_session_action_id = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                   AND owner_user_id = ?
                   AND active_session_action_id = ?
                 """,
-                (scene_version, session_id, owner_user_id, action_id),
+                (
+                    scene_version,
+                    (
+                        None
+                        if script_position is None
+                        else _json_dump(dict(script_position))
+                    ),
+                    (
+                        None
+                        if script_position is None
+                        else _json_dump(dict(script_position))
+                    ),
+                    session_id,
+                    owner_user_id,
+                    action_id,
+                ),
             )
             if session_cursor.rowcount != 1:
                 raise RuntimeError("session_action_lock_not_active")
@@ -1067,6 +1128,146 @@ class VNPlayRepository:
             )
             if action_cursor.rowcount != 1:
                 raise RuntimeError("session_action_not_found")
+            return response_payload
+
+    def commit_save_slot_create_action(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_id: int,
+        slot_key: str,
+        title: str,
+        metadata: Mapping[str, Any],
+        event_id: int | None,
+        scene_version: int,
+        scene_state_snapshot: Mapping[str, Any],
+        response_payload_factory: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Atomically create a checkpoint, save-slot pointer, and action response."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            active_session = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_sessions
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND deleted = 0
+                  AND active_session_action_id = ?
+                """,
+                (session_id, owner_user_id, action_id),
+            ).fetchone()
+            if active_session is None:
+                raise RuntimeError("session_action_lock_not_active")
+
+            checkpoint_cursor = conn.execute(
+                """
+                INSERT INTO vn_play_checkpoints (
+                    session_id,
+                    owner_user_id,
+                    label,
+                    event_id,
+                    scene_version,
+                    scene_state_snapshot_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    title,
+                    event_id,
+                    scene_version,
+                    _json_dump(dict(scene_state_snapshot)),
+                ),
+            )
+            checkpoint_id = int(checkpoint_cursor.lastrowid)
+            _insert_event(
+                conn,
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                event_type="session_checkpoint_created",
+                event_payload={
+                    "checkpoint_id": checkpoint_id,
+                    "label": title,
+                    "scene_version": scene_version,
+                },
+                source="runtime",
+            )
+            conn.execute(
+                """
+                INSERT INTO vn_play_save_slots (
+                    session_id,
+                    owner_user_id,
+                    slot_key,
+                    title,
+                    checkpoint_id,
+                    metadata_json,
+                    deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(owner_user_id, session_id, slot_key) DO UPDATE SET
+                    title = excluded.title,
+                    checkpoint_id = excluded.checkpoint_id,
+                    metadata_json = excluded.metadata_json,
+                    deleted = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    slot_key,
+                    title,
+                    checkpoint_id,
+                    _json_dump(dict(metadata or {})),
+                ),
+            )
+            save_slot_row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_save_slots
+                WHERE session_id = ? AND owner_user_id = ? AND slot_key = ?
+                """,
+                (session_id, owner_user_id, slot_key),
+            ).fetchone()
+            if save_slot_row is None:
+                raise RuntimeError("save_slot_not_found")
+            response_payload = dict(response_payload_factory(_decode_save_slot(save_slot_row)))
+            action_cursor = conn.execute(
+                """
+                UPDATE vn_play_session_actions
+                SET status = ?,
+                    response_payload_json = ?,
+                    error_json = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND session_id = ?
+                  AND owner_user_id = ?
+                """,
+                (
+                    "completed",
+                    _json_dump(response_payload),
+                    action_id,
+                    session_id,
+                    owner_user_id,
+                ),
+            )
+            if action_cursor.rowcount != 1:
+                raise RuntimeError("session_action_not_found")
+            session_cursor = conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET active_session_action_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND active_session_action_id = ?
+                """,
+                (session_id, owner_user_id, action_id),
+            )
+            if session_cursor.rowcount != 1:
+                raise RuntimeError("session_action_lock_not_active")
             return response_payload
 
     def get_turn_request(self, turn_request_id: int) -> dict[str, Any] | None:
@@ -1583,6 +1784,103 @@ class VNPlayRepository:
         row = cursor.fetchone()
         return _decode_checkpoint(row) if row is not None else None
 
+    def find_asset_cleanup_blockers(
+        self,
+        *,
+        owner_user_id: int,
+        asset_pack_id: int,
+        generated_file_ids: set[int],
+        item_ids_by_file_id: Mapping[int, int],
+    ) -> dict[int, list[dict[str, str]]]:
+        """Find generated files referenced by VN play sessions and checkpoints."""
+        self._ensure_schema_initialized()
+        if not generated_file_ids:
+            return {}
+        item_to_file_id = {
+            int(item_id): int(file_id)
+            for file_id, item_id in item_ids_by_file_id.items()
+        }
+        session_rows = self.db.execute_query(
+            """
+            SELECT id
+            FROM vn_play_sessions
+            WHERE owner_user_id = ?
+              AND vn_asset_pack_id = ?
+              AND deleted = 0
+            """,
+            (owner_user_id, asset_pack_id),
+        ).fetchall()
+        blockers: dict[int, list[dict[str, str]]] = {}
+        for session_row in session_rows:
+            session_id = int(session_row["id"])
+            event_rows = self.db.execute_query(
+                """
+                SELECT id, event_payload_json
+                FROM vn_play_events
+                WHERE owner_user_id = ?
+                  AND session_id = ?
+                """,
+                (owner_user_id, session_id),
+            ).fetchall()
+            for row in event_rows:
+                _add_cleanup_blockers_from_payload(
+                    blockers,
+                    payload=_json_loads(row["event_payload_json"], {}),
+                    generated_file_ids=generated_file_ids,
+                    item_to_file_id=item_to_file_id,
+                    source_type="event",
+                    source_id=int(row["id"]),
+                )
+
+            checkpoint_rows = self.db.execute_query(
+                """
+                SELECT id, scene_state_snapshot_json
+                FROM vn_play_checkpoints
+                WHERE owner_user_id = ?
+                  AND session_id = ?
+                """,
+                (owner_user_id, session_id),
+            ).fetchall()
+            for row in checkpoint_rows:
+                _add_cleanup_blockers_from_payload(
+                    blockers,
+                    payload=_json_loads(row["scene_state_snapshot_json"], {}),
+                    generated_file_ids=generated_file_ids,
+                    item_to_file_id=item_to_file_id,
+                    source_type="checkpoint",
+                    source_id=int(row["id"]),
+                )
+
+            scene_row = self.db.execute_query(
+                """
+                SELECT id,
+                       current_background_item_id,
+                       current_depth_item_id,
+                       active_sprite_items_json
+                FROM vn_play_scene_state
+                WHERE owner_user_id = ?
+                  AND session_id = ?
+                """,
+                (owner_user_id, session_id),
+            ).fetchone()
+            if scene_row is not None:
+                _add_cleanup_blockers_from_payload(
+                    blockers,
+                    payload={
+                        "current_background_item_id": scene_row["current_background_item_id"],
+                        "current_depth_item_id": scene_row["current_depth_item_id"],
+                        "active_sprite_items": _json_loads(
+                            scene_row["active_sprite_items_json"],
+                            [],
+                        ),
+                    },
+                    generated_file_ids=generated_file_ids,
+                    item_to_file_id=item_to_file_id,
+                    source_type="scene_state",
+                    source_id=int(scene_row["id"]),
+                )
+        return blockers
+
     def list_checkpoints(
         self,
         session_id: int,
@@ -1601,6 +1899,159 @@ class VNPlayRepository:
             (session_id, owner_user_id, owner_user_id),
         )
         return [_decode_checkpoint(row) for row in cursor.fetchall()]
+
+    def upsert_save_slot(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        slot_key: str,
+        title: str,
+        checkpoint_id: int,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO vn_play_save_slots (
+                    session_id,
+                    owner_user_id,
+                    slot_key,
+                    title,
+                    checkpoint_id,
+                    metadata_json,
+                    deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(owner_user_id, session_id, slot_key) DO UPDATE SET
+                    title = excluded.title,
+                    checkpoint_id = excluded.checkpoint_id,
+                    metadata_json = excluded.metadata_json,
+                    deleted = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    slot_key,
+                    title,
+                    checkpoint_id,
+                    _json_dump(dict(metadata or {})),
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_save_slots
+                WHERE session_id = ? AND owner_user_id = ? AND slot_key = ?
+                """,
+                (session_id, owner_user_id, slot_key),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("save_slot_not_found")
+        return _decode_save_slot(row)
+
+    def get_save_slot(
+        self,
+        save_slot_id: int,
+        *,
+        session_id: int | None = None,
+        owner_user_id: int | None = None,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_save_slots
+            WHERE id = ?
+              AND (? IS NULL OR session_id = ?)
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? OR deleted = 0)
+            """,
+            (
+                save_slot_id,
+                session_id,
+                session_id,
+                owner_user_id,
+                owner_user_id,
+                include_deleted,
+            ),
+        )
+        row = cursor.fetchone()
+        return _decode_save_slot(row) if row is not None else None
+
+    def list_save_slots(
+        self,
+        session_id: int,
+        *,
+        owner_user_id: int | None = None,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_save_slots
+            WHERE session_id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? OR deleted = 0)
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (session_id, owner_user_id, owner_user_id, include_deleted),
+        )
+        return [_decode_save_slot(row) for row in cursor.fetchall()]
+
+    def update_save_slot(
+        self,
+        save_slot_id: int,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        title: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        deleted: bool | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        current = self.get_save_slot(
+            save_slot_id,
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            include_deleted=True,
+        )
+        if current is None:
+            return None
+        next_title = str(title) if title is not None else str(current["title"])
+        next_metadata = dict(metadata) if metadata is not None else dict(current["metadata"])
+        next_deleted = bool(deleted) if deleted is not None else bool(current["deleted"])
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE vn_play_save_slots
+                SET title = ?,
+                    metadata_json = ?,
+                    deleted = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND session_id = ?
+                  AND owner_user_id = ?
+                """,
+                (
+                    next_title,
+                    _json_dump(next_metadata),
+                    int(next_deleted),
+                    save_slot_id,
+                    session_id,
+                    owner_user_id,
+                ),
+            )
+        return self.get_save_slot(
+            save_slot_id,
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            include_deleted=True,
+        )
 
     def _ensure_schema_initialized(self) -> None:
         if self._schema_initialized:
@@ -1623,6 +2074,12 @@ _SESSION_UPDATE_COLUMNS = {
     "linked_chat_mode": "linked_chat_mode",
     "seed": "seed",
     "settings": "settings_json",
+    "script_id": "script_id",
+    "script_version_id": "script_version_id",
+    "script_manifest_snapshot_id": "script_manifest_snapshot_id",
+    "script_policy_snapshot_id": "script_policy_snapshot_id",
+    "script_generation_profile_snapshot_id": "script_generation_profile_snapshot_id",
+    "script_position": "script_position_json",
     "scene_version": "scene_version",
     "active_turn_request_id": "active_turn_request_id",
     "active_session_action_id": "active_session_action_id",
@@ -1705,6 +2162,30 @@ _SESSION_UPDATE_STATEMENTS = {
     ),
     "settings": (
         "UPDATE vn_play_sessions SET settings_json = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "script_id": (
+        "UPDATE vn_play_sessions SET script_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "script_version_id": (
+        "UPDATE vn_play_sessions SET script_version_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "script_manifest_snapshot_id": (
+        "UPDATE vn_play_sessions SET script_manifest_snapshot_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "script_policy_snapshot_id": (
+        "UPDATE vn_play_sessions SET script_policy_snapshot_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "script_generation_profile_snapshot_id": (
+        "UPDATE vn_play_sessions SET script_generation_profile_snapshot_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    ),
+    "script_position": (
+        "UPDATE vn_play_sessions SET script_position_json = ?, updated_at = CURRENT_TIMESTAMP "
         "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
     ),
     "scene_version": (
@@ -1806,6 +2287,19 @@ def _ensure_vn_play_session_columns(conn: Any) -> None:
     }
     if "active_session_action_id" not in existing_columns:
         conn.execute("ALTER TABLE vn_play_sessions ADD COLUMN active_session_action_id INTEGER")
+    column_defaults = {
+        "script_id": "INTEGER",
+        "script_version_id": "INTEGER",
+        "script_manifest_snapshot_id": "INTEGER",
+        "script_policy_snapshot_id": "INTEGER",
+        "script_generation_profile_snapshot_id": "INTEGER",
+        "script_position_json": "TEXT NOT NULL DEFAULT '{}'",
+    }
+    for column_name, column_definition in column_defaults.items():
+        if column_name not in existing_columns:
+            conn.execute(
+                f"ALTER TABLE vn_play_sessions ADD COLUMN {column_name} {column_definition}"  # nosec B608
+            )
 
 
 def _insert_event(
@@ -1880,6 +2374,7 @@ def _decode_session(row: Any) -> dict[str, Any]:
     data["additional_character_ids"] = _json_loads(data.pop("additional_character_ids_json"), [])
     data["source_world_book_ids"] = _json_loads(data.pop("source_world_book_ids_json"), [])
     data["settings"] = _json_loads(data.pop("settings_json"), {})
+    data["script_position"] = _json_loads(data.pop("script_position_json", None), {})
     return data
 
 
@@ -1941,6 +2436,56 @@ def _decode_checkpoint(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["scene_state_snapshot"] = _json_loads(data.pop("scene_state_snapshot_json"), {})
     return data
+
+
+def _decode_save_slot(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    data["metadata"] = _json_loads(data.pop("metadata_json"), {})
+    data["deleted"] = bool(data.get("deleted"))
+    return data
+
+
+def _collect_int_values(value: Any, keys: set[str]) -> set[int]:
+    found: set[int] = set()
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if key in keys:
+                try:
+                    found.add(int(nested))
+                except (TypeError, ValueError):
+                    pass
+            found.update(_collect_int_values(nested, keys))
+    elif isinstance(value, list):
+        for nested in value:
+            found.update(_collect_int_values(nested, keys))
+    return found
+
+
+def _add_cleanup_blockers_from_payload(
+    blockers: dict[int, list[dict[str, str]]],
+    *,
+    payload: Any,
+    generated_file_ids: set[int],
+    item_to_file_id: Mapping[int, int],
+    source_type: str,
+    source_id: int,
+) -> None:
+    referenced_file_ids = _collect_int_values(payload, {"generated_file_id", "file_id"})
+    referenced_item_ids = _collect_int_values(
+        payload,
+        {"item_id", "current_background_item_id", "current_depth_item_id"},
+    )
+    for item_id in referenced_item_ids:
+        file_id = item_to_file_id.get(item_id)
+        if file_id is not None:
+            referenced_file_ids.add(file_id)
+    for file_id in generated_file_ids.intersection(referenced_file_ids):
+        blockers.setdefault(file_id, []).append(
+            {
+                "code": f"vn_play_{source_type}",
+                "message": f"File is referenced by VN play {source_type} {source_id}.",
+            }
+        )
 
 
 def _json_dump(value: Any) -> str:

@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import tiktoken
+from requests import RequestException
+
 from tldw_Server_API.app.core.VN_Assets import prompts as prompts_module
 from tldw_Server_API.app.core.VN_Assets.prompts import (
     PromptBudgets,
@@ -159,6 +162,19 @@ def test_estimate_prompt_tokens_prefers_available_token_encoder(monkeypatch) -> 
     )
 
     assert estimate_prompt_tokens("single-token-ish text") == 3
+
+
+def test_token_encoder_request_error_uses_deterministic_fallback(monkeypatch) -> None:
+    prompts_module._get_prompt_token_encoder.cache_clear()
+
+    def fail_get_encoding(name: str) -> None:
+        raise RequestException(f"offline token cache for {name}")
+
+    monkeypatch.setattr(tiktoken, "get_encoding", fail_get_encoding)
+
+    assert prompts_module._get_prompt_token_encoder() is None
+    assert estimate_prompt_tokens("one two three four") == 5
+    prompts_module._get_prompt_token_encoder.cache_clear()
 
 
 def test_prompt_preview_reports_omissions_and_warnings_when_truncated() -> None:

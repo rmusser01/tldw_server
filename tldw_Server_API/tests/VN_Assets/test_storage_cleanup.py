@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio as real_asyncio
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +24,10 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
+from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_multipart_payload_hash
 
 USER_ID = 42
 PNG_BYTES = b"\x89PNG\r\n\x1a\nvn-asset-test"
@@ -101,7 +105,7 @@ def client(
     fake_generated_files_repo: FakeGeneratedFilesRepo,
 ) -> TestClient:
     app = FastAPI()
-    app.include_router(vn_assets_router, prefix="/api/v1")
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
 
     async def override_user() -> User:
         return User(id=USER_ID, username="vn-storage-user")
@@ -282,13 +286,34 @@ def test_content_endpoint_streams_owned_generated_file(
     fake_generated_files_repo: FakeGeneratedFilesRepo,
 ) -> None:
     response = client.get(
-        f"/api/v1/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
         f"{asset_with_generated_file.item_id}/content"
     )
 
     assert response.status_code == 200
     assert response.content == PNG_BYTES
     assert response.headers["content-type"].startswith("image/png")
+    assert fake_generated_files_repo.accessed_ids == [asset_with_generated_file.file_id]
+
+
+def test_content_endpoint_streams_documented_octet_stream(
+    client: TestClient,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    record = fake_generated_files_repo.records[asset_with_generated_file.file_id]
+    record["mime_type"] = "application/octet-stream"
+    record["filename"] = "fixture.bin"
+    record["original_filename"] = "fixture.bin"
+
+    response = client.get(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"{asset_with_generated_file.item_id}/content"
+    )
+
+    assert response.status_code == 200
+    assert response.content == PNG_BYTES
+    assert response.headers["content-type"].startswith("application/octet-stream")
     assert fake_generated_files_repo.accessed_ids == [asset_with_generated_file.file_id]
 
 
@@ -300,7 +325,7 @@ def test_content_endpoint_denies_cross_user_generated_file(
     fake_generated_files_repo.records[asset_with_generated_file.file_id]["user_id"] = 7
 
     response = client.get(
-        f"/api/v1/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
         f"{asset_with_generated_file.item_id}/content"
     )
 
@@ -316,11 +341,104 @@ def test_content_endpoint_rejects_storage_path_escape(
     fake_generated_files_repo.records[asset_with_generated_file.file_id]["storage_path"] = "../fixture.png"
 
     response = client.get(
-        f"/api/v1/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
         f"{asset_with_generated_file.item_id}/content"
     )
 
     assert response.status_code == 404
+    assert fake_generated_files_repo.accessed_ids == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_feature", "chat"),
+        ("source_ref", "vn_asset_item:999999"),
+        ("is_deleted", True),
+    ],
+)
+def test_content_endpoint_rejects_invalid_generated_file_provenance(
+    client: TestClient,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    field: str,
+    value: object,
+) -> None:
+    fake_generated_files_repo.records[asset_with_generated_file.file_id][field] = value
+
+    response = client.get(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"{asset_with_generated_file.item_id}/content"
+    )
+
+    assert response.status_code == 404
+    assert fake_generated_files_repo.accessed_ids == []
+
+
+def test_content_endpoint_rejects_disallowed_media_type_before_serving(
+    client: TestClient,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    fake_generated_files_repo.records[asset_with_generated_file.file_id]["mime_type"] = "text/plain"
+
+    response = client.get(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"{asset_with_generated_file.item_id}/content"
+    )
+
+    assert response.status_code == 404
+    assert fake_generated_files_repo.accessed_ids == []
+
+
+def test_preview_endpoint_uses_same_owned_image_validation_as_content(
+    client: TestClient,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    response = client.get(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"{asset_with_generated_file.item_id}/preview"
+    )
+
+    assert response.status_code == 200
+    assert response.content == PNG_BYTES
+    assert response.headers["content-type"].startswith("image/png")
+    assert fake_generated_files_repo.accessed_ids == [asset_with_generated_file.file_id]
+
+
+def test_preview_endpoint_rejects_octet_stream_content(
+    client: TestClient,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    fake_generated_files_repo.records[asset_with_generated_file.file_id]["mime_type"] = (
+        "application/octet-stream"
+    )
+
+    response = client.get(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"{asset_with_generated_file.item_id}/preview"
+    )
+
+    assert response.status_code == 404
+    assert fake_generated_files_repo.accessed_ids == []
+
+
+def test_content_endpoint_blocks_policy_denied_item_before_touching_file(
+    client: TestClient,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    fake_generated_files_repo.records[asset_with_generated_file.file_id]["policy_blocked"] = True
+
+    response = client.get(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/items/"
+        f"{asset_with_generated_file.item_id}/content"
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "policy_blocked"
     assert fake_generated_files_repo.accessed_ids == []
 
 
@@ -440,6 +558,121 @@ async def test_cleanup_skips_generated_file_referenced_by_another_item(
     assert (outputs_dir / "vn_assets/fixture.png").exists()
 
 
+class BlockingCleanupProvider:
+    async def find_blockers(
+        self,
+        *,
+        pack_id: int,
+        owner_user_id: int,
+        candidates: list[dict[str, Any]],
+    ) -> dict[int, list[dict[str, str]]]:
+        assert pack_id > 0
+        assert owner_user_id == USER_ID
+        return {
+            int(candidate["generated_file_id"]): [
+                {
+                    "code": "active_vn_session",
+                    "message": "File is still referenced by an active VN session.",
+                }
+            ]
+            for candidate in candidates
+        }
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skips_blocked_generated_files_from_pluggable_provider(
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    outputs_dir: Path,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    service.review_item(
+        asset_with_generated_file.item_id,
+        VNAssetReviewRequest(review_status="rejected"),
+    )
+
+    response = await service.cleanup_pack(
+        asset_with_generated_file.pack_id,
+        VNAssetCleanupRequest(dry_run=False, statuses=["rejected"]),
+        files_repo=fake_generated_files_repo,
+        blocker_provider=BlockingCleanupProvider(),
+    )
+
+    assert response.files_would_delete == 0
+    assert response.files_deleted == 0
+    assert response.blocked_count == 1
+    assert response.skipped_file_ids == [asset_with_generated_file.file_id]
+    assert response.cleanup_blocked == [
+        {
+            "item_id": asset_with_generated_file.item_id,
+            "file_id": asset_with_generated_file.file_id,
+            "blockers": [
+                {
+                    "code": "active_vn_session",
+                    "message": "File is still referenced by an active VN session.",
+                }
+            ],
+        }
+    ]
+    assert fake_generated_files_repo.hard_deleted_ids == []
+    assert (outputs_dir / "vn_assets/fixture.png").exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skips_generated_files_referenced_by_published_script_manifest(
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    outputs_dir: Path,
+) -> None:
+    scripts_repo = VNScriptsRepository.initialized(chacha_db)
+    script = scripts_repo.create_script(
+        owner_user_id=USER_ID,
+        title="Published route",
+        primary_asset_pack_id=asset_with_generated_file.pack_id,
+        policy_profile_id="local_default",
+        generation_profile_id="story_default",
+        status="published",
+    )
+    scripts_repo.create_manifest_snapshot(
+        owner_user_id=USER_ID,
+        script_id=int(script["id"]),
+        asset_pack_id=asset_with_generated_file.pack_id,
+        version_id=1,
+        manifest={
+            "assets": {
+                "sprites": [
+                    {
+                        "item_id": asset_with_generated_file.item_id,
+                        "generated_file_id": asset_with_generated_file.file_id,
+                    }
+                ]
+            }
+        },
+        manifest_hash="manifest-hash",
+    )
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    service.review_item(
+        asset_with_generated_file.item_id,
+        VNAssetReviewRequest(review_status="rejected"),
+    )
+
+    response = await service.cleanup_pack(
+        asset_with_generated_file.pack_id,
+        VNAssetCleanupRequest(dry_run=False, statuses=["rejected"]),
+        files_repo=fake_generated_files_repo,
+        blocker_provider=VNAssetCleanupBlockerProvider(chacha_db),
+    )
+
+    assert response.files_deleted == 0
+    assert response.blocked_count == 1
+    assert response.skipped_file_ids == [asset_with_generated_file.file_id]
+    assert response.cleanup_blocked[0]["blockers"][0]["code"] == "published_script_manifest"
+    assert fake_generated_files_repo.hard_deleted_ids == []
+    assert (outputs_dir / "vn_assets/fixture.png").exists()
+
+
 def test_cleanup_endpoint_dry_run(
     client: TestClient,
     chacha_db: CharactersRAGDB,
@@ -453,13 +686,51 @@ def test_cleanup_endpoint_dry_run(
     )
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
         json={"dry_run": True, "statuses": ["hidden"]},
     )
 
     assert response.status_code == 200
     assert response.json()["files_would_delete"] == 1
     assert fake_generated_files_repo.hard_deleted_ids == []
+
+
+def test_cleanup_endpoint_replays_same_idempotency_key_and_conflicts_on_different_payload(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    service.review_item(
+        asset_with_generated_file.item_id,
+        VNAssetReviewRequest(review_status="hidden"),
+    )
+    payload = {
+        "dry_run": False,
+        "statuses": ["hidden"],
+        "idempotency_key": "cleanup-pack-1",
+    }
+
+    first = client.post(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
+        json=payload,
+    )
+    replay = client.post(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
+        json=payload,
+    )
+    conflict = client.post(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
+        json={**payload, "statuses": ["rejected"]},
+    )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    assert fake_generated_files_repo.hard_deleted_ids == [asset_with_generated_file.file_id]
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
 
 
 def test_upload_endpoint_creates_draft_uploaded_item(
@@ -482,8 +753,12 @@ def test_upload_endpoint_creates_draft_uploaded_item(
     monkeypatch.setattr(generated_file_helpers, "get_storage_service", fake_get_storage_service)
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack.id}/items/upload",
-        data={"slot_id": str(slot.id), "variant_index": "0"},
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={
+            "slot_id": str(slot.id),
+            "variant_index": "0",
+            "idempotency_key": "upload-create-1",
+        },
         files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
     )
 
@@ -500,6 +775,116 @@ def test_upload_endpoint_creates_draft_uploaded_item(
     assert fake_service.calls[0]["source_feature"] == "vn_assets"
     assert fake_service.calls[0]["source_ref"] == f"vn_asset_item:{body['id']}"
     assert (outputs_dir / fake_service.calls[0]["storage_path"]).read_bytes() == VALID_PNG_BYTES
+
+
+def test_upload_endpoint_replays_same_idempotency_key_and_conflicts_on_different_file(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    outputs_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Storage import generated_file_helpers
+
+    fake_service = FakeStorageService()
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    pack = service.create_pack(VNAssetPackCreate(title="Upload Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+
+    async def fake_get_storage_service() -> FakeStorageService:
+        return fake_service
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", fake_get_storage_service)
+
+    first = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": "0", "idempotency_key": "upload-item-1"},
+        files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
+    )
+    replay = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": "0", "idempotency_key": "upload-item-1"},
+        files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
+    )
+    conflict = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": "0", "idempotency_key": "upload-item-1"},
+        files={"file": ("sprite.png", VALID_PNG_BYTES + b"changed", "image/png")},
+    )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json() == first.json()
+    assert len(fake_service.calls) == 1
+    assert len(service.repo.list_items(pack.id)) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_upload_endpoint_in_progress_key_does_not_release_existing_claim(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    pack = service.create_pack(VNAssetPackCreate(title="Upload Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+    idempotency_key = "upload-in-progress"
+    payload_hash = canonical_multipart_payload_hash(
+        {
+            "pack_id": pack.id,
+            "slot_id": slot.id,
+            "variant_index": 0,
+        },
+        file_sha256=hashlib.sha256(VALID_PNG_BYTES).hexdigest(),
+        file_size=len(VALID_PNG_BYTES),
+        filename="sprite.png",
+        content_type="image/png",
+    )
+    service.repo.claim_idempotency_record(
+        owner_user_id=USER_ID,
+        scope="vn_asset_item_upload",
+        resource_id=f"pack:{pack.id}:slot:{slot.id}",
+        idempotency_key=idempotency_key,
+        payload_hash=payload_hash,
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": "0", "idempotency_key": idempotency_key},
+        files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "idempotency_key_in_progress"
+    record = service.repo.get_idempotency_record(
+        owner_user_id=USER_ID,
+        scope="vn_asset_item_upload",
+        resource_id=f"pack:{pack.id}:slot:{slot.id}",
+        idempotency_key=idempotency_key,
+    )
+    assert record is not None
+    assert record["status"] == "in_progress"
+    assert service.repo.list_items(pack.id) == []
+
+
+def test_upload_endpoint_requires_idempotency_key(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    pack = service.create_pack(VNAssetPackCreate(title="Upload Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+
+    response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": "0"},
+        files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
 
 
 def test_upload_endpoint_rejects_oversized_asset_before_storage_registration(
@@ -520,8 +905,12 @@ def test_upload_endpoint_rejects_oversized_asset_before_storage_registration(
     )
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack.id}/items/upload",
-        data={"slot_id": str(slot.id), "variant_index": "0"},
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={
+            "slot_id": str(slot.id),
+            "variant_index": "0",
+            "idempotency_key": "upload-too-large-1",
+        },
         files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
     )
 
@@ -552,8 +941,12 @@ def test_upload_endpoint_rejects_invalid_variant_index(
     monkeypatch.setattr(generated_file_helpers, "get_storage_service", fake_get_storage_service)
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack.id}/items/upload",
-        data={"slot_id": str(slot.id), "variant_index": str(variant_index)},
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/upload",
+        data={
+            "slot_id": str(slot.id),
+            "variant_index": str(variant_index),
+            "idempotency_key": f"upload-invalid-variant-{variant_index}",
+        },
         files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
     )
 

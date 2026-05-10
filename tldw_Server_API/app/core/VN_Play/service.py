@@ -11,6 +11,8 @@ from typing import Any, Protocol
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
+from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
 from tldw_Server_API.app.core.VN_Play.branch_navigation import (
@@ -30,6 +32,9 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_INVALID_CHOICE_ID,
     ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_RETRY_LAST_TURN_NOT_FAILED,
+    ERROR_SCRIPT_ADVANCE_BLOCKED,
+    ERROR_SCRIPT_ENDED,
+    ERROR_SCRIPTED_STORY_TURN_NOT_ALLOWED,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
     EVENT_CHOICE_SELECTED,
@@ -48,6 +53,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_USER_TURN,
     EVENT_MODEL_TURN_PARSE_FAILED,
     MODE_FREEFORM,
+    MODE_SCRIPTED_STORY,
     MODE_STORY,
     SESSION_ACTION_STATUS_ABANDONED,
     SESSION_ACTION_STATUS_COMPLETED,
@@ -61,9 +67,20 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     TURN_STATUS_PARSE_FAILED,
     TURN_STATUS_PENDING,
 )
+from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety_definition
 from tldw_Server_API.app.core.VN_Play.models import SceneState, TurnResult
 from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, coerce_turn_result
 from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
+from tldw_Server_API.app.core.VN_Scripts.service import _character_safety_status
+
+MAX_SCRIPT_EXECUTION_STEPS = 500
+SCRIPT_GENERATION_SOURCE_LITERAL = "script_literal"
+_CONFLICT_REPLAY_ERROR_CODES = {
+    ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_RESTORE_ACTION_IN_PROGRESS,
+    ERROR_STALE_SCENE_VERSION,
+    ERROR_TURN_IN_PROGRESS,
+}
 
 
 class VNPlayError(Exception):
@@ -111,6 +128,12 @@ class VNPlaySession:
     settings: dict[str, Any]
     scene_version: int
     active_turn_request_id: int | None
+    script_id: int | None = None
+    script_version_id: int | None = None
+    script_manifest_snapshot_id: int | None = None
+    script_policy_snapshot_id: int | None = None
+    script_generation_profile_snapshot_id: int | None = None
+    script_position: dict[str, Any] = field(default_factory=dict)
     active_session_action_id: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -138,6 +161,14 @@ class VNPlaySession:
             linked_chat_mode=str(row["linked_chat_mode"]),
             seed=_optional_str(row.get("seed")),
             settings=dict(row.get("settings") or {}),
+            script_id=_optional_int(row.get("script_id")),
+            script_version_id=_optional_int(row.get("script_version_id")),
+            script_manifest_snapshot_id=_optional_int(row.get("script_manifest_snapshot_id")),
+            script_policy_snapshot_id=_optional_int(row.get("script_policy_snapshot_id")),
+            script_generation_profile_snapshot_id=_optional_int(
+                row.get("script_generation_profile_snapshot_id")
+            ),
+            script_position=dict(row.get("script_position") or {}),
             scene_version=int(row["scene_version"]),
             active_turn_request_id=_optional_int(row.get("active_turn_request_id")),
             active_session_action_id=_optional_int(row.get("active_session_action_id")),
@@ -166,6 +197,8 @@ class VNPlayTurnResponse:
     scene_version: int
     events: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> VNPlayTurnResponse:
@@ -175,16 +208,31 @@ class VNPlayTurnResponse:
             scene_version=int(payload["scene_version"]),
             events=_list_of_dicts(payload.get("events")),
             warnings=_list_of_dicts(payload.get("warnings")),
+            error_code=(
+                str(payload["error_code"])
+                if payload.get("error_code") is not None
+                else None
+            ),
+            error_message=(
+                str(payload["error_message"])
+                if payload.get("error_message") is not None
+                else None
+            ),
         )
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "turn_request_id": self.turn_request_id,
             "status": self.status,
             "scene_version": self.scene_version,
             "events": self.events,
             "warnings": self.warnings,
         }
+        if self.error_code is not None:
+            payload["error_code"] = self.error_code
+        if self.error_message is not None:
+            payload["error_message"] = self.error_message
+        return payload
 
 
 class DeterministicVNPlayTurnAdapter:
@@ -234,7 +282,19 @@ class VNPlayService:
         linked_chat_mode: str = "read_only_context",
         seed: str | None = None,
         settings: Mapping[str, Any] | None = None,
+        script_id: int | None = None,
+        script_version_id: int | None = None,
+        acknowledgements: Sequence[str] | None = None,
     ) -> VNPlaySession:
+        script_context = self._script_session_context(
+            mode=mode,
+            primary_character_id=primary_character_id,
+            vn_asset_pack_id=vn_asset_pack_id,
+            content_rating=content_rating,
+            script_id=script_id,
+            script_version_id=script_version_id,
+            acknowledgements=acknowledgements,
+        )
         row = self.repo.create_session(
             owner_user_id=self.owner_user_id,
             mode=mode,
@@ -250,6 +310,14 @@ class VNPlayService:
             linked_chat_mode=linked_chat_mode,
             seed=seed,
             settings=settings,
+            script_id=script_context.get("script_id"),
+            script_version_id=script_context.get("script_version_id"),
+            script_manifest_snapshot_id=script_context.get("script_manifest_snapshot_id"),
+            script_policy_snapshot_id=script_context.get("script_policy_snapshot_id"),
+            script_generation_profile_snapshot_id=script_context.get(
+                "script_generation_profile_snapshot_id"
+            ),
+            script_position=script_context.get("script_position"),
         )
         self.repo.append_event(
             session_id=int(row["id"]),
@@ -265,6 +333,101 @@ class VNPlayService:
         )
         return VNPlaySession.from_row(row)
 
+    def _script_session_context(
+        self,
+        *,
+        mode: str,
+        primary_character_id: int,
+        vn_asset_pack_id: int,
+        content_rating: str,
+        script_id: int | None,
+        script_version_id: int | None,
+        acknowledgements: Sequence[str] | None,
+    ) -> dict[str, Any]:
+        """Resolve immutable script metadata to pin on a scripted session."""
+        if mode != MODE_SCRIPTED_STORY:
+            if script_id is not None or script_version_id is not None:
+                raise ValueError("script_fields_require_scripted_story")
+            return {}
+        if script_id is None or script_version_id is None:
+            raise ValueError("script_version_required")
+
+        script_repo = VNScriptsRepository.initialized(self.repo.db)
+        script = script_repo.get_script(
+            int(script_id),
+            owner_user_id=self.owner_user_id,
+        )
+        if script is None:
+            raise ValueError("script_not_found")
+        version = script_repo.get_version(
+            int(script_id),
+            int(script_version_id),
+            owner_user_id=self.owner_user_id,
+        )
+        if version is None:
+            raise ValueError("script_version_not_found")
+        if int(script["primary_asset_pack_id"]) != int(version["asset_pack_id"]):
+            raise ValueError("script_asset_pack_mismatch")
+        if int(version["asset_pack_id"]) != int(vn_asset_pack_id):
+            raise ValueError("script_asset_pack_mismatch")
+        pack = VNAssetPackService(
+            self.repo.db,
+            owner_user_id=self.owner_user_id,
+        ).get_pack(int(version["asset_pack_id"]))
+        script_primary_character_id = int(pack.primary_character_id)
+        script_content_rating = str(script.get("content_rating") or pack.content_rating or "general")
+        if script_primary_character_id != int(primary_character_id):
+            raise ValueError("script_primary_character_mismatch")
+        if script_content_rating != str(content_rating):
+            raise ValueError("script_content_rating_mismatch")
+
+        policy_snapshot = VNProfileSnapshotRepository.initialized(
+            self.repo.db
+        ).get_profile_snapshot(
+            int(version["policy_snapshot_id"]),
+            owner_user_id=self.owner_user_id,
+        )
+        if policy_snapshot is None:
+            raise ValueError("policy_snapshot_not_found")
+
+        policy_decision = evaluate_character_safety_definition(
+            profile_definition=policy_snapshot["definition"],
+            policy_profile_id=str(policy_snapshot["profile_id"]),
+            content_rating=script_content_rating,
+            metadata_status=self._character_safety_status(script_primary_character_id),
+        )
+        if policy_decision.get("blocked"):
+            raise ValueError("script_session_policy_blocked")
+        required_acknowledgements = {
+            str(reason["code"])
+            for reason in policy_decision.get("reasons", [])
+            if isinstance(reason, Mapping)
+            and reason.get("requires_acknowledgement")
+            and reason.get("code")
+        }
+        if not required_acknowledgements.issubset(set(acknowledgements or [])):
+            raise ValueError("script_session_acknowledgement_required")
+
+        program = version.get("program")
+        return {
+            "script_id": int(version["script_id"]),
+            "script_version_id": int(version["id"]),
+            "script_manifest_snapshot_id": int(version["manifest_snapshot_id"]),
+            "script_policy_snapshot_id": int(version["policy_snapshot_id"]),
+            "script_generation_profile_snapshot_id": int(
+                version["generation_profile_snapshot_id"]
+            ),
+            "script_position": _initial_script_position(program),
+            "primary_character_id": script_primary_character_id,
+            "content_rating": script_content_rating,
+        }
+
+    def _character_safety_status(self, character_id: int) -> str:
+        character = self.repo.db.get_character_card_by_id(character_id)
+        if not isinstance(character, Mapping):
+            return "missing"
+        return _character_safety_status(character)
+
     def list_sessions(self, *, include_deleted: bool = False) -> list[VNPlaySession]:
         return [
             VNPlaySession.from_row(row)
@@ -279,6 +442,22 @@ class VNPlayService:
         if row is None:
             raise VNPlayNotFoundError("session_not_found")
         return VNPlaySession.from_row(row)
+
+    def public_session_payload(self, session: VNPlaySession) -> dict[str, Any]:
+        """Return a session payload without raw scripted-story interpreter internals."""
+        return _public_session_payload(session)
+
+    def public_checkpoint_payload(self, checkpoint: Mapping[str, Any]) -> dict[str, Any]:
+        """Return a checkpoint payload without raw scripted-story interpreter internals."""
+        payload = dict(checkpoint)
+        snapshot = dict(payload.get("scene_state_snapshot") or {})
+        script_position = _script_position_from_snapshot(snapshot)
+        if script_position is not None:
+            snapshot["script_position"] = {
+                "progress_token": _script_progress_token(script_position)
+            }
+        payload["scene_state_snapshot"] = snapshot
+        return payload
 
     async def submit_turn(
         self,
@@ -319,6 +498,21 @@ class VNPlayService:
             owner_user_id=self.owner_user_id,
         )
         if session.scene_version != client_scene_version:
+            turn_request = self.repo.create_turn_request(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                base_scene_version=client_scene_version,
+                status=TURN_STATUS_ABANDONED,
+            )
+            self.repo.update_turn_request(
+                int(turn_request["id"]),
+                {
+                    "error": {"code": ERROR_STALE_SCENE_VERSION},
+                },
+                owner_user_id=self.owner_user_id,
+            )
             raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
         if session.active_turn_request_id is not None:
             raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
@@ -698,11 +892,14 @@ class VNPlayService:
         return enriched
 
     def create_checkpoint(self, session_id: int, *, label: str) -> dict[str, Any]:
-        self.get_session(session_id)
+        session = self.get_session(session_id)
         events = self.repo.list_events(session_id)
         state = self.repo.get_scene_state(session_id, owner_user_id=self.owner_user_id)
         if state is None:
             raise VNPlayNotFoundError("scene_state_not_found")
+        scene_state_snapshot = dict(state)
+        if session.mode == MODE_SCRIPTED_STORY:
+            scene_state_snapshot["script_position"] = dict(session.script_position)
         last_event_id = int(events[-1]["id"]) if events else None
         checkpoint = self.repo.create_checkpoint(
             session_id=session_id,
@@ -710,7 +907,7 @@ class VNPlayService:
             label=label,
             event_id=last_event_id,
             scene_version=int(state["scene_version"]),
-            scene_state_snapshot=state,
+            scene_state_snapshot=scene_state_snapshot,
         )
         self.repo.append_event(
             session_id=session_id,
@@ -847,6 +1044,7 @@ class VNPlayService:
         session_id: int,
         checkpoint_id: int,
         *,
+        client_scene_version: int,
         idempotency_key: str,
     ) -> dict[str, Any]:
         """Restore a checkpoint through the shared idempotent restore pipeline.
@@ -874,6 +1072,7 @@ class VNPlayService:
             {
                 "action_type": "checkpoint_restore",
                 "checkpoint_id": checkpoint_id,
+                "client_scene_version": client_scene_version,
             }
         )
         action = self._create_or_replay_session_action(
@@ -889,13 +1088,14 @@ class VNPlayService:
         self._validate_restore_can_start(
             session_id=session_id,
             action_id=int(action["id"]),
-            expected_scene_version=session.scene_version,
+            expected_scene_version=client_scene_version,
         )
 
         snapshot = dict(checkpoint["scene_state_snapshot"])
+        script_position = _script_position_from_snapshot(snapshot)
         previous_scene_version = session.scene_version
         next_scene_version = previous_scene_version + 1
-        restored_state = dict(snapshot)
+        restored_state = _scene_snapshot_without_script_position(snapshot)
         restored_state["scene_version"] = next_scene_version
         event_payload = {
             "restore_kind": "checkpoint",
@@ -913,6 +1113,7 @@ class VNPlayService:
                 event_payload=event_payload,
                 scene_state=restored_state,
                 scene_version=next_scene_version,
+                script_position=script_position,
                 branch_node_id=_optional_int(restored_state.get("active_branch_node_id")),
                 response_payload_factory=lambda payload: self._restore_response_payload(
                     payload,
@@ -930,6 +1131,709 @@ class VNPlayService:
             )
             raise
         return response
+
+    async def start_story(
+        self,
+        session_id: int,
+        *,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> VNPlayTurnResponse | dict[str, Any]:
+        """Start a model Story session or advance a scripted story from its entry."""
+        session = self.get_session(session_id)
+        if session.mode == MODE_SCRIPTED_STORY:
+            return self.advance_script(
+                session_id,
+                client_scene_version=client_scene_version,
+                idempotency_key=idempotency_key,
+            )
+        if session.mode != MODE_STORY:
+            raise VNPlayConflictError("story_start_requires_story_mode")
+        return await self.submit_turn(
+            session_id,
+            custom_action={"verb": "start_story"},
+            client_scene_version=client_scene_version,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_save_slot(
+        self,
+        session_id: int,
+        *,
+        slot_key: str,
+        title: str,
+        metadata: Mapping[str, Any] | None = None,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+        session = self.get_session(session_id)
+        normalized_metadata = dict(metadata or {})
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": "save_slot_create",
+                "slot_key": slot_key,
+                "title": title,
+                "metadata": normalized_metadata,
+            }
+        )
+        action = self._create_or_replay_session_action(
+            session_id=session_id,
+            action_type="save_slot_create",
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+        )
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+        response_payload = action.get("response_payload")
+        if response_payload is not None:
+            raise VNPlayConflictError(ERROR_RESTORE_ACTION_IN_PROGRESS)
+
+        self._validate_restore_can_start(
+            session_id=session_id,
+            action_id=int(action["id"]),
+            expected_scene_version=session.scene_version,
+        )
+
+        try:
+            events = self.repo.list_events(session_id)
+            state = self.repo.get_scene_state(session_id, owner_user_id=self.owner_user_id)
+            if state is None:
+                raise VNPlayNotFoundError("scene_state_not_found")
+            scene_state_snapshot = dict(state)
+            if session.mode == MODE_SCRIPTED_STORY:
+                scene_state_snapshot["script_position"] = dict(session.script_position)
+            last_event_id = int(events[-1]["id"]) if events else None
+            response = self.repo.commit_save_slot_create_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                slot_key=slot_key,
+                title=title,
+                metadata=normalized_metadata,
+                event_id=last_event_id,
+                scene_version=int(state["scene_version"]),
+                scene_state_snapshot=scene_state_snapshot,
+                response_payload_factory=lambda save_slot: _save_slot_response(
+                    save_slot,
+                    replayed=False,
+                ),
+            )
+            return response
+        except VNPlayConflictError as exc:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=str(exc),
+            )
+            raise
+        except Exception as exc:
+            self._mark_session_action_failed(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
+            )
+            raise
+
+    def list_save_slots(
+        self,
+        session_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        self.get_session(session_id)
+        return self.repo.list_save_slots(
+            session_id,
+            owner_user_id=self.owner_user_id,
+            include_deleted=include_deleted,
+        )
+
+    def get_save_slot(
+        self,
+        session_id: int,
+        save_slot_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        self.get_session(session_id)
+        slot = self.repo.get_save_slot(
+            save_slot_id,
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            include_deleted=include_deleted,
+        )
+        if slot is None:
+            raise VNPlayNotFoundError("save_slot_not_found")
+        return slot
+
+    def update_save_slot(
+        self,
+        session_id: int,
+        save_slot_id: int,
+        *,
+        title: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.get_session(session_id)
+        slot = self.repo.update_save_slot(
+            save_slot_id,
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            title=title,
+            metadata=metadata,
+        )
+        if slot is None or slot.get("deleted"):
+            raise VNPlayNotFoundError("save_slot_not_found")
+        return slot
+
+    def delete_save_slot(self, session_id: int, save_slot_id: int) -> None:
+        self.get_session(session_id)
+        slot = self.repo.update_save_slot(
+            save_slot_id,
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            deleted=True,
+        )
+        if slot is None:
+            raise VNPlayNotFoundError("save_slot_not_found")
+
+    def restore_save_slot(
+        self,
+        session_id: int,
+        save_slot_id: int,
+        *,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+
+        session = self.get_session(session_id)
+        slot = self.get_save_slot(session_id, save_slot_id)
+        checkpoint_id = int(slot["checkpoint_id"])
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": "save_slot_restore",
+                "save_slot_id": save_slot_id,
+                "checkpoint_id": checkpoint_id,
+                "client_scene_version": client_scene_version,
+            }
+        )
+        action = self._create_or_replay_session_action(
+            session_id=session_id,
+            action_type="save_slot_restore",
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+        )
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+
+        try:
+            if session.scene_version != client_scene_version:
+                raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
+            self._validate_restore_can_start(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                expected_scene_version=client_scene_version,
+            )
+            checkpoint = self.repo.get_checkpoint(checkpoint_id)
+            if checkpoint is None or int(checkpoint["session_id"]) != session_id:
+                raise VNPlayNotFoundError("checkpoint_not_found")
+            snapshot = dict(checkpoint["scene_state_snapshot"])
+            script_position = _script_position_from_snapshot(snapshot)
+            previous_scene_version = session.scene_version
+            next_scene_version = previous_scene_version + 1
+            restored_state = _scene_snapshot_without_script_position(snapshot)
+            restored_state["scene_version"] = next_scene_version
+            event_payload = {
+                "restore_kind": "save_slot",
+                "save_slot_id": save_slot_id,
+                "checkpoint_id": checkpoint_id,
+                "scene_state_snapshot": snapshot,
+                "previous_scene_version": previous_scene_version,
+                "scene_version": next_scene_version,
+                "idempotency_key": idempotency_key,
+            }
+            response = self.repo.commit_session_restore_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                event_payload=event_payload,
+                scene_state=restored_state,
+                scene_version=next_scene_version,
+                script_position=script_position,
+                branch_node_id=_optional_int(restored_state.get("active_branch_node_id")),
+                response_payload_factory=lambda payload: self._restore_response_payload(
+                    payload,
+                    checkpoint_id=checkpoint_id,
+                    save_slot_id=save_slot_id,
+                    target_event_id=_optional_int(checkpoint.get("event_id")),
+                    replayed=False,
+                ),
+            )
+        except VNPlayConflictError as exc:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=str(exc),
+            )
+            raise
+        except Exception as exc:
+            self._mark_session_action_failed(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
+            )
+            raise
+        return response
+
+    def advance_script(
+        self,
+        session_id: int,
+        *,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Advance a scripted story until it reaches a visible choice or end."""
+        return self._run_script_action(
+            session_id=session_id,
+            action_type="script_advance",
+            client_scene_version=client_scene_version,
+            idempotency_key=idempotency_key,
+            choice_id=None,
+        )
+
+    def choose_script_option(
+        self,
+        session_id: int,
+        *,
+        choice_id: str,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Select a visible scripted-story choice and advance the target label."""
+        return self._run_script_action(
+            session_id=session_id,
+            action_type="script_choice",
+            client_scene_version=client_scene_version,
+            idempotency_key=idempotency_key,
+            choice_id=choice_id,
+        )
+
+    def regenerate_script_expansion(
+        self,
+        session_id: int,
+        *,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Append a regenerated model-expansion lineage event without rewriting history."""
+        return self._run_script_regenerate_action(
+            session_id=session_id,
+            client_scene_version=client_scene_version,
+            idempotency_key=idempotency_key,
+        )
+
+    def get_script_state(self, session_id: int) -> dict[str, Any]:
+        """Return spoiler-safe interpreter state for a scripted-story session."""
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        version = self._script_version_for_session(session)
+        return _script_public_state_payload(
+            session_id=session.id,
+            scene_version=session.scene_version,
+            position=session.script_position,
+            program=version.get("program"),
+        )
+
+    def get_script_debug_state(self, session_id: int) -> dict[str, Any]:
+        """Return owner-visible pinned script metadata and program state."""
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        version = self._script_version_for_session(session)
+        state = _script_state_payload(
+            session_id=session.id,
+            scene_version=session.scene_version,
+            position=session.script_position,
+        )
+        state.update(
+            {
+                "script_id": session.script_id,
+                "script_version_id": session.script_version_id,
+                "script_manifest_snapshot_id": session.script_manifest_snapshot_id,
+                "script_policy_snapshot_id": session.script_policy_snapshot_id,
+                "script_generation_profile_snapshot_id": (
+                    session.script_generation_profile_snapshot_id
+                ),
+                "version_number": version.get("version_number"),
+                "version_label": version.get("label"),
+                "program": version.get("program") if isinstance(version.get("program"), Mapping) else {},
+                "script_defaults": (
+                    version.get("script_defaults")
+                    if isinstance(version.get("script_defaults"), Mapping)
+                    else {}
+                ),
+                "validation": version.get("validation"),
+            }
+        )
+        return state
+
+    def _run_script_action(
+        self,
+        *,
+        session_id: int,
+        action_type: str,
+        client_scene_version: int,
+        idempotency_key: str,
+        choice_id: str | None,
+    ) -> dict[str, Any]:
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": action_type,
+                "choice_id": choice_id,
+                "client_scene_version": client_scene_version,
+            }
+        )
+        action = self._create_or_replay_session_action(
+            session_id=session_id,
+            action_type=action_type,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+        )
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+
+        lock_acquired = False
+        try:
+            if choice_id is None:
+                if _list_of_dicts(session.script_position.get("waiting_choices")):
+                    self._abandon_session_action(
+                        session_id=session_id,
+                        action_id=int(action["id"]),
+                        error_code=ERROR_SCRIPT_ADVANCE_BLOCKED,
+                    )
+                    raise VNPlayConflictError(ERROR_SCRIPT_ADVANCE_BLOCKED)
+                if session.script_position.get("ended"):
+                    self._abandon_session_action(
+                        session_id=session_id,
+                        action_id=int(action["id"]),
+                        error_code=ERROR_SCRIPT_ENDED,
+                    )
+                    raise VNPlayConflictError(ERROR_SCRIPT_ENDED)
+            self._validate_restore_can_start(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                expected_scene_version=client_scene_version,
+            )
+            lock_acquired = True
+            version = self._script_version_for_session(session)
+            execution = _execute_script_program(
+                version.get("program"),
+                session.script_position,
+                choice_id=choice_id,
+                seed=session.seed,
+            )
+            next_scene_version = client_scene_version + 1
+            events = self._append_script_events(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                execution=execution,
+                scene_version=next_scene_version,
+                selected_choice_id=choice_id,
+            )
+            state = derive_scene_state(self.repo.list_events(session_id))
+            last_event_id = int(events[-1]["id"]) if events else None
+            self._persist_scene_state(
+                session_id=session_id,
+                state=state,
+                last_event_id=last_event_id,
+            )
+            self.repo.update_session(
+                session_id,
+                {
+                    "scene_version": next_scene_version,
+                    "script_position": execution["position"],
+                },
+                owner_user_id=self.owner_user_id,
+            )
+            response = self._script_action_response(
+                session_id=session_id,
+                scene_version=next_scene_version,
+                position=execution["position"],
+                events=events,
+                replayed=False,
+            )
+            self.repo.mark_session_action_terminal(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                status=SESSION_ACTION_STATUS_COMPLETED,
+                response_payload=response,
+            )
+        except VNPlayTurnError as exc:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=str(exc) or ERROR_INTERNAL_ERROR,
+            )
+            raise
+        except VNPlayConflictError:
+            raise
+        except VNPlayNotFoundError as exc:
+            if lock_acquired:
+                self._mark_session_action_failed(
+                    session_id=session_id,
+                    action_id=int(action["id"]),
+                    error_code=str(exc) or ERROR_INTERNAL_ERROR,
+                    error_type=exc.__class__.__name__,
+                )
+            raise
+        except Exception as exc:
+            self._mark_session_action_failed(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
+            )
+            raise
+        return response
+
+    def _run_script_regenerate_action(
+        self,
+        *,
+        session_id: int,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        generation = session.script_position.get("last_generation")
+        if not isinstance(generation, Mapping):
+            raise VNPlayConflictError("script_regenerate_unavailable")
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": "script_regenerate",
+                "client_scene_version": client_scene_version,
+                "generation_id": generation.get("id"),
+            }
+        )
+        action = self._create_or_replay_session_action(
+            session_id=session_id,
+            action_type="script_regenerate",
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+        )
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+
+        lock_acquired = False
+        try:
+            self._validate_restore_can_start(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                expected_scene_version=client_scene_version,
+            )
+            lock_acquired = True
+            result = _script_regeneration_result(generation, idempotency_key=idempotency_key)
+            next_position = dict(session.script_position)
+            next_position["last_generation"] = result
+            execution = _script_execution_payload(
+                position=next_position,
+                variables=dict(next_position.get("variables") or {}),
+                narrative_lines=[str(result.get("narrative_text") or "")],
+                dialogue=_list_of_dicts(result.get("dialogue")),
+                visible_choices=[],
+                selected_choice=None,
+                random_results=[],
+                generation_results=[result],
+            )
+            next_scene_version = client_scene_version + 1
+            events = self._append_script_events(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                execution=execution,
+                scene_version=next_scene_version,
+                selected_choice_id=None,
+            )
+            state = derive_scene_state(self.repo.list_events(session_id))
+            last_event_id = int(events[-1]["id"]) if events else None
+            self._persist_scene_state(
+                session_id=session_id,
+                state=state,
+                last_event_id=last_event_id,
+            )
+            self.repo.update_session(
+                session_id,
+                {
+                    "scene_version": next_scene_version,
+                    "script_position": next_position,
+                },
+                owner_user_id=self.owner_user_id,
+            )
+            response = self._script_action_response(
+                session_id=session_id,
+                scene_version=next_scene_version,
+                position=next_position,
+                events=events,
+                replayed=False,
+            )
+            self.repo.mark_session_action_terminal(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                status=SESSION_ACTION_STATUS_COMPLETED,
+                response_payload=response,
+            )
+        except VNPlayConflictError:
+            raise
+        except Exception as exc:
+            if lock_acquired:
+                self._mark_session_action_failed(
+                    session_id=session_id,
+                    action_id=int(action["id"]),
+                    error_code=ERROR_INTERNAL_ERROR,
+                    error_type=exc.__class__.__name__,
+                )
+            raise
+        return response
+
+    def _script_version_for_session(self, session: VNPlaySession) -> dict[str, Any]:
+        if session.script_id is None or session.script_version_id is None:
+            raise VNPlayNotFoundError("script_version_not_found")
+        version = VNScriptsRepository.initialized(self.repo.db).get_version(
+            session.script_id,
+            session.script_version_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if version is None:
+            raise VNPlayNotFoundError("script_version_not_found")
+        return version
+
+    def _append_script_events(
+        self,
+        *,
+        session_id: int,
+        action_id: int,
+        execution: Mapping[str, Any],
+        scene_version: int,
+        selected_choice_id: str | None,
+    ) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        if selected_choice_id is not None:
+            selected_choice = execution.get("selected_choice")
+            events.append(
+                self.repo.append_event(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    event_type=EVENT_CHOICE_SELECTED,
+                    event_payload={
+                        "session_action_id": action_id,
+                        "choice_id": selected_choice_id,
+                        "choice": (
+                            _script_public_choice(selected_choice)
+                            if isinstance(selected_choice, Mapping)
+                            else {}
+                        ),
+                        "scene_version": scene_version,
+                    },
+                    source="user",
+                )
+            )
+        narrative_text = str(execution.get("narrative_text") or "")
+        dialogue = _list_of_dicts(execution.get("dialogue"))
+        generation_results = _list_of_dicts(execution.get("generation_results"))
+        if narrative_text or dialogue or generation_results:
+            events.append(
+                self.repo.append_event(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    event_type=EVENT_MODEL_TURN,
+                    event_payload={
+                        "session_action_id": action_id,
+                        "narrative_text": narrative_text,
+                        "dialogue": dialogue,
+                        "scripted": True,
+                        "generation_results": generation_results,
+                        "scene_version": scene_version,
+                    },
+                    source="runtime",
+                )
+            )
+        choices = _script_public_choices(execution.get("visible_choices"))
+        random_results = _list_of_dicts(execution.get("random_results"))
+        if choices:
+            events.append(
+                self.repo.append_event(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    event_type=EVENT_CHOICE_PRESENTED,
+                    event_payload={
+                        "session_action_id": action_id,
+                        "choices": choices,
+                        "scene_version": scene_version,
+                    },
+                    source="runtime",
+                )
+            )
+        events.append(
+            self.repo.append_event(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                event_type=EVENT_SCENE_STATE_CHANGED,
+                event_payload={
+                    "session_action_id": action_id,
+                    "visible_choices": choices,
+                    "random_results": random_results,
+                    "scene_version": scene_version,
+                },
+                source="runtime",
+            )
+        )
+        return events
+
+    def _script_action_response(
+        self,
+        *,
+        session_id: int,
+        scene_version: int,
+        position: Mapping[str, Any],
+        events: Sequence[Mapping[str, Any]],
+        replayed: bool,
+    ) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        version = self._script_version_for_session(session)
+        current_scene = self.get_enriched_scene_state(session_id)
+        return {
+            "status": "completed",
+            "replayed": replayed,
+            "scene_version": scene_version,
+            "session": _public_session_payload(session),
+            "current_scene": current_scene,
+            "script_state": _script_public_state_payload(
+                session_id=session_id,
+                scene_version=scene_version,
+                position=position,
+                program=version.get("program"),
+            ),
+            "events": [dict(event) for event in events],
+            "warnings": [],
+        }
 
     def list_branches(self, session_id: int) -> list[dict[str, Any]]:
         self.get_session(session_id)
@@ -1008,6 +1912,8 @@ class VNPlayService:
                 error_code=ERROR_TURN_IN_PROGRESS,
             )
             raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+        if session.active_session_action_id == action_id:
+            raise VNPlayConflictError(ERROR_RESTORE_ACTION_IN_PROGRESS)
         if (
             session.active_session_action_id is not None
             and session.active_session_action_id != action_id
@@ -1095,11 +2001,12 @@ class VNPlayService:
         *,
         branch_id: int | None = None,
         checkpoint_id: int | None = None,
+        save_slot_id: int | None = None,
         target: str | None = None,
         target_event_id: int | None,
         replayed: bool,
     ) -> dict[str, Any]:
-        session_payload = dict(payload["session"])
+        session_payload = _public_session_payload(VNPlaySession.from_row(payload["session"]))
         scene_state = dict(payload["scene_state"])
         navigation = build_branch_navigation(
             session=session_payload,
@@ -1122,6 +2029,8 @@ class VNPlayService:
             response["branch_id"] = branch_id
         if checkpoint_id is not None:
             response["checkpoint_id"] = checkpoint_id
+        if save_slot_id is not None:
+            response["save_slot_id"] = save_slot_id
         if target is not None:
             response["target"] = target
         return response
@@ -1175,11 +2084,25 @@ class VNPlayService:
         ):
             return VNPlayTurnResponse.from_payload(response_payload)
 
-        return VNPlayTurnResponse(
-            turn_request_id=int(turn_request["id"]),
-            status=str(turn_request["status"]),
-            scene_version=int(turn_request["base_scene_version"]),
-        )
+        status = str(turn_request.get("status") or "")
+        error = turn_request.get("error")
+        error_code = None
+        if isinstance(error, Mapping):
+            if error.get("code") is not None:
+                error_code = str(error["code"])
+        if status in {TURN_STATUS_MODEL_FAILED, TURN_STATUS_PARSE_FAILED}:
+            raise VNPlayTurnError(error_code or status)
+        if status == TURN_STATUS_ABANDONED and error_code:
+            if error_code in _CONFLICT_REPLAY_ERROR_CODES:
+                raise VNPlayConflictError(error_code)
+            raise VNPlayTurnError(error_code)
+        if status in {TURN_STATUS_PENDING, TURN_STATUS_MODEL_CALLING}:
+            raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+        if error_code is not None:
+            if error_code in _CONFLICT_REPLAY_ERROR_CODES:
+                raise VNPlayConflictError(error_code)
+            raise VNPlayTurnError(error_code)
+        raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
 
     def _abandon_conflicting_turn(
         self,
@@ -1577,6 +2500,472 @@ def _validate_turn_input_for_mode(
         raise VNPlayTurnError(ERROR_CHOICE_NOT_ALLOWED)
     if session.mode == MODE_STORY and "input_text" in input_payload:
         raise VNPlayTurnError(ERROR_CHOICE_NOT_ALLOWED)
+    if session.mode == MODE_SCRIPTED_STORY:
+        raise VNPlayTurnError(ERROR_SCRIPTED_STORY_TURN_NOT_ALLOWED)
+
+
+def _initial_script_position(program: Any) -> dict[str, Any]:
+    """Build the deterministic initial interpreter position for a script."""
+    if not isinstance(program, Mapping):
+        return {"label": "start", "index": 0, "ended": False, "variables": {}}
+    entry_label = str(program.get("entry_label") or "start")
+    return {
+        "label": entry_label,
+        "index": 0,
+        "ended": False,
+        "variables": _initial_script_variables(program.get("variables")),
+    }
+
+
+def _initial_script_variables(raw_variables: Any) -> dict[str, Any]:
+    if not isinstance(raw_variables, Mapping):
+        return {}
+    variables: dict[str, Any] = {}
+    for name, definition in raw_variables.items():
+        if isinstance(name, str) and isinstance(definition, Mapping):
+            variables[name] = definition.get("default")
+    return variables
+
+
+def _execute_script_program(
+    program: Any,
+    position: Mapping[str, Any],
+    *,
+    choice_id: str | None,
+    seed: str | None,
+) -> dict[str, Any]:
+    """Run a deterministic script segment until the next visible boundary."""
+    if not isinstance(program, Mapping):
+        raise VNPlayTurnError("script_program_missing")
+    labels = program.get("labels")
+    if not isinstance(labels, Mapping):
+        raise VNPlayTurnError("script_labels_missing")
+
+    current_position = dict(position or _initial_script_position(program))
+    variables = dict(current_position.get("variables") or {})
+    selected_choice: dict[str, Any] | None = None
+    if choice_id is not None:
+        selected_choice = _script_selected_choice(current_position, choice_id)
+        current_position = {
+            "label": selected_choice["target"],
+            "index": 0,
+            "ended": False,
+            "variables": variables,
+        }
+
+    label = str(current_position.get("label") or program.get("entry_label") or "start")
+    index = int(current_position.get("index") or 0)
+    narrative_lines: list[str] = []
+    dialogue: list[dict[str, Any]] = []
+    visible_choices: list[dict[str, Any]] = []
+    random_results: list[dict[str, Any]] = []
+    generation_results: list[dict[str, Any]] = []
+    ended = False
+
+    for _ in range(MAX_SCRIPT_EXECUTION_STEPS):
+        ops = labels.get(label)
+        if not isinstance(ops, list):
+            raise VNPlayTurnError("script_label_missing")
+        if index >= len(ops):
+            ended = True
+            break
+        opcode = ops[index]
+        index += 1
+        if not isinstance(opcode, Mapping):
+            continue
+        if not _script_condition_matches(opcode.get("if"), variables):
+            continue
+
+        op = str(opcode.get("op") or "")
+        if op == "narrate":
+            text = str(opcode.get("text") or "")
+            if text:
+                narrative_lines.append(text)
+                dialogue.append({"speaker": "Narrator", "text": text})
+        elif op == "say":
+            text = str(opcode.get("text") or "")
+            speaker = str(opcode.get("speaker") or opcode.get("character") or "")
+            if text:
+                dialogue.append({"speaker": speaker or "Narrator", "text": text})
+        elif op == "set":
+            var_name = str(opcode.get("var") or "")
+            if var_name:
+                variables[var_name] = opcode.get("value")
+        elif op == "increment":
+            var_name = str(opcode.get("var") or "")
+            amount = opcode.get("amount", 1)
+            current = variables.get(var_name, 0)
+            if isinstance(current, (int, float)) and isinstance(amount, (int, float)):
+                variables[var_name] = current + amount
+        elif op == "random":
+            result = _script_random_result(
+                opcode,
+                seed=seed,
+                label=label,
+                index=index - 1,
+            )
+            var_name = result.get("var")
+            if isinstance(var_name, str) and var_name:
+                variables[var_name] = result.get("value")
+            random_results.append(result)
+        elif op == "generate":
+            result = _script_generation_result(
+                opcode,
+                seed=seed,
+                label=label,
+                index=index - 1,
+            )
+            generation_results.append(result)
+            text = str(result.get("narrative_text") or "")
+            if text:
+                narrative_lines.append(text)
+            dialogue.extend(_list_of_dicts(result.get("dialogue")))
+            current_position = {
+                "label": label,
+                "index": index,
+                "ended": False,
+                "variables": variables,
+                "last_generation": result,
+            }
+            return _script_execution_payload(
+                position=current_position,
+                variables=variables,
+                narrative_lines=narrative_lines,
+                dialogue=dialogue,
+                visible_choices=[],
+                selected_choice=selected_choice,
+                random_results=random_results,
+                generation_results=generation_results,
+            )
+        elif op == "jump":
+            label = str(opcode.get("target") or "")
+            index = 0
+        elif op == "choice":
+            visible_choices = _script_visible_choices(opcode)
+            current_position = {
+                "label": label,
+                "index": index - 1,
+                "ended": False,
+                "variables": variables,
+                "waiting_choice_id": str(opcode.get("id") or ""),
+                "waiting_choices": visible_choices,
+            }
+            return _script_execution_payload(
+                position=current_position,
+                variables=variables,
+                narrative_lines=narrative_lines,
+                dialogue=dialogue,
+                visible_choices=visible_choices,
+                selected_choice=selected_choice,
+                random_results=random_results,
+                generation_results=generation_results,
+            )
+        elif op == "end":
+            ended = True
+            break
+        elif op == "return":
+            ended = True
+            break
+
+    current_position = {
+        "label": label,
+        "index": index,
+        "ended": ended,
+        "variables": variables,
+    }
+    return _script_execution_payload(
+        position=current_position,
+        variables=variables,
+        narrative_lines=narrative_lines,
+        dialogue=dialogue,
+        visible_choices=[],
+        selected_choice=selected_choice,
+        random_results=random_results,
+        generation_results=generation_results,
+    )
+
+
+def _script_selected_choice(position: Mapping[str, Any], choice_id: str) -> dict[str, Any]:
+    choices = _list_of_dicts(position.get("waiting_choices"))
+    for choice in choices:
+        if str(choice.get("id")) == choice_id and choice.get("target"):
+            return choice
+    raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+
+
+def _script_visible_choices(opcode: Mapping[str, Any]) -> list[dict[str, Any]]:
+    choices = _list_of_dicts(opcode.get("choices"))
+    return [
+        {
+            "id": str(choice.get("id") or ""),
+            "text": str(choice.get("text") or choice.get("id") or ""),
+            "target": str(choice.get("target") or ""),
+        }
+        for choice in choices
+        if choice.get("id") and choice.get("target")
+    ]
+
+
+def _script_execution_payload(
+    *,
+    position: Mapping[str, Any],
+    variables: Mapping[str, Any],
+    narrative_lines: Sequence[str],
+    dialogue: Sequence[Mapping[str, Any]],
+    visible_choices: Sequence[Mapping[str, Any]],
+    selected_choice: Mapping[str, Any] | None,
+    random_results: Sequence[Mapping[str, Any]],
+    generation_results: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    payload = {
+        "position": dict(position),
+        "variables": dict(variables),
+        "narrative_text": "\n".join(narrative_lines),
+        "dialogue": [dict(item) for item in dialogue],
+        "visible_choices": [dict(choice) for choice in visible_choices],
+        "random_results": [dict(result) for result in random_results],
+        "generation_results": [dict(result) for result in generation_results],
+    }
+    if selected_choice is not None:
+        payload["selected_choice"] = dict(selected_choice)
+    return payload
+
+
+def _script_random_result(
+    opcode: Mapping[str, Any],
+    *,
+    seed: str | None,
+    label: str,
+    index: int,
+) -> dict[str, Any]:
+    random_id = str(opcode.get("id") or f"{label}:{index}")
+    var_name = str(opcode.get("var") or "")
+    digest = int(
+        _payload_hash(
+            {
+                "seed": seed or "",
+                "id": random_id,
+                "label": label,
+                "index": index,
+            }
+        ),
+        16,
+    )
+    choices = opcode.get("choices")
+    if (
+        isinstance(choices, Sequence)
+        and not isinstance(choices, (str, bytes))
+        and len(choices) > 0
+    ):
+        value = choices[digest % len(choices)]
+        result_type = "choice"
+    else:
+        minimum = opcode.get("min", 0)
+        maximum = opcode.get("max", 1)
+        if not isinstance(minimum, int) or isinstance(minimum, bool):
+            minimum = 0
+        if not isinstance(maximum, int) or isinstance(maximum, bool):
+            maximum = 1
+        if maximum < minimum:
+            minimum, maximum = maximum, minimum
+        value = minimum + (digest % (maximum - minimum + 1))
+        result_type = "integer"
+
+    return {
+        "id": random_id,
+        "var": var_name,
+        "type": result_type,
+        "value": value,
+    }
+
+
+def _script_generation_result(
+    opcode: Mapping[str, Any],
+    *,
+    seed: str | None,
+    label: str,
+    index: int,
+) -> dict[str, Any]:
+    generation_id = str(opcode.get("id") or f"{label}:{index}")
+    prompt = str(opcode.get("prompt") or opcode.get("text") or generation_id)
+    narrative_text = str(opcode.get("narrative_text") or opcode.get("text") or "")
+    if not narrative_text:
+        raise VNPlayTurnError("script_generation_unavailable")
+    speaker = str(opcode.get("speaker") or "Narrator")
+    regeneration_text = str(
+        opcode.get("regeneration_text")
+        or opcode.get("regenerate_text")
+        or ""
+    )
+    return {
+        "id": generation_id,
+        "label": label,
+        "index": index,
+        "prompt_hash": _payload_hash({"seed": seed or "", "prompt": prompt})[:16],
+        "source": SCRIPT_GENERATION_SOURCE_LITERAL,
+        "model_invoked": False,
+        "narrative_text": narrative_text,
+        "dialogue": [{"speaker": speaker, "text": narrative_text}],
+        "regeneration_text": regeneration_text or None,
+        "regeneration_supported": bool(regeneration_text),
+        "regenerated": False,
+    }
+
+
+def _script_regeneration_result(
+    generation: Mapping[str, Any],
+    *,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    regenerated_text = str(generation.get("regeneration_text") or "")
+    if not regenerated_text:
+        raise VNPlayConflictError("script_regenerate_unavailable")
+    return {
+        **dict(generation),
+        "regenerated": True,
+        "regeneration_key_hash": _payload_hash({"idempotency_key": idempotency_key})[:16],
+        "narrative_text": regenerated_text,
+        "dialogue": [{"speaker": "Narrator", "text": regenerated_text}],
+    }
+
+
+def _script_state_payload(
+    *,
+    session_id: int,
+    scene_version: int,
+    position: Mapping[str, Any],
+) -> dict[str, Any]:
+    variables = dict(position.get("variables") or {})
+    waiting_choices = _list_of_dicts(position.get("waiting_choices"))
+    waiting_choice = None
+    if waiting_choices:
+        waiting_choice = {
+            "id": position.get("waiting_choice_id"),
+            "choices": waiting_choices,
+        }
+    return {
+        "session_id": session_id,
+        "scene_version": scene_version,
+        "position": dict(position),
+        "variables": variables,
+        "waiting_choice": waiting_choice,
+        "ended": bool(position.get("ended")),
+    }
+
+
+def _script_public_state_payload(
+    *,
+    session_id: int,
+    scene_version: int,
+    position: Mapping[str, Any],
+    program: Any,
+) -> dict[str, Any]:
+    waiting_choices = _script_public_choices(position.get("waiting_choices"))
+    waiting_choice = None
+    if waiting_choices:
+        waiting_choice = {
+            "id": position.get("waiting_choice_id"),
+            "choices": waiting_choices,
+        }
+    return {
+        "session_id": session_id,
+        "scene_version": scene_version,
+        "position": {"progress_token": _script_progress_token(position)},
+        "variables": _script_public_variables(program, position.get("variables")),
+        "waiting_choice": waiting_choice,
+        "ended": bool(position.get("ended")),
+    }
+
+
+def _script_progress_token(position: Mapping[str, Any]) -> str:
+    return _payload_hash(
+        {
+            "label": position.get("label"),
+            "index": position.get("index"),
+            "waiting_choice_id": position.get("waiting_choice_id"),
+            "ended": bool(position.get("ended")),
+        }
+    )[:16]
+
+
+def _script_public_variables(program: Any, raw_variables: Any) -> dict[str, Any]:
+    if not isinstance(program, Mapping) or not isinstance(raw_variables, Mapping):
+        return {}
+    definitions = program.get("variables")
+    if not isinstance(definitions, Mapping):
+        return {}
+    public_variables: dict[str, Any] = {}
+    for name, value in raw_variables.items():
+        if not isinstance(name, str):
+            continue
+        definition = definitions.get(name)
+        if isinstance(definition, Mapping) and definition.get("public") is True:
+            public_variables[name] = value
+    return public_variables
+
+
+def _script_public_choices(raw_choices: Any) -> list[dict[str, Any]]:
+    return [
+        _script_public_choice(choice)
+        for choice in _list_of_dicts(raw_choices)
+        if choice.get("id")
+    ]
+
+
+def _script_public_choice(choice: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(choice.get("id") or ""),
+        "text": str(choice.get("text") or choice.get("id") or ""),
+    }
+
+
+def _script_condition_matches(condition: Any, variables: Mapping[str, Any]) -> bool:
+    if condition is None:
+        return True
+    if not isinstance(condition, Mapping):
+        return False
+    if (
+        "all" in condition
+        and isinstance(condition["all"], Sequence)
+        and not isinstance(condition["all"], (str, bytes))
+    ):
+        return all(_script_condition_matches(item, variables) for item in condition["all"])
+    if (
+        "any" in condition
+        and isinstance(condition["any"], Sequence)
+        and not isinstance(condition["any"], (str, bytes))
+    ):
+        return any(_script_condition_matches(item, variables) for item in condition["any"])
+    if "not" in condition:
+        return not _script_condition_matches(condition["not"], variables)
+    value = variables.get(str(condition.get("var") or ""))
+    expected = condition.get("value")
+    operator = str(condition.get("op") or "eq")
+    if operator == "eq":
+        return value == expected
+    if operator in {"ne", "neq"}:
+        return value != expected
+    if operator == "in" and isinstance(expected, Sequence) and not isinstance(expected, (str, bytes)):
+        return value in expected
+    if operator == "not_in" and isinstance(expected, Sequence) and not isinstance(expected, (str, bytes)):
+        return value not in expected
+    if operator in {"lt", "lte", "gt", "gte"}:
+        return _compare_script_values(value, expected, operator)
+    return False
+
+
+def _compare_script_values(value: Any, expected: Any, operator: str) -> bool:
+    if not isinstance(value, (int, float)) or not isinstance(expected, (int, float)):
+        return False
+    if operator == "lt":
+        return value < expected
+    if operator == "lte":
+        return value <= expected
+    if operator == "gt":
+        return value > expected
+    if operator == "gte":
+        return value >= expected
+    return False
 
 
 def _selected_visible_choice(
@@ -1702,6 +3091,16 @@ def _session_payload(session: VNPlaySession) -> dict[str, Any]:
         "primary_character_id": session.primary_character_id,
         "scene_version": session.scene_version,
     }
+
+
+def _public_session_payload(session: VNPlaySession) -> dict[str, Any]:
+    payload = asdict(session)
+    payload["deleted"] = False
+    if session.mode == MODE_SCRIPTED_STORY:
+        payload["script_position"] = {
+            "progress_token": _script_progress_token(session.script_position)
+        }
+    return payload
 
 
 def _event_int(event: Mapping[str, Any], key: str) -> int | None:
@@ -1855,6 +3254,25 @@ def _payload_hash(payload: Mapping[str, Any]) -> str:
 
 def _scene_state_payload(state: SceneState) -> dict[str, Any]:
     return asdict(state)
+
+
+def _scene_snapshot_without_script_position(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(snapshot)
+    payload.pop("script_position", None)
+    return payload
+
+
+def _script_position_from_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any] | None:
+    script_position = snapshot.get("script_position")
+    if isinstance(script_position, Mapping):
+        return dict(script_position)
+    return None
+
+
+def _save_slot_response(slot: Mapping[str, Any], *, replayed: bool) -> dict[str, Any]:
+    payload = dict(slot)
+    payload["replayed"] = replayed
+    return payload
 
 
 def _input_text(payload: Mapping[str, Any]) -> str:
