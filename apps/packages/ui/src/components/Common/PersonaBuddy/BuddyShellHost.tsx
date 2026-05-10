@@ -298,6 +298,9 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const [visualRenderError, setVisualRenderError] =
     React.useState<PersonaVisualRenderErrorState | null>(null)
   const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const setVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.setRuntimeDiagnostics
+  )
   const clearExpiredVisualOverride = usePersonaVisualRuntimeStore(
     (state) => state.clearExpired
   )
@@ -399,6 +402,35 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       renderError: activeVisualRenderError,
       includeNoActivePack: visualPackLoadStatus === "loaded"
     })
+
+  React.useEffect(() => {
+    const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
+    if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
+      setVisualRuntimeDiagnostics(null)
+      return
+    }
+
+    setVisualRuntimeDiagnostics({
+      personaId: activePersonaId,
+      sessionId: renderContext.live_session_id ?? null,
+      packId: visualPack?.id ?? null,
+      packTitle: visualPack?.title ?? null,
+      packLoadStatus: visualPackLoadStatus,
+      visualState,
+      diagnostic: visualDiagnostic,
+      updatedAt: Date.now()
+    })
+  }, [
+    renderContext.live_session_id,
+    resolvedPersona.activePersonaId,
+    resolvedPersona.hasTargetPersona,
+    setVisualRuntimeDiagnostics,
+    visualDiagnostic,
+    visualPack?.id,
+    visualPack?.title,
+    visualPackLoadStatus,
+    visualState
+  ])
   const portalRoot = ensurePortalRoot()
 
   if (!resolvedPersona.hasTargetPersona) {

@@ -16,6 +16,11 @@ import { PersonaPolicySummary } from "@/components/Option/MCPHub"
 import type { PersonaTurnDetectionValues } from "@/components/PersonaGarden/PersonaTurnDetectionControls"
 import { AssistantVoiceCard } from "@/components/PersonaGarden/AssistantVoiceCard"
 import { AssistantDefaultsPanel } from "@/components/PersonaGarden/AssistantDefaultsPanel"
+import { PersonaBuddyDiagnosticsPanel } from "@/components/PersonaGarden/PersonaBuddyDiagnosticsPanel"
+import {
+  buildPersonaBuddyDiagnostics,
+  type PersonaBuddyProfileState
+} from "@/components/PersonaGarden/personaBuddyDiagnostics"
 import {
   PersonaSetupHandoffCard,
 } from "@/components/PersonaGarden/PersonaSetupHandoffCard"
@@ -221,6 +226,9 @@ const SidepanelPersona = ({
   })
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
   const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const visualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.runtimeDiagnostics
+  )
   const [buddyShellLiveContext, setBuddyShellLiveContext] = React.useState({
     live_voice_state: "idle",
     active_tool_status: "",
@@ -1119,6 +1127,66 @@ const SidepanelPersona = ({
       }
     : undefined
 
+  const activeBuddySummary =
+    (savedPersonaBuddySummaryPersonaId === selectedPersonaId
+      ? savedPersonaBuddySummary
+      : null) ??
+    selectedCatalogPersona?.buddy_summary ??
+    null
+  const personaProfileState: PersonaBuddyProfileState = personaProfileLoading
+    ? "loading"
+    : selectedPersonaId
+      ? "loaded"
+      : "idle"
+  const activeVisualRuntimeDiagnostics =
+    visualRuntimeDiagnostics &&
+    visualRuntimeDiagnostics.personaId === normalizedLivePersonaId &&
+    (!sessionId ||
+      !visualRuntimeDiagnostics.sessionId ||
+      visualRuntimeDiagnostics.sessionId === sessionId)
+      ? visualRuntimeDiagnostics
+      : null
+  const personaBuddyDiagnostics = buildPersonaBuddyDiagnostics({
+    selectedPersona: {
+      id: selectedPersonaId,
+      name: selectedPersonaName
+    },
+    profileState: personaProfileState,
+    buddySummary: activeBuddySummary,
+    capabilities,
+    capabilitiesLoading: capsLoading,
+    liveSession: {
+      connected,
+      connecting,
+      sessionId,
+      error
+    },
+    liveVoice: {
+      state: liveVoiceController.state,
+      recoveryMode: liveVoiceController.recoveryMode,
+      warning: liveVoiceController.warning,
+      activeToolStatus: liveVoiceController.activeToolStatus,
+      textOnlyDueToTtsFailure: liveVoiceController.textOnlyDueToTtsFailure,
+      manualModeRequired: liveVoiceController.manualModeRequired
+    },
+    wake: {
+      armed: liveVoiceController.wakeArmed,
+      detectorState: liveVoiceController.wakeDetectorState,
+      warning: liveVoiceController.wakeWarning,
+      triggerPhrases: liveVoiceController.wakeTriggerPhrases,
+      behavior: liveVoiceController.sessionWakeBehavior
+    },
+    visual: {
+      packId: activeVisualRuntimeDiagnostics?.packId ?? null,
+      packTitle: activeVisualRuntimeDiagnostics?.packTitle ?? null,
+      packLoadStatus: activeVisualRuntimeDiagnostics?.packLoadStatus ?? "idle",
+      diagnostic: activeVisualRuntimeDiagnostics?.diagnostic ?? null
+    }
+  })
+  const personaBuddyDiagnosticsPanel = !isCompanionMode ? (
+    <PersonaBuddyDiagnosticsPanel diagnostics={personaBuddyDiagnostics} />
+  ) : null
+
   const assistantVoiceCard = (
     <AssistantVoiceCard
       resolvedDefaults={resolvedLivePersonaVoiceDefaults}
@@ -1788,6 +1856,7 @@ const SidepanelPersona = ({
         <LazyLiveSessionPanel
           controls={liveSessionControls}
           assistantVoice={assistantVoiceCard}
+          diagnostics={personaBuddyDiagnosticsPanel}
           error={liveSessionStatusPanels}
           pendingPlan={pendingPlanCard}
           transcript={transcriptPanel}

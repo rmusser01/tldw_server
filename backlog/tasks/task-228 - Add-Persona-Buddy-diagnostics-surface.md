@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-10 07:18'
-updated_date: '2026-05-10 15:15'
+updated_date: '2026-05-10 15:20'
 labels:
   - persona
   - buddy
@@ -56,6 +56,8 @@ Planning started in isolated worktree .worktrees/persona-buddy-diagnostics on br
 Task 1 complete: added pure Persona/Buddy diagnostics projector and unit tests. Verification: bunx vitest run apps/packages/ui/src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts passed (5 tests).
 
 Task 2 complete: added PersonaBuddyDiagnosticsPanel using the existing StatePanel design-system component. Verification: bun run test src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx passed (2 tests) from apps/packages/ui.
+
+Task 3 complete: wired diagnostics into Persona Live, added visual runtime diagnostics to the existing persona visual runtime store, and published BuddyShellHost visual diagnostics for route consumption. Verification: bun run test src/routes/__tests__/sidepanel-persona.test.tsx -t diagnostics passed; bun run test src/store/__tests__/persona-visual-runtime.test.ts passed; bun run test src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx passed; bun run test src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx -t visual passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
