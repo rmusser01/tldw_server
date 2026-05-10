@@ -173,7 +173,11 @@ def _build_branch_index(branches: Sequence[Mapping[str, Any]]) -> dict[str, Any]
             "choice_text": _branch_choice_text(branch, branch_path),
         }
         normalized.append(branch_data)
-        path_to_branch_id[path_identity] = branch_id
+        if (
+            path_identity not in path_to_branch_id
+            or branch_id < path_to_branch_id[path_identity]
+        ):
+            path_to_branch_id[path_identity] = branch_id
 
     parents: dict[int, int | None] = {}
     for branch in normalized:
@@ -375,13 +379,18 @@ def _restore_payload(
         default_target = BRANCH_RESTORE_TARGET_LATEST
     elif choice_point is not None:
         default_target = BRANCH_RESTORE_TARGET_CHOICE_POINT
+    target_names = [
+        target_name
+        for target_name, target_payload in (
+            (BRANCH_RESTORE_TARGET_LATEST, branch_latest),
+            (BRANCH_RESTORE_TARGET_CHOICE_POINT, choice_point),
+        )
+        if target_payload is not None
+    ]
     return {
         "supported": branch_latest is not None or choice_point is not None,
         "default_target": default_target,
-        "target_names": [
-            BRANCH_RESTORE_TARGET_LATEST,
-            BRANCH_RESTORE_TARGET_CHOICE_POINT,
-        ],
+        "target_names": target_names,
         "targets": {
             BRANCH_RESTORE_TARGET_LATEST: branch_latest,
             BRANCH_RESTORE_TARGET_CHOICE_POINT: choice_point,
