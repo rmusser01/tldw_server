@@ -6,6 +6,7 @@ import {
   BuddyShellRenderContextProvider,
   useBuddyShellRenderContext
 } from "@/components/Common/PersonaBuddy"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import { SELECTED_ASSISTANT_STORAGE_KEY } from "@/utils/selected-assistant-storage"
 
 const mocks = vi.hoisted(() => ({
@@ -349,6 +350,10 @@ describe("SidepanelPersona", () => {
     mocks.buildPersonaWebSocketUrl.mockReset()
     mocks.fetchCompanionConversationPrompts.mockReset()
     mocks.buddyShellContextSnapshots = []
+    usePersonaVisualRuntimeStore.setState({
+      override: null,
+      runtimeDiagnostics: null
+    } as any)
     mocks.buildPersonaWebSocketUrl.mockReturnValue(
       "ws://persona.test/api/v1/persona/stream"
     )
@@ -445,6 +450,141 @@ describe("SidepanelPersona", () => {
     expect(screen.getByRole("tab", { name: "Scopes" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Policies" })).toBeInTheDocument()
     await waitForLiveSessionPanel()
+  })
+
+  it("renders degraded Persona/Buddy diagnostics from visual runtime state while controls stay available", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.capabilitiesState.capabilities = {
+      hasPersona: true,
+      hasPersonalization: true,
+      hasAudio: true,
+      hasMcp: true
+    } as any
+    usePersonaVisualRuntimeStore.setState({
+      runtimeDiagnostics: {
+        personaId: "research_assistant",
+        sessionId: null,
+        packId: "pack-1",
+        packTitle: "Broken Pack",
+        packLoadStatus: "error",
+        diagnostic: {
+          code: "load_failed",
+          severity: "warning",
+          title: "Visual pack did not load",
+          message: "The active visual pack could not be loaded."
+        },
+        updatedAt: 1_765_333_200_000
+      }
+    } as any)
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            { id: "research_assistant", name: "Research Assistant" }
+          ]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "research_assistant",
+            version: 1,
+            buddy_summary: {
+              has_buddy: true,
+              persona_name: "Research Assistant",
+              role_summary: "Keeps research sessions moving",
+              visual: null
+            },
+            voice_defaults: {
+              voice_chat_trigger_phrases: ["hey research"],
+              wake_behavior: "continuous"
+            },
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitForLiveSessionPanel()
+    const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
+
+    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Visual pack did not load")
+    expect(diagnostics).toHaveTextContent("Pack ID: pack-1")
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
+  })
+
+  it("shows profile load failures in Persona/Buddy diagnostics", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.capabilitiesState.capabilities = {
+      hasPersona: true,
+      hasPersonalization: true,
+      hasMcp: true
+    } as any
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            { id: "research_assistant", name: "Research Assistant" }
+          ]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: false,
+          error: "Profile service offline",
+          json: async () => ({})
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitForLiveSessionPanel()
+    const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
+
+    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Profile")
+    expect(diagnostics).toHaveTextContent("Load failed")
+    expect(diagnostics).toHaveTextContent("Profile service offline")
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
   })
 
   it("boots persona selection and active tab from query params", async () => {

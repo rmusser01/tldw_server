@@ -11,6 +11,7 @@ import {
   DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS,
   usePersonaBuddyShellStore
 } from "@/store/persona-buddy-shell"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type { PersonaBuddyRenderContext } from "@/types/persona-buddy"
 import { BuddyShellHost } from "../BuddyShellHost"
 
@@ -182,6 +183,10 @@ describe("BuddyShellHost", () => {
           ...DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS["sidepanel-desktop"]
         }
       }
+    })
+    usePersonaVisualRuntimeStore.setState({
+      override: null,
+      runtimeDiagnostics: null
     })
   })
 
@@ -505,6 +510,44 @@ describe("BuddyShellHost", () => {
         expect.stringContaining("/assets/idle.png")
       )
     })
+  })
+
+  it("clears published visual diagnostics when the host unmounts", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    const view = renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(
+        usePersonaVisualRuntimeStore.getState().runtimeDiagnostics
+      ).toEqual(
+        expect.objectContaining({
+          personaId: "persona-1",
+          packId: "pack-1",
+          packLoadStatus: "loaded",
+          visualState: "idle"
+        })
+      )
+    })
+
+    view.unmount()
+
+    expect(usePersonaVisualRuntimeStore.getState().runtimeDiagnostics).toBeNull()
   })
 
   it("links the active buddy popover to the persona Visuals workflow", () => {

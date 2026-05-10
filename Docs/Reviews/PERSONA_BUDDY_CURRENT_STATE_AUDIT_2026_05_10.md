@@ -116,6 +116,7 @@ The MCP module provides enough current capability for composability: read capabi
 1. Persona/Buddy diagnostics surface
    - Scope: read-only diagnostic card/API helper, selected persona id/name, profile load status, buddy summary presence, active visual pack id/status/diagnostic, websocket connected/session id/last event, wake armed/state/rejection reason, MCP persona_visuals readiness.
    - Out of scope: new MCP tools, new renderer behavior, Persona Chat quality changes.
+   - Implementation tracking: Stage 1 Persona/Buddy diagnostics is tracked by GitHub issue #1511 and the implementation plan in `Docs/superpowers/plans/2026-05-10-persona-buddy-diagnostics-implementation-plan.md`.
 
 2. Live voice/wake recovery copy and reason mapping
    - Scope: map existing server reason codes and client recovery modes to user-facing remediation in Live Session, including saved-profile/runtime wake mismatch and reconnect/copy/reset actions.
