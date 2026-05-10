@@ -717,6 +717,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             route_key="vn-assets",
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vn_policy",
+            log_name="vn_policy",
+            prefix=f"{API_V1_PREFIX}/vn",
+            tags=("vn-policy",),
+            route_key="vn-policy",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.vn_play",
             log_name="vn_play",
             prefix=f"{API_V1_PREFIX}/vn",

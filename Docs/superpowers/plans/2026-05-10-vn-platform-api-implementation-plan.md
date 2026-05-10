@@ -578,7 +578,7 @@ git commit -m "Migrate VN assets to platform API"
 - Test: `tldw_Server_API/tests/VN_Policy/test_vn_policy_service.py`
 - Test: `tldw_Server_API/tests/VN_Policy/test_vn_policy_api.py`
 
-- [ ] **Step 1: Write failing profile repository tests**
+- [x] **Step 1: Write failing profile repository tests**
 
 Cover:
 
@@ -601,7 +601,7 @@ Add generation-profile schema/service tests for required fields:
 Assert invalid bounds and unsupported combinations fail validation before a
 profile can be used by scripts, sessions, or VN audio.
 
-- [ ] **Step 2: Write failing safety metadata tests**
+- [x] **Step 2: Write failing safety metadata tests**
 
 Use service-level tests for:
 
@@ -618,7 +618,7 @@ Use service-level tests for:
 ("general", "imported_untrusted", "strict_hosted") -> decision block
 ```
 
-- [ ] **Step 3: Write failing admin/RBAC and route tests**
+- [x] **Step 3: Write failing admin/RBAC and route tests**
 
 Cover:
 
@@ -630,11 +630,11 @@ Cover:
 - `/api/v1/vn/vn-policy` paths appear in OpenAPI after router registration;
 - list endpoints expose offset pagination fields.
 
-- [ ] **Step 4: Implement policy DB and service**
+- [x] **Step 4: Implement policy DB and service**
 
 Use admin/global storage consistent with existing AuthNZ/admin infrastructure. If a global config DB abstraction is not available, keep the first implementation config-backed plus snapshot rows in per-user `ChaChaNotes.db` for user-owned scripts/sessions. Do not store user-owned script/session snapshots only in the central AuthNZ DB.
 
-- [ ] **Step 5: Add API schemas and endpoints**
+- [x] **Step 5: Add API schemas and endpoints**
 
 Implement:
 
@@ -648,13 +648,13 @@ Implement:
 
 Use stable VN error detail objects.
 
-- [ ] **Step 6: Register policy router and assert OpenAPI paths**
+- [x] **Step 6: Register policy router and assert OpenAPI paths**
 
 Register `vn_policy.router` under `prefix=f"{API_V1_PREFIX}/vn"` in
 `content.py`. Add route/OpenAPI assertions for `/api/v1/vn/vn-policy/evaluate`,
 `/profiles`, and `/generation-profiles`.
 
-- [ ] **Step 7: Run policy tests**
+- [x] **Step 7: Run policy tests**
 
 Run:
 

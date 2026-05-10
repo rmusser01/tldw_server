@@ -120,6 +120,9 @@ AUDIT_EXPORT_CONTENT_TYPES = {
 MEETING_EVENTS_PATH = "/api/v1/meetings/sessions/{session_id}/events"
 NOTIFICATIONS_STREAM_PATH = "/api/v1/notifications/stream"
 VN_ASSET_CONTENT_PATH = "/api/v1/vn/vn-assets/packs/{pack_id}/items/{item_id}/content"
+VN_POLICY_EVALUATE_PATH = "/api/v1/vn/vn-policy/evaluate"
+VN_POLICY_PROFILES_PATH = "/api/v1/vn/vn-policy/profiles"
+VN_POLICY_GENERATION_PROFILES_PATH = "/api/v1/vn/vn-policy/generation-profiles"
 SLIDES_EXPORT_PATH = "/api/v1/slides/presentations/{presentation_id}/export"
 SLIDES_EXPORT_CONTENT_TYPES = {
     "application/json",
@@ -971,6 +974,23 @@ def test_vn_asset_content_openapi_documents_file_response() -> None:
     operation = app.openapi()["paths"][VN_ASSET_CONTENT_PATH]["get"]
 
     _assert_file_response_content(operation, {"application/octet-stream", "image/jpeg", "image/png", "image/webp"})
+
+
+@pytest.mark.integration
+def test_vn_policy_openapi_documents_canonical_paths() -> None:
+    """VN policy profile endpoints must be exposed under the canonical VN namespace."""
+    from tldw_Server_API.app.api.v1.endpoints.vn_policy import router as vn_policy_router
+
+    app = FastAPI()
+    app.include_router(vn_policy_router, prefix="/api/v1/vn")
+    paths = app.openapi()["paths"]
+
+    assert VN_POLICY_EVALUATE_PATH in paths
+    assert VN_POLICY_PROFILES_PATH in paths
+    assert VN_POLICY_GENERATION_PROFILES_PATH in paths
+    assert "post" in paths[VN_POLICY_EVALUATE_PATH]
+    assert {"get", "post"}.issubset(paths[VN_POLICY_PROFILES_PATH])
+    assert {"get", "post"}.issubset(paths[VN_POLICY_GENERATION_PROFILES_PATH])
 
 
 @pytest.mark.integration

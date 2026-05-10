@@ -54,12 +54,11 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
         },
         "supported_content_ratings": ["general", "teen", "mature"],
         "visible_policy_profiles": [
-            {"id": "general", "name": "General", "visible": True},
-            {"id": "mature", "name": "Mature", "visible": True},
+            {"id": "local_default", "name": "Local Default", "visible": True},
+            {"id": "strict_hosted", "name": "Strict Hosted", "visible": True},
         ],
         "visible_generation_profiles": [
-            {"id": "default_image", "name": "Default Image", "visible": True},
-            {"id": "default_audio", "name": "Default Audio", "visible": True},
+            {"id": "story_default", "name": "Story Default", "visible": True},
         ],
         "supported_media_types": {
             "image": list(VN_SUPPORTED_IMAGE_MEDIA_TYPES),

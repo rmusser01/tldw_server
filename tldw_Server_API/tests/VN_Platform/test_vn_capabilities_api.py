@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 from tldw_Server_API.app.api.v1.endpoints.vn_capabilities import router as vn_capabilities_router
 from tldw_Server_API.app.api.v1.endpoints.vn_play import router as vn_play_router
+from tldw_Server_API.app.api.v1.endpoints.vn_policy import router as vn_policy_router
 
 pytestmark = pytest.mark.integration
 
@@ -17,6 +18,7 @@ def client() -> TestClient:
     app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
     app.include_router(vn_assets_router, prefix="/api/v1/vn")
     app.include_router(vn_play_router, prefix="/api/v1/vn")
+    app.include_router(vn_policy_router, prefix="/api/v1/vn")
     return TestClient(app)
 
 
@@ -35,7 +37,7 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert body["enabled_modules"]["assets"] is True
     assert body["enabled_modules"]["play"] is True
     assert body["enabled_modules"]["scripts"] is False
-    assert body["enabled_modules"]["policy"] is False
+    assert body["enabled_modules"]["policy"] is True
     assert body["enabled_modules"]["audio"] is False
     assert body["features"]["asset_generation"] is True
     assert body["features"]["asset_portability"] is True

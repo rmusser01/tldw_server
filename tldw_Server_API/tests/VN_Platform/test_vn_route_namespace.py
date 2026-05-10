@@ -14,7 +14,7 @@ def test_vn_routes_are_registered_under_canonical_namespace() -> None:
     vn_specs = [
         spec
         for spec in iter_content_router_specs()
-        if spec.route_key in {"vn-capabilities", "vn-assets", "vn-play"}
+        if spec.route_key in {"vn-capabilities", "vn-assets", "vn-play", "vn-policy"}
     ]
 
     register_router_specs(app, vn_specs)
@@ -22,6 +22,9 @@ def test_vn_routes_are_registered_under_canonical_namespace() -> None:
     paths = {getattr(route, "path", "") for route in app.routes}
     assert "/api/v1/vn/vn-capabilities" in paths
     assert "/api/v1/vn/vn-assets/packs" in paths
+    assert "/api/v1/vn/vn-policy/evaluate" in paths
+    assert "/api/v1/vn/vn-policy/profiles" in paths
+    assert "/api/v1/vn/vn-policy/generation-profiles" in paths
     assert "/api/v1/vn/vn-play/sessions" in paths
     assert "/api/v1/vn-assets/packs" not in paths
     assert "/api/v1/vn-play/sessions" not in paths

@@ -3839,6 +3839,15 @@ def test_iter_content_router_specs_defers_tail_router_attr_lookup(
             "default_stable": True,
         },
         {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.vn_policy",
+            "expected_name": "vn_policy",
+            "path": "/vn-policy",
+            "prefix": "/api/v1/vn",
+            "tags": ("vn-policy",),
+            "route_key": "vn-policy",
+            "default_stable": True,
+        },
+        {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.vn_play",
             "expected_name": "vn_play",
             "path": "/vn-play",
@@ -11074,6 +11083,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.vn_policy",
+        path="/vn-policy",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.vn_play",
         path="/vn-play",
     )
@@ -11293,6 +11307,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["vn-capabilities"].tags == ("vn-capabilities",)
     assert by_key["vn-assets"].prefix == "/api/v1/vn"
     assert by_key["vn-assets"].tags == ("vn-assets",)
+    assert by_key["vn-policy"].prefix == "/api/v1/vn"
+    assert by_key["vn-policy"].tags == ("vn-policy",)
     assert by_key["vn-play"].prefix == "/api/v1/vn"
     assert by_key["vn-play"].tags == ("vn-play",)
     assert by_tags[("research",)].prefix == "/api/v1/research"
