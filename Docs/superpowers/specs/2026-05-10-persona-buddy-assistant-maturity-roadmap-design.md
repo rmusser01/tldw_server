@@ -35,6 +35,10 @@ The visual-pack roadmap is complete as scoped. Future visual work should start
 from the `#1497` evaluation and be split into new targeted issues rather than
 reopening the completed visual-pack epic.
 
+Before any tracker mutation, Stage 0 should re-verify live GitHub state and
+record the checked date. The issue state above is the design baseline, not a
+permanent source of truth.
+
 ## Product Framing
 
 Persona/Buddy is one assistant runtime with several surfaces:
@@ -80,13 +84,21 @@ known-good.
 
 Deliverables:
 
-1. Audit document covering Persona Chat, Persona Live, Persona Buddy, Persona
-   Garden, wake/voice, MCP persona tools, visual packs, docs, unit/integration
-   tests, and E2E coverage.
-2. Issue tree that updates or supersedes `#635` with concrete scoped issues.
-3. Known-good flow checklist for setup, chat, live voice, wake, Buddy display,
-   visual fallback, MCP runtime trigger, and recovery.
-4. Explicit separation note for `#1391` VN/CYOA work so future assistant work
+1. Evidence-backed audit document covering Persona Chat, Persona Live, Persona
+   Buddy, Persona Garden, wake/voice, MCP persona tools, visual packs, docs,
+   unit/integration tests, and E2E coverage.
+2. Current contract inventory covering REST schemas, stream payloads, MCP tools,
+   DB/state ownership, frontend surfaces, docs, and test coverage for each
+   Persona/Buddy flow.
+3. Evidence table with at least: flow, user journey, source files, API/runtime
+   contracts, tests, linked issues, known failures, severity, and recommended
+   next issue.
+4. Proposed issue tree that updates or supersedes `#635` with concrete scoped
+   issues after the evidence table identifies real gaps.
+5. Known-good flow and smoke/E2E candidate checklist for setup, chat, live
+   voice, wake, Buddy display, visual fallback, MCP runtime trigger, and
+   recovery.
+6. Explicit separation note for `#1391` VN/CYOA work so future assistant work
    does not drift into VN runtime assumptions.
 
 Audit questions:
@@ -96,13 +108,18 @@ Audit questions:
 3. Which flows have UI affordances but no reliable backend/runtime contract?
 4. Which flows are mature enough for expansion, and which need stabilization
    first?
+5. Which current contracts are server-owned, client-derived, persisted,
+   session-scoped, or MCP-triggered?
 
 Acceptance for Stage 0:
 
 1. A maintainer can point to one document that says what exists, what is flaky,
    and what should be next.
-2. `#635` is either rewritten into a scoped tracker or replaced by new issues.
-3. No code is changed except docs/task records unless a separately approved
+2. The document includes a contract inventory and evidence table with file,
+   test, issue, and severity references for each audited flow.
+3. `#635` has a documented migration recommendation, including which useful
+   links/comments should be preserved before it is rewritten or closed.
+4. No code is changed except docs/task records unless a separately approved
    follow-up issue exists.
 
 ### Stage 1: Reliability and UX Baseline
@@ -111,6 +128,10 @@ Goal: make existing Persona/Buddy flows dependable, understandable, and
 recoverable before adding new persona intelligence or runtime expansion.
 
 This is the first implementation target.
+
+Scope boundary: Stage 1 only hardens existing reliability diagnostics, recovery,
+copy, and test coverage. It should not add new persona capabilities, new
+runtime triggers, new renderer behavior, or new Persona Chat intelligence.
 
 Why this comes first:
 
@@ -175,6 +196,11 @@ This stage should decompose `#635` into concrete slices. The links currently on
 the eval design, but they should not substitute for repo-specific acceptance
 criteria.
 
+Before adding LLM-as-judge recipes or subjective scoring, Stage 2 should start
+with human error analysis on representative traces. Each proposed eval should
+name the failure mode it catches, the source traces or fixtures that motivated
+it, and the deterministic checks that can run before any optional judge.
+
 Likely workstreams:
 
 1. Role adherence:
@@ -191,7 +217,8 @@ Likely workstreams:
      not.
 4. Persona eval harness:
    - adapt the useful ideas behind role-adherence and role-playing eval links
-     into local deterministic fixtures and optional LLM-as-judge evals.
+     into local deterministic fixtures and optional LLM-as-judge evals only
+     after representative traces and failure labels exist.
    - avoid vanity metrics; tie each eval to a failure mode.
 5. Chat UX:
    - show effective persona, active policy/tool constraints, memory/RAG
@@ -208,11 +235,18 @@ Acceptance for Stage 2:
 3. Role adherence and memory/RAG behavior have repeatable evaluation coverage.
 4. Persona Chat shares contracts with Persona Garden/Live instead of creating
    parallel persona state.
+5. Optional LLM judges are backed by human-reviewed examples and deterministic
+   baseline checks.
 
 ### Stage 3: Unified Runtime and MCP Expansion
 
 Goal: let tools, live state, approvals, and Persona Chat participate in a
 coherent assistant loop.
+
+Before any new runtime trigger or MCP persona capability is implemented, this
+stage requires a policy/security review that documents authorization scope,
+duration limits, audit visibility, failure behavior, and the boundary between
+transient runtime effects and durable persona mutations.
 
 Likely workstreams:
 
@@ -241,6 +275,8 @@ Acceptance for Stage 3:
 2. Buddy and Live surfaces can explain what the assistant is doing without
    racing each other.
 3. MCP-driven behavior is visible, bounded, and auditable.
+4. Runtime/MCP expansion has an explicit policy/security review before
+   implementation.
 
 ### Stage 4: Visual and Renderer Future Work
 
@@ -280,25 +316,34 @@ Create a new GitHub epic:
 
 1. `Epic: Persona/Buddy assistant maturity roadmap`
 
-Suggested child issues:
+Create one immediate child issue:
 
 1. `Audit: Persona/Buddy current-state reliability and UX baseline`
-2. `Sprint: Persona Live setup and recovery diagnostics`
-3. `Sprint: Persona wake/voice diagnostics and copy alignment`
-4. `Sprint: Buddy shell stale-context and fallback hardening`
-5. `Sprint: Persona MCP tool diagnostics and audit visibility`
-6. `Sprint: Persona Live/Buddy E2E reliability coverage`
-7. `Epic: Persona Chat quality and evaluation`
-8. `Research: Persona role-adherence and memory/RAG eval harness`
-9. `Sprint: Persona Chat effective-context UX`
-10. `Epic: Unified Persona runtime and MCP expansion`
-11. `Research: Persona live-state contract v2`
-12. `Epic: Persona visual renderer/provider follow-ups`
+
+Do not create the full child issue tree up front. Stage 0 should produce the
+evidence table first, then create or update only the child issues justified by
+observed gaps.
+
+Candidate child issues after Stage 0 evidence:
+
+1. `Sprint: Persona Live setup and recovery diagnostics`
+2. `Sprint: Persona wake/voice diagnostics and copy alignment`
+3. `Sprint: Buddy shell stale-context and fallback hardening`
+4. `Sprint: Persona MCP tool diagnostics and audit visibility`
+5. `Sprint: Persona Live/Buddy E2E reliability coverage`
+6. `Epic: Persona Chat quality and evaluation`
+7. `Research: Persona role-adherence and memory/RAG eval harness`
+8. `Sprint: Persona Chat effective-context UX`
+9. `Epic: Unified Persona runtime and MCP expansion`
+10. `Research: Persona live-state contract v2`
+11. `Epic: Persona visual renderer/provider follow-ups`
 
 Issue hygiene:
 
 1. Keep `#1391` open only for VN/CYOA work unless it is intentionally split.
-2. Rewrite or close `#635` after the Persona Chat quality epic exists.
+2. Before rewriting or closing `#635`, preserve its useful reference links,
+   comments, and role-playing/persona-eval notes in the Persona Chat quality
+   issue or audit report.
 3. Do not reopen `#1449`; future visual work should use new targeted issues.
 
 ## Testing Strategy
@@ -318,8 +363,9 @@ Stage 1 should prioritize:
 Stage 2 should add:
 
 1. Deterministic persona prompt/contract tests where possible.
-2. Optional eval recipes for subjective role-adherence and grounding behavior
-   only after failure modes are identified.
+2. Human-labeled representative traces before optional subjective judges.
+3. Optional eval recipes for role-adherence and grounding behavior only after
+   failure modes are identified and deterministic baselines exist.
 
 Stage 3 should add:
 
@@ -346,6 +392,9 @@ Stage 4 should add:
 5. Risk: VN/CYOA tracker work bleeds into assistant runtime.
    - Mitigation: keep `#1391` compatibility-only from this roadmap unless a
      future issue explicitly bridges the two.
+6. Risk: The issue tree becomes an unverified issue flood.
+   - Mitigation: create only the epic and Stage 0 audit first; let audit
+     evidence justify the remaining child issues.
 
 ## First Concrete Next Step
 
@@ -366,3 +415,12 @@ The audit should inspect the current code, docs, and tests for:
 
 The audit should produce a written report and a proposed issue tree for Stage 1.
 Only after that audit should implementation begin on reliability/UX fixes.
+
+Minimum report shape:
+
+1. Contract inventory table.
+2. Evidence table with severity and source links.
+3. Known-good flow checklist and smoke/E2E candidates.
+4. `#635` migration recommendation with preserved references.
+5. Stage 1 issue recommendations limited to reliability diagnostics and UX
+   hardening.
