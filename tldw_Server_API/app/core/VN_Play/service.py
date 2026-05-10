@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from loguru import logger
@@ -13,10 +13,22 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
+from tldw_Server_API.app.core.VN_Play.branch_navigation import (
+    branch_filter_ids,
+    build_branch_navigation,
+    filter_branch_events,
+)
 from tldw_Server_API.app.core.VN_Play.constants import (
+    BRANCH_RESTORE_TARGET_CHOICE_POINT,
+    BRANCH_RESTORE_TARGET_LATEST,
+    ERROR_BRANCH_NOT_FOUND,
+    ERROR_BRANCH_RESTORE_NOT_ALLOWED,
+    ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
     ERROR_CHOICE_NOT_ALLOWED,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_INTERNAL_ERROR,
     ERROR_INVALID_CHOICE_ID,
+    ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_RETRY_LAST_TURN_NOT_FAILED,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
@@ -37,6 +49,10 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_MODEL_TURN_PARSE_FAILED,
     MODE_FREEFORM,
     MODE_STORY,
+    SESSION_ACTION_STATUS_ABANDONED,
+    SESSION_ACTION_STATUS_COMPLETED,
+    SESSION_ACTION_STATUS_FAILED,
+    SESSION_ACTION_STATUS_PENDING,
     STORY_BRANCH_LABEL_MAX_LENGTH,
     TURN_STATUS_ABANDONED,
     TURN_STATUS_COMPLETED,
@@ -95,6 +111,7 @@ class VNPlaySession:
     settings: dict[str, Any]
     scene_version: int
     active_turn_request_id: int | None
+    active_session_action_id: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -123,6 +140,7 @@ class VNPlaySession:
             settings=dict(row.get("settings") or {}),
             scene_version=int(row["scene_version"]),
             active_turn_request_id=_optional_int(row.get("active_turn_request_id")),
+            active_session_action_id=_optional_int(row.get("active_session_action_id")),
             created_at=_optional_str(row.get("created_at")),
             updated_at=_optional_str(row.get("updated_at")),
         )
@@ -327,6 +345,13 @@ class VNPlayService:
                 selected_choice,
                 scene_version=client_scene_version,
                 choice_presented_event_id=parent_choice_event_id,
+                parent_branch_path=_active_branch_path(
+                    self.repo.list_branches(
+                        session_id,
+                        owner_user_id=self.owner_user_id,
+                    ),
+                    persisted_scene_state,
+                ),
             )
             input_payload = {
                 "choice_id": choice_id,
@@ -559,8 +584,79 @@ class VNPlayService:
         )
 
     def list_events(self, session_id: int) -> list[dict[str, Any]]:
+        return self.list_events_with_metadata(session_id)["events"]
+
+    def list_events_with_metadata(
+        self,
+        session_id: int,
+        *,
+        branch_id: int | None = None,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+        include_descendants: bool = False,
+    ) -> dict[str, Any]:
         self.get_session(session_id)
-        return self.repo.list_events(session_id)
+        if branch_id is None:
+            return {
+                "events": self.repo.list_events(
+                    session_id,
+                    after_sequence=after_sequence,
+                    limit=limit,
+                ),
+                "warnings": [],
+            }
+
+        branches = self.repo.list_branches(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if not any(int(branch["id"]) == branch_id for branch in branches):
+            raise VNPlayNotFoundError(ERROR_BRANCH_NOT_FOUND)
+
+        branch_ids = branch_filter_ids(
+            branch_id=branch_id,
+            branches=branches,
+            include_descendants=include_descendants,
+        )
+        if self.repo.can_filter_branch_events_by_tags(session_id):
+            return {
+                "events": self.repo.list_events_for_branch_nodes(
+                    session_id,
+                    sorted(branch_ids),
+                    after_sequence=after_sequence,
+                    limit=limit,
+                ),
+                "warnings": [],
+            }
+
+        events = self.repo.list_events(session_id)
+        filtered_events, warnings = filter_branch_events(
+            branch_id=branch_id,
+            branches=branches,
+            events=events,
+            include_descendants=include_descendants,
+            after_sequence=after_sequence,
+            limit=limit if limit is not None else len(events),
+        )
+        return {"events": filtered_events, "warnings": warnings}
+
+    def get_branch_navigation(self, session_id: int) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        branches = self.repo.list_branches(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        events = self.repo.list_events(session_id)
+        scene_state = self.repo.get_scene_state(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        return build_branch_navigation(
+            session=_session_payload(session),
+            branches=branches,
+            events=events,
+            scene_state=scene_state,
+        )
 
     def get_enriched_scene_state(self, session_id: int) -> dict[str, Any] | None:
         session = self.get_session(session_id)
@@ -629,8 +725,140 @@ class VNPlayService:
         )
         return checkpoint
 
-    def restore_checkpoint(self, session_id: int, checkpoint_id: int) -> dict[str, Any]:
-        self.get_session(session_id)
+    def restore_branch(
+        self,
+        session_id: int,
+        *,
+        branch_id: int,
+        client_scene_version: int,
+        idempotency_key: str,
+        target: str = BRANCH_RESTORE_TARGET_LATEST,
+    ) -> dict[str, Any]:
+        """Restore a story branch with idempotent session-action serialization.
+
+        Completed actions replay their stored response. Failed or abandoned
+        terminal actions return their persisted error code without mutating the
+        original action state.
+        """
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+        if target not in {BRANCH_RESTORE_TARGET_LATEST, BRANCH_RESTORE_TARGET_CHOICE_POINT}:
+            raise VNPlayConflictError(ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE)
+
+        session = self.get_session(session_id)
+        if session.mode != MODE_STORY:
+            raise VNPlayConflictError(ERROR_BRANCH_RESTORE_NOT_ALLOWED)
+
+        branches = self.repo.list_branches(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        branch = next(
+            (item for item in branches if int(item["id"]) == branch_id),
+            None,
+        )
+        if branch is None:
+            raise VNPlayNotFoundError(ERROR_BRANCH_NOT_FOUND)
+
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": "branch_restore",
+                "branch_id": branch_id,
+                "target": target,
+                "client_scene_version": client_scene_version,
+            }
+        )
+        action = self._create_or_replay_session_action(
+            session_id=session_id,
+            action_type="branch_restore",
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+        )
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+
+        self._validate_restore_can_start(
+            session_id=session_id,
+            action_id=int(action["id"]),
+            expected_scene_version=client_scene_version,
+        )
+
+        try:
+            target_event_id = self._branch_restore_target_event_id(
+                session_id=session_id,
+                branch_id=branch_id,
+                target=target,
+            )
+            target_state = self._scene_state_through_event(
+                session_id=session_id,
+                target_event_id=target_event_id,
+            )
+            previous_scene_version = session.scene_version
+            next_scene_version = previous_scene_version + 1
+            restore_snapshot = _scene_state_payload(target_state)
+            restored_state = dict(restore_snapshot)
+            restored_state["scene_version"] = next_scene_version
+            event_payload = {
+                "restore_kind": "branch",
+                "branch_id": branch_id,
+                "target": target,
+                "target_event_id": target_event_id,
+                "scene_state_snapshot": restore_snapshot,
+                "previous_scene_version": previous_scene_version,
+                "scene_version": next_scene_version,
+                "idempotency_key": idempotency_key,
+            }
+            response = self.repo.commit_session_restore_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                event_payload=event_payload,
+                scene_state=restored_state,
+                scene_version=next_scene_version,
+                branch_node_id=_optional_int(restored_state.get("active_branch_node_id")),
+                response_payload_factory=lambda payload: self._restore_response_payload(
+                    payload,
+                    branch_id=branch_id,
+                    target=target,
+                    target_event_id=target_event_id,
+                    replayed=False,
+                ),
+            )
+        except VNPlayConflictError as exc:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=str(exc),
+            )
+            raise
+        except Exception as exc:
+            self._mark_session_action_failed(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
+            )
+            raise
+        return response
+
+    def restore_checkpoint(
+        self,
+        session_id: int,
+        checkpoint_id: int,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Restore a checkpoint through the shared idempotent restore pipeline.
+
+        The stored session action owns replay, active mutation locking, and
+        terminal failure semantics so duplicate client retries cannot fork
+        session state or overwrite prior failure diagnostics.
+        """
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+
+        session = self.get_session(session_id)
         checkpoints = self.repo.list_checkpoints(
             session_id,
             owner_user_id=self.owner_user_id,
@@ -642,31 +870,294 @@ class VNPlayService:
         if checkpoint is None:
             raise VNPlayNotFoundError("checkpoint_not_found")
 
-        snapshot = dict(checkpoint["scene_state_snapshot"])
-        event = self.repo.append_event(
-            session_id=session_id,
-            owner_user_id=self.owner_user_id,
-            event_type=EVENT_SESSION_RESTORED,
-            event_payload={
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": "checkpoint_restore",
                 "checkpoint_id": checkpoint_id,
-                "scene_state_snapshot": snapshot,
-                "scene_version": checkpoint["scene_version"],
-            },
-            source="runtime",
+            }
         )
-        restored_state = derive_scene_state(self.repo.list_events(session_id))
-        self._persist_scene_state(
+        action = self._create_or_replay_session_action(
             session_id=session_id,
-            state=restored_state,
-            last_event_id=int(event["id"]),
+            action_type="checkpoint_restore",
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
         )
-        return checkpoint
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+
+        self._validate_restore_can_start(
+            session_id=session_id,
+            action_id=int(action["id"]),
+            expected_scene_version=session.scene_version,
+        )
+
+        snapshot = dict(checkpoint["scene_state_snapshot"])
+        previous_scene_version = session.scene_version
+        next_scene_version = previous_scene_version + 1
+        restored_state = dict(snapshot)
+        restored_state["scene_version"] = next_scene_version
+        event_payload = {
+            "restore_kind": "checkpoint",
+            "checkpoint_id": checkpoint_id,
+            "scene_state_snapshot": snapshot,
+            "previous_scene_version": previous_scene_version,
+            "scene_version": next_scene_version,
+            "idempotency_key": idempotency_key,
+        }
+        try:
+            response = self.repo.commit_session_restore_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                event_payload=event_payload,
+                scene_state=restored_state,
+                scene_version=next_scene_version,
+                branch_node_id=_optional_int(restored_state.get("active_branch_node_id")),
+                response_payload_factory=lambda payload: self._restore_response_payload(
+                    payload,
+                    checkpoint_id=checkpoint_id,
+                    target_event_id=_optional_int(checkpoint.get("event_id")),
+                    replayed=False,
+                ),
+            )
+        except Exception as exc:
+            self._mark_session_action_failed(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
+            )
+            raise
+        return response
 
     def list_branches(self, session_id: int) -> list[dict[str, Any]]:
         self.get_session(session_id)
         return self.repo.list_branches(
             session_id,
             owner_user_id=self.owner_user_id,
+        )
+
+    def _create_or_replay_session_action(
+        self,
+        *,
+        session_id: int,
+        action_type: str,
+        idempotency_key: str,
+        request_payload_hash: str,
+    ) -> dict[str, Any]:
+        try:
+            return self.repo.create_session_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_type=action_type,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                status=SESSION_ACTION_STATUS_PENDING,
+            )
+        except ValueError as exc:
+            if str(exc) == ERROR_IDEMPOTENCY_KEY_CONFLICT:
+                raise VNPlayConflictError(ERROR_IDEMPOTENCY_KEY_CONFLICT) from exc
+            raise
+
+    def _completed_session_action_response(
+        self,
+        action: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        response_payload = action.get("response_payload")
+        if not isinstance(response_payload, Mapping):
+            raise VNPlayConflictError(ERROR_RESTORE_ACTION_IN_PROGRESS)
+        replayed = dict(response_payload)
+        replayed["replayed"] = True
+        return replayed
+
+    def _raise_for_terminal_session_action(self, action: Mapping[str, Any]) -> None:
+        status = str(action.get("status"))
+        if status not in {
+            SESSION_ACTION_STATUS_FAILED,
+            SESSION_ACTION_STATUS_ABANDONED,
+        }:
+            return
+        error = action.get("error")
+        error_code = (
+            str(error["code"])
+            if isinstance(error, Mapping) and error.get("code")
+            else ERROR_RESTORE_ACTION_IN_PROGRESS
+        )
+        raise VNPlayConflictError(error_code)
+
+    def _validate_restore_can_start(
+        self,
+        *,
+        session_id: int,
+        action_id: int,
+        expected_scene_version: int,
+    ) -> None:
+        session = self.get_session(session_id)
+        if session.scene_version != expected_scene_version:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=action_id,
+                error_code=ERROR_STALE_SCENE_VERSION,
+            )
+            raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
+        if session.active_turn_request_id is not None:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=action_id,
+                error_code=ERROR_TURN_IN_PROGRESS,
+            )
+            raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+        if (
+            session.active_session_action_id is not None
+            and session.active_session_action_id != action_id
+        ):
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=action_id,
+                error_code=ERROR_RESTORE_ACTION_IN_PROGRESS,
+            )
+            raise VNPlayConflictError(ERROR_RESTORE_ACTION_IN_PROGRESS)
+
+        if not self.repo.try_acquire_session_action_lock(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            action_id=action_id,
+            expected_scene_version=expected_scene_version,
+        ):
+            current = self.get_session(session_id)
+            if current.active_turn_request_id is not None:
+                error_code = ERROR_TURN_IN_PROGRESS
+            elif current.active_session_action_id is not None:
+                error_code = ERROR_RESTORE_ACTION_IN_PROGRESS
+            else:
+                error_code = ERROR_STALE_SCENE_VERSION
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=action_id,
+                error_code=error_code,
+            )
+            raise VNPlayConflictError(error_code)
+
+    def _branch_restore_target_event_id(
+        self,
+        *,
+        session_id: int,
+        branch_id: int,
+        target: str,
+    ) -> int:
+        navigation = self.get_branch_navigation(session_id)
+        branch_node = next(
+            (
+                branch
+                for branch in navigation["branches"]
+                if int(branch["branch_id"]) == branch_id
+            ),
+            None,
+        )
+        if branch_node is None:
+            raise VNPlayNotFoundError(ERROR_BRANCH_NOT_FOUND)
+        if target == BRANCH_RESTORE_TARGET_LATEST:
+            target_event_id = _optional_int(
+                branch_node.get("event_range", {}).get("latest_event_id")
+            )
+        else:
+            target_event_id = _optional_int(branch_node.get("parent_event_id"))
+            parent_event = (
+                self.repo.get_event(target_event_id)
+                if target_event_id is not None
+                else None
+            )
+            if parent_event is None or parent_event.get("event_type") != EVENT_CHOICE_PRESENTED:
+                target_event_id = None
+        if target_event_id is None:
+            raise VNPlayConflictError(ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE)
+        return target_event_id
+
+    def _scene_state_through_event(
+        self,
+        *,
+        session_id: int,
+        target_event_id: int,
+    ) -> SceneState:
+        bounded_events: list[dict[str, Any]] = []
+        for event in self.repo.list_events(session_id):
+            event_id = _event_int(event, "id")
+            if event_id is not None and event_id <= target_event_id:
+                bounded_events.append(event)
+        if not any(_event_int(event, "id") == target_event_id for event in bounded_events):
+            raise VNPlayConflictError(ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE)
+        return derive_scene_state(bounded_events)
+
+    def _restore_response_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        branch_id: int | None = None,
+        checkpoint_id: int | None = None,
+        target: str | None = None,
+        target_event_id: int | None,
+        replayed: bool,
+    ) -> dict[str, Any]:
+        session_payload = dict(payload["session"])
+        scene_state = dict(payload["scene_state"])
+        navigation = build_branch_navigation(
+            session=session_payload,
+            branches=_list_of_dicts(payload.get("branches")),
+            events=_list_of_dicts(payload.get("events")),
+            scene_state=scene_state,
+        )
+        restore_event = dict(payload["restore_event"])
+        response: dict[str, Any] = {
+            "status": SESSION_ACTION_STATUS_COMPLETED,
+            "replayed": replayed,
+            "restore_event_id": int(restore_event["id"]),
+            "target_event_id": target_event_id,
+            "scene_version": int(scene_state["scene_version"]),
+            "session": session_payload,
+            "current_scene": scene_state,
+            "branch_navigation": navigation,
+        }
+        if branch_id is not None:
+            response["branch_id"] = branch_id
+        if checkpoint_id is not None:
+            response["checkpoint_id"] = checkpoint_id
+        if target is not None:
+            response["target"] = target
+        return response
+
+    def _abandon_session_action(
+        self,
+        *,
+        session_id: int,
+        action_id: int,
+        error_code: str,
+    ) -> None:
+        self.repo.mark_session_action_terminal(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            action_id=action_id,
+            status=SESSION_ACTION_STATUS_ABANDONED,
+            error={"code": error_code},
+        )
+
+    def _mark_session_action_failed(
+        self,
+        *,
+        session_id: int,
+        action_id: int,
+        error_code: str,
+        error_type: str | None = None,
+    ) -> None:
+        error_payload = {"code": error_code}
+        if error_type:
+            error_payload["error_type"] = error_type
+        self.repo.mark_session_action_terminal(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            action_id=action_id,
+            status=SESSION_ACTION_STATUS_FAILED,
+            error=error_payload,
         )
 
     def _response_for_existing_turn(
@@ -696,11 +1187,12 @@ class VNPlayService:
         session_id: int,
     ) -> VNPlayTurnResponse:
         current = self.get_session(session_id)
-        status = (
-            ERROR_TURN_IN_PROGRESS
-            if current.active_turn_request_id is not None
-            else ERROR_STALE_SCENE_VERSION
-        )
+        if current.active_turn_request_id is not None:
+            status = ERROR_TURN_IN_PROGRESS
+        elif current.active_session_action_id is not None:
+            status = ERROR_RESTORE_ACTION_IN_PROGRESS
+        else:
+            status = ERROR_STALE_SCENE_VERSION
         self.repo.update_turn_request(
             int(turn_request["id"]),
             {
@@ -761,6 +1253,13 @@ class VNPlayService:
         result: TurnResult,
         next_scene_version: int,
     ) -> VNPlayTurnResponse:
+        active_branch_id = _story_active_branch_id(
+            session,
+            self.repo.get_scene_state(
+                session_id,
+                owner_user_id=self.owner_user_id,
+            ),
+        )
         model_turn = self.repo.append_event(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
@@ -774,6 +1273,7 @@ class VNPlayService:
                 "scene_version": next_scene_version,
             },
             source="model",
+            branch_node_id=active_branch_id,
         )
         new_events: list[dict[str, Any]] = [dict(event) for event in prior_events]
         new_events.append(model_turn)
@@ -784,6 +1284,7 @@ class VNPlayService:
             turn_request_id=turn_request_id,
             directives=result.visual_directives,
             scene_version=next_scene_version,
+            branch_node_id=active_branch_id,
         )
         new_events.extend(visual_events)
 
@@ -798,6 +1299,7 @@ class VNPlayService:
                     "scene_version": next_scene_version,
                 },
                 source="runtime",
+                branch_node_id=active_branch_id,
             )
             new_events.append(choice_presented)
 
@@ -813,6 +1315,7 @@ class VNPlayService:
             event_type=EVENT_SCENE_STATE_CHANGED,
             event_payload=scene_payload,
             source="runtime",
+            branch_node_id=active_branch_id,
         )
         turn_completed = self.repo.append_event(
             session_id=session_id,
@@ -823,6 +1326,7 @@ class VNPlayService:
                 "scene_version": next_scene_version,
             },
             source="runtime",
+            branch_node_id=active_branch_id,
         )
         new_events.extend([scene_state_changed, turn_completed])
 
@@ -863,6 +1367,7 @@ class VNPlayService:
         turn_request_id: int,
         directives: Sequence[Mapping[str, Any]],
         scene_version: int,
+        branch_node_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
         if not directives:
             return [], {}, []
@@ -918,6 +1423,7 @@ class VNPlayService:
                         "scene_version": scene_version,
                     },
                     source="runtime",
+                    branch_node_id=branch_node_id,
                 )
             )
 
@@ -938,6 +1444,7 @@ class VNPlayService:
                             "scene_version": scene_version,
                         },
                         source="runtime",
+                        branch_node_id=branch_node_id,
                     )
                 )
                 _merge_visual_item_scene_update(
@@ -971,6 +1478,7 @@ class VNPlayService:
                         **warning,
                     },
                     source="runtime",
+                    branch_node_id=branch_node_id,
                 )
             )
 
@@ -1144,8 +1652,10 @@ def _branch_path_for_choice(
     *,
     scene_version: int,
     choice_presented_event_id: int | None,
+    parent_branch_path: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    return [
+    path = [dict(step) for step in parent_branch_path or []]
+    path.append(
         {
             "schema_version": 1,
             "type": "choice",
@@ -1154,7 +1664,44 @@ def _branch_path_for_choice(
             "choice_presented_event_id": choice_presented_event_id,
             "scene_version": scene_version,
         }
-    ]
+    )
+    return path
+
+
+def _active_branch_path(
+    branches: Sequence[Mapping[str, Any]],
+    scene_state: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    active_branch_id = _optional_int(
+        scene_state.get("active_branch_node_id") if scene_state is not None else None
+    )
+    if active_branch_id is None:
+        return []
+    for branch in branches:
+        if _optional_int(branch.get("id")) == active_branch_id:
+            return _list_of_dicts(branch.get("branch_path"))
+    return []
+
+
+def _story_active_branch_id(
+    session: VNPlaySession,
+    scene_state: Mapping[str, Any] | None,
+) -> int | None:
+    if session.mode != MODE_STORY or scene_state is None:
+        return None
+    return _optional_int(scene_state.get("active_branch_node_id"))
+
+
+def _session_payload(session: VNPlaySession) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "owner_user_id": session.owner_user_id,
+        "mode": session.mode,
+        "title": session.title,
+        "status": session.status,
+        "primary_character_id": session.primary_character_id,
+        "scene_version": session.scene_version,
+    }
 
 
 def _event_int(event: Mapping[str, Any], key: str) -> int | None:
@@ -1304,6 +1851,10 @@ def _append_enrichment_warning(state: dict[str, Any], exc: Exception) -> None:
 def _payload_hash(payload: Mapping[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded, usedforsecurity=False).hexdigest()
+
+
+def _scene_state_payload(state: SceneState) -> dict[str, Any]:
+    return asdict(state)
 
 
 def _input_text(payload: Mapping[str, Any]) -> str:

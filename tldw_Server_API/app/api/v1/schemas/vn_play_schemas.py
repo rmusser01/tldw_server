@@ -21,6 +21,8 @@ VNPlaySetupTrustSource = Literal["local_pack", "latest_import_journal", "unknown
 VNPlaySetupWarningSeverity = Literal["info", "warning", "high_risk"]
 VNPlaySetupCompatibilityStatus = Literal["compatible", "different_character", "unknown"]
 VNPlaySetupEmptyStateScope = Literal["global", "filter", "page"]
+VNPlayBranchRestoreTarget = Literal["branch_latest", "choice_point"]
+VNPlayBranchWarningSeverity = Literal["info", "warning", "high_risk"]
 VNPlayTurnStatus = Literal[
     "pending",
     "model_calling",
@@ -337,6 +339,105 @@ class VNPlayRestoreRequest(BaseModel):
     idempotency_key: StrictStr = Field(..., min_length=1, max_length=200)
 
 
+class VNPlayBranchWarning(BaseModel):
+    """Stable branch-navigation warning payload."""
+
+    code: StrictStr
+    severity: VNPlayBranchWarningSeverity = "warning"
+    recoverable: StrictBool = True
+    message: StrictStr | None = None
+    branch_id: StrictInt | None = None
+    event_id: StrictInt | None = None
+
+
+class VNPlayBranchEventRange(BaseModel):
+    """Event interval covered by a branch node."""
+
+    start_event_id: StrictInt | None = None
+    start_sequence_number: StrictInt | None = None
+    latest_event_id: StrictInt | None = None
+    latest_sequence_number: StrictInt | None = None
+
+
+class VNPlayBranchRestoreCapability(BaseModel):
+    """Restore targets available for a branch node."""
+
+    supported: StrictBool
+    default_target: VNPlayBranchRestoreTarget | None = None
+    target_names: list[VNPlayBranchRestoreTarget] = Field(default_factory=list)
+    targets: dict[str, dict[str, StrictInt | None] | None] = Field(default_factory=dict)
+
+
+class VNPlayBranchPathStep(BaseModel):
+    """One step in a VN Play branch path."""
+
+    branch_id: StrictInt
+    branch_label: StrictStr | None = None
+    choice_id: StrictStr | None = None
+    choice_text: StrictStr | None = None
+    depth: StrictInt = Field(..., ge=0)
+
+
+class VNPlayBranchNavigationNode(BaseModel):
+    """Derived navigation data for one branch node."""
+
+    branch_id: StrictInt
+    parent_branch_id: StrictInt | None = None
+    parent_event_id: StrictInt | None = None
+    choice_selected_event_id: StrictInt | None = None
+    branch_label: StrictStr | None = None
+    choice_id: StrictStr | None = None
+    choice_text: StrictStr | None = None
+    branch_path: list[dict[str, Any]] = Field(default_factory=list)
+    depth: StrictInt = Field(..., ge=0)
+    status: StrictStr = "active"
+    is_active: StrictBool = False
+    is_on_active_path: StrictBool = False
+    event_range: VNPlayBranchEventRange = Field(default_factory=VNPlayBranchEventRange)
+    subtree_event_range: VNPlayBranchEventRange = Field(default_factory=VNPlayBranchEventRange)
+    restore: VNPlayBranchRestoreCapability
+    warnings: list[VNPlayBranchWarning] = Field(default_factory=list)
+
+
+class VNPlayBranchNavigationResponse(BaseModel):
+    """Derived branch navigation read model for a VN Play session."""
+
+    session_id: StrictInt
+    mode: VNPlayMode
+    scene_version: StrictInt = Field(..., ge=0)
+    last_event_id: StrictInt | None = None
+    active_branch_node_id: StrictInt | None = None
+    active_path: list[VNPlayBranchPathStep] = Field(default_factory=list)
+    branches: list[VNPlayBranchNavigationNode] = Field(default_factory=list)
+    warnings: list[VNPlayBranchWarning] = Field(default_factory=list)
+
+
+class VNPlayBranchRestoreRequest(BaseModel):
+    """Request body for restoring a VN Play branch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_scene_version: StrictInt = Field(..., ge=0)
+    idempotency_key: StrictStr = Field(..., min_length=1, max_length=200)
+    target: VNPlayBranchRestoreTarget = "branch_latest"
+
+
+class VNPlayBranchRestoreResponse(BaseModel):
+    """Response for branch restore operations."""
+
+    status: StrictStr
+    replayed: StrictBool = False
+    restore_event_id: StrictInt
+    target_event_id: StrictInt | None = None
+    scene_version: StrictInt = Field(..., ge=0)
+    session: VNPlaySessionResponse
+    current_scene: VNPlaySceneStateResponse
+    branch_navigation: VNPlayBranchNavigationResponse
+    branch_id: StrictInt | None = None
+    checkpoint_id: StrictInt | None = None
+    target: VNPlayBranchRestoreTarget | None = None
+
+
 class VNPlayRetryTurnRequest(BaseModel):
     """Request body for retrying the last VN Play user turn."""
 
@@ -363,7 +464,17 @@ class VNPlayBranchResponse(BaseModel):
 
 
 __all__ = [
+    "VNPlayBranchEventRange",
+    "VNPlayBranchNavigationNode",
+    "VNPlayBranchNavigationResponse",
+    "VNPlayBranchPathStep",
+    "VNPlayBranchRestoreCapability",
+    "VNPlayBranchRestoreRequest",
+    "VNPlayBranchRestoreResponse",
+    "VNPlayBranchRestoreTarget",
     "VNPlayBranchResponse",
+    "VNPlayBranchWarning",
+    "VNPlayBranchWarningSeverity",
     "VNPlayCheckpointCreate",
     "VNPlayCheckpointResponse",
     "VNPlayEventResponse",
