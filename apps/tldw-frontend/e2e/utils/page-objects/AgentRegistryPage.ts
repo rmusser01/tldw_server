@@ -13,6 +13,11 @@ import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
+export interface AgentRegistryHealthState {
+  loaded: boolean
+  unavailable: boolean
+}
+
 export class AgentRegistryPage extends BasePage {
   constructor(page: Page) {
     super(page)
@@ -95,17 +100,35 @@ export class AgentRegistryPage extends BasePage {
   /** Wait for the health card to finish its loading state. */
   async waitForHealthSettled(timeout = 20_000): Promise<void> {
     await Promise.race([
-      this.runnerBinaryLabel.waitFor({ state: "visible", timeout }),
+      Promise.all([
+        this.runnerBinaryLabel.waitFor({ state: "visible", timeout }),
+        this.agentStatusLabel.waitFor({ state: "visible", timeout }),
+        this.apiKeysLabel.waitFor({ state: "visible", timeout }),
+      ]),
       this.healthUnavailableWarning.waitFor({ state: "visible", timeout }),
     ])
   }
 
+  /** Wait once for health to settle, then read the resulting state. */
+  async getHealthState(timeout = 20_000): Promise<AgentRegistryHealthState> {
+    await this.waitForHealthSettled(timeout)
+    const [runnerVisible, agentVisible, apiKeysVisible, unavailable] =
+      await Promise.all([
+        this.runnerBinaryLabel.isVisible().catch(() => false),
+        this.agentStatusLabel.isVisible().catch(() => false),
+        this.apiKeysLabel.isVisible().catch(() => false),
+        this.healthUnavailableWarning.isVisible().catch(() => false),
+      ])
+
+    return {
+      loaded: runnerVisible && agentVisible && apiKeysVisible,
+      unavailable,
+    }
+  }
+
   /** Check if health data loaded successfully (status indicators are visible) */
   async isHealthDataLoaded(): Promise<boolean> {
-    await this.waitForHealthSettled().catch(() => {})
-    const runnerVisible = await this.runnerBinaryLabel.isVisible().catch(() => false)
-    const agentVisible = await this.agentStatusLabel.isVisible().catch(() => false)
-    return runnerVisible && agentVisible
+    return (await this.getHealthState()).loaded
   }
 
   /** Wait for the agent list to finish its loading state. */
@@ -127,8 +150,7 @@ export class AgentRegistryPage extends BasePage {
 
   /** Check if the page is showing health warning (server unreachable) */
   async isHealthUnavailable(): Promise<boolean> {
-    await this.waitForHealthSettled().catch(() => {})
-    return this.healthUnavailableWarning.isVisible().catch(() => false)
+    return (await this.getHealthState()).unavailable
   }
 
   // -- Interactive elements for assertAllButtonsWired() ----------------------
