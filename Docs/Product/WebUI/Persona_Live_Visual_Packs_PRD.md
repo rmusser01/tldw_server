@@ -310,8 +310,9 @@ by PR #1135 asset-pack portability:
 
 Users SHOULD be able to save an existing same-user visual pack into a personal
 library as metadata, not as an immediate asset copy. V1 library entries are
-user-scoped references to a source persona and source pack with display
-snapshots so stale entries can still be shown and removed.
+user-scoped references to a source persona and source pack. V1 intentionally
+does not store display snapshots; listing derives source display names from live
+source rows when those rows still resolve.
 
 Saving the same source pack SHOULD be idempotent. Using a library item SHOULD
 duplicate the referenced source pack to the chosen target persona as a draft and
@@ -569,8 +570,10 @@ baseline. The first reference-backed V1 slices are now covered:
    library entries and creating inactive target-persona drafts (#1496).
 6. Shared/cross-device libraries remain future work.
 7. External MCP-compatible visual providers remain future work.
-8. Live2D or other renderer adapter remains future work after the sprite/frame
-   path is stable.
+8. Renderer/provider adapter evaluation for Live2D and other future paths is
+   tracked by #1497 and the 2026-05-10 design evaluation.
+9. Live2D or other renderer adapter implementation remains future work after the
+   sprite/frame path and renderer capability contract are stable.
 
 ---
 
@@ -668,3 +671,9 @@ E2E:
 10. Issue #1450: Same-user Persona Visual pack duplicate-to-persona draft flow.
 11. Issue #1468: Personal Persona Visual pack library foundation.
 12. Issue #1490: Persona visual-pack import conflict choices.
+13. Issue #1493: Persona Garden reusable affordances.
+14. Issue #1496: MCP reusable-pack semantics for reference-backed personal
+    library entries.
+15. Issue #1497: Persona visual-pack renderer/provider adapter evaluation.
+16. Renderer/provider adapter evaluation:
+    `Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md`

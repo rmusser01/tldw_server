@@ -44,6 +44,18 @@ work. It keeps today's pack attached to one persona while leaving room for later
 duplicate-to-persona, import/export, and shared-library workflows without
 changing the core pack format.
 
+V1 validation and Buddy runtime support are intentionally limited to
+`sprite_frames`. Reserved renderer labels in API/UI types are not support
+claims until backend manifest validation, import preview, Buddy runtime
+rendering, and capability reporting all agree on the new renderer contract.
+
+Future renderer/provider adapter work is evaluated in
+`Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md`.
+That evaluation keeps Live2D, Rive, Lottie, Spine, and external MCP-compatible
+pack providers separate from the current V1 activation path. The recommended
+next step is a renderer capability contract and safe sprite atlas extension
+before any non-sprite adapter implementation.
+
 ## Personal Library
 
 The personal library is a user-scoped metadata layer over existing Persona
