@@ -1512,15 +1512,15 @@ class ACPSessionsDB:
         cutoff = now_dt - timedelta(days=retention_days_int)
         cutoff_iso = cutoff.isoformat()
         conn = self._get_conn()
-        cursor = conn.execute(
-            """
-            DELETE FROM sessions
-            WHERE status IN ('closed', 'error')
-              AND COALESCE(last_activity_at, created_at) < ?
-            """,
-            (cutoff_iso,),
-        )
-        conn.commit()
+        with conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM sessions
+                WHERE status IN ('closed', 'error')
+                  AND COALESCE(last_activity_at, created_at) < ?
+                """,
+                (cutoff_iso,),
+            )
         deleted = cursor.rowcount
         if deleted:
             logger.info(

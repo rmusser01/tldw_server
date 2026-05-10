@@ -334,6 +334,52 @@ def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):
     assert events[0]["metadata"]["agent_type"] == "codex"
 
 
+def test_acp_list_audit_events_filters_in_memory_events_by_retention(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    class _EmptyAuditDB:
+        _retention_days = 1
+
+        def flush(self):
+            return 0
+
+        def query_events(self, **_kwargs):
+            return []
+
+        def get_hot_cache(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(audit_db_mod, "get_acp_audit_db", lambda: _EmptyAuditDB())
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2000-01-01T00:00:00+00:00",
+                "action": "old",
+                "user_id": 1,
+                "session_id": "retention-session",
+                "metadata": {},
+            }
+        )
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2999-01-01T00:00:00+00:00",
+                "action": "fresh",
+                "user_id": 1,
+                "session_id": "retention-session",
+                "metadata": {},
+            }
+        )
+    try:
+        events = acp_endpoints._acp_list_audit_events(session_id="retention-session")
+    finally:
+        with acp_endpoints._ACP_AUDIT_LOCK:
+            acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    assert [event["action"] for event in events] == ["fresh"]
+
+
 def test_agent_audit_scope_is_admin_readable_without_runner_session(
     client_user_only,
     monkeypatch,

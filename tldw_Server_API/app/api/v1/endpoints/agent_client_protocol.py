@@ -330,17 +330,28 @@ def _acp_record_audit_event(
 
 def _acp_list_audit_events(*, session_id: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
+    retention_days = 30
+    now_seconds = time.time()
     try:
         from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
 
         audit_db = get_acp_audit_db()
+        retention_days = max(0, int(getattr(audit_db, "_retention_days", retention_days)))
         audit_db.flush()
         events.extend(audit_db.query_events(session_id=session_id, limit=5000))
-        events.extend(audit_db.get_hot_cache(session_id=session_id))
+        events.extend(
+            item for item in audit_db.get_hot_cache(session_id=session_id)
+            if _acp_audit_event_within_retention(item, retention_days=retention_days, now=now_seconds)
+        )
     except Exception:
         logger.warning("ACP audit DB read failed")
     with _ACP_AUDIT_LOCK:
-        events.extend(dict(item) for item in _ACP_AUDIT_EVENTS if str(item.get("session_id")) == str(session_id))
+        events.extend(
+            dict(item)
+            for item in _ACP_AUDIT_EVENTS
+            if str(item.get("session_id")) == str(session_id)
+            and _acp_audit_event_within_retention(item, retention_days=retention_days, now=now_seconds)
+        )
 
     deduped: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
     for event in events:
@@ -358,6 +369,38 @@ def _acp_list_audit_events(*, session_id: str) -> list[dict[str, Any]]:
         )
         deduped[key] = dict(event)
     return sorted(deduped.values(), key=lambda item: str(item.get("timestamp") or ""))
+
+
+def _acp_audit_event_timestamp_seconds(event: dict[str, Any]) -> float | None:
+    """Best-effort conversion of an audit event timestamp to epoch seconds."""
+    value = event.get("timestamp")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _acp_audit_event_within_retention(
+    event: dict[str, Any],
+    *,
+    retention_days: int,
+    now: float,
+) -> bool:
+    """Return true when an in-memory audit event is inside the retention window."""
+    timestamp_seconds = _acp_audit_event_timestamp_seconds(event)
+    if timestamp_seconds is None:
+        return True
+    cutoff = float(now) - (max(0, int(retention_days)) * 86400)
+    return timestamp_seconds >= cutoff
 
 
 def _is_agent_audit_scope(session_id: str) -> bool:
@@ -453,9 +496,12 @@ def _redact_acp_string(value: str) -> str:
         return _ACP_REDACTED_VALUE
     if (
         text.startswith("/")
+        or text.startswith(".")
         or text.startswith("~")
         or text.startswith("\\\\")
+        or "/" in text
         or ":\\" in text
+        or ":/" in text
     ):
         return _ACP_REDACTED_VALUE
     if len(text) > 300:
@@ -2690,13 +2736,17 @@ async def acp_session_events(
         ) or (
             content.get("message") if isinstance(content, dict) else None
         )
+        data = _redact_acp_value(content, key="data") if redacted else content
+        reason_code = _normalize_reason_code(raw_reason, raw_error) if isinstance(content, dict) else None
+        if redacted and content is not None and not isinstance(content, dict):
+            data = _ACP_REDACTED_VALUE
         event = {
             "index": idx,
             "event_type": "message",
             "role": msg.get("role"),
             "timestamp": msg.get("timestamp"),
-            "data": _redact_acp_value(content, key="data") if redacted else content,
-            "reason_code": _normalize_reason_code(raw_reason, raw_error),
+            "data": data,
+            "reason_code": reason_code,
         }
         events.append(event)
 

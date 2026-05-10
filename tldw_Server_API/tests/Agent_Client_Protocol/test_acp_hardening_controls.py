@@ -69,7 +69,7 @@ class _StubSessionRecord:
         self.status = "active"
         self.created_at = "2026-02-26T00:00:00+00:00"
         self.last_activity_at = "2026-02-26T00:05:00+00:00"
-        self.message_count = 3
+        self.message_count = 4
         self.tags = ["hardening"]
         self.persona_id = "persona-abc"
         self.workspace_id = "ws-1"
@@ -110,11 +110,19 @@ class _StubSessionRecord:
                         "metadata": {
                             "title": "Safe artifact title",
                             "location": "\\\\server\\share\\report.md",
+                            "relative_path": "src/report.md",
+                            "parent_path": "../.env",
+                            "windows_forward_path": "C:/Users/example/report.md",
                             "api_key": "sk-metadata-secret",
                         },
                     }
                 },
                 "timestamp": "2026-02-26T00:00:03+00:00",
+            },
+            {
+                "role": "assistant",
+                "content": "ordinary assistant transcript text",
+                "timestamp": "2026-02-26T00:00:04+00:00",
             },
         ]
         self.usage = _StubUsage(prompt_tokens=10, completion_tokens=20)
@@ -275,6 +283,9 @@ def test_acp_events_redacted_mode_preserves_reason_code_and_hides_data(client_us
     assert payload["events"][1]["reason_code"] == "blocked"
     assert payload["events"][1]["data"]["message"] == "[redacted]"
     assert payload["events"][1]["data"]["tool_arguments"] == "[redacted]"
+    assert payload["events"][3]["reason_code"] is None
+    assert payload["events"][3]["data"] == "[redacted]"
+    assert "ordinary assistant transcript text" not in serialized
 
 
 def test_acp_artifacts_redacted_mode_scrubs_payloads_but_keeps_operational_context(
@@ -294,6 +305,9 @@ def test_acp_artifacts_redacted_mode_scrubs_payloads_but_keeps_operational_conte
     assert artifact["type"] == "summary"
     assert artifact["metadata"]["title"] == "Safe artifact title"
     assert artifact["metadata"]["location"] == "[redacted]"
+    assert artifact["metadata"]["relative_path"] == "[redacted]"
+    assert artifact["metadata"]["parent_path"] == "[redacted]"
+    assert artifact["metadata"]["windows_forward_path"] == "[redacted]"
     assert artifact["metadata"]["api_key"] == "[redacted]"
     assert artifact["path"] == "[redacted]"
     assert artifact["content"] == "[redacted]"

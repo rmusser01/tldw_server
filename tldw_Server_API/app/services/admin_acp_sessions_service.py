@@ -397,7 +397,7 @@ class ACPSessionStore:
     ) -> None:
         """Set ACP hard-delete retention windows."""
         self._session_retention_days = int(session_retention_days)
-        self._audit_retention_days = int(audit_retention_days)
+        self._audit_retention_days = max(0, int(audit_retention_days))
 
     def start_cleanup_task(self) -> None:
         """Start background task to evict expired sessions."""
