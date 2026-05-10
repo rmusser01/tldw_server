@@ -207,25 +207,41 @@ export const AgentTasksPage: React.FC = () => {
   const [projectForm] = Form.useForm()
   const [taskForm] = Form.useForm()
   const orchestrationSupportRef = React.useRef<boolean | null>(null)
+  const taskDetailRequestRef = React.useRef<AbortController | null>(null)
 
-  const getHeaders = useCallback(async () => {
-    return buildACPAuthHeaders(connectionConfig, { includeContentType: true })
-  }, [connectionConfig])
-
-  const buildRequestUrl = useCallback(
+  const buildRequestTransport = useCallback(
     (path: string) => {
       if (!connectionConfig) return null
       return resolveBrowserRequestTransport({
         config: connectionConfig,
         path
-      }).url
+      })
     },
     [connectionConfig]
   )
 
+  const getHeaders = useCallback((transport?: { mode?: string } | null) => {
+    if (transport?.mode === "hosted") {
+      return { "Content-Type": "application/json" }
+    }
+    return buildACPAuthHeaders(connectionConfig, { includeContentType: true })
+  }, [connectionConfig])
+
+  const buildRequestUrl = useCallback(
+    (path: string) => {
+      return buildRequestTransport(path)?.url ?? null
+    },
+    [buildRequestTransport]
+  )
+
+  const apiTransport = useMemo(
+    () => buildRequestTransport(AGENT_ORCHESTRATION_BASE_PATH),
+    [buildRequestTransport]
+  )
+
   const apiBase = useMemo(
-    () => buildRequestUrl(AGENT_ORCHESTRATION_BASE_PATH),
-    [buildRequestUrl]
+    () => apiTransport?.url ?? null,
+    [apiTransport]
   )
 
   React.useEffect(() => {
@@ -238,6 +254,19 @@ export const AgentTasksPage: React.FC = () => {
     setProjects([])
     setTasks([])
     setSelectedProjectId(null)
+  }, [])
+
+  const handleCloseTaskDetail = useCallback(() => {
+    taskDetailRequestRef.current?.abort()
+    taskDetailRequestRef.current = null
+    setTaskDetailLoading(false)
+    setTaskDetail(null)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      taskDetailRequestRef.current?.abort()
+    }
   }, [])
 
   const hasOrchestrationSupport = useCallback(async (): Promise<boolean> => {
@@ -274,14 +303,14 @@ export const AgentTasksPage: React.FC = () => {
       setSetupIssues([])
       return
     }
-    const healthUrl = buildRequestUrl("/api/v1/acp/health")
-    if (!healthUrl) {
+    const healthTransport = buildRequestTransport("/api/v1/acp/health")
+    if (!healthTransport) {
       return
     }
     setSetupLoading(true)
     try {
-      const res = await fetch(healthUrl, {
-        headers: buildACPAuthHeaders(connectionConfig)
+      const res = await fetch(healthTransport.url, {
+        headers: getHeaders(healthTransport)
       })
       if (!res.ok) {
         setSetupIssues(buildACPSetupIssues(null, `ACP health returned HTTP ${res.status}`))
@@ -298,7 +327,7 @@ export const AgentTasksPage: React.FC = () => {
     } finally {
       setSetupLoading(false)
     }
-  }, [buildRequestUrl, connectionConfig])
+  }, [buildRequestTransport, connectionConfig, getHeaders])
 
   const fetchProjects = useCallback(async () => {
     if (!apiBase) return
@@ -310,7 +339,7 @@ export const AgentTasksPage: React.FC = () => {
         markUnsupported()
         return
       }
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/projects`, { headers })
       await ensureOrchestrationResponse(res)
       const data = await res.json()
@@ -325,14 +354,14 @@ export const AgentTasksPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [apiBase, getHeaders, hasOrchestrationSupport, markUnsupported])
+  }, [apiBase, apiTransport, getHeaders, hasOrchestrationSupport, markUnsupported])
 
   const fetchTasks = useCallback(
     async (projectId: number) => {
       if (!apiBase) return
       setTasksLoading(true)
       try {
-        const headers = await getHeaders()
+        const headers = getHeaders(apiTransport)
         const res = await fetch(`${apiBase}/projects/${projectId}/tasks`, { headers })
         await ensureOrchestrationResponse(res)
         const data = await res.json()
@@ -348,7 +377,7 @@ export const AgentTasksPage: React.FC = () => {
         setTasksLoading(false)
       }
     },
-    [apiBase, getHeaders, markUnsupported]
+    [apiBase, apiTransport, getHeaders, markUnsupported]
   )
 
   useEffect(() => {
@@ -371,7 +400,7 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleCreateProject = async (values: { name: string; description?: string }) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/projects`, {
         method: "POST",
         headers,
@@ -399,7 +428,7 @@ export const AgentTasksPage: React.FC = () => {
   }) => {
     if (selectedProjectId === null) return
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const body = {
         ...values,
         dependency_id: values.dependency_id || undefined,
@@ -425,7 +454,7 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleDispatchRun = async (taskId: number) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/tasks/${taskId}/run`, {
         method: "POST",
         headers,
@@ -452,7 +481,7 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleSubmitReview = async (taskId: number, approved: boolean) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/tasks/${taskId}/review`, {
         method: "POST",
         headers,
@@ -473,28 +502,44 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleInspectTask = async (taskId: number) => {
     if (!apiBase) return
+    taskDetailRequestRef.current?.abort()
+    const controller = new AbortController()
+    taskDetailRequestRef.current = controller
+    setTaskDetail(null)
     setTaskDetailLoading(true)
     setError(null)
     try {
-      const headers = await getHeaders()
-      const res = await fetch(`${apiBase}/tasks/${taskId}`, { headers })
+      const headers = getHeaders(apiTransport)
+      const res = await fetch(`${apiBase}/tasks/${taskId}`, {
+        headers,
+        signal: controller.signal
+      })
       await ensureOrchestrationResponse(res)
       const data = await res.json()
+      if (taskDetailRequestRef.current !== controller || controller.signal.aborted) {
+        return
+      }
       setTaskDetail(data as TaskDetailItem)
     } catch (err) {
+      if (taskDetailRequestRef.current !== controller || controller.signal.aborted) {
+        return
+      }
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
         setError(err instanceof Error ? err.message : "Failed to load task diagnostics")
       }
     } finally {
-      setTaskDetailLoading(false)
+      if (taskDetailRequestRef.current === controller) {
+        taskDetailRequestRef.current = null
+        setTaskDetailLoading(false)
+      }
     }
   }
 
   const handleDeleteProject = async (projectId: number) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/projects/${projectId}`, {
         method: "DELETE",
         headers,
@@ -787,7 +832,7 @@ export const AgentTasksPage: React.FC = () => {
       <Modal
         title="Task diagnostics"
         open={Boolean(taskDetail) || taskDetailLoading}
-        onCancel={() => setTaskDetail(null)}
+        onCancel={handleCloseTaskDetail}
         footer={null}
         width={820}
       >

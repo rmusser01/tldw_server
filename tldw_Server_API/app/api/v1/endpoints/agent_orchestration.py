@@ -33,6 +33,12 @@ from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
 
 router = APIRouter(prefix="/agent-orchestration", tags=["agent-orchestration"])
 
+SESSION_CREATE_FAILED = "session_create_failed"
+PROMPT_FAILED = "prompt_failed"
+COMPLETION_SIGNAL_INVALID = "completion_signal_invalid"
+REVIEW_DECISION_INVALID = "review_decision_invalid"
+REVIEWER_FAILED = "reviewer_failed"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,6 +84,7 @@ Set approved to false when the output does not satisfy the success criteria.
 
 
 def _build_dispatch_prompt(task: Any) -> str:
+    """Build the task prompt with the required ACP completion marker contract."""
     prompt_text = f"Task: {task.title}\n\n{task.description}"
     if task.success_criteria:
         prompt_text += f"\n\nSuccess Criteria: {task.success_criteria}"
@@ -86,6 +93,7 @@ def _build_dispatch_prompt(task: Any) -> str:
 
 
 def _build_review_prompt(task: Any, completion_summary: str) -> str:
+    """Build a reviewer prompt that requires exactly one review decision marker."""
     prompt_text = (
         f"Review task: {task.title}\n\n"
         f"Task description:\n{task.description}\n\n"
@@ -239,20 +247,27 @@ def _extract_tool_calls(value: Any) -> list[Any]:
     return []
 
 
-def _extract_artifacts(value: Any) -> list[dict[str, Any]]:
+def _extract_artifact_summaries(value: Any, *, session_id: str | None = None) -> list[dict[str, Any]]:
+    """Return slim artifact summaries without copying raw artifact payloads."""
     if not isinstance(value, dict):
         return []
-    artifacts: list[dict[str, Any]] = []
+    artifact_count = 0
     listed = value.get("artifacts")
     if isinstance(listed, list):
-        artifacts.extend(dict(item) for item in listed if isinstance(item, dict))
+        artifact_count += sum(1 for item in listed if isinstance(item, dict))
     single = value.get("artifact")
     if isinstance(single, dict):
-        artifacts.append(dict(single))
+        artifact_count += 1
+    summaries: list[dict[str, Any]] = []
+    if artifact_count > 0:
+        summary: dict[str, Any] = {"artifact_count": artifact_count}
+        if session_id:
+            summary["session_id"] = session_id
+        summaries.append(summary)
     nested = value.get("content")
     if isinstance(nested, dict):
-        artifacts.extend(_extract_artifacts(nested))
-    return artifacts
+        summaries.extend(_extract_artifact_summaries(nested, session_id=session_id))
+    return summaries
 
 
 def _diagnostic_messages_for_session(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -317,15 +332,23 @@ def _run_failure_context(
             "source": "session_diagnostic",
         }
     if getattr(run, "error", None):
+        error_text = str(run.error)
+        stable_reason_codes = {
+            SESSION_CREATE_FAILED,
+            PROMPT_FAILED,
+            COMPLETION_SIGNAL_INVALID,
+            REVIEW_DECISION_INVALID,
+            REVIEWER_FAILED,
+        }
         try:
             from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _normalize_reason_code
 
-            reason_code = _normalize_reason_code(None, run.error)
+            reason_code = error_text if error_text in stable_reason_codes else _normalize_reason_code(None, error_text)
         except Exception:
             reason_code = "failed_runtime"
         return {
             "reason_code": reason_code,
-            "message": str(run.error),
+            "message": error_text,
             "diagnostic_uri": None,
             "source": "orchestration_run",
         }
@@ -369,8 +392,9 @@ def _run_history_summary(
     artifacts: list[dict[str, Any]] = []
     tool_call_count = 0
     stop_reason: str | None = None
+    session_id = str(getattr(run, "session_id", "") or "")
     for raw_value in assistant_raw_values:
-        artifacts.extend(_extract_artifacts(raw_value))
+        artifacts.extend(_extract_artifact_summaries(raw_value, session_id=session_id))
         tool_call_count += len(_extract_tool_calls(raw_value))
         if stop_reason is None:
             stop_reason = _extract_stop_reason(raw_value)
@@ -379,7 +403,7 @@ def _run_history_summary(
         from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _extract_session_diagnostics
 
         diagnostics = _extract_session_diagnostics(
-            str(getattr(run, "session_id", "") or ""),
+            session_id,
             _diagnostic_messages_for_session(messages),
         )
     except Exception:
@@ -534,6 +558,11 @@ def _validate_workspace_root(root_path: str) -> str:
             },
         )
     if not any(path == b or path.is_relative_to(b) for b in bases):
+        logger.warning(
+            "Rejected ACP workspace root outside allowlist root_path={} allowed_base_paths={}",
+            path,
+            [str(b) for b in bases],
+        )
         raise HTTPException(
             status_code=403,
             detail={
@@ -542,8 +571,6 @@ def _validate_workspace_root(root_path: str) -> str:
                     "root_path must be under ACP-WORKSPACE.allowed_base_paths "
                     "or ACP_WORKSPACE_ALLOWED_BASE_PATHS."
                 ),
-                "root_path": str(path),
-                "allowed_base_paths": [str(b) for b in bases],
             },
         )
     return str(path)
@@ -1320,17 +1347,17 @@ async def dispatch_run(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create ACP session")
+        logger.exception("Failed to create ACP session")
         # Create a failed run record
         run = await _run_sync(lambda: db.create_run(task_id, agent_type=agent_type))
-        await _run_sync(lambda: db.fail_run(run.id, error=str(exc)))
+        await _run_sync(lambda: db.fail_run(run.id, error=SESSION_CREATE_FAILED))
         triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         _record_orchestration_audit_event(
             action="orchestration_task_triaged",
             user=user,
             task=triaged_task,
             run_id=run.id,
-            metadata={"reason_code": "session_create_failed"},
+            metadata={"reason_code": SESSION_CREATE_FAILED},
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1360,8 +1387,8 @@ async def dispatch_run(
         )
 
     except Exception as exc:
-        logger.error("ACP prompt failed")
-        await _run_sync(lambda: db.fail_run(run.id, error=str(exc)))
+        logger.exception("ACP prompt failed")
+        await _run_sync(lambda: db.fail_run(run.id, error=PROMPT_FAILED))
         triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         _record_orchestration_audit_event(
             action="orchestration_task_triaged",
@@ -1369,7 +1396,7 @@ async def dispatch_run(
             task=triaged_task,
             session_id=session_id,
             run_id=run.id,
-            metadata={"reason_code": "prompt_failed"},
+            metadata={"reason_code": PROMPT_FAILED},
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1379,9 +1406,8 @@ async def dispatch_run(
     try:
         completion_signal = validate_task_completion_signal(result)
     except CompletionSignalValidationError as exc:
-        error = f"ACP completion signal {exc.reason}: {exc}"
         logger.warning("ACP completion signal invalid for task {} run {}: {}", task_id, run.id, exc)
-        await _run_sync(lambda: db.fail_run(run.id, error=error))
+        await _run_sync(lambda: db.fail_run(run.id, error=COMPLETION_SIGNAL_INVALID))
         triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         _record_orchestration_audit_event(
             action="orchestration_task_triaged",
@@ -1389,7 +1415,7 @@ async def dispatch_run(
             task=triaged_task,
             session_id=session_id,
             run_id=run.id,
-            metadata={"reason_code": "completion_signal_invalid", "completion_signal_reason": exc.reason},
+            metadata={"reason_code": COMPLETION_SIGNAL_INVALID, "completion_signal_reason": exc.reason},
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1454,7 +1480,8 @@ async def dispatch_run(
             )
             review_decision = validate_review_decision_signal(review_result)
         except ReviewDecisionValidationError as exc:
-            review_error = f"ACP review decision {exc.reason}: {exc}"
+            review_error = REVIEW_DECISION_INVALID
+            logger.warning("ACP review decision invalid for task {}: {}", task_id, exc)
             if review_run is None:
                 review_run = await _run_sync(lambda: db.create_run(
                     task_id,
@@ -1477,12 +1504,14 @@ async def dispatch_run(
                 metadata={
                     "approved": False,
                     "reviewer": task.reviewer_agent_type,
-                    "reason_code": "review_decision_invalid",
+                    "reason_code": REVIEW_DECISION_INVALID,
+                    "review_decision_reason": exc.reason,
                     "feedback_present": True,
                 },
             )
         except Exception as exc:
-            review_error = f"ACP reviewer failed: {exc}"
+            review_error = REVIEWER_FAILED
+            logger.exception("ACP reviewer failed")
             if review_run is None:
                 review_run = await _run_sync(lambda: db.create_run(
                     task_id,
@@ -1505,7 +1534,7 @@ async def dispatch_run(
                 metadata={
                     "approved": False,
                     "reviewer": task.reviewer_agent_type,
-                    "reason_code": "reviewer_failed",
+                    "reason_code": REVIEWER_FAILED,
                     "feedback_present": True,
                 },
             )

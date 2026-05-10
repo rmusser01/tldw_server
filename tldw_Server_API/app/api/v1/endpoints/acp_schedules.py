@@ -38,7 +38,7 @@ class ACPScheduleCreate(BaseModel):
     enabled: bool = Field(True, description="Whether the schedule is active")
     timezone: str = Field("UTC", description="IANA timezone for cron evaluation")
     concurrency_mode: str = Field("skip", description="Overlapping run behavior: 'skip' or 'queue'")
-    misfire_grace_sec: int = Field(300, description="Seconds a missed fire may still enqueue")
+    misfire_grace_sec: int = Field(300, ge=0, description="Seconds a missed fire may still enqueue")
     coalesce: bool = Field(True, description="Coalesce missed runs into one execution")
 
 
@@ -56,7 +56,7 @@ class ACPScheduleUpdate(BaseModel):
     enabled: bool | None = None
     timezone: str | None = None
     concurrency_mode: str | None = None
-    misfire_grace_sec: int | None = None
+    misfire_grace_sec: int | None = Field(None, ge=0)
     coalesce: bool | None = None
 
 

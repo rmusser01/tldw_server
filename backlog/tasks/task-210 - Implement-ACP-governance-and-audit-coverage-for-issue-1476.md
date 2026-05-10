@@ -39,24 +39,28 @@ Implement the #1476 governance/RBAC/audit slice in the ACP productionization wor
 
 <!-- SECTION:PLAN:BEGIN -->
 ## Stage 1: Governance/RBAC Baseline
+
 **Goal**: Capture current ACP route authorization and policy-authority assumptions.
 **Success Criteria**: #1476 doc lists REST TokenScopeGuard endpoints, WebSocket write-scope behavior, and MCP Hub/runtime-policy snapshot authority.
 **Tests**: Documentation review plus existing authorization tests.
 **Status**: Complete
 
 ## Stage 2: Session and Agent Audit Events
+
 **Goal**: Add sanitized audit records for agent registration/management and ACP session creation.
 **Success Criteria**: Events avoid cwd, env, command args, prompt text, and configured secrets while preserving actor/action/session/agent identifiers.
 **Tests**: Focused ACP endpoint tests.
 **Status**: Complete
 
 ## Stage 3: Orchestration Audit Events
+
 **Goal**: Add sanitized audit records for dispatch, completion signal, reviewer decision, retry, complete, and triage transitions.
 **Success Criteria**: Task/run/reviewer IDs and status/reason metadata reconstruct the control-plane path without raw task descriptions or reviewer feedback.
 **Tests**: Focused orchestration dispatch/review tests.
 **Status**: Complete
 
 ## Stage 4: Verification and Issue Evidence
+
 **Goal**: Run focused tests, full relevant suites, Bandit, and update #1476.
 **Success Criteria**: Verification is recorded in Backlog and GitHub issue comments.
 **Tests**: ACP focused tests, Agent Orchestration suite, Bandit, git diff check.

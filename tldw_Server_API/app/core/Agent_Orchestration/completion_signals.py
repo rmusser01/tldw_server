@@ -107,6 +107,14 @@ def _iter_text_candidates(value: Any) -> list[str]:
     return []
 
 
+def _collect_marker_payloads(pattern: re.Pattern[str], text_candidates: list[str]) -> list[str]:
+    """Return all structured marker payloads found across candidate text fields."""
+    payloads: list[str] = []
+    for text in text_candidates:
+        payloads.extend(match.group("payload") for match in pattern.finditer(text))
+    return payloads
+
+
 def _extract_payload(acp_result: dict[str, Any]) -> dict[str, Any]:
     for key in _DIRECT_PAYLOAD_KEYS:
         if key in acp_result:
@@ -117,14 +125,17 @@ def _extract_payload(acp_result: dict[str, Any]) -> dict[str, Any]:
         if key in acp_result:
             text_candidates.extend(_iter_text_candidates(acp_result[key]))
 
-    for text in text_candidates:
-        match = _COMPLETION_MARKER_RE.search(text)
-        if match is None:
-            continue
+    marker_payloads = _collect_marker_payloads(_COMPLETION_MARKER_RE, text_candidates)
+    if len(marker_payloads) == 1:
         try:
-            return _coerce_payload(match.group("payload"))
+            return _coerce_payload(marker_payloads[0])
         except CompletionSignalValidationError:
             raise
+    if len(marker_payloads) > 1:
+        raise CompletionSignalValidationError(
+            "multiple",
+            "multiple ACP completion markers found",
+        )
 
     raise CompletionSignalValidationError(
         "missing",
@@ -145,14 +156,17 @@ def _extract_review_payload(acp_result: dict[str, Any]) -> dict[str, Any]:
         if key in acp_result:
             text_candidates.extend(_iter_text_candidates(acp_result[key]))
 
-    for text in text_candidates:
-        match = _REVIEW_MARKER_RE.search(text)
-        if match is None:
-            continue
+    marker_payloads = _collect_marker_payloads(_REVIEW_MARKER_RE, text_candidates)
+    if len(marker_payloads) == 1:
         try:
-            return _coerce_payload(match.group("payload"))
+            return _coerce_payload(marker_payloads[0])
         except CompletionSignalValidationError as exc:
             raise ReviewDecisionValidationError(exc.reason, str(exc)) from exc
+    if len(marker_payloads) > 1:
+        raise ReviewDecisionValidationError(
+            "multiple",
+            "multiple ACP review decision markers found",
+        )
 
     raise ReviewDecisionValidationError(
         "missing",

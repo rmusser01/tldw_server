@@ -12,6 +12,10 @@ const configMocks = vi.hoisted(() => ({
   getConfig: vi.fn()
 }))
 
+const deploymentMocks = vi.hoisted(() => ({
+  isHostedTldwDeployment: vi.fn(() => false)
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
@@ -26,6 +30,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: (...args: unknown[]) => configMocks.getConfig(...args)
   }
+}))
+
+vi.mock("@/services/tldw/deployment-mode", () => ({
+  isHostedTldwDeployment: () => deploymentMocks.isHostedTldwDeployment()
 }))
 
 vi.mock("antd", () => {
@@ -113,6 +121,7 @@ vi.mock("antd", () => {
 describe("AgentTasksPage connection and payload normalization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    deploymentMocks.isHostedTldwDeployment.mockReturnValue(false)
 
     storageMocks.useStorage.mockImplementation((key: string, fallback: string) => {
       if (key === "serverUrl") return ["http://localhost:8000", vi.fn()]
@@ -325,6 +334,56 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(screen.getByText("API keys are missing")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open agent registry/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
+  })
+
+  it("omits stored ACP credentials from hosted-mode proxy requests", async () => {
+    deploymentMocks.isHostedTldwDeployment.mockReturnValue(true)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const headers = (init?.headers as Record<string, string> | undefined) ?? {}
+      if (url === "/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "/api/proxy/acp/health") {
+        expect(headers["X-API-KEY"]).toBeUndefined()
+        expect(headers.Authorization).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === "/api/proxy/agent-orchestration/projects") {
+        expect(headers["X-API-KEY"]).toBeUndefined()
+        expect(headers.Authorization).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => []
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<AgentTasksPage />)
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/proxy/agent-orchestration/projects",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" }
+      })
+    )
   })
 
   it("opens task run diagnostics from enriched task detail without manual ID copying", async () => {

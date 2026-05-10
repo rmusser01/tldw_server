@@ -80,9 +80,12 @@ export const AgentRegistryPage: React.FC = () => {
       const res = await fetch(transport.url, { headers })
       if (res.ok) {
         setHealth(normalizeACPHealthStatus(await res.json()))
+      } else {
+        setHealth(null)
       }
     } catch {
       // Health check failure is not critical
+      setHealth(null)
     } finally {
       setHealthLoading(false)
     }

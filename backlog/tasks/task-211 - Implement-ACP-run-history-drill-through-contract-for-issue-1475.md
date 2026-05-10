@@ -39,24 +39,28 @@ Implement the #1475 run-history and session drill-through slice in the ACP produ
 
 <!-- SECTION:PLAN:BEGIN -->
 ## Stage 1: Contract Shape
+
 **Goal**: Define the additive task-detail run-history fields and document the backend/frontend contract.
 **Success Criteria**: Plan and docs identify links, availability flags, previews, counts, and diagnostics without changing existing run storage.
 **Tests**: Contract-focused API tests.
 **Status**: Complete
 
 ## Stage 2: Red Tests
+
 **Goal**: Add focused tests for enriched task run detail on successful and failed linked ACP sessions.
 **Success Criteria**: Tests fail because the enrichment fields are missing.
 **Tests**: Targeted Agent Orchestration API tests.
 **Status**: Complete
 
 ## Stage 3: Backend Enrichment
+
 **Goal**: Reuse ACP session store/message helpers to enrich task runs with drill-through links, event/artifact/diagnostic counts, stop reason, tool-call count, and failure context.
 **Success Criteria**: Existing raw run fields remain stable and new fields are additive.
 **Tests**: Targeted tests pass.
 **Status**: Complete
 
 ## Stage 4: Verification and Issue Evidence
+
 **Goal**: Run focused tests, relevant ACP/orchestration suites, Bandit for touched backend Python, diff check, then update #1475.
 **Success Criteria**: Backlog and GitHub issue include evidence.
 **Tests**: Focused pytest, relevant suites, Bandit, git diff check.

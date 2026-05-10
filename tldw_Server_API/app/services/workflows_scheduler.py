@@ -346,7 +346,7 @@ class _WFRecurringScheduler:
                 max_instances = 1
                 coalesce = True if schedule.coalesce is None else bool(schedule.coalesce)
 
-            misfire_grace_time = int(schedule.misfire_grace_sec or 300)
+            misfire_grace_time = 300 if schedule.misfire_grace_sec is None else int(schedule.misfire_grace_sec)
             # Pass user_id so run handler can pick correct per-user DB
             effective_uid = user_id if user_id is not None else int(schedule.user_id)
             # Determine jitter: prefer enabling for watchlist jobs to avoid the "on the hour" thundering herd
@@ -439,7 +439,7 @@ class _WFRecurringScheduler:
                 max_instances = 1
                 coalesce = True if schedule.coalesce is None else bool(schedule.coalesce)
 
-            misfire_grace_time = int(schedule.misfire_grace_sec or 300)
+            misfire_grace_time = 300 if schedule.misfire_grace_sec is None else int(schedule.misfire_grace_sec)
             effective_uid = user_id if user_id is not None else int(schedule.user_id)
 
             self._aps.add_job(

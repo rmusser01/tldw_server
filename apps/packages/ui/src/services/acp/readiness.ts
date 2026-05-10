@@ -77,9 +77,7 @@ export const normalizeACPHealthStatus = (payload: unknown): ACPHealthStatus | nu
     runner: typeof runner?.status === "string" ? runner.status : "unknown",
     agent:
       agents.length === 0
-        ? typeof record.overall === "string"
-          ? record.overall
-          : "unknown"
+        ? "unavailable"
         : availableAgents === 0
           ? "unavailable"
           : availableAgents === agents.length

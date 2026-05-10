@@ -41,24 +41,28 @@ Implement the #1477 sandbox/workspace readiness slice in the ACP productionizati
 
 <!-- SECTION:PLAN:BEGIN -->
 ## Stage 1: Scope and Contract
+
 **Goal**: Define the narrow #1477 backend hardening contract.
 **Success Criteria**: Tests and docs target workspace validation errors, MCP/env session injection, and sandbox env merge behavior.
 **Tests**: Focused workspace helper and sandbox runner tests.
 **Status**: Complete
 
 ## Stage 2: Red Tests
+
 **Goal**: Add failing tests for actionable workspace errors, dispatch env propagation, and sandbox session env merge.
 **Success Criteria**: Tests fail on missing structured error detail or missing session env propagation.
 **Tests**: Targeted Agent Orchestration and ACP sandbox tests.
 **Status**: Complete
 
 ## Stage 3: Backend Hardening
+
 **Goal**: Implement structured validation details and per-session env propagation through standard and sandbox ACP session creation.
 **Success Criteria**: MCP server injection remains unchanged and env propagation is additive.
 **Tests**: Targeted tests pass.
 **Status**: Complete
 
 ## Stage 4: Docs and Verification
+
 **Goal**: Update ACP docs/readiness row, run focused tests, broader relevant suites, Bandit, diff check, then update #1477.
 **Success Criteria**: Backlog and GitHub issue include evidence.
 **Tests**: Focused pytest, relevant suites, Bandit, git diff check.

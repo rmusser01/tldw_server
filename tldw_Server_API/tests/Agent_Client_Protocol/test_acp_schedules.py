@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import (
     WorkflowSchedule,
@@ -219,7 +220,7 @@ def test_list_registered_schedules_falls_back_to_list_schedules(monkeypatch):
         enabled=True,
         require_online=False,
         concurrency_mode="skip",
-        misfire_grace_sec=300,
+        misfire_grace_sec=0,
         coalesce=True,
         jitter_sec=0,
         acp_config_json='{"prompt": "legacy"}',
@@ -270,7 +271,7 @@ async def test_load_all_routes_acp_to_add_acp_job(monkeypatch, tmp_path):
         enabled=True,
         require_online=False,
         concurrency_mode="skip",
-        misfire_grace_sec=300,
+        misfire_grace_sec=0,
         coalesce=True,
         jitter_sec=0,
         acp_config_json='{"prompt": "hello"}',
@@ -490,7 +491,7 @@ def test_add_acp_job_applies_explicit_concurrency_metadata(monkeypatch):
         enabled=True,
         require_online=False,
         concurrency_mode="skip",
-        misfire_grace_sec=300,
+        misfire_grace_sec=0,
         coalesce=True,
         jitter_sec=0,
         acp_config_json='{"prompt": "skip"}',
@@ -511,6 +512,7 @@ def test_add_acp_job_applies_explicit_concurrency_metadata(monkeypatch):
     assert captured_jobs[1]["id"] == "acp-skip"
     assert captured_jobs[1]["max_instances"] == 1
     assert captured_jobs[1]["coalesce"] is True
+    assert captured_jobs[1]["misfire_grace_time"] == 0
     assert history_updates
 
 def test_create_with_message_list_prompt(scheduler):
@@ -869,4 +871,84 @@ async def test_create_acp_schedule_passes_concurrency_controls(monkeypatch):
     assert fake_scheduler.create_kwargs["misfire_grace_sec"] == 120
     assert fake_scheduler.create_kwargs["coalesce"] is False
     assert response["concurrency_mode"] == "queue"
+    assert response["misfire_grace_sec"] == 120
     assert response["next_run_at"] == "2026-05-11T09:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_create_acp_schedule_preserves_zero_misfire_grace_sec(monkeypatch):
+    """Explicit zero misfire grace should survive API create and response mapping."""
+    from tldw_Server_API.app.api.v1.endpoints import acp_schedules as schedules_api
+
+    class User:
+        id = 1
+
+    class FakeScheduler:
+        def __init__(self):
+            self.create_kwargs: dict[str, Any] = {}
+
+        def create(self, **kwargs):
+            self.create_kwargs = kwargs
+            return "acp-zero-misfire"
+
+        def get(self, _schedule_id: str):
+            return WorkflowSchedule(
+                id="acp-zero-misfire",
+                tenant_id="default",
+                user_id="1",
+                workflow_id=None,
+                name=self.create_kwargs["name"],
+                cron=self.create_kwargs["cron"],
+                timezone=self.create_kwargs["timezone"],
+                inputs_json="{}",
+                run_mode="async",
+                validation_mode="block",
+                enabled=True,
+                require_online=False,
+                concurrency_mode=self.create_kwargs["concurrency_mode"],
+                misfire_grace_sec=self.create_kwargs["misfire_grace_sec"],
+                coalesce=self.create_kwargs["coalesce"],
+                jitter_sec=0,
+                acp_config_json=self.create_kwargs["acp_config_json"],
+                last_run_at=None,
+                next_run_at=None,
+                last_status=None,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+            )
+
+    fake_scheduler = FakeScheduler()
+    monkeypatch.setattr(schedules_api, "_get_scheduler", lambda: fake_scheduler)
+
+    response = await schedules_api.create_acp_schedule(
+        schedules_api.ACPScheduleCreate(
+            name="Zero misfire",
+            cron="0 9 * * *",
+            timezone="UTC",
+            prompt="run",
+            concurrency_mode="skip",
+            misfire_grace_sec=0,
+            coalesce=True,
+        ),
+        user=User(),
+    )
+
+    assert fake_scheduler.create_kwargs["misfire_grace_sec"] == 0
+    assert response["misfire_grace_sec"] == 0
+
+
+def test_acp_schedule_rejects_negative_misfire_grace_sec():
+    """Negative misfire grace values should fail Pydantic/FastAPI validation."""
+    from tldw_Server_API.app.api.v1.endpoints import acp_schedules as schedules_api
+
+    with pytest.raises(ValidationError):
+        schedules_api.ACPScheduleCreate(
+            name="Bad misfire",
+            cron="0 9 * * *",
+            timezone="UTC",
+            prompt="run",
+            misfire_grace_sec=-1,
+        )
+
+    with pytest.raises(ValidationError):
+        schedules_api.ACPScheduleUpdate(misfire_grace_sec=-1)

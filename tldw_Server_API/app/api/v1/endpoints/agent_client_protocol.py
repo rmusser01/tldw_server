@@ -263,6 +263,7 @@ _ACP_AUDIT_SENSITIVE_MARKERS = (
 
 
 def _sanitize_audit_value(key: str, value: Any) -> Any:
+    """Return a redacted audit-safe representation for one metadata value."""
     key_l = str(key).strip().lower()
     if key_l in _ACP_AUDIT_SENSITIVE_KEYS:
         return "[redacted]"
@@ -280,6 +281,7 @@ def _sanitize_audit_value(key: str, value: Any) -> Any:
 
 
 def _sanitize_audit_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Return audit metadata with sensitive keys, payloads, and long strings removed."""
     return {
         str(key): _sanitize_audit_value(str(key), value)
         for key, value in dict(metadata or {}).items()
@@ -327,8 +329,40 @@ def _acp_record_audit_event(
 
 
 def _acp_list_audit_events(*, session_id: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    try:
+        from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
+
+        audit_db = get_acp_audit_db()
+        audit_db.flush()
+        events.extend(audit_db.query_events(session_id=session_id, limit=5000))
+        events.extend(audit_db.get_hot_cache(session_id=session_id))
+    except Exception:
+        logger.warning("ACP audit DB read failed")
     with _ACP_AUDIT_LOCK:
-        return [dict(item) for item in _ACP_AUDIT_EVENTS if str(item.get("session_id")) == str(session_id)]
+        events.extend(dict(item) for item in _ACP_AUDIT_EVENTS if str(item.get("session_id")) == str(session_id))
+
+    deduped: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
+    for event in events:
+        metadata = event.get("metadata")
+        try:
+            metadata_key = json.dumps(metadata or {}, sort_keys=True, default=str)
+        except TypeError:
+            metadata_key = str(metadata)
+        key = (
+            str(event.get("timestamp") or ""),
+            str(event.get("action") or ""),
+            str(event.get("session_id") or ""),
+            int(event.get("user_id") or 0),
+            metadata_key,
+        )
+        deduped[key] = dict(event)
+    return sorted(deduped.values(), key=lambda item: str(item.get("timestamp") or ""))
+
+
+def _is_agent_audit_scope(session_id: str) -> bool:
+    """Return true when an audit id names an admin-managed agent resource."""
+    return str(session_id).startswith("agent:")
 
 
 def _acp_mark_reconciliation(
@@ -2754,8 +2788,12 @@ async def acp_session_audit(
 ) -> dict[str, Any]:
     """Return ACP audit trail for a session."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="audit")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
+    if _is_agent_audit_scope(session_id):
+        if not getattr(user, "is_admin", False):
+            raise HTTPException(status_code=403, detail="Admin role required for agent audit")
+    else:
+        client = await get_runner_client()
+        await _require_session_access(client, session_id=session_id, user_id=int(user.id))
     events = _acp_list_audit_events(session_id=session_id)
     return {
         "session_id": session_id,

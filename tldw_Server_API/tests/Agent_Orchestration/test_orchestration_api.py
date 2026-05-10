@@ -158,7 +158,16 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
     async def fake_store():
         return _RunHistorySessionStore({"session-success": session})
 
+    def fake_audit_events(*, session_id: str):
+        with acp_mod._ACP_AUDIT_LOCK:
+            return [
+                dict(event)
+                for event in acp_mod._ACP_AUDIT_EVENTS
+                if event.get("session_id") == session_id
+            ]
+
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -180,7 +189,9 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
         assert enriched_run["history"]["stop_reason"] == "end"
         assert enriched_run["history"]["prompt"]["preview"] == "Task prompt text"
         assert enriched_run["history"]["result"]["preview"] == "Done"
-        assert enriched_run["history"]["artifacts"][0]["id"] == "artifact-1"
+        assert enriched_run["history"]["artifacts"] == [
+            {"artifact_count": 1, "session_id": "session-success"}
+        ]
         assert enriched_run["failure_context"] is None
     finally:
         db.close()
@@ -418,6 +429,46 @@ async def _build_dispatch_task(tmp_path):
     return db, task
 
 
+async def test_task_completion_signal_rejects_multiple_markers():
+    """Completion validation should require exactly one structured marker."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        validate_task_completion_signal,
+    )
+
+    with pytest.raises(CompletionSignalValidationError) as exc_info:
+        validate_task_completion_signal(
+            {
+                "content": (
+                    '<acp-task-completion>{"status":"completed","summary":"one"}</acp-task-completion>'
+                    '<acp-task-completion>{"status":"rejected","summary":"two"}</acp-task-completion>'
+                )
+            }
+        )
+
+    assert exc_info.value.reason == "multiple"
+
+
+async def test_review_decision_signal_rejects_multiple_markers():
+    """Reviewer validation should require exactly one structured marker."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        ReviewDecisionValidationError,
+        validate_review_decision_signal,
+    )
+
+    with pytest.raises(ReviewDecisionValidationError) as exc_info:
+        validate_review_decision_signal(
+            {
+                "content": (
+                    '<acp-review-decision>{"approved":true,"feedback":"pass"}</acp-review-decision>'
+                    '<acp-review-decision>{"approved":false,"feedback":"fail"}</acp-review-decision>'
+                )
+            }
+        )
+
+    assert exc_info.value.reason == "multiple"
+
+
 async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_path):
     from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
 
@@ -451,7 +502,7 @@ async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_pa
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.detail == "Failed to create ACP session"
-        fake_logger.error.assert_called_once_with("Failed to create ACP session")
+        fake_logger.exception.assert_called_once_with("Failed to create ACP session")
     finally:
         db.close()
 
@@ -824,7 +875,7 @@ async def test_dispatch_run_requires_completion_signal(monkeypatch, tmp_path):
         assert updated_task.status == TaskStatus.TRIAGE
         runs = db.list_runs(task.id)
         assert runs[0].status.value == "failed"
-        assert "missing" in (runs[0].error or "")
+        assert runs[0].error == "completion_signal_invalid"
     finally:
         db.close()
 
@@ -863,7 +914,7 @@ async def test_dispatch_run_rejects_malformed_completion_signal(monkeypatch, tmp
         assert updated_task.status == TaskStatus.TRIAGE
         runs = db.list_runs(task.id)
         assert runs[0].status.value == "failed"
-        assert "malformed" in (runs[0].error or "")
+        assert runs[0].error == "completion_signal_invalid"
     finally:
         db.close()
 
@@ -902,7 +953,7 @@ async def test_dispatch_run_rejects_rejected_completion_signal(monkeypatch, tmp_
         assert updated_task.status == TaskStatus.TRIAGE
         runs = db.list_runs(task.id)
         assert runs[0].status.value == "failed"
-        assert "rejected" in (runs[0].error or "")
+        assert runs[0].error == "completion_signal_invalid"
     finally:
         db.close()
 
@@ -940,7 +991,7 @@ async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.detail == "ACP prompt failed"
-        fake_logger.error.assert_called_once_with("ACP prompt failed")
+        fake_logger.exception.assert_called_once_with("ACP prompt failed")
     finally:
         db.close()
 
