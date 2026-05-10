@@ -491,6 +491,53 @@ class _FakeBrokerService:
         }
 
 
+class _FakeExternalFederationManager:
+    def __init__(self, result: dict[str, Any]) -> None:
+        self.result = result
+        self.calls: list[str | None] = []
+
+    async def reconcile_servers(self, server_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(server_id)
+        return dict(self.result)
+
+
+class _FakeExternalFederationModule:
+    def __init__(self, manager: _FakeExternalFederationManager) -> None:
+        self._manager = manager
+        self.invalidated = 0
+
+    def invalidate_capability_caches(self) -> None:
+        self.invalidated += 1
+
+
+class _FakeModuleRegistry:
+    def __init__(self, module: Any | None) -> None:
+        self.module = module
+        self.refresh_calls: list[str] = []
+
+    async def get_module(self, module_id: str) -> Any | None:
+        if module_id == "external_federation":
+            return self.module
+        return None
+
+    async def get_all_modules(self) -> dict[str, Any]:
+        return {"fallback": self.module} if self.module is not None else {}
+
+    async def refresh_module_registries(self, module_id: str) -> None:
+        self.refresh_calls.append(module_id)
+
+
+class _FakeMcpServer:
+    def __init__(self, module: Any | None, *, initialized: bool = True) -> None:
+        self.initialized = initialized
+        self.initialize_calls = 0
+        self.module_registry = _FakeModuleRegistry(module)
+
+    async def initialize(self) -> None:
+        self.initialize_calls += 1
+        self.initialized = True
+
+
 def _build_app(
     *,
     principal: AuthPrincipal | None,
@@ -513,6 +560,197 @@ def _build_app(
     app.dependency_overrides[mcp_hub_management.get_mcp_hub_service] = lambda: _FakeService()
     app.dependency_overrides[mcp_hub_management.get_mcp_credential_broker_service] = lambda: _FakeBrokerService()
     return app
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_requires_mutation_permission(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_hub_management,
+        "get_mcp_server",
+        lambda: _FakeMcpServer(module=None),
+        raising=False,
+    )
+    app = _build_app(
+        principal=_make_principal(permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery")
+
+    assert resp.status_code == 403
+    assert "system.configure" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_reconciles_live_runtime(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    server = _FakeMcpServer(module=module, initialized=False)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "docs"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert payload["server_id"] == "docs"
+    assert payload["refreshed_servers"] == 1
+    assert payload["virtual_tools"] == 2
+    assert payload["requires_restart"] is False
+    assert manager.calls == ["docs"]
+    assert server.initialize_calls == 1
+    assert module.invalidated == 1
+    assert server.module_registry.refresh_calls == ["external_federation"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_accepts_query_server_id(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery?server_id=docs")
+
+    assert resp.status_code == 200
+    assert manager.calls == ["docs"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_rejects_unknown_body_fields(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "docs", "unexpected": True},
+        )
+
+    assert resp.status_code == 422
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_rejects_conflicting_query_and_body_server_id(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery?server_id=query-docs",
+            json={"server_id": "body-docs"},
+        )
+
+    assert resp.status_code == 422
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_rejects_blank_body_server_id(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "   "},
+        )
+
+    assert resp.status_code == 422
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_returns_503_when_runtime_module_unavailable(monkeypatch) -> None:
+    server = _FakeMcpServer(module=None, initialized=True)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery")
+
+    assert resp.status_code == 503
+    payload = resp.json()
+    assert payload["detail"]["requires_restart"] is True
+    assert "external federation" in payload["detail"]["message"].lower()
 
 
 @pytest.mark.asyncio

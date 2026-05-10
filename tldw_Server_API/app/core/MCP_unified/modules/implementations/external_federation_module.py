@@ -136,13 +136,45 @@ class ExternalFederationModule(BaseModule):
 
         return tools
 
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        """Validate external federation management and virtual tool arguments."""
+
+        if not isinstance(arguments, dict):
+            raise ValueError(f"{tool_name} arguments must be an object")
+        args = self.sanitize_input(arguments)
+
+        if tool_name == "external.tools.refresh":
+            unknown = set(args) - {"server_id"}
+            if unknown:
+                raise ValueError(f"external.tools.refresh does not accept arguments: {', '.join(sorted(unknown))}")
+            server_id = args.get("server_id")
+            if server_id is not None and (not isinstance(server_id, str) or not server_id.strip()):
+                raise ValueError("server_id must be a non-empty string when provided")
+            return
+
+        if tool_name == "external.servers.list":
+            if args:
+                raise ValueError("external.servers.list does not accept arguments")
+            return
+
+        if tool_name.startswith("ext."):
+            confirm = args.get("__confirm_write")
+            if confirm is not None and not isinstance(confirm, bool):
+                raise ValueError("__confirm_write must be a boolean when provided")
+            return
+
+        if tool_name.startswith("external."):
+            raise ValueError(f"Unknown external federation management tool: {tool_name}")
+        raise ValueError(f"Unknown external federation tool: {tool_name}")
+
     async def execute_tool(
         self,
         tool_name: str,
         arguments: dict[str, Any],
         context: Optional[Any] = None,
     ) -> Any:
-        args = self.sanitize_input(arguments or {})
+        args = self.sanitize_input({} if arguments is None else arguments)
+        self.validate_tool_arguments(tool_name, args)
 
         if self._manager is None:
             raise RuntimeError("External federation manager is not initialized")
@@ -156,8 +188,6 @@ class ExternalFederationModule(BaseModule):
 
         if tool_name == "external.tools.refresh":
             server_id = args.get("server_id")
-            if server_id is not None and not isinstance(server_id, str):
-                raise ValueError("server_id must be a string when provided")
             try:
                 return await self._manager.refresh_discovery(server_id=server_id)
             finally:

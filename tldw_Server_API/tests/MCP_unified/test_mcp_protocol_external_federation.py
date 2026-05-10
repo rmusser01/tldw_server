@@ -14,6 +14,9 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.external_feder
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
+from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
+    ExternalServerRegistryPartialLoadError,
+)
 from tldw_Server_API.app.core.MCP_unified.external_servers.transports.base import (
     BrokeredExternalCredential,
     ExternalMCPTransportAdapter,
@@ -68,6 +71,50 @@ class _BrokerAwareAdapter(ExternalMCPTransportAdapter):
             is_error=False,
             metadata={"adapter": "broker-aware"},
         )
+
+
+class _RuntimeRowsRepo:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+
+    async def list_external_servers(self) -> list[dict[str, Any]]:
+        return self._rows
+
+
+@pytest.mark.asyncio
+async def test_managed_external_registry_service_reports_partial_invalid_rows() -> None:
+    from tldw_Server_API.app.services.mcp_hub_external_registry_service import (
+        McpHubExternalRegistryService,
+    )
+
+    repo = _RuntimeRowsRepo(
+        [
+            {
+                "id": "docs",
+                "name": "Docs",
+                "transport": "websocket",
+                "config": {"websocket": {"url": "wss://docs.example/ws"}},
+                "enabled": True,
+                "server_source": "managed",
+            },
+            {
+                "id": "broken",
+                "name": "Broken",
+                "transport": "websocket",
+                "config": {},
+                "enabled": True,
+                "server_source": "managed",
+            },
+        ]
+    )
+    service = McpHubExternalRegistryService(repo=repo)  # type: ignore[arg-type]
+
+    with pytest.raises(ExternalServerRegistryPartialLoadError) as exc_info:
+        await service.list_runtime_servers()
+
+    exc = exc_info.value
+    assert [server.id for server in exc.servers] == ["docs"]
+    assert exc.errors == {"broken": "external_server_config_invalid"}
 
 
 @pytest.mark.asyncio
@@ -496,3 +543,82 @@ async def test_external_federation_module_brokers_managed_secret_ref_at_call_tim
     assert adapter.seen_runtime_auth is not None
     assert adapter.seen_runtime_auth.headers == {"Authorization": "Bearer super-secret-token"}
     assert result["metadata"]["credential_mode"] == "brokered_ephemeral"
+
+
+def test_external_federation_validates_refresh_and_list_arguments() -> None:
+    module = ExternalFederationModule(ModuleConfig(name="external_federation", settings={}))
+
+    module.validate_tool_arguments("external.tools.refresh", {})
+    module.validate_tool_arguments("external.tools.refresh", {"server_id": "docs"})
+    module.validate_tool_arguments("external.servers.list", {})
+
+    with pytest.raises(ValueError, match="arguments must be an object"):
+        module.validate_tool_arguments("external.tools.refresh", [])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="server_id must be a non-empty string"):
+        module.validate_tool_arguments("external.tools.refresh", {"server_id": ""})
+    with pytest.raises(ValueError, match="server_id must be a non-empty string"):
+        module.validate_tool_arguments("external.tools.refresh", {"server_id": 7})
+    with pytest.raises(ValueError, match="does not accept arguments"):
+        module.validate_tool_arguments("external.servers.list", {"server_id": "docs"})
+    with pytest.raises(ValueError, match="Unknown external federation management tool"):
+        module.validate_tool_arguments("external.servers.delete", {})
+
+
+def test_external_federation_validates_virtual_tool_argument_shape_and_confirmation() -> None:
+    module = ExternalFederationModule(ModuleConfig(name="external_federation", settings={}))
+
+    module.validate_tool_arguments("ext.docs.repo.search", {"q": "x"})
+    module.validate_tool_arguments("ext.docs.repo.update", {"title": "x", "__confirm_write": True})
+
+    with pytest.raises(ValueError, match="arguments must be an object"):
+        module.validate_tool_arguments("ext.docs.repo.search", "q=x")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="__confirm_write must be a boolean"):
+        module.validate_tool_arguments("ext.docs.repo.update", {"__confirm_write": "true"})
+
+
+@pytest.mark.asyncio
+async def test_external_federation_execute_rejects_invalid_management_arguments() -> None:
+    class _Manager:
+        called = False
+
+        async def list_servers(self) -> list[dict[str, Any]]:
+            self.called = True
+            return []
+
+    manager = _Manager()
+    module = ExternalFederationModule(ModuleConfig(name="external_federation", settings={}))
+    module._manager = manager
+
+    with pytest.raises(ValueError, match="external.servers.list does not accept arguments"):
+        await module.execute_tool("external.servers.list", {"server_id": "docs"})
+
+    assert manager.called is False
+
+
+@pytest.mark.asyncio
+async def test_external_federation_execute_validates_virtual_tools_after_sanitizing_arguments() -> None:
+    class _Manager:
+        seen_arguments: dict[str, Any] | None = None
+
+        async def execute_virtual_tool(
+            self,
+            *,
+            virtual_tool_name: str,
+            arguments: dict[str, Any],
+            context: Any = None,
+        ) -> dict[str, Any]:
+            del virtual_tool_name, context
+            self.seen_arguments = arguments
+            return {"ok": True}
+
+    manager = _Manager()
+    module = ExternalFederationModule(ModuleConfig(name="external_federation", settings={}))
+    module._manager = manager
+
+    result = await module.execute_tool("ext.docs.repo.search", {"q": "hello\x00"})
+
+    assert result == {"ok": True}
+    assert manager.seen_arguments == {"q": "hello"}
+
+    with pytest.raises(ValueError, match="__confirm_write must be a boolean"):
+        await module.execute_tool("ext.docs.repo.update", {"__confirm_write": "true"})

@@ -317,6 +317,21 @@ class ModuleRegistry:
         """Return module id mapped to a tool, if known."""
         return self._tool_registry.get(tool_name)
 
+    async def refresh_module_registries(self, module_id: str) -> bool:
+        """Rebuild cached tool/resource/prompt mappings for a registered module."""
+
+        async with self._lock:
+            registration = self._modules.get(module_id)
+            module = registration.module_instance if registration and registration.is_operational() else None
+            if module is None:
+                return False
+            self._tool_registry = {k: v for k, v in self._tool_registry.items() if v != module_id}
+            self._resource_registry = {k: v for k, v in self._resource_registry.items() if v != module_id}
+            self._prompt_registry = {k: v for k, v in self._prompt_registry.items() if v != module_id}
+
+        await self._update_registries(module_id, module)
+        return True
+
     async def find_module_for_resource(self, uri: str) -> Optional[BaseModule]:
         """Find module that provides a specific resource"""
         async with self._lock:
