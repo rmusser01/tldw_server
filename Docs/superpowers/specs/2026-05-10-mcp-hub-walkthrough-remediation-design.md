@@ -76,10 +76,7 @@ The single-server endpoint refreshes one server. The collection endpoint refresh
 Both endpoints should:
 
 - require the same mutation/admin permission used by create/update/delete external server endpoints;
-- resolve the live MCP runtime through the existing `get_mcp_server()` singleton;
-- initialize the MCP server if the singleton exists but has not yet initialized;
-- fetch the `external_federation` module from the live module registry;
-- fail gracefully with `requires_restart: true` or a runtime-unavailable response if the live server or external federation module cannot be reached;
+- reach the live external federation runtime if it is initialized;
 - reconcile managed server definitions from the configured server loader;
 - add adapters for new enabled servers;
 - update adapters for changed enabled servers;
@@ -103,13 +100,6 @@ Suggested response shape:
 ```
 
 If the live MCP runtime cannot be reached, return a non-2xx response only when the operation cannot be attempted. If the server was saved successfully but runtime refresh cannot run, the frontend should still preserve the saved server state and show retry or restart guidance.
-
-Implementation should prefer a dedicated `ExternalServerManager.reconcile_servers()` method over hiding reconciliation inside `refresh_discovery()`. That keeps the runtime update sequence explicit:
-
-1. reload runtime server definitions from the configured loader;
-2. reconcile adapters and virtual tools for added, changed, disabled, or removed servers;
-3. refresh discovery for the requested target;
-4. invalidate MCP module and protocol-facing capability caches.
 
 ### External Federation Validation
 
@@ -192,8 +182,6 @@ The chat UI should show a warning when the selected MCP state is not the effecti
 - `Tools omitted because MCP is offline.`
 - `Tools omitted because no executable tools are enabled.`
 
-PR 1 scope is normal `/api/v1/chat/completions` chat construction and the raw preview path for normal and comparison chat requests. Character `complete-v2`, image generation, and specialized chat modes should not be silently retrofitted unless they already route through `pageAssistModel` and the same helper. If a mode intentionally cannot send MCP tools, the preview or UI should make that limitation explicit instead of implying the tools will be sent.
-
 ### Readiness Gate
 
 Adjust `ServerReadinessGate` to distinguish transport failure, unhealthy health, and degraded health.
@@ -246,7 +234,7 @@ Improve the catalog empty state:
 - If no managed server exists: primary action `Add server`.
 - If managed servers exist but no tools are registered: primary action `Refresh discovery`.
 - If refresh fails: show server-specific errors.
-- If tools exist but are not chat-executable: route the user toward Access or policy state instead of implying setup is incomplete. This state must be derived from MCP discovery/tool executability data, such as `useMcpTools`, `/api/v1/mcp/tools`, or another existing executable-tools contract. Do not infer chat executability from the MCP Hub tool registry summary alone, because that summary is registry metadata rather than caller-specific execution permission.
+- If tools exist but are not chat-executable: route the user toward Access or policy state instead of implying setup is incomplete.
 
 The copy should separate:
 
@@ -273,13 +261,6 @@ This is intended for quickstart versus advanced split-brain debugging. It should
 Document or test the expected database isolation behavior for local MCP Hub walkthroughs.
 
 The observed issue was that an alternate AuthNZ `DATABASE_URL` still allowed other runtime subsystems to touch repo-local databases. The PR 2 scope should not necessarily rework all database configuration, but it should make local walkthrough setup explicit enough that E2E and contributor runs avoid accidental repo DB churn where practical.
-
-Minimum PR 2 deliverable:
-
-- document the temp-path environment recipe needed for the toy MCP walkthrough;
-- document which runtime databases are expected to remain repo-local unless separately configured;
-- make the toy E2E smoke run against temporary paths where practical;
-- include a final `git status --short` cleanliness check in the walkthrough verification notes.
 
 ## Error Handling
 
@@ -367,7 +348,7 @@ Exact test paths may be adjusted during implementation based on the touched file
 ## Open Questions For Implementation
 
 - Whether the refresh-all endpoint should live under `/external-servers/refresh-discovery` or a broader `/runtime/refresh-discovery` path.
-- Which exact module-id fallback names should be accepted when resolving the live external federation module, if local configs use a non-default id.
-- Whether deployment diagnostics belong directly in MCP Hub, a shared networking panel, or both. The default PR 2 direction is MCP Hub first, using shared networking helpers where available.
+- Whether the runtime manager should expose one `reconcile_servers()` method or combine reconciliation into `refresh_discovery()`.
+- Whether deployment diagnostics belong directly in MCP Hub, a shared networking panel, or both.
 
 These questions should be answered in the implementation plan, but they do not change the two-PR design direction.
