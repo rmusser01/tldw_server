@@ -210,14 +210,14 @@ When importing content that already exists:
   - Example: "Research Note" becomes "[Imported] Research Note"
   - Useful for identifying imported content
 
-- **Import Media**: Include media files from the chatbook
-  - Default: true (recommended)
-  - Set to false to save space
-  - OpenWebUI JSON imports ignore this option and preserve only attachment references
+- **Import Media**: Not supported yet
+  - Default: false
+  - Keep this set to false; the server rejects true values in v1
+  - OpenWebUI JSON imports preserve only attachment references
 
-- **Import Embeddings**: Include vector embeddings
-  - Default: false (recreated as needed)
-  - Set to true for exact search behavior
+- **Import Embeddings**: Not supported yet
+  - Default: false
+  - Keep this set to false; the server rejects true values in v1
   - OpenWebUI JSON imports do not import embeddings
 
 ### Preview Before Import
@@ -452,7 +452,7 @@ A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSO
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: Chatbook archive media is imported if import_media is true and you have sufficient storage quota. OpenWebUI JSON import preserves file, image, and artifact references as metadata only.
+A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON import preserves file, image, and artifact references as metadata only.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.

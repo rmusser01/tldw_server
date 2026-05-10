@@ -141,22 +141,26 @@ Implementation notes:
 
 **Description**: Import content from an uploaded chatbook archive or OpenWebUI chat export JSON.
 
-**Request**: Multipart form data + query parameters
+**Request**: Multipart form data
 - `file` (form field): The import file (required)
-- `source_format` (form field or query parameter): `chatbook` (default) or `openwebui_json`
-- Additional import options are provided as query parameters or multipart fields (see Options JSON for fields). For example: `?conflict_resolution=skip&import_media=true`
+- `source_format` (form field): `chatbook` (default) or `openwebui_json`
+- `conflict_resolution` (form field): `skip` (default) or `rename` for current import flows
+- `prefix_imported` (form field): boolean, default `false`
+- `content_selections` (form field): optional JSON object encoded as a string; unsupported content types are rejected
+- `import_media` and `import_embeddings` (form fields): must remain `false` in v1; true values are rejected
 
-Supported options (as query parameters or structured by clients that map to query params):
+Supported multipart fields:
 ```json
 {
   "source_format": "chatbook",
-  "content_selections": {
+  "content_selections": "{\"conversation\":[\"conv_123\"],\"note\":[]}",
+  "content_selections_json_shape": {
     "conversation": ["conv_123"],  // Only import specific items
-    "note": []  // Import all notes
+    "note": []  // Import all notes if content selections are supported
   },
-  "conflict_resolution": "skip",  // skip, overwrite, rename, merge
+  "conflict_resolution": "skip",
   "prefix_imported": false,
-  "import_media": true,
+  "import_media": false,
   "import_embeddings": false,
   "async_mode": false
 }
@@ -623,10 +627,16 @@ if job_id:
 
         time.sleep(5)  # Check every 5 seconds
 
-# Import a chatbook (options as query parameters)
+# Import a chatbook (options as multipart form fields)
 with open("my_backup.chatbook", "rb") as f:
     boundary, body = encode_multipart(
-        {},
+        {
+            "source_format": "chatbook",
+            "conflict_resolution": "skip",
+            "prefix_imported": "false",
+            "import_media": "false",
+            "import_embeddings": "false",
+        },
         [("file", "my_backup.chatbook", f.read(), "application/octet-stream")],
     )
     upload_headers = {
@@ -634,7 +644,7 @@ with open("my_backup.chatbook", "rb") as f:
         "Content-Type": f"multipart/form-data; boundary={boundary}",
     }
     req = Request(
-        f"{API_BASE}/chatbooks/import?conflict_resolution=skip&prefix_imported=false",
+        f"{API_BASE}/chatbooks/import",
         data=body,
         headers=upload_headers,
         method="POST",
@@ -700,12 +710,17 @@ async function monitorJob(jobId) {
   }
 }
 
-// Import chatbook (options as query parameters)
+// Import chatbook (options as multipart form fields)
 async function importChatbook(file) {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('source_format', 'chatbook');
+  formData.append('conflict_resolution', 'skip');
+  formData.append('prefix_imported', 'false');
+  formData.append('import_media', 'false');
+  formData.append('import_embeddings', 'false');
 
-  const response = await fetch(`${API_BASE}/chatbooks/import?conflict_resolution=skip&prefix_imported=false`, {
+  const response = await fetch(`${API_BASE}/chatbooks/import`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${TOKEN}`
