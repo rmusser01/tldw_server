@@ -5,13 +5,15 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 08:23'
+updated_date: '2026-05-10 15:08'
 labels:
   - mcp
   - webui
   - backend
   - chat
 dependencies: []
+references:
+  - https://github.com/rmusser01/tldw_server/pull/1514
 documentation:
   - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
   - docs/superpowers/plans/2026-05-10-mcp-hub-live-discovery-chat-plan.md
@@ -92,6 +94,8 @@ Stage 3 quality follow-up RED/GREEN: added service tests requiring chatDebugMeta
 2026-05-10: Stage 4 committed as 6d9162f84 (Allow degraded API readiness entry) after spec and quality reviews approved. Beginning Stage 5 focused final verification: backend MCP pytest, frontend MCP/readiness Vitest, Bandit over touched backend production files, and git diff --check.
 
 2026-05-10 Stage 5 final verification completed. Backend: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q -> 61 passed, 5 warnings. UI package: bun run test chat-tools/pageAssistModel/raw-preview/TldwChatService/MCPHub tab tests -> 6 files passed, 55 tests. Frontend readiness: bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx -> 6 passed. Bandit: 0 findings, output /tmp/bandit_mcp_hub_pr1.json. git diff --check passed.
+
+2026-05-10: Draft PR created for the completed PR 1 slice: https://github.com/rmusser01/tldw_server/pull/1514. PR is draft pending a human-authored Change summary per the repo AI-generated PR policy.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
