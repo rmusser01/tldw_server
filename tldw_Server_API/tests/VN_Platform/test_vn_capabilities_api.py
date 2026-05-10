@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_r
 from tldw_Server_API.app.api.v1.endpoints.vn_capabilities import router as vn_capabilities_router
 from tldw_Server_API.app.api.v1.endpoints.vn_play import router as vn_play_router
 from tldw_Server_API.app.api.v1.endpoints.vn_policy import router as vn_policy_router
+from tldw_Server_API.app.api.v1.endpoints.vn_scripts import router as vn_scripts_router
 
 pytestmark = pytest.mark.integration
 
@@ -17,6 +18,7 @@ def client() -> TestClient:
     app = FastAPI()
     app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
     app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.include_router(vn_scripts_router, prefix="/api/v1/vn")
     app.include_router(vn_play_router, prefix="/api/v1/vn")
     app.include_router(vn_policy_router, prefix="/api/v1/vn")
     return TestClient(app)
@@ -36,11 +38,12 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert body["resources"]["audio"] == "/api/v1/vn/vn-audio"
     assert body["enabled_modules"]["assets"] is True
     assert body["enabled_modules"]["play"] is True
-    assert body["enabled_modules"]["scripts"] is False
+    assert body["enabled_modules"]["scripts"] is True
     assert body["enabled_modules"]["policy"] is True
     assert body["enabled_modules"]["audio"] is False
     assert body["features"]["asset_generation"] is True
     assert body["features"]["asset_portability"] is True
+    assert body["features"]["scripted_story"] is True
     assert body["features"]["realtime_image_generation"] is False
     assert body["route_migration"]["canonical"] == "/api/v1/vn/vn-*"
     assert body["route_migration"]["supersedes"] == ["/api/v1/vn-assets", "/api/v1/vn-play"]

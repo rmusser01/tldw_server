@@ -695,7 +695,7 @@ git commit -m "Add VN policy profiles API"
 - Test: `tldw_Server_API/tests/VN_Scripts/test_vn_scripts_api.py`
 - Test: `tldw_Server_API/tests/VN_Scripts/test_vn_script_publish_snapshots.py`
 
-- [ ] **Step 1: Write failing DB tests**
+- [x] **Step 1: Write failing DB tests**
 
 Assert scripts tables are created in per-user `ChaChaNotes.db`:
 
@@ -707,7 +707,7 @@ Assert scripts tables are created in per-user `ChaChaNotes.db`:
 
 Test draft optimistic revision conflict with `if_revision`.
 
-- [ ] **Step 2: Write failing validator tests**
+- [x] **Step 2: Write failing validator tests**
 
 Cover:
 
@@ -727,13 +727,13 @@ Add publish policy tests proving `POST /publish` repeats authoritative policy
 evaluation and blocks/warns independently of prior advisory `/vn-policy/evaluate`
 responses.
 
-- [ ] **Step 3: Implement repository and validator**
+- [x] **Step 3: Implement repository and validator**
 
 Keep validation pure where possible. The service should load manifest/profile context and pass it into the pure validator.
 
 Do not accept text DSL as source truth in V1.
 
-- [ ] **Step 4: Implement script API**
+- [x] **Step 4: Implement script API**
 
 Implement:
 
@@ -755,13 +755,13 @@ Publish must snapshot:
 - effective generation profile;
 - script defaults.
 
-- [ ] **Step 5: Register scripts router and assert OpenAPI paths**
+- [x] **Step 5: Register scripts router and assert OpenAPI paths**
 
 Register `vn_scripts.router` under `prefix=f"{API_V1_PREFIX}/vn"` in
 `content.py`. Add route/OpenAPI assertions for draft, validation, publish,
 version, manifest snapshot, and version policy-evaluate endpoints.
 
-- [ ] **Step 6: Run script tests**
+- [x] **Step 6: Run script tests**
 
 Run:
 
@@ -772,7 +772,15 @@ Run:
 
 Expected: all VN scripts tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
+
+Verification completed:
+
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts -q` -> `29 passed, 5 warnings`.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts tldw_Server_API/tests/VN_Platform tldw_Server_API/tests/VN_Assets/test_manifest_builder.py tldw_Server_API/tests/VN_Assets/test_vn_assets_api.py::test_manifest_returns_approved_only_items tldw_Server_API/tests/VN_Policy tldw_Server_API/tests/Services/test_router_groups_contract.py tldw_Server_API/tests/Services/test_openapi_contracts.py -q` -> `320 passed, 33 warnings`.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m compileall tldw_Server_API/app/core/VN_Scripts tldw_Server_API/app/core/DB_Management/VNScripts_DB.py tldw_Server_API/app/api/v1/endpoints/vn_scripts.py tldw_Server_API/app/api/v1/schemas/vn_script_schemas.py` -> exit 0.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/vn_scripts.py tldw_Server_API/app/api/v1/schemas/vn_script_schemas.py tldw_Server_API/app/core/DB_Management/VNScripts_DB.py tldw_Server_API/app/core/VN_Scripts tldw_Server_API/app/api/v1/router_groups/content.py -f json -o /tmp/bandit_vn_scripts_task4.json` -> 0 findings.
+- `git diff --check` -> exit 0.
 
 ```bash
 git add \
