@@ -1654,6 +1654,212 @@ describe("SidepanelPersona", () => {
     })
   })
 
+  it("smoke-tests setup from persona choice through starter retry and dry-run handoff", async () => {
+    mocks.location.search = "?persona_id=garden-helper&tab=profiles"
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+
+    let profileVersion = 2
+    let starterAttempts = 0
+    let currentVoiceDefaults = {
+      confirmation_mode: "destructive_only"
+    }
+    let currentSetup = {
+      status: "in_progress",
+      version: 1,
+      run_id: "setup-smoke-run",
+      current_step: "persona",
+      completed_steps: [],
+      completed_at: null,
+      last_test_type: null
+    }
+    const setupEventBodies: Array<Record<string, unknown>> = []
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = String(init?.method || "GET").toUpperCase()
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "garden-helper", name: "Garden Helper" }]
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/setup-analytics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "garden-helper",
+            summary: {
+              total_runs: 0,
+              completion_rate: 0,
+              first_post_setup_action_rate: 0
+            }
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/setup-events") && method === "POST") {
+        setupEventBodies.push(init?.body || {})
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            event_id: init?.body?.event_id || "evt-setup-smoke",
+            run_id: init?.body?.run_id || "setup-smoke-run",
+            event_type: init?.body?.event_type || "step_viewed",
+            deduped: false,
+            created_at: "2026-03-14T10:00:00.000Z"
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/voice-analytics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "garden-helper",
+            summary: { total_runs: 0, matched_runs: 0, fallback_runs: 0 }
+          })
+        })
+      }
+      if (
+        path.includes("/persona/profiles/garden-helper/voice-commands/test") &&
+        method === "POST"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            heard_text: init?.body?.heard_text,
+            matched: true,
+            command_name: "Search Notes"
+          })
+        })
+      }
+      if (
+        path.includes("/persona/profiles/garden-helper/voice-commands") &&
+        method === "POST"
+      ) {
+        starterAttempts += 1
+        if (starterAttempts === 1) {
+          return Promise.resolve({
+            ok: false,
+            error: "Failed to create starter command",
+            json: async () => ({})
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "cmd-search-notes" })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper")) {
+        if (method === "PATCH") {
+          profileVersion += 1
+          currentVoiceDefaults = {
+            ...currentVoiceDefaults,
+            ...(init?.body?.voice_defaults || {})
+          }
+          currentSetup = {
+            ...currentSetup,
+            ...(init?.body?.setup || {})
+          }
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "garden-helper",
+            version: profileVersion,
+            voice_defaults: currentVoiceDefaults,
+            setup: currentSetup,
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("persona")
+    })
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("voice")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Search Notes" }))
+
+    expect(await screen.findByText("Failed to create starter command")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry Search Notes" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("safety")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask for destructive actions" }))
+    fireEvent.click(screen.getByRole("button", { name: "No external connections for now" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save safety choices" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test")
+    })
+
+    fireEvent.change(screen.getByPlaceholderText("Try a spoken phrase"), {
+      target: { value: "search notes for project alpha" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Run dry-run test" }))
+
+    await screen.findByText(/Matched Search Notes/i)
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish with dry-run test" }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+    })
+
+    expect(starterAttempts).toBe(2)
+    expect(currentSetup.status).toBe("completed")
+    expect(currentSetup.completed_steps).toEqual([
+      "persona",
+      "voice",
+      "commands",
+      "safety",
+      "test"
+    ])
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent(
+      "Assistant setup complete"
+    )
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent(
+      "Added 1 starter command"
+    )
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent(
+      "Ask for destructive actions"
+    )
+    await waitFor(() => {
+      expect(
+        setupEventBodies.some(
+          (body) =>
+            body.event_type === "setup_completed" &&
+            body.completion_type === "dry_run"
+        )
+      ).toBe(true)
+    })
+  })
+
   it("keeps the commands step in place with retry guidance when starter creation fails", async () => {
     mocks.location.search = "?persona_id=garden-helper&tab=commands"
 
