@@ -379,6 +379,32 @@ const WAKE_WARNING_DIAGNOSTICS: Record<
   }
 }
 
+const LIVE_VOICE_DYNAMIC_WARNING_CODES = new Set<PersonaLiveVoiceWarningReasonCode>([
+  "voice_capture_error"
+])
+
+const WAKE_DYNAMIC_WARNING_CODES = new Set<PersonaWakeWarningReasonCode>([
+  "wake_detector_error"
+])
+
+const mappedLiveVoiceDetail = (
+  reasonCode: PersonaLiveVoiceWarningReasonCode,
+  mappedDetail: string,
+  warning: string | null | undefined
+) =>
+  LIVE_VOICE_DYNAMIC_WARNING_CODES.has(reasonCode)
+    ? joinDetails([mappedDetail, warning])
+    : mappedDetail
+
+const mappedWakeDetail = (
+  reasonCode: PersonaWakeWarningReasonCode,
+  mappedDetail: string,
+  warning: string | null | undefined
+) =>
+  WAKE_DYNAMIC_WARNING_CODES.has(reasonCode)
+    ? joinDetails([mappedDetail, warning])
+    : mappedDetail
+
 const summarizeLiveVoice = (
   liveVoice: PersonaBuddyDiagnosticsInput["liveVoice"]
 ): PersonaBuddyDiagnosticRow => {
@@ -399,7 +425,11 @@ const summarizeLiveVoice = (
       label: "Live voice",
       value: mappedWarning.value,
       state: mappedWarning.state,
-      detail: joinDetails([mappedWarning.detail, liveVoice?.warning])
+      detail: mappedLiveVoiceDetail(
+        reasonCode,
+        mappedWarning.detail,
+        liveVoice?.warning
+      )
     }
   }
 
@@ -435,7 +465,7 @@ const summarizeWake = (
       label: "Wake",
       value: mappedWarning.value,
       state: mappedWarning.state,
-      detail: joinDetails([mappedWarning.detail, wake?.warning])
+      detail: mappedWakeDetail(reasonCode, mappedWarning.detail, wake?.warning)
     }
   }
 

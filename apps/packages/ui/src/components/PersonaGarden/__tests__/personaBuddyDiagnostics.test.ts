@@ -180,6 +180,35 @@ describe("buildPersonaBuddyDiagnostics", () => {
         })
       ])
     )
+    expect(
+      diagnostics.rows.find((row) => row.label === "Live voice")?.detail
+    ).not.toMatch(/Server VAD unavailable/)
+
+    const captureError = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: true, connecting: false, sessionId: "session-1" },
+      liveVoice: {
+        state: "error",
+        recoveryMode: "none",
+        warning: "USB microphone disappeared.",
+        warningReasonCode: "voice_capture_error"
+      },
+      wake: { armed: false, detectorState: "idle" },
+      visual: { packLoadStatus: "loaded", diagnostic: null }
+    })
+
+    expect(captureError.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Live voice",
+          value: "Capture issue",
+          detail: expect.stringMatching(/USB microphone disappeared/)
+        })
+      ])
+    )
   })
 
   it("uses wake reason codes without treating disabled wake as broken Persona Live", () => {
@@ -210,6 +239,9 @@ describe("buildPersonaBuddyDiagnostics", () => {
         })
       ])
     )
+    expect(
+      permissionNeeded.rows.find((row) => row.label === "Wake")?.detail
+    ).not.toMatch(/Microphone permission is blocked/)
 
     const notConfigured = buildPersonaBuddyDiagnostics({
       selectedPersona: { id: "persona-1", name: "Ada" },
@@ -237,7 +269,36 @@ describe("buildPersonaBuddyDiagnostics", () => {
         })
       ])
     )
+    expect(
+      notConfigured.rows.find((row) => row.label === "Wake")?.detail
+    ).not.toMatch(/Add a persona trigger phrase/)
     expect(notConfigured.state).toBe("healthy")
+
+    const detectorError = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: true, connecting: false, sessionId: "session-1" },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: {
+        armed: true,
+        detectorState: "error",
+        warning: "Speech recognition restart failed.",
+        warningReasonCode: "wake_detector_error"
+      },
+      visual: { packLoadStatus: "loaded", diagnostic: null }
+    })
+
+    expect(detectorError.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Wake",
+          value: "Detector issue",
+          detail: expect.stringMatching(/Speech recognition restart failed/)
+        })
+      ])
+    )
   })
 
   it("does not mark intentionally dormant Buddy summaries as degraded", () => {

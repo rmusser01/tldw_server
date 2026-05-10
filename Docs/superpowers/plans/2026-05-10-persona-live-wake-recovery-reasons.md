@@ -67,7 +67,6 @@ Add exported string-literal union types:
 export type PersonaLiveVoiceWarningReasonCode =
   | "live_voice_disconnected"
   | "server_stt_unavailable"
-  | "live_voice_source_pending"
   | "barge_in_disabled"
   | "voice_capture_error"
   | "voice_no_transcript"
@@ -90,7 +89,7 @@ export type PersonaWakeWarningReasonCode =
   | "wake_activation_rejected"
 ```
 
-Set these codes wherever the existing hook sets `warning` or `wakeWarning`; clear them whenever the corresponding warning is cleared.
+Set these codes wherever the existing hook sets `warning` or `wakeWarning`; clear them whenever the corresponding warning is cleared. `!liveVoiceSourceReady` should continue to queue the pending start without setting warning metadata because it is a short hydration state rather than a user-visible recovery condition.
 
 - [ ] **Step 4: Run tests to verify GREEN**
 

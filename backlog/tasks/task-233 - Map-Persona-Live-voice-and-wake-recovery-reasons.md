@@ -4,7 +4,7 @@ title: Map Persona Live voice and wake recovery reasons
 status: Done
 assignee: []
 created_date: '2026-05-10 16:11'
-updated_date: '2026-05-10 16:29'
+updated_date: '2026-05-10 16:53'
 labels:
   - persona
   - buddy
@@ -60,6 +60,14 @@ Verification: git diff --check passed.
 Bandit: not applicable; this slice touches frontend TypeScript and Backlog/plan docs only, with no backend Python changes.
 
 Known skips/blockers: none for this slice; Bandit remains not applicable because no backend Python changed.
+
+PR review sweep: addressing Gemini comments on stale live_voice_source_pending plan text and redundant diagnostics detail joining.
+
+PR review fixes: removed stale live_voice_source_pending from the plan snippet because source readiness is queued hydration rather than a warning/recovery state; tightened diagnostics details to append raw warnings only for dynamic capture/detector errors.
+
+Review-fix verification: ./node_modules/.bin/vitest run src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx --maxWorkers=1 passed: 3 files, 75 tests.
+
+Review-fix verification: git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
