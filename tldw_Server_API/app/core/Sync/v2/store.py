@@ -35,8 +35,13 @@ class SyncV2Store:
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
 
-    def get_dataset(self, dataset_id: str) -> SyncDataset | None:
-        return self.db.get_dataset(dataset_id)
+    def get_dataset(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SyncDataset | None:
+        return self.db.get_dataset(dataset_id, owner_user_id=owner_user_id)
 
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope)
@@ -104,15 +109,15 @@ class SyncV2Store:
         self,
         dataset_id: str,
         *,
+        user_id: str,
         device_id: str | None = None,
         key_purpose: str | None = None,
-        user_id: str | None = None,
     ) -> list[SyncKeyRecord]:
         return self.db.list_key_records(
             dataset_id,
+            user_id=user_id,
             device_id=device_id,
             key_purpose=key_purpose,
-            user_id=user_id,
         )
 
 

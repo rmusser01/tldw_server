@@ -14,6 +14,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
+    SyncIdempotencyConflictError,
+    SyncInvalidDomainError,
+    SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     ConflictStatus,
@@ -456,6 +459,88 @@ def _key_record_from_row(row: dict[str, Any]) -> SyncKeyRecord:
     )
 
 
+def _dataset_domains_from_row(row: dict[str, Any]) -> set[str]:
+    domains = decode_json(row.get("domain_set_json"), default=[])
+    return {str(domain) for domain in domains}
+
+
+def _envelope_fingerprint_from_create(envelope: SyncEnvelopeCreate) -> dict[str, Any]:
+    return {
+        "dataset_id": envelope.dataset_id,
+        "domain": envelope.domain,
+        "entity_id": envelope.entity_id,
+        "stable_key": envelope.stable_key,
+        "operation": envelope.operation,
+        "client_envelope_id": envelope.client_envelope_id,
+        "device_id": envelope.device_id,
+        "client_timestamp": envelope.client_timestamp,
+        "base_version": envelope.base_version,
+        "entity_version": envelope.entity_version,
+        "dependencies": envelope.dependencies,
+        "routing_metadata": envelope.routing_metadata,
+        "payload_ciphertext": envelope.payload_ciphertext,
+        "payload_clear": envelope.payload_clear,
+        "payload_hash": envelope.payload_hash,
+        "payload_size_bytes": envelope.payload_size_bytes,
+        "adapter_version": envelope.adapter_version,
+        "status": envelope.status,
+    }
+
+
+def _envelope_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    payload_size_bytes = row.get("payload_size_bytes")
+    return {
+        "dataset_id": row["dataset_id"],
+        "domain": row["domain"],
+        "entity_id": row["entity_id"],
+        "stable_key": row.get("stable_key"),
+        "operation": row["operation"],
+        "client_envelope_id": row["client_envelope_id"],
+        "device_id": row.get("device_id"),
+        "client_timestamp": row.get("client_timestamp"),
+        "base_version": _version_from_storage(row.get("base_version")),
+        "entity_version": _version_from_storage(row.get("entity_version")),
+        "dependencies": decode_json(row.get("dependency_json"), default=[]),
+        "routing_metadata": decode_json(row.get("routing_metadata_json"), default={}),
+        "payload_ciphertext": row.get("payload_ciphertext"),
+        "payload_clear": decode_json(row.get("payload_clear_json"), default={}),
+        "payload_hash": row.get("payload_hash"),
+        "payload_size_bytes": int(payload_size_bytes) if payload_size_bytes is not None else None,
+        "adapter_version": int(row["adapter_version"]),
+        "status": row["status"],
+    }
+
+
+def _key_record_fingerprint_from_create(record: SyncKeyRecordCreate) -> dict[str, Any]:
+    return {
+        "key_record_id": record.key_record_id,
+        "dataset_id": record.dataset_id,
+        "user_id": record.user_id,
+        "device_id": record.device_id,
+        "key_purpose": record.key_purpose,
+        "wrapped_key_blob": record.wrapped_key_blob,
+        "kdf_metadata": record.kdf_metadata,
+        "recovery_hint": record.recovery_hint,
+        "rotation_of_key_record_id": record.rotation_of_key_record_id,
+        "revoked_at": record.revoked_at,
+    }
+
+
+def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "key_record_id": row["key_record_id"],
+        "dataset_id": row["dataset_id"],
+        "user_id": row["user_id"],
+        "device_id": row.get("device_id"),
+        "key_purpose": row["key_purpose"],
+        "wrapped_key_blob": row["wrapped_key_blob"],
+        "kdf_metadata": decode_json(row.get("kdf_metadata_json"), default={}),
+        "recovery_hint": row.get("recovery_hint"),
+        "rotation_of_key_record_id": row.get("rotation_of_key_record_id"),
+        "revoked_at": row.get("revoked_at"),
+    }
+
+
 class SyncDatabase:
     """Focused DB_Management helper for Sync v2 per-user storage."""
 
@@ -543,6 +628,57 @@ class SyncDatabase:
         """Execute a parameterized SQL statement through the configured backend."""
 
         return self.backend.execute(query, params, connection=connection)
+
+    def _get_dataset_row(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str | None = None,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        if owner_user_id is None:
+            return _first(
+                self.execute(
+                    "SELECT * FROM sync_datasets WHERE dataset_id = ?",
+                    (dataset_id,),
+                    connection=connection,
+                )
+            )
+        return _first(
+            self.execute(
+                """
+                SELECT * FROM sync_datasets
+                 WHERE dataset_id = ? AND owner_user_id = ?
+                """,
+                (dataset_id, owner_user_id),
+                connection=connection,
+            )
+        )
+
+    def _require_dataset(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any]:
+        row = self._get_dataset_row(dataset_id, connection=connection)
+        if row is None:
+            raise SyncDatasetNotFoundError(f"Sync dataset not found: {dataset_id}")
+        return row
+
+    def _require_dataset_domain(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any]:
+        row = self._require_dataset(dataset_id, connection=connection)
+        if domain not in _dataset_domains_from_row(row):
+            raise SyncInvalidDomainError(
+                f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
+            )
+        return row
 
     def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
         now = utcnow_iso()
@@ -690,28 +826,24 @@ class SyncDatabase:
             )
         return _dataset_from_row(row)
 
-    def get_dataset(self, dataset_id: str) -> SyncDataset | None:
-        row = _first(
-            self.execute(
-                "SELECT * FROM sync_datasets WHERE dataset_id = ?",
-                (dataset_id,),
-            )
-        )
+    def get_dataset(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str | None = None,
+    ) -> SyncDataset | None:
+        row = self._get_dataset_row(dataset_id, owner_user_id=owner_user_id)
         if row is None:
             return None
         return _dataset_from_row(row)
 
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         with self.backend.transaction() as conn:
-            dataset = _first(
-                self.execute(
-                    "SELECT dataset_id FROM sync_datasets WHERE dataset_id = ?",
-                    (envelope.dataset_id,),
-                    connection=conn,
-                )
+            self._require_dataset_domain(
+                envelope.dataset_id,
+                envelope.domain,
+                connection=conn,
             )
-            if dataset is None:
-                raise SyncDatasetNotFoundError(f"Sync dataset not found: {envelope.dataset_id}")
 
             existing = _first(
                 self.execute(
@@ -724,6 +856,13 @@ class SyncDatabase:
                 )
             )
             if existing:
+                if (
+                    _envelope_fingerprint_from_row(existing)
+                    != _envelope_fingerprint_from_create(envelope)
+                ):
+                    raise SyncIdempotencyConflictError(
+                        "Sync envelope idempotency key was reused with different content"
+                    )
                 return _envelope_from_row(existing)
 
             now = utcnow_iso()
@@ -820,6 +959,7 @@ class SyncDatabase:
     def update_device_cursor(self, cursor: SyncDeviceCursor) -> SyncDeviceCursor:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
+            self._require_dataset_domain(cursor.dataset_id, cursor.domain, connection=conn)
             existing = _first(
                 self.execute(
                     """
@@ -897,6 +1037,7 @@ class SyncDatabase:
     def insert_conflict(self, conflict: SyncConflictCreate) -> SyncConflict:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
+            self._require_dataset_domain(conflict.dataset_id, conflict.domain, connection=conn)
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
@@ -1010,6 +1151,7 @@ class SyncDatabase:
     def store_key_record(self, record: SyncKeyRecordCreate) -> SyncKeyRecord:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
+            self._require_dataset(record.dataset_id, connection=conn)
             existing = _first(
                 self.execute(
                     "SELECT * FROM sync_key_records WHERE key_record_id = ?",
@@ -1018,34 +1160,14 @@ class SyncDatabase:
                 )
             )
             if existing:
-                self.execute(
-                    """
-                    UPDATE sync_key_records
-                       SET dataset_id = ?,
-                           user_id = ?,
-                           device_id = ?,
-                           key_purpose = ?,
-                           wrapped_key_blob = ?,
-                           kdf_metadata_json = ?,
-                           recovery_hint = ?,
-                           rotation_of_key_record_id = ?,
-                           revoked_at = ?
-                     WHERE key_record_id = ?
-                    """,
-                    (
-                        record.dataset_id,
-                        record.user_id,
-                        record.device_id,
-                        record.key_purpose,
-                        record.wrapped_key_blob,
-                        encode_json(record.kdf_metadata, default={}),
-                        record.recovery_hint,
-                        record.rotation_of_key_record_id,
-                        record.revoked_at,
-                        record.key_record_id,
-                    ),
-                    connection=conn,
-                )
+                if (
+                    _key_record_fingerprint_from_row(existing)
+                    != _key_record_fingerprint_from_create(record)
+                ):
+                    raise SyncIdempotencyConflictError(
+                        "Sync key record ID was reused with different key material"
+                    )
+                row = existing
             else:
                 self.execute(
                     """
@@ -1071,28 +1193,28 @@ class SyncDatabase:
                     ),
                     connection=conn,
                 )
-            row = _first(
-                self.execute(
-                    "SELECT * FROM sync_key_records WHERE key_record_id = ?",
-                    (record.key_record_id,),
-                    connection=conn,
+                row = _first(
+                    self.execute(
+                        "SELECT * FROM sync_key_records WHERE key_record_id = ?",
+                        (record.key_record_id,),
+                        connection=conn,
+                    )
                 )
-            )
         return _key_record_from_row(row)
 
     def list_key_records(
         self,
         dataset_id: str,
         *,
+        user_id: str,
         device_id: str | None = None,
         key_purpose: str | None = None,
-        user_id: str | None = None,
     ) -> list[SyncKeyRecord]:
-        params: list[Any] = [dataset_id]
-        sql = "SELECT * FROM sync_key_records WHERE dataset_id = ?"
-        if user_id is not None:
-            sql += " AND user_id = ?"
-            params.append(user_id)
+        if not user_id:
+            raise SyncStoreError("user_id is required when listing Sync key records")
+        self._require_dataset(dataset_id)
+        params: list[Any] = [dataset_id, user_id]
+        sql = "SELECT * FROM sync_key_records WHERE dataset_id = ? AND user_id = ?"
         if device_id is not None:
             sql += " AND device_id = ?"
             params.append(device_id)

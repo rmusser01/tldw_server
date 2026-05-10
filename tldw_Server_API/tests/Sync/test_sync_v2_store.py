@@ -9,6 +9,12 @@ import pytest
 
 import tldw_Server_API.app.core.Sync.v2.store as store_module
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncDatasetNotFoundError,
+    SyncIdempotencyConflictError,
+    SyncInvalidDomainError,
+    SyncStoreError,
+)
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
     SyncDatasetCreate,
@@ -187,6 +193,13 @@ def test_dataset_enrollment_is_idempotent(sync_store: SyncV2Store):
     assert fetched == second
 
 
+def test_get_dataset_can_be_scoped_by_owner(sync_store: SyncV2Store):
+    dataset = sync_store.enroll_dataset(_dataset())
+
+    assert sync_store.get_dataset("dataset-1", owner_user_id="user-1") == dataset
+    assert sync_store.get_dataset("dataset-1", owner_user_id="user-2") is None
+
+
 def test_insert_envelope_is_idempotent_by_dataset_and_client_envelope(sync_store: SyncV2Store):
     sync_store.enroll_dataset(_dataset())
     envelope = _envelope(client_envelope_id="env-1")
@@ -197,6 +210,31 @@ def test_insert_envelope_is_idempotent_by_dataset_and_client_envelope(sync_store
     assert second.server_sequence == first.server_sequence
     assert second.server_timestamp == first.server_timestamp
     assert sync_store.list_envelopes_after("dataset-1", 0) == [first]
+
+
+def test_insert_envelope_rejects_duplicate_drift(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+    envelope = _envelope(client_envelope_id="env-1")
+
+    sync_store.insert_envelope(envelope)
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.insert_envelope(
+            _envelope(client_envelope_id="env-1", payload_hash="sha256:changed")
+        )
+
+
+def test_insert_envelope_rejects_domain_not_enrolled(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset(domains=["notes"]))
+
+    with pytest.raises(SyncInvalidDomainError):
+        sync_store.insert_envelope(
+            _envelope(
+                domain="chat",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:chat-1",
+            )
+        )
 
 
 def test_list_envelopes_after_cursor_is_ordered_and_domain_filterable(sync_store: SyncV2Store):
@@ -223,6 +261,8 @@ def test_list_envelopes_after_cursor_is_ordered_and_domain_filterable(sync_store
 
 
 def test_device_cursor_upsert_and_fetch(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+
     cursor = sync_store.update_device_cursor(
         SyncDeviceCursor(
             dataset_id="dataset-1",
@@ -237,7 +277,33 @@ def test_device_cursor_upsert_and_fetch(sync_store: SyncV2Store):
     assert fetched.last_pulled_sequence == 42
 
 
+def test_device_cursor_rejects_missing_dataset_and_unenrolled_domain(sync_store: SyncV2Store):
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="missing-dataset",
+                device_id="device-1",
+                domain="notes",
+                last_pulled_sequence=1,
+            )
+        )
+
+    sync_store.enroll_dataset(_dataset(domains=["notes"]))
+
+    with pytest.raises(SyncInvalidDomainError):
+        sync_store.update_device_cursor(
+            SyncDeviceCursor(
+                dataset_id="dataset-1",
+                device_id="device-1",
+                domain="chat",
+                last_pulled_sequence=1,
+            )
+        )
+
+
 def test_conflict_insert_list_and_resolve_lifecycle(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+
     inserted = sync_store.insert_conflict(_conflict())
 
     assert inserted.status == "unresolved"
@@ -260,15 +326,27 @@ def test_conflict_insert_list_and_resolve_lifecycle(sync_store: SyncV2Store):
     assert sync_store.list_conflicts("dataset-1", status="resolved") == [resolved]
 
 
+def test_conflict_rejects_missing_dataset_and_unenrolled_domain(sync_store: SyncV2Store):
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.insert_conflict(_conflict(dataset_id="missing-dataset"))
+
+    sync_store.enroll_dataset(_dataset(domains=["notes"]))
+
+    with pytest.raises(SyncInvalidDomainError):
+        sync_store.insert_conflict(_conflict(domain="chat"))
+
+
 def test_key_records_store_wrapped_blobs_without_plaintext_keys(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+
     stored = sync_store.store_key_record(_key_record())
-    duplicate = sync_store.store_key_record(_key_record(recovery_hint="updated hint"))
-    records = sync_store.list_key_records("dataset-1")
+    duplicate = sync_store.store_key_record(_key_record())
+    records = sync_store.list_key_records("dataset-1", user_id="user-1")
     columns = {column["name"] for column in sync_store.db.backend.get_table_info("sync_key_records")}
 
     assert duplicate.key_record_id == stored.key_record_id
     assert duplicate.created_at == stored.created_at
-    assert duplicate.recovery_hint == "updated hint"
+    assert duplicate.recovery_hint == "personal laptop"
     assert duplicate.user_id == "user-1"
     assert records == [duplicate]
     assert records[0].user_id == "user-1"
@@ -276,3 +354,39 @@ def test_key_records_store_wrapped_blobs_without_plaintext_keys(sync_store: Sync
     assert not hasattr(records[0], "plaintext_key")
     assert "user_id" in columns
     assert all("plaintext" not in column_name.lower() for column_name in columns)
+
+    with pytest.raises(TypeError):
+        sync_store.list_key_records("dataset-1")
+
+    with pytest.raises(SyncStoreError):
+        sync_store.list_key_records("dataset-1", user_id="")
+
+
+def test_key_records_are_scoped_by_user(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+
+    sync_store.store_key_record(_key_record(key_record_id="key-user-1", user_id="user-1"))
+    sync_store.store_key_record(_key_record(key_record_id="key-user-2", user_id="user-2"))
+
+    user_1_records = sync_store.list_key_records("dataset-1", user_id="user-1")
+    user_2_records = sync_store.list_key_records("dataset-1", user_id="user-2")
+
+    assert [record.key_record_id for record in user_1_records] == ["key-user-1"]
+    assert [record.key_record_id for record in user_2_records] == ["key-user-2"]
+
+
+def test_key_record_rejects_missing_dataset(sync_store: SyncV2Store):
+    with pytest.raises(SyncDatasetNotFoundError):
+        sync_store.store_key_record(_key_record(dataset_id="missing-dataset"))
+
+
+def test_key_record_duplicate_drift_raises(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+
+    sync_store.store_key_record(_key_record())
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.store_key_record(_key_record(wrapped_key_blob="wrapped:changed"))
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.store_key_record(_key_record(user_id="user-2"))
