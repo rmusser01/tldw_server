@@ -24,6 +24,25 @@ def _context() -> VNScriptValidationContext:
             "max_choices": 4,
             "max_model_expansion_scope": "scene",
             "supports_structured_output": True,
+            "supported_output_schemas": ["narrative_dialogue", "scene_update"],
+        },
+        available_generation_profiles={
+            "default": {
+                "profile_id": "story_default",
+                "allowed_content_ratings": ["general", "teen"],
+                "max_choices": 4,
+                "max_model_expansion_scope": "scene",
+                "supports_structured_output": True,
+                "supported_output_schemas": ["narrative_dialogue", "scene_update"],
+            },
+            "choice_writer": {
+                "profile_id": "choice_profile",
+                "allowed_content_ratings": ["general"],
+                "max_choices": 3,
+                "max_model_expansion_scope": "turn",
+                "supports_structured_output": True,
+                "supported_output_schemas": ["choice_set"],
+            },
         },
         content_rating="general",
         owner_user_id=42,
@@ -51,7 +70,7 @@ def _program() -> dict:
             ],
             "open": [
                 {"op": "play_bgm", "media_ref": "bgm.archive"},
-                {"op": "generate", "scope": "scene", "max_choices": 2},
+                {"op": "generate", "scope": "scene", "max_choices": 2, "output_schema": "narrative_dialogue"},
                 {"op": "end"},
             ],
         },
@@ -166,6 +185,94 @@ def test_generate_opcode_rejects_raw_provider_routing() -> None:
 
     assert result.valid is False
     assert "generation_raw_routing_not_allowed" in _error_codes(result)
+
+
+def test_generate_opcode_rejects_unknown_or_invalid_profile_key() -> None:
+    program = _program()
+    program["labels"]["open"][1]["profile_key"] = "missing_profile"
+
+    unknown_result = validate_script_program(program, _context())
+
+    program["labels"]["open"][1]["profile_key"] = "Bad Key!"
+    invalid_result = validate_script_program(program, _context())
+
+    assert unknown_result.valid is False
+    assert "generation_profile_key_unknown" in _error_codes(unknown_result)
+    assert invalid_result.valid is False
+    assert "generation_profile_key_invalid" in _error_codes(invalid_result)
+
+
+def test_generate_opcode_rejects_unsupported_output_schema_for_profile() -> None:
+    program = _program()
+    program["labels"]["open"][1].update(
+        {
+            "profile_key": "choice_writer",
+            "output_schema": "scene_update",
+            "scope": "turn",
+        }
+    )
+
+    result = validate_script_program(program, _context())
+
+    assert result.valid is False
+    assert "generation_output_schema_not_supported" in _error_codes(result)
+
+
+def test_generate_opcode_rejects_non_string_output_schema() -> None:
+    program = _program()
+    program["labels"]["open"][1]["output_schema"] = ["choice_set"]
+
+    result = validate_script_program(program, _context())
+
+    assert result.valid is False
+    assert "generation_output_schema_invalid" in _error_codes(result)
+
+
+def test_generate_choice_set_requires_authored_generated_choice_target() -> None:
+    program = _program()
+    program["labels"]["generated_choice"] = [{"op": "narrate", "text": "Choice received."}, {"op": "end"}]
+    program["labels"]["open"][1].update(
+        {
+            "profile_key": "choice_writer",
+            "output_schema": "choice_set",
+            "scope": "turn",
+        }
+    )
+
+    result = validate_script_program(program, _context())
+
+    assert result.valid is False
+    assert "generation_on_generated_choice_missing" in _error_codes(result)
+
+    program["labels"]["open"][1]["on_generated_choice"] = "missing"
+    missing_result = validate_script_program(program, _context())
+
+    assert missing_result.valid is False
+    assert "generation_on_generated_choice_missing" in _error_codes(missing_result)
+
+
+def test_generate_confirmation_and_cancel_shapes_are_validated() -> None:
+    program = _program()
+    program["labels"]["open"][1]["requires_user_confirm"] = "yes"
+    program["labels"]["open"][1]["on_cancel"] = "missing"
+
+    result = validate_script_program(program, _context())
+
+    assert result.valid is False
+    assert {
+        "generation_requires_user_confirm_invalid",
+        "generation_on_cancel_missing",
+    }.issubset(_error_codes(result))
+
+
+def test_literal_generation_remains_valid_without_output_schema() -> None:
+    program = _program()
+    program["labels"]["open"][1] = {"op": "generate", "narrative_text": "A literal line."}
+
+    result = validate_script_program(program, _context())
+
+    assert result.valid is True
+    assert result.errors == []
 
 
 def test_unreachable_label_is_warning() -> None:

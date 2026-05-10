@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -41,6 +42,9 @@ from tldw_Server_API.app.core.VN_Scripts.service import VNScriptService
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
 router = APIRouter(prefix="/vn-scripts", tags=["vn-scripts"])
+_GENERATION_PROFILE_KEY_RE = re.compile(r"^[a-z0-9_.-]{1,64}$")
+_MAX_GENERATION_PROFILE_MAP_SIZE = 16
+_MAX_GENERATION_PROFILE_ID_LENGTH = 80
 
 
 def _current_user_id(current_user: User) -> int:
@@ -82,9 +86,10 @@ async def create_script(
         await _resolve_request_profiles(
             policy_profile_id=request.policy_profile_id,
             generation_profile_id=request.generation_profile_id,
+            generation_profiles=request.generation_profiles,
             profile_store=profile_store,
         )
-        row = service.create_script(**request.model_dump())
+        row = service.create_script(**request.model_dump(exclude={"generation_profile_ids"}))
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
     return VNScriptResponse.model_validate(row)
@@ -123,7 +128,7 @@ async def patch_script(
 ) -> VNScriptResponse:
     """Patch script metadata."""
     try:
-        fields = request.model_dump(exclude_unset=True)
+        fields = request.model_dump(exclude_unset=True, exclude={"generation_profile_ids"})
         await _resolve_patch_profiles(fields, profile_store=profile_store)
         return VNScriptResponse.model_validate(service.update_script(script_id, fields))
     except ValueError as exc:
@@ -159,7 +164,7 @@ async def put_draft(
 ) -> VNScriptDraftResponse:
     """Replace whole draft with optimistic revision control."""
     try:
-        policy_profile, generation_profile = await _resolve_script_profiles(
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
             service.get_script(script_id),
             profile_store=profile_store,
         )
@@ -176,6 +181,7 @@ async def put_draft(
                 audio_refs=audio_refs,
                 policy_profile=policy_profile,
                 generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
             )
         )
     except ValueError as exc:
@@ -192,7 +198,7 @@ async def validate_draft(
 ) -> VNScriptValidationResponse:
     """Validate a draft without publishing."""
     try:
-        policy_profile, generation_profile = await _resolve_script_profiles(
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
             service.get_script(script_id),
             profile_store=profile_store,
         )
@@ -209,6 +215,7 @@ async def validate_draft(
                 audio_refs=audio_refs,
                 policy_profile=policy_profile,
                 generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
             )
         )
     except ValueError as exc:
@@ -250,9 +257,13 @@ async def publish_script(
         audio_refs = None
         policy_profile = None
         generation_profile = None
+        generation_profiles = None
         if existing is None:
             script = service.get_script(script_id)
-            policy_profile, generation_profile = await _resolve_script_profiles(script, profile_store=profile_store)
+            policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
+                script,
+                profile_store=profile_store,
+            )
             draft = service.get_draft(script_id)["draft"]
             audio_refs = await _resolve_accessible_audio_refs(
                 draft,
@@ -268,6 +279,7 @@ async def publish_script(
             audio_refs=audio_refs,
             policy_profile=policy_profile,
             generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
         )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
@@ -371,15 +383,25 @@ async def _resolve_request_profiles(
     *,
     policy_profile_id: str,
     generation_profile_id: str,
+    generation_profiles: Mapping[str, str] | None = None,
     profile_store: VNPolicyProfileStore,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     policy_profile = await profile_store.get_policy_profile(policy_profile_id)
     generation_profile = await profile_store.get_generation_profile(generation_profile_id)
     if policy_profile is None:
         raise ValueError("policy_profile_not_found")
     if generation_profile is None:
         raise ValueError("generation_profile_not_found")
-    return policy_profile, generation_profile
+    _validate_generation_profile_map_shape(generation_profiles)
+    resolved_generation_profiles: dict[str, dict[str, Any]] = {"default": generation_profile}
+    for profile_key, profile_id in (generation_profiles or {}).items():
+        if profile_key == "default":
+            raise ValueError("generation_profile_default_reserved")
+        profile = await profile_store.get_generation_profile(str(profile_id))
+        if profile is None:
+            raise ValueError("generation_profile_not_found")
+        resolved_generation_profiles[str(profile_key)] = profile
+    return policy_profile, generation_profile, resolved_generation_profiles
 
 
 async def _resolve_patch_profiles(
@@ -389,6 +411,7 @@ async def _resolve_patch_profiles(
 ) -> None:
     policy_profile_id = fields.get("policy_profile_id")
     generation_profile_id = fields.get("generation_profile_id")
+    generation_profiles = fields.get("generation_profiles")
     if isinstance(policy_profile_id, str) and await profile_store.get_policy_profile(policy_profile_id) is None:
         raise ValueError("policy_profile_not_found")
     if (
@@ -396,18 +419,44 @@ async def _resolve_patch_profiles(
         and await profile_store.get_generation_profile(generation_profile_id) is None
     ):
         raise ValueError("generation_profile_not_found")
+    if isinstance(generation_profiles, Mapping):
+        _validate_generation_profile_map_shape(generation_profiles)
+        for profile_key, profile_id in generation_profiles.items():
+            if profile_key == "default":
+                raise ValueError("generation_profile_default_reserved")
+            if await profile_store.get_generation_profile(str(profile_id)) is None:
+                raise ValueError("generation_profile_not_found")
 
 
 async def _resolve_script_profiles(
     script: Mapping[str, Any],
     *,
     profile_store: VNPolicyProfileStore,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     return await _resolve_request_profiles(
         policy_profile_id=str(script["policy_profile_id"]),
         generation_profile_id=str(script["generation_profile_id"]),
+        generation_profiles={
+            key: value
+            for key, value in dict(script.get("generation_profiles") or {}).items()
+            if key != "default"
+        },
         profile_store=profile_store,
     )
+
+
+def _validate_generation_profile_map_shape(generation_profiles: Mapping[str, Any] | None) -> None:
+    if not isinstance(generation_profiles, Mapping):
+        return
+    if len(generation_profiles) > _MAX_GENERATION_PROFILE_MAP_SIZE:
+        raise ValueError("generation_profile_map_too_large")
+    for profile_key, profile_id in generation_profiles.items():
+        if profile_key == "default":
+            raise ValueError("generation_profile_default_reserved")
+        if not isinstance(profile_key, str) or not _GENERATION_PROFILE_KEY_RE.fullmatch(profile_key):
+            raise ValueError("generation_profile_key_invalid")
+        if not isinstance(profile_id, str) or not profile_id or len(profile_id) > _MAX_GENERATION_PROFILE_ID_LENGTH:
+            raise ValueError("generation_profile_id_invalid")
 
 
 async def _resolve_accessible_audio_refs(

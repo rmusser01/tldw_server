@@ -216,6 +216,126 @@ def test_create_accepts_admin_created_profile_rows(
     assert response.json()["generation_profile_id"] == "custom_story"
 
 
+def test_script_api_round_trips_authored_generation_profile_map(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    authnz_pool: DatabasePool,
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    async def seed_profiles() -> None:
+        store = VNPolicyProfileStore(authnz_pool)
+        await store.initialize()
+        await store.create_generation_profile(
+            profile_id="choice_profile",
+            display_name="Choice Writer",
+            description=None,
+            definition=STORY_DEFAULT_GENERATION_DEFINITION | {"supported_output_schemas": ["choice_set"]},
+            created_by_user_id=42,
+        )
+        await store.create_generation_profile(
+            profile_id="scene_profile",
+            display_name="Scene Director",
+            description=None,
+            definition=STORY_DEFAULT_GENERATION_DEFINITION | {"supported_output_schemas": ["scene_update"]},
+            created_by_user_id=42,
+        )
+
+    asyncio.run(seed_profiles())
+
+    create_response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "description": "A short route.",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "local_default",
+            "generation_profile_id": "story_default",
+            "generation_profiles": {"choice_writer": "choice_profile"},
+            "content_rating": "general",
+        },
+    )
+    script_id = int(create_response.json()["id"])
+    patch_response = client.patch(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}",
+        json={"generation_profiles": {"choice_writer": "choice_profile", "scene_director": "scene_profile"}},
+    )
+    detail_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}")
+    list_response = client.get("/api/v1/vn/vn-scripts/scripts?limit=20&offset=0")
+
+    assert create_response.status_code == 201
+    assert create_response.json()["generation_profiles"] == {
+        "default": "story_default",
+        "choice_writer": "choice_profile",
+    }
+    assert patch_response.status_code == 200
+    assert patch_response.json()["generation_profiles"] == {
+        "default": "story_default",
+        "choice_writer": "choice_profile",
+        "scene_director": "scene_profile",
+    }
+    assert detail_response.json()["generation_profiles"] == patch_response.json()["generation_profiles"]
+    assert list_response.json()["items"][0]["generation_profiles"] == patch_response.json()["generation_profiles"]
+
+
+def test_script_api_rejects_invalid_generation_profile_map_key(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    authnz_pool: DatabasePool,
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    async def seed_profiles() -> None:
+        store = VNPolicyProfileStore(authnz_pool)
+        await store.initialize()
+        await store.create_generation_profile(
+            profile_id="choice_profile",
+            display_name="Choice Writer",
+            description=None,
+            definition=STORY_DEFAULT_GENERATION_DEFINITION | {"supported_output_schemas": ["choice_set"]},
+            created_by_user_id=42,
+        )
+
+    asyncio.run(seed_profiles())
+
+    response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "local_default",
+            "generation_profile_id": "story_default",
+            "generation_profiles": {"Bad Key!": "choice_profile"},
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["details"]["reason"] == "generation_profile_key_invalid"
+
+
+def test_script_api_rejects_default_generation_profile_map_key(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "local_default",
+            "generation_profile_id": "story_default",
+            "generation_profiles": {"default": "story_default"},
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["details"]["reason"] == "generation_profile_default_reserved"
+
+
 def test_draft_and_publish_use_custom_authnz_profile_versions(
     client: TestClient,
     chacha_dbs: dict[int, CharactersRAGDB],

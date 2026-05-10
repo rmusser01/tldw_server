@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 from tldw_Server_API.app.core.VN_Scripts.models import VNScriptDiagnostic, VNScriptValidationResult
@@ -13,6 +14,8 @@ _AUDIO_OPS = {"play_bgm", "play_sfx", "voice_cue"}
 _LINK_OPS = {"jump", "choice"}
 _GENERATION_SCOPE_ORDER = {"none": 0, "turn": 1, "scene": 2, "session": 3}
 _SCRIPT_SCHEMA_VERSION = "vn_script_program.v1"
+_PROFILE_KEY_RE = re.compile(r"^[a-z0-9_.-]{1,64}$")
+_SUPPORTED_OUTPUT_SCHEMAS = {"narrative_dialogue", "choice_set", "scene_update"}
 _ALLOWED_VARIABLE_TYPES = {"boolean", "integer", "number", "string"}
 _ALLOWED_CONDITION_OPERATORS = {"eq", "ne", "neq", "lt", "lte", "gt", "gte", "in", "not_in"}
 _RAW_GENERATION_ROUTING_KEYS = {
@@ -56,6 +59,7 @@ class VNScriptValidationContext:
     approved_slot_keys: set[str] = field(default_factory=set)
     audio_refs: dict[str, dict[str, Any]] = field(default_factory=dict)
     generation_profile: dict[str, Any] = field(default_factory=dict)
+    available_generation_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     content_rating: str = "general"
     owner_user_id: int | None = None
 
@@ -159,7 +163,7 @@ def _validate_opcode(
     elif op == "increment":
         _validate_increment(opcode, path, variables, errors)
     elif op == "generate":
-        _validate_generation(opcode, path, context, errors)
+        _validate_generation(opcode, path, label_names, context, errors)
 
     condition = opcode.get("if")
     if condition is not None:
@@ -280,6 +284,7 @@ def _validate_audio_ref(
 def _validate_generation(
     opcode: Mapping[str, Any],
     path: str,
+    label_names: set[str],
     context: VNScriptValidationContext,
     errors: list[VNScriptDiagnostic],
 ) -> None:
@@ -293,7 +298,106 @@ def _validate_generation(
                 {"keys": raw_routing_keys},
             )
         )
-    profile = context.generation_profile
+    profile_key = opcode.get("profile_key", "default")
+    if not isinstance(profile_key, str) or not _PROFILE_KEY_RE.fullmatch(profile_key):
+        errors.append(
+            _diag(
+                "generation_profile_key_invalid",
+                "Generation profile_key must match ^[a-z0-9_.-]{1,64}$.",
+                f"{path}.profile_key",
+                {"profile_key": profile_key},
+            )
+        )
+        profile_key = "default"
+    available_profiles = context.available_generation_profiles or {"default": context.generation_profile}
+    profile = available_profiles.get(profile_key)
+    if profile is None:
+        errors.append(
+            _diag(
+                "generation_profile_key_unknown",
+                "Generation profile_key is not declared by script metadata.",
+                f"{path}.profile_key",
+                {"profile_key": profile_key},
+            )
+        )
+        profile = context.generation_profile
+
+    is_literal_generation = isinstance(opcode.get("narrative_text"), str) or isinstance(opcode.get("regeneration_text"), str)
+    output_schema = opcode.get("output_schema")
+    if output_schema is None and not is_literal_generation:
+        output_schema = "narrative_dialogue"
+    if output_schema is not None:
+        if not isinstance(output_schema, str) or output_schema not in _SUPPORTED_OUTPUT_SCHEMAS:
+            errors.append(
+                _diag(
+                    "generation_output_schema_invalid",
+                    "Generation output_schema is not supported.",
+                    f"{path}.output_schema",
+                    {"output_schema": output_schema},
+                )
+            )
+        elif not _profile_supports_output_schema(profile, str(output_schema)):
+            errors.append(
+                _diag(
+                    "generation_output_schema_not_supported",
+                    "Generation profile does not support the requested output_schema.",
+                    f"{path}.output_schema",
+                    {"profile_key": profile_key, "output_schema": output_schema},
+                )
+            )
+    requires_user_confirm = opcode.get("requires_user_confirm")
+    if requires_user_confirm is not None and not isinstance(requires_user_confirm, bool):
+        errors.append(
+            _diag(
+                "generation_requires_user_confirm_invalid",
+                "requires_user_confirm must be a boolean when provided.",
+                f"{path}.requires_user_confirm",
+                {"requires_user_confirm": requires_user_confirm},
+            )
+        )
+    if "on_cancel" in opcode:
+        _validate_target(opcode.get("on_cancel"), f"{path}.on_cancel", "generation_on_cancel_missing", label_names, errors)
+    if output_schema == "choice_set":
+        _validate_target(
+            opcode.get("on_generated_choice"),
+            f"{path}.on_generated_choice",
+            "generation_on_generated_choice_missing",
+            label_names,
+            errors,
+        )
+    elif "on_generated_choice" in opcode:
+        _validate_target(
+            opcode.get("on_generated_choice"),
+            f"{path}.on_generated_choice",
+            "generation_on_generated_choice_missing",
+            label_names,
+            errors,
+        )
+    provider_class = str(profile.get("provider_class") or profile.get("deployment_class") or "")
+    if provider_class in {"hosted", "public"} and not bool(profile.get("moderation_required")):
+        errors.append(
+            _diag(
+                "generation_moderation_required",
+                "Hosted or public generation profiles must require moderation.",
+                f"{path}.profile_key",
+                {"profile_key": profile_key, "provider_class": provider_class},
+            )
+        )
+    batch_cap = profile.get("automatic_generation_batch_cap", profile.get("max_automatic_generation_batch"))
+    if requires_user_confirm is not True and batch_cap is not None:
+        try:
+            batch_cap_int = int(batch_cap)
+        except (TypeError, ValueError):
+            batch_cap_int = 0
+        if batch_cap_int < 1:
+            errors.append(
+                _diag(
+                    "generation_batch_cap_invalid",
+                    "Automatic generation profiles must allow at least one generation per batch.",
+                    f"{path}.profile_key",
+                    {"profile_key": profile_key, "batch_cap": batch_cap},
+                )
+            )
     allowed_ratings = {str(rating) for rating in profile.get("allowed_content_ratings", [])}
     if allowed_ratings and context.content_rating not in allowed_ratings:
         errors.append(
@@ -326,6 +430,15 @@ def _validate_generation(
                 {"max_choices": max_choices, "requested": requested_choices},
             )
         )
+
+
+def _profile_supports_output_schema(profile: Mapping[str, Any], output_schema: str) -> bool:
+    supported = profile.get("supported_output_schemas", profile.get("allowed_output_schemas"))
+    if isinstance(supported, list):
+        return output_schema in {str(schema) for schema in supported}
+    if output_schema in {"choice_set", "scene_update"} and not bool(profile.get("supports_structured_output", False)):
+        return False
+    return True
 
 
 def _validate_condition(
@@ -493,6 +606,11 @@ def _reachable_labels(entry_label: str, labels: Mapping[str, Any]) -> set[str]:
                 continue
             if opcode.get("op") == "jump" and isinstance(opcode.get("target"), str):
                 stack.append(str(opcode["target"]))
+            elif opcode.get("op") == "generate":
+                if isinstance(opcode.get("on_cancel"), str):
+                    stack.append(str(opcode["on_cancel"]))
+                if isinstance(opcode.get("on_generated_choice"), str):
+                    stack.append(str(opcode["on_generated_choice"]))
             elif opcode.get("op") == "choice" and isinstance(opcode.get("choices"), list):
                 for choice in opcode["choices"]:
                     if isinstance(choice, Mapping) and isinstance(choice.get("target"), str):

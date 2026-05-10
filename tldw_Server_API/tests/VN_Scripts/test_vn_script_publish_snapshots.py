@@ -45,6 +45,22 @@ def _program() -> dict:
     }
 
 
+def _generation_program_with_profile_key(profile_key: str = "choice_writer") -> dict:
+    program = _program()
+    program["labels"]["start"].insert(
+        1,
+        {
+            "op": "generate",
+            "profile_key": profile_key,
+            "output_schema": "choice_set",
+            "scope": "turn",
+            "on_generated_choice": "after_choice",
+        },
+    )
+    program["labels"]["after_choice"] = [{"op": "narrate", "text": "The choice is made."}, {"op": "end"}]
+    return program
+
+
 def _audio_program() -> dict:
     program = _program()
     program["media_refs"] = {
@@ -221,6 +237,116 @@ def test_publish_snapshots_resolved_custom_profile_versions(chacha_db: Character
     assert generation_snapshot["profile_id"] == "custom_story"
     assert generation_snapshot["profile_version"] == 2
     assert generation_snapshot["definition"]["max_choices"] == 2
+
+
+def test_publish_stores_default_and_additional_generation_profile_snapshots(chacha_db: CharactersRAGDB) -> None:
+    profile_repo = VNPolicyRepository.initialized(chacha_db)
+    choice_definition = dict(STORY_DEFAULT_GENERATION_DEFINITION)
+    choice_definition["supported_output_schemas"] = ["choice_set"]
+    choice_profile = profile_repo.create_generation_profile(
+        profile_id="choice_profile",
+        display_name="Choice Writer",
+        definition=choice_definition,
+    )
+    service = VNScriptService(
+        chacha_db,
+        owner_user_id=42,
+        manifest_resolver=lambda asset_pack_id: _manifest(),
+    )
+    script = service.create_script(
+        title="Archive Door",
+        primary_asset_pack_id=7,
+        policy_profile_id="local_default",
+        generation_profile_id="story_default",
+        generation_profiles={"choice_writer": "choice_profile"},
+        content_rating="general",
+    )
+    service.replace_draft(
+        script["id"],
+        if_revision=0,
+        draft=_generation_program_with_profile_key(),
+        generation_profiles={"choice_writer": choice_profile},
+    )
+
+    published = service.publish_script(
+        script["id"],
+        draft_revision=1,
+        label="profile-map",
+        idempotency_key="publish-profile-map",
+        acknowledgements=["character_safety_missing"],
+        generation_profiles={"choice_writer": choice_profile},
+    )
+    version = service.get_version(script["id"], published["version_id"])
+
+    assert script["generation_profiles"] == {
+        "default": "story_default",
+        "choice_writer": "choice_profile",
+    }
+    assert set(published["generation_profile_snapshots"]) == {"default", "choice_writer"}
+    assert version["generation_profile_snapshots"] == published["generation_profile_snapshots"]
+    assert version["generation_profile_snapshot_id"] == published["generation_profile_snapshots"]["default"]
+
+    choice_snapshot = service.profile_snapshots.get_profile_snapshot(
+        published["generation_profile_snapshots"]["choice_writer"],
+        owner_user_id=42,
+    )
+    assert choice_snapshot["profile_id"] == "choice_profile"
+    assert choice_snapshot["resource_id"] == published["version_id"]
+
+
+def test_publish_idempotency_replays_same_key_after_profile_map_changes(chacha_db: CharactersRAGDB) -> None:
+    profile_repo = VNPolicyRepository.initialized(chacha_db)
+    choice_definition = dict(STORY_DEFAULT_GENERATION_DEFINITION)
+    choice_definition["supported_output_schemas"] = ["choice_set"]
+    choice_profile = profile_repo.create_generation_profile(
+        profile_id="choice_profile",
+        display_name="Choice Writer",
+        definition=choice_definition,
+    )
+    alt_choice_profile = profile_repo.create_generation_profile(
+        profile_id="choice_profile_alt",
+        display_name="Choice Writer Alt",
+        definition=choice_definition,
+    )
+    service = VNScriptService(
+        chacha_db,
+        owner_user_id=42,
+        manifest_resolver=lambda asset_pack_id: _manifest(),
+    )
+    script = service.create_script(
+        title="Archive Door",
+        primary_asset_pack_id=7,
+        policy_profile_id="local_default",
+        generation_profile_id="story_default",
+        generation_profiles={"choice_writer": "choice_profile"},
+        content_rating="general",
+    )
+    service.replace_draft(
+        script["id"],
+        if_revision=0,
+        draft=_generation_program_with_profile_key(),
+        generation_profiles={"choice_writer": choice_profile},
+    )
+    first = service.publish_script(
+        script["id"],
+        draft_revision=1,
+        label="profile-map",
+        idempotency_key="publish-profile-map",
+        acknowledgements=["character_safety_missing"],
+        generation_profiles={"choice_writer": choice_profile},
+    )
+    service.update_script(script["id"], {"generation_profiles": {"choice_writer": "choice_profile_alt"}})
+
+    replayed = service.publish_script(
+        script["id"],
+        draft_revision=1,
+        label="profile-map",
+        idempotency_key="publish-profile-map",
+        acknowledgements=["character_safety_missing"],
+        generation_profiles={"choice_writer": alt_choice_profile},
+    )
+
+    assert replayed == first
 
 
 def test_service_validation_resolves_declared_audio_refs(chacha_db: CharactersRAGDB) -> None:

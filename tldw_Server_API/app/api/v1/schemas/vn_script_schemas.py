@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
@@ -20,9 +20,17 @@ class VNScriptCreate(BaseModel):
     primary_asset_pack_id: int = Field(..., ge=1)
     policy_profile_id: str = Field(default="local_default", min_length=1, max_length=80)
     generation_profile_id: str = Field(default="story_default", min_length=1, max_length=80)
+    generation_profiles: dict[str, str] = Field(default_factory=dict)
+    generation_profile_ids: dict[str, str] | None = None
     content_rating: ContentRating = "general"
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _merge_generation_profile_ids(self) -> "VNScriptCreate":
+        if self.generation_profile_ids is not None:
+            self.generation_profiles = dict(self.generation_profile_ids)
+        return self
 
 
 class VNScriptPatch(BaseModel):
@@ -34,9 +42,17 @@ class VNScriptPatch(BaseModel):
     primary_asset_pack_id: int | None = Field(default=None, ge=1)
     policy_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
     generation_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
+    generation_profiles: dict[str, str] | None = None
+    generation_profile_ids: dict[str, str] | None = None
     content_rating: ContentRating | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _merge_generation_profile_ids(self) -> "VNScriptPatch":
+        if self.generation_profile_ids is not None:
+            self.generation_profiles = dict(self.generation_profile_ids)
+        return self
 
 
 class VNScriptResponse(BaseModel):
@@ -49,6 +65,7 @@ class VNScriptResponse(BaseModel):
     primary_asset_pack_id: int
     policy_profile_id: str
     generation_profile_id: str
+    generation_profiles: dict[str, str] = Field(default_factory=dict)
     content_rating: str
 
 
@@ -128,6 +145,7 @@ class VNScriptPublishResponse(BaseModel):
     manifest_snapshot_id: int
     policy_snapshot_id: int
     generation_profile_snapshot_id: int
+    generation_profile_snapshots: dict[str, int] = Field(default_factory=dict)
     validation: dict[str, Any]
     created_at: str
 
@@ -145,6 +163,7 @@ class VNScriptVersionResponse(BaseModel):
     manifest_snapshot_id: int
     policy_snapshot_id: int
     generation_profile_snapshot_id: int
+    generation_profile_snapshots: dict[str, int] = Field(default_factory=dict)
     script_defaults: dict[str, Any]
     validation: dict[str, Any]
     created_at: str
