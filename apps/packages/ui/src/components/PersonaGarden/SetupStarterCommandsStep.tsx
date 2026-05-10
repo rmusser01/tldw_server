@@ -97,16 +97,19 @@ export const SetupStarterCommandsStep: React.FC<SetupStarterCommandsStepProps> =
               disabled={saving}
               onClick={() => {
                 const wasChecked = checkedKeys.has(template.key)
+                const shouldRetrySelected = Boolean(retryHint) && wasChecked
                 setCheckedKeys((prev) => {
                   const next = new Set(prev)
                   if (next.has(template.key)) {
-                    next.delete(template.key)
+                    if (!shouldRetrySelected) {
+                      next.delete(template.key)
+                    }
                   } else {
                     next.add(template.key)
                   }
                   return next
                 })
-                if (!wasChecked) {
+                if (!wasChecked || shouldRetrySelected) {
                   onCreateFromTemplate(template.key)
                 }
               }}

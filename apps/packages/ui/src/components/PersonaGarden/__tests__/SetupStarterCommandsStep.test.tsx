@@ -78,6 +78,27 @@ describe("SetupStarterCommandsStep", () => {
     expect(onCreateFromTemplate).not.toHaveBeenCalled()
   })
 
+  it("retries an already-selected template when starter-command creation failed", () => {
+    const onCreateFromTemplate = vi.fn()
+
+    render(
+      <SetupStarterCommandsStep
+        saving={false}
+        error="Failed to create starter command"
+        defaultCommands={[{ template_key: "notes-search" }]}
+        onCreateFromTemplate={onCreateFromTemplate}
+        onCreateMcpStarter={vi.fn()}
+        onSkip={vi.fn()}
+      />
+    )
+
+    const searchNotes = screen.getByRole("button", { name: "Search Notes" })
+    fireEvent.click(searchNotes)
+
+    expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
+    expect(searchNotes).toHaveAttribute("aria-pressed", "true")
+  })
+
   it("creates an MCP-backed starter command from an explicit tool and phrase", () => {
     const onCreateMcpStarter = vi.fn()
 
