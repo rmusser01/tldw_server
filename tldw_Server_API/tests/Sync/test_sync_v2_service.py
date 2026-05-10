@@ -553,6 +553,65 @@ def test_conflict_push_retry_reuses_existing_unresolved_conflict(
     assert manifest.datasets[0].unresolved_conflicts == 1
 
 
+def test_conflict_push_rejects_idempotency_drift_without_aborting_batch(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    first = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+    drift = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="env-conflict",
+                payload_hash="sha256:drifted-conflict",
+                payload_ciphertext="ciphertext:drifted-conflict",
+            ),
+            _envelope(
+                client_envelope_id="env-after-drift",
+                entity_id="note-after-drift",
+                stable_key="note:after-drift",
+                payload_hash="sha256:after-drift",
+            ),
+        ],
+    )
+
+    assert [conflict.client_envelope_id for conflict in first.conflicts] == ["env-conflict"]
+    assert drift.conflicts == []
+    assert [item.client_envelope_id for item in drift.rejected] == ["env-conflict"]
+    assert drift.rejected[0].error_code == "idempotency_conflict"
+    assert [item.client_envelope_id for item in drift.accepted] == ["env-after-drift"]
+    assert len(sync_store.list_conflicts("dataset-1", status="unresolved")) == 1
+
+
 def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
     sync_service.push(

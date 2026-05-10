@@ -360,7 +360,16 @@ class SyncV2Service:
                 )
                 continue
             if isinstance(outcome, AdapterConflict):
-                conflicts.append(self._store_conflict(dataset, envelope, outcome))
+                try:
+                    conflicts.append(self._store_conflict(dataset, envelope, outcome))
+                except SyncIdempotencyConflictError:
+                    rejected.append(
+                        SyncPushRejected(
+                            client_envelope_id=envelope.client_envelope_id,
+                            error_code="idempotency_conflict",
+                            message="Sync envelope ID was reused with different content",
+                        )
+                    )
                 continue
 
             try:

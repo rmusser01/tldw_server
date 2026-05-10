@@ -4,7 +4,7 @@ title: Add Sync v2 service layer
 status: Done
 assignee: []
 created_date: '2026-05-10 03:59'
-updated_date: '2026-05-10 04:47'
+updated_date: '2026-05-10 04:53'
 labels:
   - sync
   - service
@@ -103,6 +103,16 @@ Code quality re-review verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 28 passed, 5 warnings.
 - git diff --check: passed.
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/store.py tldw_Server_API/app/core/DB_Management/Sync_DB.py -f json -o /tmp/bandit_sync_v2_payload_conflict_invariants.json: 0 findings.
+
+Final code quality review follow-up: patch conflict-path idempotency errors so SyncIdempotencyConflictError returns a per-envelope idempotency_conflict rejection instead of aborting the push. Plan: add regression first, verify failure, patch the conflict branch guard, rerun required Sync tests, diff check, Bandit, update task, and commit.
+
+Final code quality review follow-up complete. Wrapped the AdapterConflict persistence path with SyncIdempotencyConflictError handling so conflict-envelope drift returns a per-envelope idempotency_conflict rejection instead of aborting the push. Added regression coverage proving a drifted conflict retry rejects that envelope, continues processing later envelopes, and does not create a duplicate unresolved conflict.
+
+Final review verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 33 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 28 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py -f json -o /tmp/bandit_sync_v2_conflict_idempotency.json: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -119,6 +129,8 @@ Final spec re-review fix: SyncAdapterRegistry now rejects unknown adapter domain
 Code quality follow-up: closed ownership takeover vectors for datasets/devices, enforced authenticated request device identity in push, added per-envelope domain/payload validation, kept normal pull results to accepted envelopes, propagated cursor persistence errors, and replaced repeatable default IDs with UUID-style generation.
 
 Code quality re-review: closed clear-payload size bypasses with compact JSON byte accounting, made conflict retries idempotent at the conflict layer, and converted invalid cursor/page_size inputs into SyncStoreError validation failures.
+
+Final code quality review: conflict-path idempotency drift now returns a per-envelope idempotency_conflict rejection and allows the rest of the push batch to continue.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
