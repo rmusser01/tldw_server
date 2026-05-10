@@ -47,17 +47,17 @@ const mcpHubBasics: TutorialDefinition = {
       disableBeacon: true
     },
     {
-      target: '[data-testid="mcp-hub-tab-profiles"]',
+      target: '[data-testid="mcp-hub-workflow-access"]',
       titleKey: "tutorials:mcpHub.basics.profilesTitle",
-      titleFallback: "Permission Profiles",
+      titleFallback: "Access Workflow",
       contentKey: "tutorials:mcpHub.basics.profilesContent",
       contentFallback:
-        "Create permission profiles to control which tools each user or persona can access.",
+        "Use Access to create profiles and assign which tools each user or persona can reach.",
       placement: "bottom",
       disableBeacon: true
     },
     {
-      target: '[data-testid="mcp-hub-tab-audit"]',
+      target: '[data-testid="mcp-hub-workflow-audit"]',
       titleKey: "tutorials:mcpHub.basics.auditTitle",
       titleFallback: "Governance Audit",
       contentKey: "tutorials:mcpHub.basics.auditContent",
