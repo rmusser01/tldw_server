@@ -4,7 +4,7 @@ title: Implement Persona Garden reusable visual-pack affordances
 status: Done
 assignee: []
 created_date: '2026-05-10 03:06'
-updated_date: '2026-05-10 03:24'
+updated_date: '2026-05-10 04:06'
 labels:
   - persona
   - webui
@@ -37,12 +37,16 @@ Implement GitHub issue #1493 as the next Phase 3 Persona/Buddy visual-pack reuse
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented a Persona Garden Visual Pack reuse decision panel backed by existing editor controls. Added focused panel and editor integration tests for create-draft focus routing, personal-library routing, import archive routing, duplicate target routing, disabled duplicate/import empty states, and no marketplace/VN/CYOA wording. Verification: bun run test src/components/PersonaGarden/__tests__/VisualPackReusePanel.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx passed with 25 tests. Bandit: not applicable because this slice touches TypeScript and Markdown only.
+
+Review-fix pass for PR #1494: Qodo reported one actionable requirement gap in VisualPackReusePanel empty library copy. Reopening task for the review fix before editing files.
+
+Review fix applied for PR #1494: adjusted the empty personal-library copy to avoid the contradictory 'Use one...' follow-up when there are no saved packs. Added regression assertions in VisualPackReusePanel and VisualPackEditor tests. Verification: bun run test src/components/PersonaGarden/__tests__/VisualPackReusePanel.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx passed with 25 tests; git diff --check passed. Bandit remains not applicable for TypeScript/Markdown-only changes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a reusable Persona Garden decision surface for Buddy/persona visual packs. The surface makes create draft, personal library, import archive, and duplicate-to-persona flows discoverable while delegating to existing controls and preserving draft/review-before-activation semantics. Updated the Persona Live Visual Packs PRD snapshot and added focused Vitest coverage.
+Added the Persona Garden visual-pack reuse surface and addressed PR #1494 review feedback by making the empty library state give valid next-step guidance instead of implying an item can be used when none exist. Focused Vitest coverage passes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

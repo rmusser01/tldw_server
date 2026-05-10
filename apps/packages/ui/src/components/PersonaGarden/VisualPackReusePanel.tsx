@@ -15,10 +15,20 @@ export type VisualPackReusePanelProps = {
   onOpenDuplicate: () => void
 }
 
-const formatLibraryCount = (count: number): string => {
-  if (count <= 0) return "No saved visual packs yet"
+const formatLibraryStatus = (count: number): string => {
+  if (count <= 0) {
+    return [
+      "No saved visual packs yet.",
+      "Save a pack here first, or create/import a draft before adding it to the library."
+    ].join(" ")
+  }
   if (count === 1) return "1 saved visual pack"
   return `${count} saved visual packs`
+}
+
+const getLibraryDescription = (count: number): string => {
+  if (count <= 0) return formatLibraryStatus(count)
+  return `${formatLibraryStatus(count)}. Use one to create a reviewed draft for the target persona.`
 }
 
 const getDuplicateStatus = ({
@@ -98,8 +108,7 @@ export const VisualPackReusePanel: React.FC<VisualPackReusePanelProps> = ({
             <Tag>reference</Tag>
           </div>
           <div className="mt-1 min-h-[2.5rem] text-xs leading-5 text-text-muted">
-            {formatLibraryCount(libraryItemCount)}. Use one to create a reviewed
-            draft for the target persona.
+            {getLibraryDescription(libraryItemCount)}
           </div>
           <Button
             className="mt-2 w-full justify-center"

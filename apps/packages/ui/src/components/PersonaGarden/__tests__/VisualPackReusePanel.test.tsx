@@ -73,6 +73,12 @@ describe("VisualPackReusePanel", () => {
     expect(screen.getByTestId("persona-visual-reuse-panel")).toHaveTextContent(
       "No saved visual packs yet"
     )
+    expect(screen.getByTestId("persona-visual-reuse-panel")).toHaveTextContent(
+      "Save a pack here first"
+    )
+    expect(screen.getByTestId("persona-visual-reuse-panel")).not.toHaveTextContent(
+      "Use one to create"
+    )
     fireEvent.click(screen.getByRole("button", { name: /use personal library/i }))
     expect(onOpenLibrary).toHaveBeenCalledTimes(1)
 

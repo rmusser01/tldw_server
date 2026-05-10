@@ -520,6 +520,8 @@ describe("VisualPackEditor", () => {
 
     const reusePanel = await screen.findByTestId("persona-visual-reuse-panel")
     expect(reusePanel).toHaveTextContent("No saved visual packs yet")
+    expect(reusePanel).toHaveTextContent("Save a pack here first")
+    expect(reusePanel).not.toHaveTextContent("Use one to create")
     expect(reusePanel).toHaveTextContent("Select a pack before duplicating")
     expect(
       within(reusePanel).getByRole("button", { name: /duplicate to persona/i })
