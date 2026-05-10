@@ -21,6 +21,25 @@ vi.mock('react-i18next', () => ({
   })
 }))
 
+vi.mock('@/design-system', async (importActual) => {
+  const actual = await importActual<typeof import('@/design-system')>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label:
+            key === 'unavailable' ? 'Unavailable via registry' : state.label
+        }
+      }
+    )
+  }
+})
+
 describe('MediaLibraryStatsPanel', () => {
   it('renders visible totals, type distribution, words, and storage usage', () => {
     render(
@@ -153,5 +172,27 @@ describe('MediaLibraryStatsPanel', () => {
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByTestId('media-library-stats-visible')).not.toBeInTheDocument()
+  })
+
+  it('renders unavailable storage state from the design-system registry', () => {
+    render(
+      <MediaLibraryStatsPanel
+        results={[]}
+        totalCount={0}
+        storageUsage={{
+          loading: false,
+          error: null,
+          totalMb: null,
+          quotaMb: null,
+          usagePercentage: null,
+          warning: null
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId('media-library-stats-toggle'))
+    expect(screen.getByTestId('media-library-stats-storage-empty')).toHaveTextContent(
+      'Unavailable via registry'
+    )
   })
 })
