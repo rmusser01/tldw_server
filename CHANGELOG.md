@@ -12,6 +12,10 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- Expanded ACP release-signoff evidence for permission denial, reconnect, and
+  recovery paths with deterministic frontend hook coverage and a readiness
+  addendum that separates automated evidence from live downstream-agent caveats.
+
 ### Fixed
 
 ### Removed
