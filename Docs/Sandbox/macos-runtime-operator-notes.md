@@ -462,6 +462,20 @@ helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
 same-session VM reuse, verifies recovery diagnostics plus dry-run
 reconciliation repair planning, and stops the helper on exit.
 
+`restart-drill` is a narrower local helper lifecycle check. Use it after
+starting the helper through `vz-helperctl.py start` when you need to prove that
+the managed pid-file/socket workflow can stop the helper, start a replacement
+on the same paths, and reach healthy status again. It refuses absent or
+unmanaged helpers, preserves existing helper logs under the configured log
+directory, and does not run guest commands, mutate reconciliation state, manage
+launchd, or validate host reboot behavior.
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py start
+tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
+tools/macos-vz-helper/scripts/vz-helperctl.py stop
+```
+
 Manual failure drills are opt-in and remain disabled for default smoke and
 scheduled host-gated runs. To include them, pass:
 

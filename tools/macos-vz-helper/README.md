@@ -40,6 +40,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py check
 tools/macos-vz-helper/scripts/vz-helperctl.py build
 tools/macos-vz-helper/scripts/vz-helperctl.py start
 tools/macos-vz-helper/scripts/vz-helperctl.py status
+tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
 tools/macos-vz-helper/scripts/vz-helperctl.py stop
 tools/macos-vz-helper/scripts/vz-helperctl.py plist
 ```
@@ -51,6 +52,12 @@ The command uses stable user-owned defaults under
 `plist` prints LaunchAgent scaffolding by default and does not create runtime
 directories unless `--create-dirs` is provided. It does not call `launchctl`,
 install services, or auto-upgrade helpers.
+
+`restart-drill` is an operator-managed lifecycle drill for helpers already
+started through `vz-helperctl.py start`. It verifies the current managed helper
+status, stops it through the pid-file/socket lease, starts a replacement on the
+same managed paths, and verifies status again. It does not manage launchd,
+reboot the host, or take ownership of helpers started outside this wrapper.
 
 For real host E2E smoke, prefer the managed wrapper:
 

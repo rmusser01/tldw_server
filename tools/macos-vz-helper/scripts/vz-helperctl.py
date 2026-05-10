@@ -1156,6 +1156,103 @@ def status_helper(
     return CheckResult(ok=True, reason="helper_not_running")
 
 
+def _prefixed_results(prefix: str, results: Iterable[tuple[str, CheckResult]]) -> list[tuple[str, CheckResult]]:
+    return [(f"{prefix}_{name}", result) for name, result in results]
+
+
+def _result_named(results: Iterable[tuple[str, CheckResult]], name: str) -> CheckResult | None:
+    for result_name, result in results:
+        if result_name == name:
+            return result
+    return None
+
+
+def _managed_helper_running_result(results: list[tuple[str, CheckResult]]) -> CheckResult:
+    for _, result in results:
+        if not result.ok:
+            return result
+
+    process_result = _result_named(results, "process")
+    if process_result is None:
+        return CheckResult(ok=False, reason="helper_status_missing_process")
+    if process_result.reason != "helper_pid_running":
+        return CheckResult(
+            ok=False,
+            reason=process_result.reason or "helper_not_running",
+            message=process_result.message,
+        )
+
+    ping_result = _result_named(results, "ping")
+    if ping_result is None:
+        return CheckResult(ok=False, reason="helper_status_missing_ping")
+    if not ping_result.ok:
+        return ping_result
+
+    return CheckResult(ok=True)
+
+
+def restart_helper_drill(
+    helper_path: Path,
+    socket_path: Path,
+    pid_file: Path,
+    log_dir: Path,
+    *,
+    plist_path: Path | None = None,
+    entitlements_path: Path | None = None,
+    dry_run: bool = False,
+    status_collector: Callable[..., list[tuple[str, CheckResult]]] = collect_status_results,
+    stopper: Callable[..., CheckResult] | None = None,
+    starter: Callable[..., CheckResult] = start_helper,
+) -> list[tuple[str, CheckResult]]:
+    """Run an operator-managed stop/start/status drill for a helperctl-owned helper."""
+    stopper_fn = stopper or stop_helper
+    results: list[tuple[str, CheckResult]] = []
+    before_status = status_collector(
+        helper_path,
+        socket_path,
+        pid_file,
+        log_dir,
+        plist_path=plist_path,
+        entitlements_path=entitlements_path,
+    )
+    results.extend(_prefixed_results("before", before_status))
+
+    before_gate = _managed_helper_running_result(before_status)
+    if not before_gate.ok:
+        results.append(("restart_drill", before_gate))
+        return results
+
+    if dry_run:
+        results.append(("stop", CheckResult(ok=True, reason="dry_run")))
+        results.append(("start", CheckResult(ok=True, reason="dry_run")))
+        results.append(("restart_drill", CheckResult(ok=True, reason="dry_run")))
+        return results
+
+    stop_result = stopper_fn(helper_path, pid_file, socket_path=socket_path)
+    results.append(("stop", stop_result))
+    if not stop_result.ok:
+        results.append(("restart_drill", stop_result))
+        return results
+
+    start_result = starter(helper_path, socket_path, pid_file, log_dir, dry_run=False)
+    results.append(("start", start_result))
+    if not start_result.ok:
+        results.append(("restart_drill", start_result))
+        return results
+
+    after_status = status_collector(
+        helper_path,
+        socket_path,
+        pid_file,
+        log_dir,
+        plist_path=plist_path,
+        entitlements_path=entitlements_path,
+    )
+    results.extend(_prefixed_results("after", after_status))
+    results.append(("restart_drill", _managed_helper_running_result(after_status)))
+    return results
+
+
 def stop_helper(
     helper_path: Path,
     pid_file: Path,
@@ -1346,6 +1443,21 @@ def _status_command(args: argparse.Namespace) -> int:
     return 0 if all(result.ok for _, result in results) else 1
 
 
+def _restart_drill_command(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    results = restart_helper_drill(
+        Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        Path(args.socket_path) if args.socket_path else paths.socket_path,
+        Path(args.pid_file) if args.pid_file else paths.pid_file,
+        Path(args.log_dir) if args.log_dir else paths.log_dir,
+        plist_path=Path(args.plist_output) if args.plist_output else paths.plist_path,
+        entitlements_path=Path(args.entitlements) if args.entitlements else None,
+        dry_run=args.dry_run,
+    )
+    _print_results(results, as_json=args.json)
+    return 0 if all(result.ok for _, result in results) else 1
+
+
 def _start_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = start_helper(
@@ -1434,6 +1546,20 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--entitlements")
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=_status_command)
+
+    restart_drill = subparsers.add_parser(
+        "restart-drill",
+        help="stop, start, and status-check a helperctl-managed helper",
+    )
+    restart_drill.add_argument("--helper", "--helper-path", dest="helper_path")
+    restart_drill.add_argument("--socket", "--socket-path", dest="socket_path")
+    restart_drill.add_argument("--pid-file")
+    restart_drill.add_argument("--log-dir")
+    restart_drill.add_argument("--plist-output")
+    restart_drill.add_argument("--entitlements")
+    restart_drill.add_argument("--dry-run", action="store_true")
+    restart_drill.add_argument("--json", action="store_true")
+    restart_drill.set_defaults(func=_restart_drill_command)
 
     start = subparsers.add_parser("start", help="start the helper")
     start.add_argument("--helper", "--helper-path", dest="helper_path")

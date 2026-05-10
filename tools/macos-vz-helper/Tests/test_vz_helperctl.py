@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import plistlib
 import socket
@@ -8,6 +9,7 @@ import tempfile
 import time
 from pathlib import Path
 from subprocess import CompletedProcess
+from typing import Any
 from unittest import TestCase
 
 import pytest
@@ -2038,6 +2040,161 @@ def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
     CASE.assertEqual(killed, [1234])
     CASE.assertEqual(removed, [(socket_path, identity)])
+
+
+def test_restart_drill_stops_starts_and_reports_after_status(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def status_collector(*args: Any, **kwargs: Any) -> list[tuple[str, Any]]:
+        calls.append(("status", args))
+        return [
+            ("process", helperctl.CheckResult(ok=True, reason="helper_pid_running")),
+            ("ping", helperctl.CheckResult(ok=True)),
+        ]
+
+    def stopper(*args: Any, **kwargs: Any) -> Any:
+        calls.append(("stop", args))
+        return helperctl.CheckResult(ok=True)
+
+    def starter(*args: Any, **kwargs: Any) -> Any:
+        calls.append(("start", args))
+        return helperctl.CheckResult(ok=True)
+
+    results = helperctl.restart_helper_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        status_collector=status_collector,
+        stopper=stopper,
+        starter=starter,
+    )
+
+    CASE.assertEqual([call[0] for call in calls], ["status", "stop", "start", "status"])
+    CASE.assertIn(("stop", helperctl.CheckResult(ok=True)), results)
+    CASE.assertIn(("start", helperctl.CheckResult(ok=True)), results)
+    CASE.assertIn(("restart_drill", helperctl.CheckResult(ok=True)), results)
+
+
+def test_restart_drill_fails_without_running_managed_helper(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+
+    def status_collector(*args: Any, **kwargs: Any) -> list[tuple[str, Any]]:
+        return [
+            ("process", helperctl.CheckResult(ok=True, reason="helper_not_running")),
+            ("ping", helperctl.CheckResult(ok=True, reason="helper_not_running")),
+        ]
+
+    results = helperctl.restart_helper_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        status_collector=status_collector,
+        stopper=lambda *args, **kwargs: pytest.fail("restart drill should not stop absent helper"),
+        starter=lambda *args, **kwargs: pytest.fail("restart drill should not start absent helper"),
+    )
+
+    CASE.assertEqual(results[-1], ("restart_drill", helperctl.CheckResult(ok=False, reason="helper_not_running")))
+
+
+def test_restart_drill_reports_start_failure_without_post_status(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    status_calls: list[tuple[Any, ...]] = []
+
+    def status_collector(*args: Any, **kwargs: Any) -> list[tuple[str, Any]]:
+        status_calls.append(args)
+        return [
+            ("process", helperctl.CheckResult(ok=True, reason="helper_pid_running")),
+            ("ping", helperctl.CheckResult(ok=True)),
+        ]
+
+    results = helperctl.restart_helper_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        status_collector=status_collector,
+        stopper=lambda *args, **kwargs: helperctl.CheckResult(ok=True),
+        starter=lambda *args, **kwargs: helperctl.CheckResult(ok=False, reason="helper_ping_failed"),
+    )
+
+    CASE.assertEqual(len(status_calls), 1)
+    CASE.assertIn(("start", helperctl.CheckResult(ok=False, reason="helper_ping_failed")), results)
+    CASE.assertEqual(results[-1], ("restart_drill", helperctl.CheckResult(ok=False, reason="helper_ping_failed")))
+
+
+def test_restart_drill_cli_passes_paths_and_prints_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    entitlements = tmp_path / "helper.entitlements"
+    captured_paths: dict[str, Any] = {}
+
+    def fake_restart_drill(
+        helper_path: Path,
+        received_socket_path: Path,
+        received_pid_file: Path,
+        received_log_dir: Path,
+        **kwargs: Any,
+    ) -> list[tuple[str, Any]]:
+        captured_paths.update(
+            {
+                "helper": helper_path,
+                "socket": received_socket_path,
+                "pid_file": received_pid_file,
+                "log_dir": received_log_dir,
+                "entitlements": kwargs["entitlements_path"],
+            }
+        )
+        return [("restart_drill", helperctl.CheckResult(ok=True))]
+
+    monkeypatch.setattr(helperctl, "restart_helper_drill", fake_restart_drill)
+
+    code = helperctl.main(
+        [
+            "restart-drill",
+            "--helper",
+            str(helper),
+            "--socket",
+            str(socket_path),
+            "--pid-file",
+            str(pid_file),
+            "--log-dir",
+            str(log_dir),
+            "--entitlements",
+            str(entitlements),
+            "--json",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(output[0]["name"], "restart_drill")
+    CASE.assertEqual(captured_paths["helper"], helper)
+    CASE.assertEqual(captured_paths["socket"], socket_path)
+    CASE.assertEqual(captured_paths["pid_file"], pid_file)
+    CASE.assertEqual(captured_paths["log_dir"], log_dir)
+    CASE.assertEqual(captured_paths["entitlements"], entitlements)
 
 
 def test_smoke_dry_run_delegates_to_host_smoke_script(tmp_path, capsys):
