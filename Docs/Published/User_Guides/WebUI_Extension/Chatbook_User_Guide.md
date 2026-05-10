@@ -5,7 +5,7 @@
 1. [Introduction](#introduction)
 2. [Getting Started](#getting-started)
 3. [Exporting Content](#exporting-content)
-4. [Importing Chatbooks](#importing-chatbooks)
+4. [Importing Content](#importing-content)
 5. [Managing Jobs](#managing-jobs)
 6. [Best Practices](#best-practices)
 7. [Troubleshooting](#troubleshooting)
@@ -15,7 +15,7 @@
 
 ### What is a Chatbook?
 
-A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work.
+A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files into tldw conversations.
 
 ### Why Use Chatbooks?
 
@@ -37,6 +37,8 @@ Chatbooks can contain:
 - 📄 **Documents**: Generated summaries and reports
 - 🎨 **Media**: Images, audio, and video files (optional)
 - 🔢 **Embeddings**: Vector representations for search (optional)
+
+OpenWebUI JSON imports are handled as conversation imports: each valid OpenWebUI chat becomes a tldw conversation with message branches, timestamps, models, file references, and source metadata preserved where available.
 
 ## Getting Started
 
@@ -151,14 +153,30 @@ For more control over what to export:
 }
 ```
 
-## Importing Chatbooks
+## Importing Content
 
-### Basic Import
+### Basic Chatbook Import
 
 1. Click "Import Chatbook"
-2. Select your `.chatbook` file
-3. Choose conflict resolution strategy
-4. Click "Import"
+2. Select "Chatbook archive" as the source
+3. Select your `.chatbook` file
+4. Choose conflict resolution strategy
+5. Click "Import"
+
+### OpenWebUI Chat Import
+
+The same import tab can also import normal OpenWebUI "Export Chats" JSON files:
+
+1. Click "Import Chatbook"
+2. Select "OpenWebUI JSON" as the source
+3. Select the `.json` file produced by OpenWebUI's chat export
+4. Preview the file and review the chat, message, branch, duplicate, attachment-reference, malformed-chat, and warning counts
+5. Choose `skip` to avoid reimporting existing chats, or `rename` to intentionally create a second copy
+6. Click "Import"
+
+OpenWebUI import creates one tldw conversation for each valid OpenWebUI chat. It preserves all valid message branches as parent-linked message trees, not only the currently selected branch. Duplicate detection uses the OpenWebUI source reference stored on imported conversations, so repeated imports default to skipping previously imported chats.
+
+OpenWebUI v1 import supports standard exported chat JSON files only. It does not import directly from `webui.db`, OpenWebUI admin exports, or a live OpenWebUI server. File, image, and artifact references found in the export are preserved as message metadata only; the referenced attachment binaries are not hydrated in v1.
 
 ### Conflict Resolution Strategies
 
@@ -173,6 +191,7 @@ When importing content that already exists:
 - **Behavior**: Replaces existing items with imported versions
 - **Use When**: Imported version is more recent or authoritative
 - **Example**: Restoring from a backup after data corruption
+- **OpenWebUI**: Not available for OpenWebUI JSON imports in v1
 
 #### Rename
 - **Behavior**: Adds imported items with modified names
@@ -194,22 +213,27 @@ When importing content that already exists:
 - **Import Media**: Include media files from the chatbook
   - Default: true (recommended)
   - Set to false to save space
+  - OpenWebUI JSON imports ignore this option and preserve only attachment references
 
 - **Import Embeddings**: Include vector embeddings
   - Default: false (recreated as needed)
   - Set to true for exact search behavior
+  - OpenWebUI JSON imports do not import embeddings
 
 ### Preview Before Import
 
-Always preview a chatbook before importing:
+Always preview a chatbook or OpenWebUI export before importing:
 
 1. Click "Preview Chatbook"
 2. Select the file
 3. Review:
    - Total items by type
+   - OpenWebUI chat/message/branch counts when importing JSON
+   - Duplicate and malformed-chat counts
    - Creation date
    - Author information
    - Size
+   - Warnings
 4. Decide on import strategy
 
 ## Managing Jobs
@@ -422,13 +446,13 @@ A: Not currently. You need to start a new export job.
 ### Import Questions
 
 **Q: Will importing duplicate my content?**
-A: Depends on conflict resolution. Use "skip" to avoid duplicates.
+A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSON import defaults to `skip` and detects existing imported chats by `source=openwebui` plus the OpenWebUI external reference.
 
 **Q: Can I preview what will be imported?**
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: They're imported if import_media is true and you have sufficient storage quota.
+A: Chatbook archive media is imported if import_media is true and you have sufficient storage quota. OpenWebUI JSON import preserves file, image, and artifact references as metadata only.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.

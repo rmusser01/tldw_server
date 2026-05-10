@@ -59,6 +59,7 @@ Top navigation groups features into tabs. Notable areas include:
   - Roleplay quickstart: `Docs/User_Guides/WebUI_Extension/Character_Roleplay_Quickstart.md`.
   - Core roleplay guide: `Docs/User_Guides/WebUI_Extension/Effective_Character_Roleplay_and_You.md`.
   - Advanced roleplay guide: `Docs/User_Guides/WebUI_Extension/Advanced_Character_Roleplay_Guide.md`.
+  - Persona Live wake phrases: `Docs/User_Guides/WebUI_Extension/Persona_Live_Wake_Phrases.md`.
 
 - Transcribe audio
   - Audio → Transcriptions: upload files for batch transcription.
@@ -79,7 +80,7 @@ Top navigation groups features into tabs. Notable areas include:
   - Embeddings and Vector Stores tabs: manage providers/models, warmups, caches, collections, upserts, and queries.
 
 - Chatbooks
-  - Chatbooks: export/import content and manage background jobs.
+  - Chatbooks: export/import content, import OpenWebUI "Export Chats" JSON files, and manage background jobs.
 
 - Bring Your Own Keys (BYOK)
   - Multi-user only: store per-user provider keys and optional org/team shared keys.

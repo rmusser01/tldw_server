@@ -38,7 +38,7 @@ paths:
       tags:
         - Export
       summary: Create a new chatbook
-      description: Export selected content to a chatbook file
+      description: Export selected content to a chatbook archive. Sync exports return a completed job reference with a job-backed download URL.
       operationId: createChatbook
       requestBody:
         required: true
@@ -70,12 +70,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /chatbooks/export/continue:
+    post:
+      tags:
+        - Export
+      summary: Continue a truncated chatbook export
+      description: Continue a truncated export in sync mode. Requests with `async_mode=true` are rejected with HTTP 400.
+      operationId: continueChatbookExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContinueExportRequest'
+      responses:
+        '200':
+          description: Continuation export created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateChatbookResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /chatbooks/import:
     post:
       tags:
         - Import
       summary: Import a chatbook
-      description: Import content from an uploaded chatbook file
+      description: Import content from an uploaded chatbook file using direct multipart form fields. Sync imports return `imported_items` plus `warnings`.
       operationId: importChatbook
       requestBody:
         required: true
@@ -90,11 +119,28 @@ paths:
                   type: string
                   format: binary
                   description: Chatbook file to import
-                options:
-                  type: string
-                  format: json
-                  description: JSON string with import options
-                  example: '{"conflict_resolution": "skip", "prefix_imported": true}'
+                content_selections:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                conflict_resolution:
+                  $ref: '#/components/schemas/ConflictResolution'
+                prefix_imported:
+                  type: boolean
+                  default: false
+                import_media:
+                  type: boolean
+                  default: false
+                  description: Must remain false; media import is not supported yet.
+                import_embeddings:
+                  type: boolean
+                  default: false
+                  description: Must remain false; embedding import is not supported yet.
+                async_mode:
+                  type: boolean
+                  default: false
       responses:
         '200':
           description: Chatbook imported successfully
@@ -112,10 +158,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -124,7 +170,7 @@ paths:
       tags:
         - Import
       summary: Preview chatbook contents
-      description: Preview the contents of a chatbook without importing
+      description: Preview the contents of a chatbook without importing. Invalid archives or manifests return HTTP 400; unexpected server faults return HTTP 500.
       operationId: previewChatbook
       requestBody:
         required: true
@@ -235,7 +281,7 @@ paths:
       tags:
         - Jobs
       summary: Remove export job
-      description: Remove a completed or cancelled export job
+      description: Remove a completed, cancelled, failed, or expired export job
       operationId: removeExportJob
       parameters:
         - $ref: '#/components/parameters/JobId'
@@ -302,33 +348,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
-
-  /chatbooks/import/jobs/{job_id}/remove:
-    delete:
-      tags:
-        - Jobs
-      summary: Remove import job
-      description: Remove a completed or cancelled import job
-      operationId: removeImportJob
-      parameters:
-        - $ref: '#/components/parameters/JobId'
-      responses:
-        '200':
-          description: Import job removed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RemoveJobResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /chatbooks/import/jobs/{job_id}:
     delete:
       tags:
         - Jobs
@@ -354,6 +373,31 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/import/jobs/{job_id}/remove:
+    delete:
+      tags:
+        - Jobs
+      summary: Remove import job
+      description: Remove a completed, cancelled, or failed import job
+      operationId: removeImportJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Import job removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -486,9 +530,7 @@ components:
       type: string
       enum:
         - skip
-        - overwrite
         - rename
-        - merge
       default: skip
 
     ExportStatus:
@@ -516,6 +558,7 @@ components:
       required:
         - name
         - description
+        - content_selections
       properties:
         name:
           type: string
@@ -525,7 +568,7 @@ components:
         description:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 5000
           example: Regular weekly backup of all content
         content_selections:
           type: object
@@ -584,13 +627,38 @@ components:
           default: false
         import_media:
           type: boolean
-          default: true
+          default: false
+          description: Must remain false; media import is not supported yet.
         import_embeddings:
           type: boolean
           default: false
+          description: Must remain false; embedding import is not supported yet.
         async_mode:
           type: boolean
           default: false
+
+    ContinueExportRequest:
+      type: object
+      required:
+        - export_id
+        - continuations
+      properties:
+        export_id:
+          type: string
+          description: Export ID from the original chatbook manifest
+        continuations:
+          type: array
+          description: Continuation tokens from the original manifest truncation metadata
+          items:
+            type: object
+            additionalProperties: true
+        name:
+          type: string
+          maxLength: 255
+        async_mode:
+          type: boolean
+          default: false
+          description: Must remain false; async continuation exports are not supported.
 
     CreateChatbookResponse:
       type: object
@@ -604,12 +672,11 @@ components:
           type: string
         job_id:
           type: string
+          nullable: true
           description: Job ID if async mode
-        file_path:
-          type: string
-          description: File path if sync mode
         download_url:
           type: string
+          nullable: true
           description: Download URL if sync mode
 
     ImportChatbookResponse:
@@ -624,6 +691,7 @@ components:
           type: string
         job_id:
           type: string
+          nullable: true
         imported_items:
           type: object
           additionalProperties:
@@ -632,6 +700,10 @@ components:
             conversation: 5
             note: 10
             character: 2
+        warnings:
+          type: array
+          items:
+            type: string
 
     ContentItemResponse:
       type: object
@@ -666,7 +738,7 @@ components:
       properties:
         version:
           type: string
-          example: "1.0"
+          example: "1.0.0"
         name:
           type: string
         description:
@@ -776,6 +848,7 @@ components:
           $ref: '#/components/schemas/ChatbookManifestResponse'
         error:
           type: string
+          nullable: true
 
     ExportJobResponse:
       type: object

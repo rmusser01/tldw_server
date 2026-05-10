@@ -15,6 +15,7 @@ Notes:
 | `rag-unified` | API-related/RAG-API-Guide.md |
 | `rag-health` | API-related/RAG-API-Guide.md |
 | `prompt-studio` | API-related/Prompt_Studio_API.md |
+| `chatbooks` | API-related/Chatbook_API_Documentation.md |
 | `embeddings` | API-related/Embeddings_API_Documentation.md |
 | `vector-stores` | API-related/API_Design.md |
 | `ocr` | API-related/OCR_API_Documentation.md |

@@ -15,7 +15,7 @@
 
 ### What is a Chatbook?
 
-A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work.
+A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files into tldw conversations.
 
 ### Why Use Chatbooks?
 
@@ -37,6 +37,8 @@ Chatbooks can contain:
 - 📄 **Documents**: Generated summaries and reports
 - 🎨 **Media**: Images, audio, and video files (optional)
 - 🔢 **Embeddings**: Vector representations for search (optional)
+
+OpenWebUI JSON imports are handled as conversation imports: each valid OpenWebUI chat becomes a tldw conversation with message branches, timestamps, models, file references, and source metadata preserved where available.
 
 ## Getting Started
 
