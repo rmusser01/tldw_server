@@ -659,7 +659,7 @@ git commit -m "Add Backlog.md task parser"
 - Create: `tools/backlog-py/tests/test_cli_readonly.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing read-only repository tests**
+- [x] **Step 1: Write failing read-only repository tests**
 
 Test:
 
@@ -669,7 +669,7 @@ Test:
 - board grouping by status
 - no file changes after read-only operations
 
-- [ ] **Step 2: Write failing CLI tests**
+- [x] **Step 2: Write failing CLI tests**
 
 Use `click.testing.CliRunner`:
 
@@ -693,7 +693,7 @@ def test_config_list_outputs_safe_defaults(fixture_repo):
     assert "autoCommit: false" in result.output
 ```
 
-- [ ] **Step 3: Run tests to verify failure**
+- [x] **Step 3: Run tests to verify failure**
 
 Run:
 
@@ -704,7 +704,7 @@ python -m pytest tools/backlog-py/tests/test_readonly_repository.py tools/backlo
 
 Expected: FAIL with missing repository/CLI implementation.
 
-- [ ] **Step 4: Implement read-only repository and CLI**
+- [x] **Step 4: Implement read-only repository and CLI**
 
 Implement:
 
@@ -718,7 +718,7 @@ Implement:
 
 Keep console script as `backlog-py`, not `backlog`, until cutover gates pass.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -729,7 +729,7 @@ python -m pytest tools/backlog-py/tests/test_readonly_repository.py tools/backlo
 
 Expected: PASS.
 
-- [ ] **Step 6: Run live read-only smoke against this repo**
+- [x] **Step 6: Run live read-only smoke against this repo**
 
 Run:
 
@@ -748,7 +748,7 @@ Expected: commands exit 0 and the before/after backlog status files match
 exactly. This avoids false failures from unrelated pre-existing dirty backlog
 task files while still proving the Python read-only commands did not write.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
