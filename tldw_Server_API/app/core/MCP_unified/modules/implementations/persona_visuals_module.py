@@ -9,6 +9,10 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Persona.visual_jobs import create_generate_candidate_job
+from tldw_Server_API.app.core.Persona.visual_library_service import (
+    PersonaVisualLibraryService,
+    PersonaVisualLibraryServiceError,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     MAX_TRIGGER_DURATION_MS,
     MIN_TRIGGER_DURATION_MS,
@@ -67,6 +71,17 @@ class PersonaVisualsModule(BaseModule):
                 metadata={"category": "retrieval", "readOnlyHint": True, "auth_required": True},
             ),
             create_tool_definition(
+                name="persona_visuals.library_items",
+                description="List the current user's reference-backed personal Persona Visual library items.",
+                parameters={
+                    "properties": {
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+                        "offset": {"type": "integer", "minimum": 0, "default": 0},
+                    },
+                },
+                metadata={"category": "retrieval", "readOnlyHint": True, "auth_required": True},
+            ),
+            create_tool_definition(
                 name="persona_visuals.trigger_state",
                 description="Emit a transient visual state override for the current persona session.",
                 parameters={
@@ -114,6 +129,21 @@ class PersonaVisualsModule(BaseModule):
                 metadata={"category": "management", "auth_required": True},
             ),
             create_tool_definition(
+                name="persona_visuals.use_library_item",
+                description=(
+                    "Create an inactive target-persona draft from a personal visual-library item."
+                ),
+                parameters={
+                    "properties": {
+                        "item_id": {"type": "string", "minLength": 1},
+                        "target_persona_id": {"type": "string"},
+                        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                    },
+                    "required": ["item_id"],
+                },
+                metadata={"category": "management", "auth_required": True},
+            ),
+            create_tool_definition(
                 name="persona_visuals.enqueue_generation",
                 description="Queue a persona visual generation job for human review.",
                 parameters={
@@ -144,12 +174,16 @@ class PersonaVisualsModule(BaseModule):
 
         if tool_name == "persona_visuals.capabilities":
             return await asyncio.to_thread(self._capabilities_sync, args, context)
+        if tool_name == "persona_visuals.library_items":
+            return await asyncio.to_thread(self._library_items_sync, args, context)
         if tool_name == "persona_visuals.trigger_state":
             return await asyncio.to_thread(self._trigger_state_sync, args, context)
         if tool_name == "persona_visuals.create_draft_pack":
             return await asyncio.to_thread(self._create_draft_pack_sync, args, context)
         if tool_name == "persona_visuals.update_manifest":
             return await asyncio.to_thread(self._update_manifest_sync, args, context)
+        if tool_name == "persona_visuals.use_library_item":
+            return await asyncio.to_thread(self._use_library_item_sync, args, context)
         if tool_name == "persona_visuals.enqueue_generation":
             return await asyncio.to_thread(self._enqueue_generation_sync, args, context)
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -157,6 +191,14 @@ class PersonaVisualsModule(BaseModule):
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "persona_visuals.capabilities":
             self._validate_optional_string(arguments, "persona_id")
+            return
+        if tool_name == "persona_visuals.library_items":
+            if arguments.get("limit") is not None:
+                limit = int(arguments["limit"])
+                if limit < 1 or limit > 500:
+                    raise ValueError("limit must be between 1 and 500")
+            if arguments.get("offset") is not None and int(arguments["offset"]) < 0:
+                raise ValueError("offset must be non-negative")
             return
         if tool_name == "persona_visuals.trigger_state":
             self._validate_optional_string(arguments, "persona_id")
@@ -190,6 +232,21 @@ class PersonaVisualsModule(BaseModule):
                 raise ValueError("manifest must be an object")
             if arguments.get("expected_version") is not None and int(arguments["expected_version"]) < 1:
                 raise ValueError("expected_version must be positive")
+            return
+        if tool_name == "persona_visuals.use_library_item":
+            item_id = str(arguments.get("item_id") or "").strip()
+            if not item_id:
+                raise ValueError("item_id is required")
+            self._validate_optional_string(arguments, "target_persona_id")
+            title = arguments.get("title")
+            if title is not None:
+                if not isinstance(title, str):
+                    raise ValueError("title must be a string")
+                normalized_title = title.strip()
+                if not normalized_title:
+                    raise ValueError("title cannot be empty")
+                if len(normalized_title) > 200:
+                    raise ValueError("title must be <= 200 chars")
             return
         if tool_name == "persona_visuals.enqueue_generation":
             self._validate_optional_string(arguments, "persona_id")
@@ -227,6 +284,29 @@ class PersonaVisualsModule(BaseModule):
                     self._pack_summary(db, pack, persona_id=persona_id, user_id=user_id)
                     for pack in draft_packs
                 ],
+            }
+        finally:
+            self._close_db(db)
+
+    def _library_items_sync(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
+        user_id = self._resolve_user_id(context)
+        limit = self._bounded_int(args.get("limit"), default=100, minimum=1, maximum=500)
+        offset = self._bounded_int(args.get("offset"), default=0, minimum=0, maximum=1_000_000)
+        db = self._open_db(context)
+        try:
+            items = db.list_persona_visual_library_items(
+                user_id=user_id,
+                include_deleted=False,
+                limit=limit,
+                offset=offset,
+            )
+            summaries = [self._library_item_summary(item) for item in items]
+            return {
+                "items": summaries,
+                "count": len(summaries),
+                "limit": limit,
+                "offset": offset,
+                "reference_backed": True,
             }
         finally:
             self._close_db(db)
@@ -306,6 +386,37 @@ class PersonaVisualsModule(BaseModule):
                 "persona_id": persona_id,
                 "pack": self._pack_summary(db, updated, persona_id=persona_id, user_id=user_id),
             }
+        finally:
+            self._close_db(db)
+
+    def _use_library_item_sync(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
+        user_id = self._resolve_user_id(context)
+        target_persona_id = self._resolve_target_persona_id(args, context)
+        item_id = str(args.get("item_id") or "").strip()
+        title = str(args.get("title") or "").strip() or None
+        db = self._open_db(context)
+        try:
+            service = PersonaVisualLibraryService(db)
+            duplicated = service.use_item_for_persona(
+                user_id=user_id,
+                item_id=item_id,
+                target_persona_id=target_persona_id,
+                title=title,
+            )
+            return {
+                "library_item_id": item_id,
+                "persona_id": target_persona_id,
+                "pack": self._pack_summary(
+                    db,
+                    duplicated,
+                    persona_id=target_persona_id,
+                    user_id=user_id,
+                ),
+                "review_required": True,
+                "activated": False,
+            }
+        except PersonaVisualLibraryServiceError as exc:
+            raise ValueError(str(exc)) from exc
         finally:
             self._close_db(db)
 
@@ -426,6 +537,12 @@ class PersonaVisualsModule(BaseModule):
                 return value.strip()
         return None
 
+    def _resolve_target_persona_id(self, args: dict[str, Any], context: Any | None) -> str:
+        try:
+            return self._resolve_persona_id({"persona_id": args.get("target_persona_id")}, context)
+        except ValueError as exc:
+            raise ValueError("Missing target persona context for persona visuals library reuse") from exc
+
     @staticmethod
     def _require_persona(db: CharactersRAGDB, *, persona_id: str, user_id: str) -> dict[str, Any]:
         profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
@@ -464,6 +581,24 @@ class PersonaVisualsModule(BaseModule):
             "assets_count": len(assets),
         }
 
+    @staticmethod
+    def _library_item_summary(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": str(item.get("id") or ""),
+            "title": str(item.get("title") or ""),
+            "notes": item.get("notes"),
+            "tags": [str(tag) for tag in list(item.get("tags") or [])],
+            "source_persona_id": item.get("source_persona_id"),
+            "source_pack_id": item.get("source_pack_id"),
+            "source_persona_name": item.get("source_persona_name"),
+            "source_pack_title": item.get("source_pack_title"),
+            "source_pack_version": item.get("source_pack_version"),
+            "source_current_version": item.get("source_current_version"),
+            "source_available": bool(item.get("source_available")),
+            "source_changed": bool(item.get("source_changed")),
+            "version": int(item.get("version") or 1),
+        }
+
     def _get_jobs_manager(self) -> Any:
         settings = self.config.settings or {}
         manager = settings.get("jobs_manager")
@@ -482,6 +617,14 @@ class PersonaVisualsModule(BaseModule):
         except (TypeError, ValueError):
             duration_ms = 1500
         return max(MIN_TRIGGER_DURATION_MS, min(MAX_TRIGGER_DURATION_MS, duration_ms))
+
+    @staticmethod
+    def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
 
     @staticmethod
     def _validate_optional_string(arguments: dict[str, Any], key: str) -> None:

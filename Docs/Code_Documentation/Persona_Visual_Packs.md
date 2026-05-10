@@ -79,6 +79,21 @@ Current personal-library API routes:
 4. `DELETE /api/v1/persona/visual-library/{item_id}`
 5. `POST /api/v1/persona/visual-library/{item_id}/use`
 
+Current personal-library MCP tools:
+
+1. `persona_visuals.library_items` lists the current user's non-deleted
+   reference-backed library entries. It is read-only and derives live source
+   persona/pack names from the source rows when those rows still resolve.
+2. `persona_visuals.use_library_item` duplicates an available library source
+   pack to a target persona as an inactive draft through the same service path
+   as the REST API. It returns `review_required: true` and never activates the
+   target persona pack.
+
+The MCP library tools stay separate from `persona_visuals.trigger_state`.
+Runtime state triggers are transient session behavior; library reuse is a
+durable draft-creation action that must preserve review and explicit activation
+semantics.
+
 Core implementation points:
 
 1. `persona_visual_library_items` in the ChaChaNotes persona store.
@@ -86,6 +101,8 @@ Core implementation points:
 3. `PersonaVisualLibraryService` for ownership checks, metadata normalization,
    stale-source rejection on use, and duplicate-to-persona draft creation.
 4. `VisualPackEditor` for save/list/edit/remove/use controls in Persona Garden.
+5. `PersonaVisualsModule` for MCP discovery and draft reuse on top of the same
+   reference-backed service semantics.
 
 ## Import Preview And Commit
 
