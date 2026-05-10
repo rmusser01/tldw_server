@@ -2,7 +2,9 @@
 
 VN Asset Packs provide offline visual-novel asset planning, image generation, upload, review, and approved-only manifest export. V1 is a workbench for creating and reviewing assets; it does not include VN playback.
 
-Base path: `/api/v1/vn-assets`
+Canonical base path: `/api/v1/vn/vn-assets`
+
+The previous top-level `/api/v1/vn-assets` path is not part of the VN platform API contract.
 
 ## Authentication And Ownership
 
@@ -20,6 +22,19 @@ Pack metadata is owned by the authenticated user and stored in that user's `ChaC
 - V1 supports one `primary_character_id` per pack.
 - Generated variants start as `draft` and must be approved before they appear in the runtime manifest.
 
+## Idempotency
+
+Side-effecting VN asset commands that create work or delete/upload files support durable idempotency. A repeated request with the same key and same payload returns the original response. Reusing the same key with a different payload returns `409` with a stable VN error detail object whose `code` is `idempotency_key_conflict`.
+
+Use these keys:
+
+- JSON `idempotency_key`: `/packs/{pack_id}/generate`, `/packs/{pack_id}/slots/{slot_id}/retry`, `/packs/{pack_id}/items/{item_id}/regenerate`, `/packs/{pack_id}/cleanup` when `dry_run=false`.
+- Multipart form `idempotency_key`: `/packs/{pack_id}/items/upload`.
+- JSON `request_id`: `/packs/{pack_id}/export` and `/import/commit`.
+- Multipart form `request_id`: `/import/previews`.
+
+Dry-run cleanup requests are intentionally not persisted as idempotent mutations.
+
 ## Endpoint Summary
 
 | Method | Path | Purpose |
@@ -31,6 +46,17 @@ Pack metadata is owned by the authenticated user and stored in that user's `ChaC
 | `PATCH` | `/packs/{pack_id}` | Update pack metadata. |
 | `DELETE` | `/packs/{pack_id}` | Soft-delete pack metadata only. |
 | `POST` | `/packs/{pack_id}/cleanup` | Preview or execute generated-file cleanup. |
+| `POST` | `/packs/{pack_id}/export` | Start a pack export job. |
+| `GET` | `/portability/exports/{job_id}` | Read export status. |
+| `GET` | `/portability/exports/{job_id}/download` | Download a completed export archive. |
+| `POST` | `/portability/exports/{job_id}/cancel` | Cancel an export job. |
+| `POST` | `/import/previews` | Upload an import archive and start preview validation. |
+| `GET` | `/import/previews/{preview_id}` | Read import preview status and proposed plan. |
+| `POST` | `/import/previews/{preview_id}/cancel` | Cancel import preview validation. |
+| `DELETE` | `/import/previews/{preview_id}` | Delete a cancellable import preview and staged archive. |
+| `POST` | `/import/commit` | Start an import commit job from a completed preview. |
+| `GET` | `/portability/imports/{job_id}` | Read import commit status. |
+| `POST` | `/portability/imports/{job_id}/cancel` | Cancel an import commit job. |
 | `POST` | `/packs/{pack_id}/matrix/apply` | Expand a starter matrix into slots. |
 | `GET` | `/packs/{pack_id}/slots` | List slots. |
 | `POST` | `/packs/{pack_id}/slots` | Create a custom slot. |
@@ -39,6 +65,7 @@ Pack metadata is owned by the authenticated user and stored in that user's `ChaC
 | `GET` | `/packs/{pack_id}/items` | List generated or uploaded item variants. |
 | `PATCH` | `/packs/{pack_id}/items/{item_id}/review` | Set item review status and optional preferred flag. |
 | `GET` | `/packs/{pack_id}/items/{item_id}/content` | Stream item image content. |
+| `GET` | `/packs/{pack_id}/items/{item_id}/preview` | Stream item image preview content. |
 | `POST` | `/packs/{pack_id}/items/bulk-review` | Apply one review status to many items. |
 | `POST` | `/packs/{pack_id}/items/upload` | Upload an image for a slot. |
 | `POST` | `/packs/{pack_id}/items/{item_id}/preferred` | Mark one item preferred for its slot. |
@@ -56,7 +83,7 @@ Pack metadata is owned by the authenticated user and stored in that user's `ChaC
 Create a pack:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -92,7 +119,7 @@ Minimal response:
 Apply the built-in starter matrix:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/matrix/apply" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/matrix/apply" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -108,7 +135,7 @@ Each returned slot contains its `asset_type`, `slot_key`, labels, prompt templat
 Use prompt preview before generation to inspect the assembled prompt without starting a job:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/prompt-preview" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/prompt-preview" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -137,12 +164,13 @@ Do not log full prompt previews in production logs; world-book and scenario cont
 Start generation:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/generate" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/generate" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "slot_ids": [10, 11],
     "variant_count": 2,
+    "idempotency_key": "generate-pack-1",
     "options": { "priority": "normal" }
   }'
 ```
@@ -176,7 +204,7 @@ Generated and uploaded items start as `draft`. Valid review statuses are `draft`
 Approve one item and make it preferred:
 
 ```bash
-curl -X PATCH "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/items/101/review" \
+curl -X PATCH "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/items/101/review" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "review_status": "approved", "preferred": true }'
@@ -185,7 +213,7 @@ curl -X PATCH "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/items/101/review" 
 Bulk review:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/items/bulk-review" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/items/bulk-review" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "item_ids": [101, 102], "review_status": "approved" }'
@@ -229,14 +257,28 @@ Manifest export includes approved items only:
 Upload a manually prepared image into an existing slot:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/items/upload" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/items/upload" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -F "slot_id=10" \
   -F "variant_index=0" \
+  -F "idempotency_key=upload-slot-10-v0" \
   -F "file=@sprite_neutral.png;type=image/png"
 ```
 
-The upload endpoint stores the bytes through generated-file storage and returns a draft item. Use `GET /packs/{pack_id}/items/{item_id}/content` to stream image content for a reviewed item or workbench preview. The content endpoint validates both pack ownership and generated-file metadata before serving bytes.
+The upload endpoint stores the bytes through generated-file storage and returns a draft item. Use `GET /packs/{pack_id}/items/{item_id}/content` or `GET /packs/{pack_id}/items/{item_id}/preview` to stream image bytes.
+
+Both streaming endpoints validate before serving bytes:
+
+- the pack and item belong to the authenticated user;
+- the generated-file row belongs to the same user;
+- `source_feature` is `vn_assets`;
+- `source_ref` is `vn_asset_item:{item_id}`;
+- the generated file is not deleted;
+- the stored media type is `image/png`, `image/jpeg`, or `image/webp`;
+- optional `file_category`, when present, is `image`;
+- policy metadata does not block the item.
+
+Provenance, ownership, missing-file, path, and media-type failures return 404 to avoid leaking asset existence. Policy-blocked access returns 403 with stable VN error `code: "policy_blocked"`.
 
 ## Cleanup Safety
 
@@ -245,7 +287,7 @@ The upload endpoint stores the bytes through generated-file storage and returns 
 Use `POST /packs/{pack_id}/cleanup` for generated-file cleanup. The default request is a dry-run against rejected and hidden items:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-assets/packs/1/cleanup" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/cleanup" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "dry_run": true }'
@@ -261,6 +303,8 @@ Response:
   "files_would_delete": 3,
   "files_deleted": 0,
   "skipped_file_ids": [],
+  "blocked_count": 0,
+  "cleanup_blocked": [],
   "reclaimed_bytes": 1536000
 }
 ```
@@ -270,7 +314,8 @@ To execute cleanup for rejected and hidden items:
 ```json
 {
   "dry_run": false,
-  "statuses": ["rejected", "hidden"]
+  "statuses": ["rejected", "hidden"],
+  "idempotency_key": "cleanup-pack-1"
 }
 ```
 
@@ -291,7 +336,7 @@ Example approved cleanup request:
 }
 ```
 
-Cleanup skips any generated file still referenced by another item.
+Cleanup skips any generated file still referenced by another item. It also consults a pluggable cleanup blocker provider before deleting files; blocked files are added to `skipped_file_ids`, counted in `blocked_count`, and reported in `cleanup_blocked` with `item_id`, `file_id`, and blocker details.
 
 ## Worker And Backend Configuration
 

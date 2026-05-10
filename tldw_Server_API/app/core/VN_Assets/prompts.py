@@ -157,7 +157,7 @@ def _get_prompt_token_encoder() -> Any | None:
 
     try:
         return tiktoken.get_encoding("cl100k_base")
-    except (AttributeError, KeyError, RuntimeError, ValueError):
+    except Exception:
         return None
 
 

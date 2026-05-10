@@ -66,7 +66,7 @@ def client(
     current_user_id: dict[str, int],
 ) -> Iterator[TestClient]:
     app = FastAPI()
-    app.include_router(vn_assets_router, prefix="/api/v1")
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
 
     async def override_user() -> User:
         user_id = current_user_id["value"]
@@ -121,13 +121,19 @@ def test_create_pack_endpoint_returns_pack(
     character_id: int,
 ) -> None:
     response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
 
     assert response.status_code == 201
     assert response.json()["primary_character_id"] == character_id
+
+
+def test_old_top_level_vn_assets_route_is_absent(client: TestClient) -> None:
+    response = client.get("/api/v1/vn-assets/packs")
+
+    assert response.status_code == 404
 
 
 def test_starter_matrices_endpoint_declares_response_model() -> None:
@@ -161,7 +167,7 @@ def test_create_pack_rejects_coerced_starter_variant_count(
     variant_count: object,
 ) -> None:
     response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={
             "title": "Starter",
             "primary_character_id": character_id,
@@ -180,7 +186,7 @@ def test_manifest_endpoint_omits_unapproved_items(
     pack_with_items: SimpleNamespace,
 ) -> None:
     response = client.get(
-        f"/api/v1/vn-assets/packs/{pack_with_items.id}/manifest",
+        f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}/manifest",
         headers=auth_headers,
     )
 
@@ -200,11 +206,11 @@ def test_preferred_endpoint_requires_existing_approved_item(
     pack_with_items: SimpleNamespace,
 ) -> None:
     draft_response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_with_items.id}/items/{pack_with_items.draft_item_id}/preferred",
+        f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}/items/{pack_with_items.draft_item_id}/preferred",
         headers=auth_headers,
     )
     approved_response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_with_items.id}/items/{pack_with_items.approved_item_id}/preferred",
+        f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}/items/{pack_with_items.approved_item_id}/preferred",
         headers=auth_headers,
     )
 
@@ -221,7 +227,7 @@ def test_pack_endpoints_deny_cross_user_access(
     character_id: int,
 ) -> None:
     create_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
@@ -229,13 +235,13 @@ def test_pack_endpoints_deny_cross_user_access(
 
     current_user_id["value"] = 7
 
-    assert client.get(f"/api/v1/vn-assets/packs/{pack_id}", headers=auth_headers).status_code == 404
+    assert client.get(f"/api/v1/vn/vn-assets/packs/{pack_id}", headers=auth_headers).status_code == 404
     assert client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}",
         json={"title": "Not Mine"},
         headers=auth_headers,
     ).status_code == 404
-    assert client.delete(f"/api/v1/vn-assets/packs/{pack_id}", headers=auth_headers).status_code == 404
+    assert client.delete(f"/api/v1/vn/vn-assets/packs/{pack_id}", headers=auth_headers).status_code == 404
 
 
 def test_validation_limit_errors_map_to_400(
@@ -244,14 +250,14 @@ def test_validation_limit_errors_map_to_400(
     character_id: int,
 ) -> None:
     create_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = create_response.json()["id"]
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/matrix/apply",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/matrix/apply",
         json={"matrix_key": "starter", "overrides": {"variant_count": 7}},
         headers=auth_headers,
     )
@@ -266,13 +272,13 @@ def test_delete_parent_slot_with_dependents_returns_controlled_conflict(
     character_id: int,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     matrix_response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/matrix/apply",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/matrix/apply",
         json={"matrix_key": "starter", "overrides": {"variant_count": 1}},
         headers=auth_headers,
     )
@@ -281,7 +287,7 @@ def test_delete_parent_slot_with_dependents_returns_controlled_conflict(
     parent_slot_id = dependent_slot["depends_on_slot_id"]
 
     response = client.delete(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots/{parent_slot_id}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots/{parent_slot_id}",
         headers=auth_headers,
     )
 
@@ -295,24 +301,24 @@ def test_duplicate_slot_key_update_returns_controlled_conflict(
     character_id: int,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     first = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={"asset_type": "sprite", "slot_key": "sprite.first"},
         headers=auth_headers,
     ).json()
     second = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={"asset_type": "sprite", "slot_key": "sprite.second"},
         headers=auth_headers,
     ).json()
 
     response = client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots/{second['id']}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots/{second['id']}",
         json={"slot_key": first["slot_key"]},
         headers=auth_headers,
     )
@@ -329,19 +335,19 @@ def test_slot_endpoints_reject_coerced_variant_counts(
     variant_count: object,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     slot = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={"asset_type": "sprite", "slot_key": "sprite.valid"},
         headers=auth_headers,
     ).json()
 
     create_response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={
             "asset_type": "sprite",
             "slot_key": f"sprite.invalid.{type(variant_count).__name__}",
@@ -350,7 +356,7 @@ def test_slot_endpoints_reject_coerced_variant_counts(
         headers=auth_headers,
     )
     update_response = client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots/{slot['id']}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots/{slot['id']}",
         json={"variant_count": variant_count},
         headers=auth_headers,
     )
@@ -365,18 +371,18 @@ def test_slot_dependency_update_rejects_self_and_cycles(
     character_id: int,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     first = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={"asset_type": "background", "slot_key": "background.first"},
         headers=auth_headers,
     ).json()
     second = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={
             "asset_type": "depth_companion",
             "slot_key": "depth.first",
@@ -388,12 +394,12 @@ def test_slot_dependency_update_rejects_self_and_cycles(
     ).json()
 
     self_response = client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots/{first['id']}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots/{first['id']}",
         json={"depends_on_slot_id": first["id"]},
         headers=auth_headers,
     )
     cycle_response = client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots/{first['id']}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots/{first['id']}",
         json={"depends_on_slot_id": second["id"]},
         headers=auth_headers,
     )
@@ -410,19 +416,19 @@ def test_prompt_preview_rejects_unknown_budget_keys(
     character_id: int,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     slot = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={"asset_type": "sprite", "slot_key": "sprite.first"},
         headers=auth_headers,
     ).json()
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/prompt-preview",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/prompt-preview",
         json={"slot_id": slot["id"], "budgets": {"unknown": 10}},
         headers=auth_headers,
     )
@@ -466,19 +472,19 @@ def test_prompt_preview_rejects_coerced_budget_values(
     budget_value: object,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     slot = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/slots",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/slots",
         json={"asset_type": "sprite", "slot_key": "sprite.first"},
         headers=auth_headers,
     ).json()
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/prompt-preview",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/prompt-preview",
         json={"slot_id": slot["id"], "budgets": {"total": budget_value}},
         headers=auth_headers,
     )
@@ -494,14 +500,14 @@ def test_matrix_apply_rejects_malformed_variant_count(
     variant_count: object,
 ) -> None:
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
 
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack_id}/matrix/apply",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/matrix/apply",
         json={"matrix_key": "starter", "overrides": {"variant_count": variant_count}},
         headers=auth_headers,
     )
@@ -516,7 +522,7 @@ def test_generation_budget_rejects_malformed_planned_output_count(
     character_id: int,
 ) -> None:
     create_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={
             "title": "Starter",
             "primary_character_id": character_id,
@@ -525,13 +531,13 @@ def test_generation_budget_rejects_malformed_planned_output_count(
         headers=auth_headers,
     )
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     update_response = client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}",
         json={"generation_budget": {"planned_output_count": []}},
         headers=auth_headers,
     )
@@ -548,7 +554,7 @@ def test_generation_budget_rejects_float_planned_output_count(
     character_id: int,
 ) -> None:
     create_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={
             "title": "Starter",
             "primary_character_id": character_id,
@@ -557,13 +563,13 @@ def test_generation_budget_rejects_float_planned_output_count(
         headers=auth_headers,
     )
     pack_response = client.post(
-        "/api/v1/vn-assets/packs",
+        "/api/v1/vn/vn-assets/packs",
         json={"title": "Starter", "primary_character_id": character_id},
         headers=auth_headers,
     )
     pack_id = pack_response.json()["id"]
     update_response = client.patch(
-        f"/api/v1/vn-assets/packs/{pack_id}",
+        f"/api/v1/vn/vn-assets/packs/{pack_id}",
         json={"generation_budget": {"planned_output_count": 300.9}},
         headers=auth_headers,
     )

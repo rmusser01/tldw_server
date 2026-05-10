@@ -293,6 +293,7 @@ class VNAssetPackService:
         *,
         files_repo: Any,
         unregister_generated_file: Any | None = None,
+        blocker_provider: Any | None = None,
     ) -> VNAssetCleanupResponse:
         self._require_pack(pack_id)
         statuses = _cleanup_statuses(request)
@@ -324,6 +325,31 @@ class VNAssetPackService:
                 continue
             candidate_items.append(item)
 
+        blockers_by_file_id = await _cleanup_blockers_for_items(
+            blocker_provider,
+            pack_id=pack_id,
+            owner_user_id=self.owner_user_id,
+            candidates=candidate_items,
+        )
+        cleanup_blocked: list[dict[str, Any]] = []
+        if blockers_by_file_id:
+            unblocked_items: list[dict[str, Any]] = []
+            for item in candidate_items:
+                file_id = int(item["generated_file_id"])
+                blockers = blockers_by_file_id.get(file_id)
+                if blockers:
+                    skipped_file_ids.append(file_id)
+                    cleanup_blocked.append(
+                        {
+                            "item_id": int(item["id"]),
+                            "file_id": file_id,
+                            "blockers": blockers,
+                        }
+                    )
+                    continue
+                unblocked_items.append(item)
+            candidate_items = unblocked_items
+
         candidate_results = await asyncio.gather(
             *(
                 _cleanup_candidate_for_item(
@@ -350,6 +376,8 @@ class VNAssetPackService:
                 files_would_delete=files_would_delete,
                 files_deleted=0,
                 skipped_file_ids=skipped_file_ids,
+                blocked_count=len(cleanup_blocked),
+                cleanup_blocked=cleanup_blocked,
                 reclaimed_bytes=candidate_reclaimed_bytes,
             )
 
@@ -403,6 +431,8 @@ class VNAssetPackService:
             files_would_delete=files_would_delete,
             files_deleted=files_deleted,
             skipped_file_ids=skipped_file_ids,
+            blocked_count=len(cleanup_blocked),
+            cleanup_blocked=cleanup_blocked,
             reclaimed_bytes=reclaimed_bytes,
         )
 
@@ -1094,6 +1124,47 @@ async def _cleanup_candidate_for_item(
         return None
     byte_count = generated_file_size_bytes(record, fallback=item.get("bytes"))
     return item, record, byte_count
+
+
+async def _cleanup_blockers_for_items(
+    blocker_provider: Any | None,
+    *,
+    pack_id: int,
+    owner_user_id: int,
+    candidates: list[dict[str, Any]],
+) -> dict[int, list[dict[str, str]]]:
+    if blocker_provider is None or not candidates:
+        return {}
+    find_blockers = getattr(blocker_provider, "find_blockers", None)
+    if not callable(find_blockers):
+        return {}
+    result = find_blockers(
+        pack_id=pack_id,
+        owner_user_id=owner_user_id,
+        candidates=candidates,
+    )
+    raw_blockers = await result if inspect.isawaitable(result) else result
+    if not isinstance(raw_blockers, Mapping):
+        return {}
+
+    normalized: dict[int, list[dict[str, str]]] = {}
+    for raw_file_id, blockers in raw_blockers.items():
+        try:
+            file_id = int(raw_file_id)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(blockers, list):
+            continue
+        normalized_blockers: list[dict[str, str]] = []
+        for blocker in blockers:
+            if not isinstance(blocker, Mapping):
+                continue
+            code = _first_text(blocker.get("code"), "blocked") or "blocked"
+            message = _first_text(blocker.get("message"), code) or code
+            normalized_blockers.append({"code": code, "message": message})
+        if normalized_blockers:
+            normalized[file_id] = normalized_blockers
+    return normalized
 
 
 async def _hard_delete_generated_file(

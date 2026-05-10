@@ -176,6 +176,19 @@ CREATE TABLE IF NOT EXISTS vn_pack_import_journal (
     completed_at DATETIME
 );
 
+CREATE TABLE IF NOT EXISTS vn_asset_idempotency_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id INTEGER NOT NULL,
+    scope TEXT NOT NULL,
+    resource_id TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, scope, resource_id, idempotency_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_vn_asset_packs_primary_character_id
     ON vn_asset_packs(primary_character_id);
 CREATE INDEX IF NOT EXISTS idx_vn_asset_packs_deleted
@@ -226,6 +239,8 @@ CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_target_pack_id
     ON vn_pack_import_journal(target_pack_id);
 CREATE INDEX IF NOT EXISTS idx_vn_pack_import_journal_fingerprint
     ON vn_pack_import_journal(canonical_payload_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_vn_asset_idempotency_records_lookup
+    ON vn_asset_idempotency_records(owner_user_id, scope, resource_id, idempotency_key);
 """
 
 VN_ASSET_SCHEMA_STATEMENTS = tuple(
@@ -261,6 +276,73 @@ class VNAssetPacksRepository:
     def initialize_schema(self) -> None:
         ensure_vn_asset_tables(self.db)
         self._schema_initialized = True
+
+    def get_idempotency_record(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a previously completed idempotent VN asset API response."""
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT * FROM vn_asset_idempotency_records
+            WHERE owner_user_id = ?
+              AND scope = ?
+              AND resource_id = ?
+              AND idempotency_key = ?
+            """,
+            (owner_user_id, scope, resource_id, idempotency_key),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def create_idempotency_record(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+        response: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist a completed idempotent VN asset API response."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO vn_asset_idempotency_records (
+                    owner_user_id,
+                    scope,
+                    resource_id,
+                    idempotency_key,
+                    payload_hash,
+                    response_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    scope,
+                    resource_id,
+                    idempotency_key,
+                    payload_hash,
+                    _json_dump(dict(response)),
+                ),
+            )
+        record = self.get_idempotency_record(
+            owner_user_id=owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+        )
+        if record is None:
+            raise RuntimeError("created_idempotency_record_not_found")
+        return record
 
     def create_portability_job(
         self,

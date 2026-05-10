@@ -857,7 +857,7 @@ def test_generation_api_enqueues_parent_job(
     fake_jobs.created.clear()
 
     app = FastAPI()
-    app.include_router(vn_assets_router, prefix="/api/v1")
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
 
     async def override_user() -> User:
         return User(id=1, username="vn-generator")
@@ -875,15 +875,136 @@ def test_generation_api_enqueues_parent_job(
         app.dependency_overrides[job_manager_dep] = override_job_manager
 
     client = TestClient(app)
-    generate_response = client.post(f"/api/v1/vn-assets/packs/{pack.id}/generate", json={})
+    generate_response = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json={})
 
     assert generate_response.status_code == 202
     assert generate_response.json()["status"] == "queued"
     assert len(fake_jobs.created) == 1
 
-    status_response = client.get(f"/api/v1/vn-assets/packs/{pack.id}/generation")
+    status_response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation")
     assert status_response.status_code == 200
     status_payload = status_response.json()
     assert status_payload["batch_id"] == generate_response.json()["batch_id"]
     assert status_payload["planned_count"] == planned_count
     assert status_payload["enqueued_count"] == 0
+
+
+def test_generation_api_replays_same_idempotency_key_and_conflicts_on_different_payload(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(VNAssetPackCreate(title="Idempotent Pack", primary_character_id=character_id))
+    service.apply_matrix(pack.id, "starter", {"variant_count": 1})
+    fake_jobs.created.clear()
+
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+
+    async def override_user() -> User:
+        return User(id=1, username="vn-generator")
+
+    async def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+
+    client = TestClient(app)
+    payload = {"idempotency_key": "generate-pack-1", "variant_count": 1}
+    first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
+    replay = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
+    conflict = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/generate",
+        json={"idempotency_key": "generate-pack-1", "variant_count": 2},
+    )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(fake_jobs.created) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_retry_slot_api_replays_same_idempotency_key_and_conflicts_on_different_payload(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(VNAssetPackCreate(title="Retry Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+    fake_jobs.created.clear()
+
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+
+    async def override_user() -> User:
+        return User(id=1, username="vn-generator")
+
+    async def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+
+    client = TestClient(app)
+    payload = {"idempotency_key": "retry-slot-1", "variant_count": 1}
+    first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/slots/{slot.id}/retry", json=payload)
+    replay = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/slots/{slot.id}/retry", json=payload)
+    conflict = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/slots/{slot.id}/retry",
+        json={"idempotency_key": "retry-slot-1", "variant_count": 2},
+    )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(fake_jobs.created) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_regenerate_item_api_replays_same_idempotency_key_and_conflicts_on_different_payload(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(VNAssetPackCreate(title="Regenerate Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+    item = service.repo.create_item(pack_id=pack.id, slot_id=slot.id, variant_index=0)
+    fake_jobs.created.clear()
+
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+
+    async def override_user() -> User:
+        return User(id=1, username="vn-generator")
+
+    async def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+
+    client = TestClient(app)
+    payload = {"idempotency_key": "regenerate-item-1", "variant_count": 1}
+    first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/items/{item['id']}/regenerate", json=payload)
+    replay = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/items/{item['id']}/regenerate", json=payload)
+    conflict = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/items/{item['id']}/regenerate",
+        json={"idempotency_key": "regenerate-item-1", "variant_count": 2},
+    )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(fake_jobs.created) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
