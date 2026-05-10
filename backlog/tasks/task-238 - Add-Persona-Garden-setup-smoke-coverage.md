@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 17:04'
-updated_date: '2026-05-10 19:02'
+updated_date: '2026-05-10 19:06'
 labels:
   - persona
   - buddy
@@ -15,6 +15,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
   - 'https://github.com/rmusser01/tldw_server/issues/1533'
+  - 'https://github.com/rmusser01/tldw_server/pull/1534'
 documentation:
   - Docs/Reviews/PERSONA_BUDDY_CURRENT_STATE_AUDIT_2026_05_10.md
 priority: medium
