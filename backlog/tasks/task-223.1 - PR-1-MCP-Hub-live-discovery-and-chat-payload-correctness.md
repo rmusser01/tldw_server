@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@Codex'
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 08:10'
+updated_date: '2026-05-10 08:17'
 labels:
   - mcp
   - webui
@@ -31,7 +31,7 @@ Implement the first PR-sized remediation slice from the MCP Hub walkthrough. Thi
 - [ ] #2 The existing external.tools.refresh MCP tool validates arguments and no longer fails the write-tool pre-exec validator for valid calls.
 - [ ] #3 MCP Hub setup and catalog surfaces report refresh success, refresh failure, and runtime unavailable states clearly.
 - [x] #4 Chat request construction and raw request preview use the same effective MCP tool decision and expose the reason when tools are omitted.
-- [ ] #5 The readiness gate allows degraded but usable health into the app while preserving blocking behavior for unreachable or unhealthy API states.
+- [x] #5 The readiness gate allows degraded but usable health into the app while preserving blocking behavior for unreachable or unhealthy API states.
 - [ ] #6 Focused backend, frontend, and readiness tests cover the changed behavior.
 <!-- AC:END -->
 
@@ -82,6 +82,12 @@ Stage 1 backend-only implementation completed in .worktrees/mcp-hub-pr1-live-dis
 Stage 3 quality review follow-up: verified the blocking issue that TldwChatService captures chat debug metadata but TldwApiClient/chat-rag immediately overwrite the singleton debug snapshot without metadata on live send/stream paths. Adding a regression that requires debug metadata to be forwarded into lower-level chat completion options before patching the implementation.
 
 Stage 3 quality follow-up RED/GREEN: added service tests requiring chatDebugMetadata to be forwarded to lower-level createChatCompletion/streamChatCompletion options. RED run failed with missing debugMetadata on both calls. Implemented ChatCompletionRequestOptions/ChatCompletionStreamOptions carrying debugMetadata, included metadata in TldwApiClient and duplicate chat-rag captures, and passed debugMetadata from TldwChatService. Verification: package-local Stage 3 Vitest passed 42 tests across chat-tools/pageAssistModel/raw-preview/TldwChatService; git diff --check passed. Focused quality re-review approved the fix before Stage 3 commit.
+
+2026-05-10: Stage 3 committed as 49580bd4a (Align MCP chat tool payload debugging) after focused quality re-review approval. Starting Stage 4 readiness-gate work: degraded HTTP 200/206 API health should allow app entry while unreachable, malformed, or explicitly unhealthy responses preserve existing blocking/retry behavior.
+
+2026-05-10 Stage 4 readiness-gate scope: add focused RED Vitest coverage in ServerReadinessGate.test.tsx for HTTP 206 degraded app entry and explicitly unhealthy retry/blocking behavior; add cheap ok/200 degraded coverage if it fits existing patterns; minimally adjust ServerReadinessGate readiness parsing to accept HTTP 200/206 with degraded/healthy/ok while preserving network/malformed/unhealthy retries; rerun focused readiness Vitest and git diff --check; no commit.
+
+2026-05-10 Stage 4 readiness-gate implementation completed. RED focused Vitest failed as expected on HTTP 206 degraded and HTTP 200 degraded health responses staying in the retrying gate while unhealthy retry coverage passed. Implemented structured readiness parsing in ServerReadinessGate to accept only HTTP 200/206 plus body status degraded/healthy/ok; network failures, malformed JSON, non-200/206 responses, and unhealthy statuses remain non-enterable and retry/timeout through existing behavior. Verification: bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx passed 6 tests; git diff --check passed. Bandit not applicable to frontend TypeScript-only changes. No commit.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

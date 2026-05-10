@@ -117,7 +117,9 @@
 **Tests:**
 - [ ] Add readiness tests in `apps/tldw-frontend/__tests__/app/app-networking-guard.test.tsx` or a focused gate test to cover HTTP 206 degraded entry, healthy entry, and unhealthy retry/timeout behavior.
 
-**Status:** Not Started
+**Status:** Complete
+
+**Verification Notes:** Stage 4 RED focused Vitest failed as expected on HTTP 206 degraded and HTTP 200 degraded health responses staying in the retrying gate. Implemented structured readiness parsing that accepts HTTP 200/206 with `status: degraded`, `status: healthy`, or `status: ok`. Focused readiness Vitest passed 6 tests.
 
 ---
 
