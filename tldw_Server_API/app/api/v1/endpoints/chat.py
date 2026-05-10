@@ -1290,14 +1290,24 @@ def _record_persona_telemetry_hooks(
     model: str,
     user_id: str | None,
     character_id: int | None,
+    assistant_kind: str | None,
+    assistant_id: str | None,
     debug_id: str | None,
 ) -> None:
     """Emit metric/log hooks for persona telemetry diagnostics."""
+    normalized_assistant_kind = str(
+        assistant_kind or ("character" if character_id is not None else "unknown")
+    ).strip().lower() or "unknown"
+    normalized_assistant_id = str(
+        assistant_id or (character_id if normalized_assistant_kind == "character" else "none")
+    ).strip() or "none"
     labels = {
         "provider": str(provider or "unknown"),
         "model": str(model or "unknown"),
         "user_id": str(user_id or "unknown"),
         "character_id": str(character_id or "none"),
+        "assistant_kind": normalized_assistant_kind,
+        "assistant_id": normalized_assistant_id,
     }
 
     try:
@@ -1328,11 +1338,13 @@ def _record_persona_telemetry_hooks(
     if ioo >= _PERSONA_IOO_ALERT_THRESHOLD:
         log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
         logger.warning(
-            "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={}",
+            "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={} assistant_kind={} assistant_id={}",
             debug_id or "n/a",
             ioo,
             labels["user_id"],
             labels["character_id"],
+            labels["assistant_kind"],
+            labels["assistant_id"],
         )
 
     if ior < _PERSONA_IOR_LOW_ALERT_THRESHOLD:
@@ -1340,7 +1352,10 @@ def _record_persona_telemetry_hooks(
     elif ior > _PERSONA_IOR_HIGH_ALERT_THRESHOLD:
         log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
 
-    window_key = f"{labels['user_id']}:{labels['character_id']}"
+    window_key = (
+        f"{labels['user_id']}:{labels['assistant_kind']}:"
+        f"{labels['assistant_id']}:{labels['character_id']}"
+    )
     with _persona_alert_guard:
         window = _persona_ioo_windows[window_key]
         window.append(1 if ioo >= _PERSONA_IOO_ALERT_THRESHOLD else 0)
@@ -3361,6 +3376,29 @@ async def create_chat_completion(
                 and assistant_context.get("assistant_kind") == "persona"
                 and bool(persona_assistant_id)
             )
+            telemetry_assistant_kind = (
+                str(assistant_context.get("assistant_kind") or "").strip()
+                if isinstance(assistant_context, dict)
+                else ""
+            )
+            telemetry_assistant_id_from_context = (
+                str(assistant_context.get("assistant_id") or "").strip()
+                if isinstance(assistant_context, dict)
+                else ""
+            )
+            telemetry_assistant_id = (
+                telemetry_assistant_id_from_context
+                if telemetry_assistant_id_from_context
+                else (
+                    str(character_db_id_for_context)
+                    if telemetry_assistant_kind != "persona"
+                    and character_db_id_for_context is not None
+                    else ""
+                )
+            )
+            should_record_persona_telemetry = (
+                is_persona_backed_chat or character_db_id_for_context is not None
+            )
 
             if persona_strategy != "off" and is_persona_backed_chat:
                 persona_exemplars = await asyncio.to_thread(
@@ -3951,7 +3989,7 @@ async def create_chat_completion(
 
             async def _on_stream_full_reply_for_persona_telemetry(full_reply: str) -> None:
                 assistant_text = str(full_reply or "")
-                if character_db_id_for_context is not None:
+                if should_record_persona_telemetry:
                     persona_telemetry = compute_persona_exemplar_telemetry(
                         output_text=assistant_text,
                         selected_exemplars=persona_selected_exemplars,
@@ -3974,6 +4012,8 @@ async def create_chat_completion(
                         model=model,
                         user_id=user_id,
                         character_id=character_db_id_for_context,
+                        assistant_kind=telemetry_assistant_kind,
+                        assistant_id=telemetry_assistant_id,
                         debug_id=debug_id_for_logs,
                     )
 
@@ -4070,7 +4110,7 @@ async def create_chat_completion(
                     if isinstance(encoded_payload, dict)
                     else ""
                 )
-                if isinstance(encoded_payload, dict) and character_db_id_for_context is not None:
+                if isinstance(encoded_payload, dict) and should_record_persona_telemetry:
                     persona_telemetry = compute_persona_exemplar_telemetry(
                         output_text=assistant_reply_text,
                         selected_exemplars=persona_selected_exemplars,
@@ -4094,6 +4134,8 @@ async def create_chat_completion(
                             model=model,
                             user_id=user_id,
                             character_id=character_db_id_for_context,
+                            assistant_kind=telemetry_assistant_kind,
+                            assistant_id=telemetry_assistant_id,
                             debug_id=debug_id_for_logs,
                         )
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
