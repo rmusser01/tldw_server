@@ -134,9 +134,12 @@
 - The final PR notes call out why refresh is explicit and why chat eligibility is shared.
 
 **Verification Commands:**
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q`
-- [ ] `bunx vitest run apps/packages/ui/src/utils/__tests__/chat-tools.test.ts apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx apps/tldw-frontend/__tests__/app/app-networking-guard.test.tsx`
-- [ ] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py tldw_Server_API/app/core/MCP_unified/modules/registry.py tldw_Server_API/app/core/MCP_unified/modules/implementations/external_federation_module.py -f json -o /tmp/bandit_mcp_hub_pr1.json`
-- [ ] `git diff --check`
+- [x] `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q`
+- [x] `cd apps/packages/ui && bun run test src/utils/__tests__/chat-tools.test.ts src/models/__tests__/pageAssistModel.mcp-tools.test.ts src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx src/services/__tests__/tldw-chat.message-sanitization.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx`
+- [x] `cd apps/tldw-frontend && bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx`
+- [x] `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py tldw_Server_API/app/core/MCP_unified/modules/registry.py tldw_Server_API/app/core/MCP_unified/modules/implementations/external_federation_module.py -f json -o /tmp/bandit_mcp_hub_pr1.json`
+- [x] `git diff --check`
 
-**Status:** Not Started
+**Status:** Complete
+
+**Verification Notes:** Backend focused pytest passed 61 tests with 5 warnings. UI package focused Vitest passed 55 tests across six files. Frontend readiness Vitest passed 6 tests. Bandit reported 0 findings in `/tmp/bandit_mcp_hub_pr1.json`. `git diff --check` passed.

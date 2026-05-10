@@ -1,11 +1,11 @@
 ---
 id: TASK-223.1
 title: 'PR 1: MCP Hub live discovery and chat payload correctness'
-status: In Progress
+status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 08:17'
+updated_date: '2026-05-10 08:23'
 labels:
   - mcp
   - webui
@@ -27,12 +27,12 @@ Implement the first PR-sized remediation slice from the MCP Hub walkthrough. Thi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Managed external server create, update, and import can trigger live external tool discovery refresh without backend restart.
-- [ ] #2 The existing external.tools.refresh MCP tool validates arguments and no longer fails the write-tool pre-exec validator for valid calls.
-- [ ] #3 MCP Hub setup and catalog surfaces report refresh success, refresh failure, and runtime unavailable states clearly.
+- [x] #1 Managed external server create, update, and import can trigger live external tool discovery refresh without backend restart.
+- [x] #2 The existing external.tools.refresh MCP tool validates arguments and no longer fails the write-tool pre-exec validator for valid calls.
+- [x] #3 MCP Hub setup and catalog surfaces report refresh success, refresh failure, and runtime unavailable states clearly.
 - [x] #4 Chat request construction and raw request preview use the same effective MCP tool decision and expose the reason when tools are omitted.
 - [x] #5 The readiness gate allows degraded but usable health into the app while preserving blocking behavior for unreachable or unhealthy API states.
-- [ ] #6 Focused backend, frontend, and readiness tests cover the changed behavior.
+- [x] #6 Focused backend, frontend, and readiness tests cover the changed behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -88,14 +88,24 @@ Stage 3 quality follow-up RED/GREEN: added service tests requiring chatDebugMeta
 2026-05-10 Stage 4 readiness-gate scope: add focused RED Vitest coverage in ServerReadinessGate.test.tsx for HTTP 206 degraded app entry and explicitly unhealthy retry/blocking behavior; add cheap ok/200 degraded coverage if it fits existing patterns; minimally adjust ServerReadinessGate readiness parsing to accept HTTP 200/206 with degraded/healthy/ok while preserving network/malformed/unhealthy retries; rerun focused readiness Vitest and git diff --check; no commit.
 
 2026-05-10 Stage 4 readiness-gate implementation completed. RED focused Vitest failed as expected on HTTP 206 degraded and HTTP 200 degraded health responses staying in the retrying gate while unhealthy retry coverage passed. Implemented structured readiness parsing in ServerReadinessGate to accept only HTTP 200/206 plus body status degraded/healthy/ok; network failures, malformed JSON, non-200/206 responses, and unhealthy statuses remain non-enterable and retry/timeout through existing behavior. Verification: bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx passed 6 tests; git diff --check passed. Bandit not applicable to frontend TypeScript-only changes. No commit.
+
+2026-05-10: Stage 4 committed as 6d9162f84 (Allow degraded API readiness entry) after spec and quality reviews approved. Beginning Stage 5 focused final verification: backend MCP pytest, frontend MCP/readiness Vitest, Bandit over touched backend production files, and git diff --check.
+
+2026-05-10 Stage 5 final verification completed. Backend: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q -> 61 passed, 5 warnings. UI package: bun run test chat-tools/pageAssistModel/raw-preview/TldwChatService/MCPHub tab tests -> 6 files passed, 55 tests. Frontend readiness: bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx -> 6 passed. Bandit: 0 findings, output /tmp/bandit_mcp_hub_pr1.json. git diff --check passed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR 1 implementation completed for MCP Hub live discovery and chat payload correctness. Added backend live external discovery reconciliation so managed server changes can refresh the running MCP runtime without backend restart, including registry remapping and external federation argument validation. Added MCP Hub frontend refresh/invalidation hooks and Tool Catalog refresh feedback so setup/catalog surfaces report refresh success and degraded refresh outcomes. Shared chat MCP tool eligibility between pageAssistModel and raw preview, preserved omission reasons in debug metadata outside the wire payload, and forwarded metadata through the live chat client capture path. Updated the frontend readiness gate to allow degraded but enterable HTTP 200/206 health responses while preserving retry/blocking for unreachable, malformed, non-enterable, and unhealthy responses. Verification passed: backend focused pytest 61 passed; UI package focused Vitest 55 passed; frontend readiness Vitest 6 passed; Bandit over touched backend production files had 0 findings at /tmp/bandit_mcp_hub_pr1.json; git diff --check passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
