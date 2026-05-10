@@ -121,3 +121,35 @@ def test_private_mapping_redaction_is_recursive_and_preserves_safe_metadata():
     assert "known private note" not in rendered
     assert "ciphertext:secret" not in rendered
     assert "wrapped:secret" not in rendered
+
+
+def test_private_mapping_redacts_human_readable_private_fields_recursively():
+    payload = {
+        "dataset_id": "dataset-1",
+        "status": "active",
+        "title": "known private note title",
+        "metadata": {
+            "label": "known private label",
+            "body": "known private body",
+            "entity_kind": "note",
+        },
+        "items": [
+            {
+                "content": "known private item content",
+                "stable_key": "note:1",
+            }
+        ],
+    }
+
+    redacted = redact_private_mapping_for_log(payload)
+    rendered = repr(redacted)
+
+    assert redacted["dataset_id"] == "dataset-1"
+    assert redacted["status"] == "active"
+    assert redacted["metadata"]["entity_kind"] == "note"
+    assert redacted["items"][0]["stable_key"] == "note:1"
+    assert redacted["title"] == "<redacted>"
+    assert redacted["metadata"]["label"] == "<redacted>"
+    assert redacted["metadata"]["body"] == "<redacted>"
+    assert redacted["items"][0]["content"] == "<redacted>"
+    assert "known private" not in rendered

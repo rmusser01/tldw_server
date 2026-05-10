@@ -371,19 +371,14 @@ class SyncV2Service:
 
         selected_domains = self._selected_domains(dataset, domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
-        raw_limit = max(page_limit * 10 + 1, page_limit + 1)
-        raw_envelopes = self.store.list_envelopes_after(
-            dataset_id,
-            since_sequence,
-            limit=raw_limit,
+        raw_envelopes, visible = self._scan_pull_page(
+            dataset_id=dataset_id,
+            device_id=device_id,
+            since_sequence=since_sequence,
             domains=selected_domains,
+            page_limit=page_limit,
+            include_own_changes=include_own_changes,
         )
-
-        visible: list[SyncEnvelope] = []
-        for envelope in raw_envelopes:
-            if not include_own_changes and envelope.device_id == device_id:
-                continue
-            visible.append(envelope)
 
         page = visible[:page_limit]
         has_more = len(visible) > page_limit
@@ -534,6 +529,49 @@ class SyncV2Service:
                 )
             except SyncStoreError:
                 continue
+
+    def _scan_pull_page(
+        self,
+        *,
+        dataset_id: str,
+        device_id: str,
+        since_sequence: int,
+        domains: Sequence[SyncDomain],
+        page_limit: int,
+        include_own_changes: bool,
+    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
+        chunk_size = max(page_limit + 1, self.settings.max_pull_page_size)
+        scan_cursor = since_sequence
+        raw_seen: list[SyncEnvelope] = []
+        visible: list[SyncEnvelope] = []
+
+        while len(visible) <= page_limit:
+            raw_chunk = self.store.list_envelopes_after(
+                dataset_id,
+                scan_cursor,
+                limit=chunk_size,
+                domains=domains,
+            )
+            if not raw_chunk:
+                break
+
+            raw_seen.extend(raw_chunk)
+            last_sequence = raw_chunk[-1].server_sequence
+            if last_sequence <= scan_cursor:
+                break
+            scan_cursor = last_sequence
+
+            for envelope in raw_chunk:
+                if not include_own_changes and envelope.device_id == device_id:
+                    continue
+                visible.append(envelope)
+                if len(visible) > page_limit:
+                    break
+
+            if len(raw_chunk) < chunk_size:
+                break
+
+        return raw_seen, visible
 
     def _manifest_dataset(
         self,

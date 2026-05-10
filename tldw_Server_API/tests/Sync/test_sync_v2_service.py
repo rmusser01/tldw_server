@@ -326,6 +326,58 @@ def test_pull_honors_filters_echo_policy_page_size_and_has_more(
     assert next_page.has_more is False
 
 
+def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(max_batch_size=20, max_pull_page_size=1),
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    own_envelopes = [
+        _envelope(
+            client_envelope_id=f"own-{index}",
+            entity_id=f"note-own-{index}",
+            stable_key=f"note:own:{index}",
+            payload_hash=f"sha256:own-{index}",
+        )
+        for index in range(11)
+    ]
+    remote_envelope = _envelope(
+        client_envelope_id="remote-after-echoes",
+        entity_id="note-remote",
+        stable_key="note:remote",
+        device_id="device-2",
+        payload_hash="sha256:remote",
+    )
+    service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[*own_envelopes, remote_envelope],
+    )
+
+    page = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor="0",
+        domains=["notes"],
+        page_size=1,
+        include_own_changes=False,
+    )
+
+    assert [envelope.client_envelope_id for envelope in page.envelopes] == [
+        "remote-after-echoes"
+    ]
+    assert page.next_cursor == "12"
+    assert page.has_more is False
+
+
 def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
     sync_service: SyncV2Service,
     sync_store: SyncV2Store,

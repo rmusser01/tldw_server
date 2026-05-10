@@ -4,7 +4,7 @@ title: Add Sync v2 service layer
 status: Done
 assignee: []
 created_date: '2026-05-10 03:59'
-updated_date: '2026-05-10 04:08'
+updated_date: '2026-05-10 04:14'
 labels:
   - sync
   - service
@@ -53,12 +53,24 @@ Verification:
 
 Docs: no user-facing docs updated; this task is internal service-layer substrate and endpoint/API docs are later tasks.
 Known blockers: none.
+
+Spec review follow-up: fixing two Task 3 blockers. Plan: add regressions for echo-filled pull windows and recursive human-readable private-field redaction; run the focused service/security tests to see them fail; patch SyncV2Service.pull bounded scan paging and security redaction policy; rerun focused tests, existing Sync model/store tests, git diff --check, and Bandit; then mark task done and commit a fix.
+
+Spec review follow-up complete. Added regression coverage for pull paging when same-device echoes fill the first raw window before a later remote row, and for recursive redaction of label/title/body/content private text fields. Fixed pull to scan in bounded chunks while advancing the server-sequence cursor until it finds page_size + 1 visible rows or exhausts the store. Fixed private mapping redaction to conservatively redact human-readable content fields while preserving safe IDs/status/routing fields.
+
+Follow-up verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 17 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/security.py -f json -o /tmp/bandit_sync_v2_service_fix.json: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the Sync v2 service layer for capabilities, device registration, dataset enrollment, push, pull, and restore manifest assembly without wiring endpoints or concrete domain adapters. The implementation keeps adapters injectable, returns per-envelope push outcomes, validates adapter versions and private payload metadata, redacts ciphertext/key material from log helpers, and exposes metadata-only restore manifests for private datasets. Added focused service/security tests and small Sync DB/store read helpers needed by restore manifests.
+
+Spec review fix: hardened SyncV2Service.pull paging so echo-filtered pulls continue scanning in bounded server-sequence chunks until a visible page or exhaustion, and expanded private log redaction to recursively redact human-readable private fields such as labels, titles, bodies, and content.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

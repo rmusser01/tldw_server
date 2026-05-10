@@ -46,10 +46,27 @@ _PRIVATE_CLEAR_PAYLOAD_ALLOWED_KEYS = {
 }
 
 _SENSITIVE_KEYS = {
+    "abstract",
+    "body",
     "ciphertext",
+    "content",
+    "description",
+    "display_name",
+    "excerpt",
     "kdf_metadata",
+    "label",
+    "message",
+    "name",
+    "note",
     "payload_ciphertext",
     "payload_clear",
+    "plain_text",
+    "plaintext",
+    "prompt",
+    "summary",
+    "text",
+    "title",
+    "transcript",
     "wrapped_key",
     "wrapped_key_blob",
 }
