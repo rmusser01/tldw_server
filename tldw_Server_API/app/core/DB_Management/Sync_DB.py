@@ -837,6 +837,32 @@ class SyncDatabase:
             return None
         return _dataset_from_row(row)
 
+    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
+        """List active Sync v2 datasets owned by a user."""
+
+        result = self.execute(
+            """
+            SELECT * FROM sync_datasets
+             WHERE owner_user_id = ? AND archived_at IS NULL
+             ORDER BY created_at ASC, dataset_id ASC
+            """,
+            (user_id,),
+        )
+        return [_dataset_from_row(row) for row in result.rows]
+
+    def list_devices_for_user(self, user_id: str) -> list[SyncDevice]:
+        """List Sync v2 devices registered by a user."""
+
+        result = self.execute(
+            """
+            SELECT * FROM sync_devices
+             WHERE user_id = ?
+             ORDER BY last_seen_at DESC, device_id ASC
+            """,
+            (user_id,),
+        )
+        return [_device_from_row(row) for row in result.rows]
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         with self.backend.transaction() as conn:
             self._require_dataset_domain(

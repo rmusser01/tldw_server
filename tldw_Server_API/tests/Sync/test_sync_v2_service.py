@@ -1,0 +1,407 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.adapters import (
+    AdapterAccepted,
+    AdapterConflict,
+    AdapterRejected,
+    SyncAdapterRegistry,
+    StaticSyncAdapter,
+)
+from tldw_Server_API.app.core.Sync.v2.models import (
+    SyncConflictCreate,
+    SyncEnvelopeCreate,
+    SyncKeyRecordCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
+from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
+
+
+def _clock() -> str:
+    return "2026-05-10T12:00:00+00:00"
+
+
+@pytest.fixture()
+def sync_store(tmp_path: Path) -> SyncV2Store:
+    return SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_service.db"))
+
+
+@pytest.fixture()
+def registry() -> SyncAdapterRegistry:
+    registry = SyncAdapterRegistry()
+    registry.register(StaticSyncAdapter(domain="notes", supported_adapter_versions={1}))
+    registry.register(StaticSyncAdapter(domain="chat", supported_adapter_versions={1}))
+    registry.register(StaticSyncAdapter(domain="source_cache", supported_adapter_versions={1}))
+    return registry
+
+
+@pytest.fixture()
+def sync_service(sync_store: SyncV2Store, registry: SyncAdapterRegistry) -> SyncV2Service:
+    return SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(
+            max_batch_size=10,
+            max_pull_page_size=2,
+            max_envelope_payload_bytes=1024,
+            max_attachment_bytes=4096,
+        ),
+    )
+
+
+def _envelope(**overrides) -> SyncEnvelopeCreate:
+    payload = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-1",
+        "domain": "notes",
+        "entity_id": "note-1",
+        "stable_key": "note:note-1",
+        "operation": "upsert",
+        "device_id": "device-1",
+        "client_timestamp": "2026-05-10T00:00:00+00:00",
+        "entity_version": "v1",
+        "routing_metadata": {"entity_kind": "note"},
+        "payload_ciphertext": "ciphertext:opaque",
+        "payload_clear": {"status": "active"},
+        "payload_hash": "sha256:note-1",
+        "payload_size_bytes": 24,
+        "adapter_version": 1,
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
+def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
+    sync_service: SyncV2Service,
+):
+    capabilities = sync_service.capabilities()
+
+    assert capabilities.protocol_version == 2
+    assert capabilities.min_supported_protocol_version == 2
+    assert capabilities.supported_domains == ["chat", "notes", "source_cache"]
+    assert capabilities.max_batch_size == 10
+    assert capabilities.max_envelope_payload_bytes == 1024
+    assert capabilities.max_attachment_bytes == 4096
+    assert capabilities.encryption_policies == [
+        "client_private_v1",
+        "server_trusted",
+        "shared_workspace_v1",
+    ]
+
+
+def test_device_registration_creates_and_refreshes_same_device(sync_service: SyncV2Service):
+    first = sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        client_version="0.1.0",
+        capabilities={"domains": ["notes"]},
+        device_id="device-1",
+    )
+    refreshed = sync_service.register_device(
+        user_id="user-1",
+        display_name="Renamed Laptop",
+        client_type="chatbook",
+        client_version="0.1.1",
+        capabilities={"domains": ["notes", "chat"]},
+        device_id="device-1",
+    )
+
+    assert refreshed.device.device_id == first.device.device_id
+    assert refreshed.device.registered_at == first.device.registered_at
+    assert refreshed.device.display_name == "Renamed Laptop"
+    assert refreshed.device.client_version == "0.1.1"
+    assert refreshed.device.capabilities == {"domains": ["notes", "chat"]}
+
+
+def test_dataset_enrollment_creates_personal_dataset_by_default(sync_service: SyncV2Service):
+    enrolled = sync_service.enroll_dataset(user_id="user-1")
+
+    assert enrolled.dataset.dataset_id == "dataset-generated"
+    assert enrolled.dataset.owner_user_id == "user-1"
+    assert enrolled.dataset.scope_type == "personal"
+    assert enrolled.dataset.encryption_policy == "client_private_v1"
+    assert enrolled.dataset.domains == ["chat", "notes", "source_cache"]
+    assert enrolled.key_setup_required is True
+
+
+def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
+    registry: SyncAdapterRegistry,
+):
+    assert registry.get("notes").domain == "notes"
+
+    with pytest.raises(KeyError):
+        registry.get("media")
+
+
+def test_push_rejects_envelopes_for_datasets_user_cannot_access(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    result = sync_service.push(
+        user_id="user-2",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[_envelope()],
+    )
+
+    assert result.accepted == []
+    assert result.conflicts == []
+    assert result.rejected[0].client_envelope_id == "env-1"
+    assert result.rejected[0].error_code == "dataset_not_found_or_forbidden"
+
+
+def test_push_returns_per_envelope_accepted_rejected_and_conflict_outcomes(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(StaticSyncAdapter(domain="notes", supported_adapter_versions={1}))
+    registry.register(
+        StaticSyncAdapter(
+            domain="chat",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-rejected": AdapterRejected(
+                    client_envelope_id="env-rejected",
+                    error_code="domain_validation_failed",
+                    message="invalid chat shape",
+                ),
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="chat",
+                    entity_id="conversation-1",
+                    conflict_type="version_divergence",
+                    message="chat conflict",
+                ),
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes", "chat"])
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(client_envelope_id="env-accepted"),
+            _envelope(
+                client_envelope_id="env-rejected",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:chat-rejected",
+            ),
+            _envelope(
+                client_envelope_id="env-conflict",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:chat-conflict",
+            ),
+        ],
+    )
+
+    assert result.accepted[0].client_envelope_id == "env-accepted"
+    assert result.rejected[0].client_envelope_id == "env-rejected"
+    assert result.rejected[0].error_code == "domain_validation_failed"
+    assert result.conflicts[0].client_envelope_id == "env-conflict"
+    assert result.conflicts[0].conflict_id == "conflict-generated"
+    assert result.next_cursor == str(result.accepted[0].server_sequence)
+
+
+def test_push_rejects_unsupported_adapter_versions_per_envelope(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(adapter_version=2)],
+    )
+
+    assert result.accepted == []
+    assert result.rejected[0].client_envelope_id == "env-1"
+    assert result.rejected[0].error_code == "unsupported_adapter_version"
+
+
+def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-1")],
+    )
+
+    first_pull = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor="0",
+        include_own_changes=True,
+    )
+    second_pull = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor=first_pull.next_cursor,
+        include_own_changes=True,
+    )
+
+    assert [envelope.client_envelope_id for envelope in first_pull.envelopes] == ["env-1"]
+    assert first_pull.next_cursor == "1"
+    assert second_pull.envelopes == []
+    assert second_pull.next_cursor == "1"
+
+
+def test_pull_honors_filters_echo_policy_page_size_and_has_more(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes", "chat"])
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(client_envelope_id="own-note", entity_id="note-own", payload_hash="sha256:own"),
+            _envelope(
+                client_envelope_id="remote-chat",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                device_id="device-2",
+                payload_hash="sha256:chat",
+            ),
+            _envelope(
+                client_envelope_id="remote-note-1",
+                entity_id="note-remote-1",
+                stable_key="note:remote-1",
+                device_id="device-2",
+                payload_hash="sha256:remote-1",
+            ),
+            _envelope(
+                client_envelope_id="remote-note-2",
+                entity_id="note-remote-2",
+                stable_key="note:remote-2",
+                device_id="device-2",
+                payload_hash="sha256:remote-2",
+            ),
+        ],
+    )
+
+    page = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor="0",
+        domains=["notes"],
+        page_size=1,
+        include_own_changes=False,
+    )
+    next_page = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor=page.next_cursor,
+        domains=["notes"],
+        page_size=1,
+        include_own_changes=False,
+    )
+
+    assert [envelope.client_envelope_id for envelope in page.envelopes] == ["remote-note-1"]
+    assert page.next_cursor == "3"
+    assert page.has_more is True
+    assert [envelope.client_envelope_id for envelope in next_page.envelopes] == ["remote-note-2"]
+    assert next_page.has_more is False
+
+
+def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+):
+    sync_service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Private Laptop",
+        client_type="chatbook",
+        client_version="0.1.0",
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes", "source_cache"],
+        metadata={"label": "known private label"},
+    )
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="note-private",
+                payload_ciphertext="ciphertext:known-private-note",
+                payload_clear={"status": "active"},
+                payload_size_bytes=128,
+            ),
+            _envelope(
+                client_envelope_id="attachment-ref",
+                domain="source_cache",
+                entity_id="source-1",
+                stable_key="source:1",
+                payload_hash="sha256:source",
+                payload_clear={
+                    "attachment_id": "attachment-1",
+                    "availability": "available",
+                    "size_bytes": 2048,
+                },
+                payload_size_bytes=2048,
+            ),
+        ],
+    )
+    sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-1",
+            dataset_id="dataset-1",
+            domain="notes",
+            entity_id="note-1",
+            conflict_type="version_divergence",
+        )
+    )
+    sync_store.store_key_record(
+        SyncKeyRecordCreate(
+            key_record_id="key-1",
+            dataset_id="dataset-1",
+            user_id="user-1",
+            device_id="device-1",
+            key_purpose="dataset_recovery",
+            wrapped_key_blob="wrapped:secret-key",
+        )
+    )
+
+    manifest = sync_service.restore_manifest(user_id="user-1")
+
+    assert manifest.generated_at == _clock()
+    assert manifest.devices[0].device_id == "device-1"
+    assert manifest.devices[0].last_seen_at is not None
+    assert manifest.datasets[0].dataset_id == "dataset-1"
+    assert manifest.datasets[0].encryption_policy == "client_private_v1"
+    assert manifest.datasets[0].metadata == {}
+    assert manifest.datasets[0].approximate_counts == {"notes": 1, "source_cache": 1}
+    assert manifest.datasets[0].unresolved_conflicts == 1
+    assert manifest.datasets[0].attachment_availability == {"available": 1}
+    assert manifest.datasets[0].attachment_size_classes == {"small": 1}
+    assert manifest.datasets[0].key_recovery_available is True
+    assert "known private label" not in repr(manifest)
+    assert "ciphertext:known-private-note" not in repr(manifest)
+    assert "wrapped:secret-key" not in repr(manifest)

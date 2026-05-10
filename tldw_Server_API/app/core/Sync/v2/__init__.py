@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Sync v2 core substrate."""
 
+from typing import TYPE_CHECKING
+
 from .errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
@@ -21,7 +23,17 @@ from .models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
 )
-from .store import SyncV2Store
+
+if TYPE_CHECKING:
+    from .store import SyncV2Store
+
+
+def __getattr__(name: str) -> object:
+    if name == "SyncV2Store":
+        from .store import SyncV2Store
+
+        return SyncV2Store
+    raise AttributeError(name)
 
 __all__ = [
     "SyncConflict",

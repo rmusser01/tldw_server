@@ -1,0 +1,619 @@
+from __future__ import annotations
+
+"""Business service for Sync v2 protocol operations."""
+
+from collections import Counter, defaultdict
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
+
+from .adapters import (
+    AdapterAccepted,
+    AdapterConflict,
+    AdapterDeferred,
+    AdapterRejected,
+    SyncAdapterRegistry,
+)
+from .errors import (
+    SyncIdempotencyConflictError,
+    SyncInvalidDomainError,
+    SyncStoreError,
+)
+from .models import (
+    EncryptionPolicy,
+    SyncConflictCreate,
+    SyncDataset,
+    SyncDatasetCreate,
+    SyncDevice,
+    SyncDeviceCursor,
+    SyncDeviceUpsert,
+    SyncDomain,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
+)
+from .security import PrivatePayloadValidationError, validate_private_payload
+from .store import SyncV2Store
+
+
+@dataclass(frozen=True, slots=True)
+class SyncV2Settings:
+    """Server settings surfaced through Sync v2 capabilities."""
+
+    protocol_version: int = 2
+    min_supported_protocol_version: int = 2
+    max_batch_size: int = 100
+    max_pull_page_size: int = 100
+    max_envelope_payload_bytes: int = 262_144
+    max_attachment_bytes: int = 1_048_576
+    encryption_policies: list[EncryptionPolicy] = field(
+        default_factory=lambda: [
+            "client_private_v1",
+            "server_trusted",
+            "shared_workspace_v1",
+        ]
+    )
+    restore_manifest_scan_limit: int = 10_000
+
+
+@dataclass(frozen=True, slots=True)
+class SyncV2Capabilities:
+    protocol_version: int
+    min_supported_protocol_version: int
+    supported_domains: list[SyncDomain]
+    encryption_policies: list[EncryptionPolicy]
+    max_batch_size: int
+    max_envelope_payload_bytes: int
+    max_attachment_bytes: int
+    supports_restore_manifest: bool = True
+    supports_conflicts: bool = True
+    supports_attachments: bool = True
+    server_time: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceRegistration:
+    device: SyncDevice
+    server_capabilities: SyncV2Capabilities
+    required_actions: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDatasetEnrollment:
+    dataset: SyncDataset
+    cursors: dict[str, str] = field(default_factory=dict)
+    key_setup_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPushAccepted:
+    client_envelope_id: str
+    server_sequence: int
+    domain: SyncDomain
+    entity_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPushRejected:
+    client_envelope_id: str
+    error_code: str
+    message: str
+    retryable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPushConflict:
+    conflict_id: str
+    client_envelope_id: str
+    domain: SyncDomain
+    entity_id: str
+    server_sequence: int | None = None
+    message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPushResult:
+    dataset_id: str
+    accepted: list[SyncPushAccepted] = field(default_factory=list)
+    rejected: list[SyncPushRejected] = field(default_factory=list)
+    conflicts: list[SyncPushConflict] = field(default_factory=list)
+    next_cursor: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPullResult:
+    dataset_id: str
+    envelopes: list[SyncEnvelope] = field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestoreManifestDevice:
+    device_id: str
+    display_name: str | None
+    client_type: str | None
+    client_version: str | None
+    last_seen_at: str | None
+    revoked_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestoreManifestDataset:
+    dataset_id: str
+    scope_type: str
+    encryption_policy: EncryptionPolicy
+    domains: list[SyncDomain]
+    workspace_id: str | None
+    approximate_counts: dict[str, int] = field(default_factory=dict)
+    byte_estimates: dict[str, int] = field(default_factory=dict)
+    last_updated_at: str | None = None
+    unresolved_conflicts: int = 0
+    attachment_availability: dict[str, int] = field(default_factory=dict)
+    attachment_size_classes: dict[str, int] = field(default_factory=dict)
+    key_recovery_available: bool = False
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestoreManifest:
+    datasets: list[SyncRestoreManifestDataset] = field(default_factory=list)
+    devices: list[SyncRestoreManifestDevice] = field(default_factory=list)
+    generated_at: str | None = None
+    filters_applied: dict[str, object] = field(default_factory=dict)
+
+
+class SyncV2Service:
+    """Core Sync v2 service with injected persistence and adapter dependencies."""
+
+    def __init__(
+        self,
+        *,
+        store: SyncV2Store,
+        adapters: SyncAdapterRegistry,
+        clock: Callable[[], str] | None = None,
+        id_factory: Callable[[str], str] | None = None,
+        settings: SyncV2Settings | None = None,
+    ) -> None:
+        self.store = store
+        self.adapters = adapters
+        self.clock = clock or (lambda: "")
+        self.id_factory = id_factory or (lambda prefix: f"{prefix}-{self.clock()}")
+        self.settings = settings or SyncV2Settings()
+
+    def capabilities(self) -> SyncV2Capabilities:
+        return SyncV2Capabilities(
+            protocol_version=self.settings.protocol_version,
+            min_supported_protocol_version=self.settings.min_supported_protocol_version,
+            supported_domains=self.adapters.supported_domains,
+            encryption_policies=list(self.settings.encryption_policies),
+            max_batch_size=self.settings.max_batch_size,
+            max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
+            max_attachment_bytes=self.settings.max_attachment_bytes,
+            server_time=self.clock() or None,
+        )
+
+    def register_device(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        client_type: str,
+        device_id: str | None = None,
+        client_version: str | None = None,
+        capabilities: dict[str, object] | None = None,
+    ) -> SyncDeviceRegistration:
+        device = self.store.upsert_device(
+            SyncDeviceUpsert(
+                device_id=device_id or self.id_factory("device"),
+                user_id=user_id,
+                display_name=display_name,
+                client_type=client_type,
+                client_version=client_version,
+                capabilities=dict(capabilities or {}),
+            )
+        )
+        return SyncDeviceRegistration(device=device, server_capabilities=self.capabilities())
+
+    def enroll_dataset(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str | None = None,
+        scope_type: str = "personal",
+        domains: Sequence[SyncDomain] | None = None,
+        encryption_policy: EncryptionPolicy = "client_private_v1",
+        workspace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SyncDatasetEnrollment:
+        enrolled_domains = list(domains or self.adapters.supported_domains)
+        dataset = self.store.enroll_dataset(
+            SyncDatasetCreate(
+                dataset_id=dataset_id or self.id_factory("dataset"),
+                owner_user_id=user_id,
+                scope_type=scope_type,
+                encryption_policy=encryption_policy,
+                domains=enrolled_domains,
+                workspace_id=workspace_id,
+                metadata=dict(metadata or {}),
+            )
+        )
+        return SyncDatasetEnrollment(
+            dataset=dataset,
+            cursors={domain: "0" for domain in dataset.domains},
+            key_setup_required=dataset.encryption_policy == "client_private_v1",
+        )
+
+    def push(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        envelopes: Sequence[SyncEnvelopeCreate],
+    ) -> SyncPushResult:
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            return SyncPushResult(
+                dataset_id=dataset_id,
+                rejected=[
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="dataset_not_found_or_forbidden",
+                        message="Sync dataset was not found or is not accessible",
+                    )
+                    for envelope in envelopes
+                ],
+            )
+
+        accepted: list[SyncPushAccepted] = []
+        rejected: list[SyncPushRejected] = []
+        conflicts: list[SyncPushConflict] = []
+
+        for envelope in envelopes[: self.settings.max_batch_size]:
+            envelope = replace(envelope, device_id=envelope.device_id or device_id)
+            try:
+                outcome = self._evaluate_envelope(dataset, envelope)
+            except KeyError:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="unknown_domain",
+                        message=f"Sync domain is not registered: {envelope.domain}",
+                    )
+                )
+                continue
+            except PrivatePayloadValidationError as exc:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="private_payload_validation_failed",
+                        message=str(exc),
+                    )
+                )
+                continue
+
+            if isinstance(outcome, AdapterRejected):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=outcome.client_envelope_id,
+                        error_code=outcome.error_code,
+                        message=outcome.message,
+                        retryable=outcome.retryable,
+                    )
+                )
+                continue
+            if isinstance(outcome, AdapterDeferred):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=outcome.client_envelope_id,
+                        error_code="adapter_deferred",
+                        message=outcome.message,
+                        retryable=True,
+                    )
+                )
+                continue
+            if isinstance(outcome, AdapterConflict):
+                conflicts.append(self._store_conflict(dataset, envelope, outcome))
+                continue
+
+            try:
+                inserted = self.store.insert_envelope(replace(envelope, status="accepted"))
+            except SyncInvalidDomainError:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="domain_not_enrolled",
+                        message=f"Sync domain is not enrolled for this dataset: {envelope.domain}",
+                    )
+                )
+                continue
+            except SyncIdempotencyConflictError:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="idempotency_conflict",
+                        message="Sync envelope ID was reused with different content",
+                    )
+                )
+                continue
+            accepted.append(
+                SyncPushAccepted(
+                    client_envelope_id=inserted.client_envelope_id,
+                    server_sequence=inserted.server_sequence,
+                    domain=inserted.domain,
+                    entity_id=inserted.entity_id,
+                )
+            )
+
+        next_sequence = max((item.server_sequence for item in accepted), default=None)
+        return SyncPushResult(
+            dataset_id=dataset_id,
+            accepted=accepted,
+            rejected=rejected,
+            conflicts=conflicts,
+            next_cursor=str(next_sequence) if next_sequence is not None else None,
+        )
+
+    def pull(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        cursor: str | int | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        page_size: int | None = None,
+        include_own_changes: bool = False,
+    ) -> SyncPullResult:
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, domains)
+        if dataset is None:
+            return SyncPullResult(dataset_id=dataset_id, next_cursor=str(since_sequence))
+
+        selected_domains = self._selected_domains(dataset, domains)
+        page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
+        raw_limit = max(page_limit * 10 + 1, page_limit + 1)
+        raw_envelopes = self.store.list_envelopes_after(
+            dataset_id,
+            since_sequence,
+            limit=raw_limit,
+            domains=selected_domains,
+        )
+
+        visible: list[SyncEnvelope] = []
+        for envelope in raw_envelopes:
+            if not include_own_changes and envelope.device_id == device_id:
+                continue
+            visible.append(envelope)
+
+        page = visible[:page_limit]
+        has_more = len(visible) > page_limit
+        next_sequence = (
+            page[-1].server_sequence
+            if page
+            else max((envelope.server_sequence for envelope in raw_envelopes), default=since_sequence)
+        )
+        self._update_cursors(dataset_id, device_id, selected_domains, next_sequence)
+        return SyncPullResult(
+            dataset_id=dataset_id,
+            envelopes=page,
+            next_cursor=str(next_sequence),
+            has_more=has_more,
+        )
+
+    def restore_manifest(
+        self,
+        *,
+        user_id: str,
+        dataset_ids: Sequence[str] | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+    ) -> SyncRestoreManifest:
+        allowed_dataset_ids = set(dataset_ids or [])
+        selected_domains = set(domains or [])
+        datasets = [
+            dataset
+            for dataset in self.store.list_datasets_for_user(user_id)
+            if not allowed_dataset_ids or dataset.dataset_id in allowed_dataset_ids
+        ]
+        devices = [
+            SyncRestoreManifestDevice(
+                device_id=device.device_id,
+                display_name=device.display_name,
+                client_type=device.client_type,
+                client_version=device.client_version,
+                last_seen_at=device.last_seen_at,
+                revoked_at=device.revoked_at,
+            )
+            for device in self.store.list_devices_for_user(user_id)
+        ]
+
+        manifest_datasets = [
+            self._manifest_dataset(dataset, user_id=user_id, domains=selected_domains)
+            for dataset in datasets
+        ]
+        return SyncRestoreManifest(
+            datasets=manifest_datasets,
+            devices=devices,
+            generated_at=self.clock() or None,
+            filters_applied={
+                "dataset_ids": list(dataset_ids or []),
+                "domains": list(domains or []),
+            },
+        )
+
+    def _evaluate_envelope(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+    ) -> AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred:
+        if envelope.adapter_version not in self.adapters.get(envelope.domain).supported_adapter_versions:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="unsupported_adapter_version",
+                message=f"Adapter version is not supported for {envelope.domain}",
+            )
+        if dataset.encryption_policy == "client_private_v1":
+            validate_private_payload(
+                payload_ciphertext=envelope.payload_ciphertext,
+                payload_clear=envelope.payload_clear,
+            )
+        return self.adapters.get(envelope.domain).evaluate_envelope(
+            envelope,
+            dataset=dataset,
+        )
+
+    def _store_conflict(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelopeCreate,
+        outcome: AdapterConflict,
+    ) -> SyncPushConflict:
+        inserted = self.store.insert_envelope(replace(envelope, status="conflict"))
+        conflict = self.store.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=self.id_factory("conflict"),
+                dataset_id=dataset.dataset_id,
+                domain=outcome.domain,
+                entity_id=outcome.entity_id,
+                conflict_type=outcome.conflict_type,
+                local_envelope_id=envelope.client_envelope_id,
+                server_sequence=inserted.server_sequence,
+                metadata=dict(outcome.metadata),
+            )
+        )
+        return SyncPushConflict(
+            conflict_id=conflict.conflict_id,
+            client_envelope_id=outcome.client_envelope_id,
+            domain=outcome.domain,
+            entity_id=outcome.entity_id,
+            server_sequence=inserted.server_sequence,
+            message=outcome.message,
+        )
+
+    def _resolve_cursor(
+        self,
+        dataset_id: str,
+        device_id: str,
+        cursor: str | int | None,
+        domains: Sequence[SyncDomain] | None,
+    ) -> int:
+        if cursor is not None:
+            return int(cursor)
+        cursor_domains = list(domains or self.adapters.supported_domains)
+        cursors = [
+            stored.last_pulled_sequence
+            for domain in cursor_domains
+            if (stored := self.store.get_device_cursor(dataset_id, device_id, domain)) is not None
+        ]
+        return min(cursors, default=0)
+
+    def _selected_domains(
+        self,
+        dataset: SyncDataset,
+        domains: Sequence[SyncDomain] | None,
+    ) -> list[SyncDomain]:
+        allowed = set(dataset.domains)
+        requested = list(domains or dataset.domains)
+        return [domain for domain in requested if domain in allowed and self.adapters.has_domain(domain)]
+
+    def _update_cursors(
+        self,
+        dataset_id: str,
+        device_id: str,
+        domains: Sequence[SyncDomain],
+        sequence: int,
+    ) -> None:
+        for domain in domains:
+            try:
+                self.store.update_device_cursor(
+                    SyncDeviceCursor(
+                        dataset_id=dataset_id,
+                        device_id=device_id,
+                        domain=domain,
+                        last_pulled_sequence=sequence,
+                    )
+                )
+            except SyncStoreError:
+                continue
+
+    def _manifest_dataset(
+        self,
+        dataset: SyncDataset,
+        *,
+        user_id: str,
+        domains: set[SyncDomain],
+    ) -> SyncRestoreManifestDataset:
+        selected_domains = [domain for domain in dataset.domains if not domains or domain in domains]
+        envelopes = self.store.list_envelopes_after(
+            dataset.dataset_id,
+            0,
+            limit=self.settings.restore_manifest_scan_limit,
+            domains=selected_domains,
+        )
+        counts: Counter[str] = Counter()
+        byte_estimates: defaultdict[str, int] = defaultdict(int)
+        availability: Counter[str] = Counter()
+        size_classes: Counter[str] = Counter()
+        last_updated_at = dataset.updated_at
+
+        for envelope in envelopes:
+            counts[envelope.domain] += 1
+            byte_estimates[envelope.domain] += envelope.payload_size_bytes or 0
+            if envelope.server_timestamp > last_updated_at:
+                last_updated_at = envelope.server_timestamp
+            if envelope.payload_clear.get("attachment_id"):
+                availability[str(envelope.payload_clear.get("availability", "unknown"))] += 1
+                size_classes[_size_class(int(envelope.payload_clear.get("size_bytes") or 0))] += 1
+
+        conflicts = [
+            conflict
+            for conflict in self.store.list_conflicts(dataset.dataset_id, status="unresolved")
+            if not domains or conflict.domain in domains
+        ]
+        key_records = self.store.list_key_records(
+            dataset.dataset_id,
+            user_id=user_id,
+            key_purpose="dataset_recovery",
+        )
+        metadata: dict[str, object] = (
+            {} if dataset.encryption_policy == "client_private_v1" else dict(dataset.metadata)
+        )
+        return SyncRestoreManifestDataset(
+            dataset_id=dataset.dataset_id,
+            scope_type=dataset.scope_type,
+            encryption_policy=dataset.encryption_policy,
+            domains=selected_domains,
+            workspace_id=dataset.workspace_id,
+            approximate_counts=dict(sorted(counts.items())),
+            byte_estimates=dict(sorted(byte_estimates.items())),
+            last_updated_at=last_updated_at,
+            unresolved_conflicts=len(conflicts),
+            attachment_availability=dict(sorted(availability.items())),
+            attachment_size_classes=dict(sorted(size_classes.items())),
+            key_recovery_available=any(record.revoked_at is None for record in key_records),
+            metadata=metadata,
+        )
+
+
+def _size_class(size_bytes: int) -> str:
+    if size_bytes <= 1_048_576:
+        return "small"
+    if size_bytes <= 16_777_216:
+        return "medium"
+    return "large"
+
+
+__all__ = [
+    "SyncDatasetEnrollment",
+    "SyncDeviceRegistration",
+    "SyncPullResult",
+    "SyncPushAccepted",
+    "SyncPushConflict",
+    "SyncPushRejected",
+    "SyncPushResult",
+    "SyncRestoreManifest",
+    "SyncRestoreManifestDataset",
+    "SyncRestoreManifestDevice",
+    "SyncV2Capabilities",
+    "SyncV2Service",
+    "SyncV2Settings",
+]

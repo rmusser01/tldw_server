@@ -43,6 +43,12 @@ class SyncV2Store:
     ) -> SyncDataset | None:
         return self.db.get_dataset(dataset_id, owner_user_id=owner_user_id)
 
+    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
+        return self.db.list_datasets_for_user(user_id)
+
+    def list_devices_for_user(self, user_id: str) -> list[SyncDevice]:
+        return self.db.list_devices_for_user(user_id)
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope)
 

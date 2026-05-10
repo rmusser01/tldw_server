@@ -1,0 +1,72 @@
+---
+id: TASK-217
+title: Add Sync v2 service layer
+status: Done
+assignee: []
+created_date: '2026-05-10 03:59'
+updated_date: '2026-05-10 04:08'
+labels:
+  - sync
+  - service
+  - api
+dependencies:
+  - TASK-212
+references:
+  - tldw_Server_API/app/core/Sync/v2/store.py
+  - tldw_Server_API/app/core/DB_Management/Sync_DB.py
+documentation:
+  - >-
+    Docs/superpowers/plans/2026-05-10-chatbook-sync-engine-implementation-plan.md
+  - Docs/superpowers/specs/2026-05-10-chatbook-sync-engine-prd-design.md
+  - tldw_Server_API/app/api/v1/schemas/sync_v2_models.py
+priority: medium
+---
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Sync v2 service, adapter registry/protocol, and security helpers are added with injected store and deterministic test hooks.
+- [x] #2 Service tests cover capabilities, device registration refresh, default personal dataset enrollment, adapter registry known/unknown domains, dataset access rejection, per-envelope push outcomes, unsupported adapter versions, pull cursor paging/filtering/echo policy, and metadata-only restore manifests.
+- [x] #3 Security tests cover private restore manifests and log redaction without plaintext private payload or ciphertext leakage.
+- [x] #4 Focused pytest for service/security tests passes.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Inspect existing Sync v2 schema/store behavior and keep core internals independent from API schemas except at service boundaries.
+2. Write focused service and security tests for capabilities, device/dataset lifecycle, adapter registry validation, push outcomes, pull paging/filtering/echo behavior, restore manifests, and redaction.
+3. Implement adapters.py protocols/result types/registry plus security.py validation and redaction helpers.
+4. Implement SyncV2Service with injected store, user/device args, deterministic clock/id hooks, settings/capabilities, and minimal store facade extensions only where needed.
+5. Run focused service/security pytest, existing sync model/store tests if shared behavior changes, git diff --check, Bandit on touched production files, then update TASK-217 and commit.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented Sync v2 service layer with adapter registry/protocol result types, private payload validation/redaction helpers, deterministic service hooks, push/pull orchestration, and restore manifest metadata inventory. Added DB/store read helpers for user datasets/devices and made Sync v2 package store export lazy to avoid an import cycle with Sync_DB.
+
+Verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 15 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r touched production files -f json -o /tmp/bandit_sync_v2_service.json: 0 findings.
+
+Docs: no user-facing docs updated; this task is internal service-layer substrate and endpoint/API docs are later tasks.
+Known blockers: none.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the Sync v2 service layer for capabilities, device registration, dataset enrollment, push, pull, and restore manifest assembly without wiring endpoints or concrete domain adapters. The implementation keeps adapters injectable, returns per-envelope push outcomes, validates adapter versions and private payload metadata, redacts ciphertext/key material from log helpers, and exposes metadata-only restore manifests for private datasets. Added focused service/security tests and small Sync DB/store read helpers needed by restore manifests.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
