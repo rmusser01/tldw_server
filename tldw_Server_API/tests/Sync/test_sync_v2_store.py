@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import inspect
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import tldw_Server_API.app.core.Sync.v2.store as store_module
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
@@ -94,6 +98,7 @@ def _key_record(**overrides) -> SyncKeyRecordCreate:
     payload = {
         "key_record_id": "key-1",
         "dataset_id": "dataset-1",
+        "user_id": "user-1",
         "device_id": "device-1",
         "key_purpose": "dataset_recovery",
         "wrapped_key_blob": "wrapped:opaque",
@@ -117,6 +122,42 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
 
     for table_name in required_tables:
         assert sync_store.db.backend.table_exists(table_name)
+
+
+def test_sync_store_facade_does_not_embed_sql_statements():
+    source = inspect.getsource(store_module.SyncV2Store)
+
+    assert "SELECT " not in source
+    assert "INSERT " not in source
+    assert "UPDATE " not in source
+    assert "DELETE " not in source
+    assert "CREATE TABLE" not in source
+    assert "ALTER TABLE" not in source
+
+
+def test_core_models_import_without_api_schema_module():
+    code = """
+import sys
+from tldw_Server_API.app.core.Sync.v2.models import SyncKeyRecordCreate
+
+assert "tldw_Server_API.app.api.v1.schemas.sync_v2_models" not in sys.modules
+record = SyncKeyRecordCreate(
+    key_record_id="key-1",
+    dataset_id="dataset-1",
+    user_id="user-1",
+    key_purpose="dataset_recovery",
+    wrapped_key_blob="wrapped:opaque",
+)
+assert record.user_id == "user-1"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_device_upsert_is_idempotent(sync_store: SyncV2Store):
@@ -228,7 +269,10 @@ def test_key_records_store_wrapped_blobs_without_plaintext_keys(sync_store: Sync
     assert duplicate.key_record_id == stored.key_record_id
     assert duplicate.created_at == stored.created_at
     assert duplicate.recovery_hint == "updated hint"
+    assert duplicate.user_id == "user-1"
     assert records == [duplicate]
+    assert records[0].user_id == "user-1"
     assert records[0].wrapped_key_blob == "wrapped:opaque"
     assert not hasattr(records[0], "plaintext_key")
+    assert "user_id" in columns
     assert all("plaintext" not in column_name.lower() for column_name in columns)

@@ -3,15 +3,14 @@ from __future__ import annotations
 """Internal storage models for Sync v2."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
-from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
-    ConflictStatus,
-    DatasetScopeType,
-    EncryptionPolicy,
-    SyncDomain,
-    SyncOperation,
-)
+
+SyncDomain = Literal["notes", "chat", "workspaces", "source_cache", "media"]
+SyncOperation = Literal["upsert", "delete", "link", "unlink", "resolve_conflict"]
+DatasetScopeType = Literal["personal", "workspace"]
+EncryptionPolicy = Literal["client_private_v1", "server_trusted", "shared_workspace_v1"]
+ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +177,7 @@ class SyncKeyRecordCreate:
 
     key_record_id: str
     dataset_id: str
+    user_id: str
     key_purpose: str
     wrapped_key_blob: str
     device_id: str | None = None
@@ -193,6 +193,7 @@ class SyncKeyRecord:
 
     key_record_id: str
     dataset_id: str
+    user_id: str
     key_purpose: str
     wrapped_key_blob: str
     device_id: str | None
@@ -204,6 +205,9 @@ class SyncKeyRecord:
 
 
 __all__ = [
+    "ConflictStatus",
+    "DatasetScopeType",
+    "EncryptionPolicy",
     "SyncConflict",
     "SyncConflictCreate",
     "SyncDataset",
@@ -211,8 +215,10 @@ __all__ = [
     "SyncDevice",
     "SyncDeviceCursor",
     "SyncDeviceUpsert",
+    "SyncDomain",
     "SyncEnvelope",
     "SyncEnvelopeCreate",
     "SyncKeyRecord",
     "SyncKeyRecordCreate",
+    "SyncOperation",
 ]
