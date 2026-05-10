@@ -169,6 +169,7 @@ class SyncRestoreManifestDataset(BaseModel):
     byte_estimates: dict[str, int] = Field(default_factory=dict)
     last_updated_at: str | None = None
     unresolved_conflicts: int = Field(0, ge=0)
+    attachment_availability: dict[str, int] = Field(default_factory=dict)
     attachment_size_classes: dict[str, int] = Field(default_factory=dict)
     key_recovery_available: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)

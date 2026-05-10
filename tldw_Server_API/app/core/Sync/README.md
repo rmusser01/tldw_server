@@ -1,6 +1,89 @@
 # Sync
 
-Two‑way synchronization between a client’s local Media DB and the server’s per‑user Media DB. Provides a client library and server endpoints to push local changes and fetch remote deltas, with batching, idempotency, and conflict resolution.
+The Sync module currently contains two protocol generations:
+
+- Legacy media sync: `/api/v1/sync/send` and `/api/v1/sync/get`, backed by the
+  Media DB `sync_log`.
+- Sync v2: generic device, dataset, envelope, pull, conflict, key-recovery, and
+  restore-manifest APIs under the same `/api/v1/sync` route family.
+
+Sync v2 is the forward path for Chatbook and future clients. The legacy
+media-only protocol remains available during migration and is treated as a
+compatibility path, not as a second long-term sync product.
+
+## Sync v2
+
+Sync v2 is a metadata-first, domain-adapted sync substrate. Clients register a
+device, enroll or join a dataset, push envelopes, pull envelopes by cursor and
+domain, list or resolve conflicts, store opaque key-recovery metadata, and fetch
+a restore manifest before hydrating a new device.
+
+Core implementation:
+
+- `tldw_Server_API/app/core/Sync/v2/models.py`: internal protocol records.
+- `tldw_Server_API/app/core/Sync/v2/store.py`: persistence facade over
+  `DB_Management/Sync_DB.py`.
+- `tldw_Server_API/app/core/Sync/v2/service.py`: protocol invariants,
+  orchestration, restore manifests, conflict lifecycle, and key records.
+- `tldw_Server_API/app/core/Sync/v2/domain_adapters/`: domain-specific
+  validation and merge/conflict policy for notes, chat, workspaces,
+  source-cache, and media compatibility.
+- `tldw_Server_API/app/api/v1/schemas/sync_v2_models.py`: API contracts.
+- `tldw_Server_API/app/api/v1/endpoints/sync.py`: legacy and v2 routes.
+
+### Protocol Invariants
+
+- Device IDs are scoped to the authenticated user and cannot be taken over by a
+  different user.
+- Dataset IDs are scoped to the owning user for personal datasets.
+- Pushes are idempotent by `(dataset_id, client_envelope_id)`. Reusing the same
+  ID with different content is rejected.
+- Envelopes must match the push dataset and device and must target an enrolled
+  domain.
+- Pulls support domain filters, cursors, page limits, and echo suppression.
+- Private `client_private_v1` envelopes may include only routing-safe clear
+  metadata. Private title/body/content values must be encrypted client-side.
+- Restore manifests are metadata-only and must not include payload ciphertext,
+  wrapped key blobs, or private plaintext.
+- Conflict records remain visible until the client resolves or dismisses them.
+
+### Restore Flow
+
+1. Client registers a device with supported domains.
+2. Client enrolls a personal or workspace dataset.
+3. Client pushes encrypted domain envelopes.
+4. Client optionally stores a key-recovery bundle. The server stores only opaque
+   wrapped key metadata and never receives the user-held recovery secret.
+5. A new device registers and calls `GET /api/v1/sync/restore-manifest`.
+6. The manifest returns datasets, domains, approximate counts, byte estimates,
+   attachment availability, size classes, device metadata, unresolved conflict
+   counts, encryption policy, and key-recovery readiness.
+7. The client selects dataset/domain IDs and calls `GET /api/v1/sync/pull`.
+8. The client decrypts envelopes locally and applies them through local domain
+   adapters, preserving conflicts for review.
+
+### Conflict Policy
+
+Sync v2 does not silently overwrite divergent private content. Domain adapters
+accept safe independent changes, reject malformed envelopes, or create durable
+conflict records. A client resolves a conflict with:
+
+- `accept_local`
+- `accept_remote`
+- `merge`
+- `dismiss`
+
+When a merge supplies a resolution envelope, the service validates and stores
+that envelope before marking the conflict resolved.
+
+### Operational Limits
+
+`SyncV2Settings` controls batch size, pull page size, payload bytes, attachment
+bytes, attachment feature support, and restore-manifest scan limits. Attachment
+upload is currently feature-detectable but returns not-enabled until persistence
+lands.
+
+See `Docs/API/sync-v2.md` for endpoint details.
 
 ## 1. Descriptive of Current Feature Set
 
