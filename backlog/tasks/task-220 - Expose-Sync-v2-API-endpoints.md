@@ -4,7 +4,7 @@ title: Expose Sync v2 API endpoints
 status: Done
 assignee: []
 created_date: '2026-05-10 04:56'
-updated_date: '2026-05-10 05:41'
+updated_date: '2026-05-10 05:49'
 labels:
   - sync
   - api
@@ -53,6 +53,8 @@ Controller spec-fix pass: added the Sync v2 service dependency to the attachment
 Code-quality review fix pass: persisted submitted conflict resolution envelopes before marking conflicts resolved; carried dataset encryption_policy through pull responses instead of hard-coding client_private_v1; made SyncPushRequest.device_id required at the API boundary; made /attachments feature detection ignore strict body shape while remaining service-gated; converted new Sync v2 endpoint handlers to sync functions so FastAPI runs blocking service/store work in its threadpool. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 80 passed.
 
 Second quality re-review fix pass: SyncV2Service now requires registered, non-revoked user-owned devices for push, pull, conflict resolution attribution/resolution envelopes, and key recovery metadata. Conflict resolution now maps private resolution-envelope payload validation failures to SyncStoreError so endpoints return a safe client error instead of a generic 500. Added regression coverage for unregistered device rejection across device-scoped service paths and invalid private resolution envelope handling. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 83 passed.
+
+Final quality re-review fix pass: SyncV2Service no longer persists a device cursor for empty explicit-cursor pulls, preventing a registered sibling device ID from being advanced by an arbitrary high cursor without any server-observed envelopes. Added regression coverage that an empty high cursor does not poison the target device cursor and a later normal pull still receives pending envelopes. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 84 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

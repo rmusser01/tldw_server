@@ -849,6 +849,33 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert second_pull.next_cursor == "1"
 
 
+def test_pull_does_not_persist_empty_explicit_high_cursor(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-1")],
+    )
+
+    poisoned = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor="999",
+        include_own_changes=True,
+    )
+    later = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        include_own_changes=True,
+    )
+
+    assert poisoned.envelopes == []
+    assert [envelope.client_envelope_id for envelope in later.envelopes] == ["env-1"]
+
+
 def test_pull_rejects_invalid_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
 
