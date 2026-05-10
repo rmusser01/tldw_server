@@ -187,6 +187,7 @@ class PricingCatalog:
                 if not isinstance(rates, dict):
                     continue
                 placeholder = bool(rates.get("placeholder", False))
+                estimated = bool(rates.get("estimated", False))
                 note = rates.get("note")
                 if placeholder:
                     entry = {"prompt": 0.0, "completion": 0.0, "placeholder": True}
@@ -199,6 +200,8 @@ class PricingCatalog:
                 entry = {"prompt": pr, "completion": cr}
                 if "placeholder" in rates:
                     entry["placeholder"] = bool(rates.get("placeholder"))
+                if "estimated" in rates:
+                    entry["estimated"] = estimated
                 if note is not None:
                     entry["note"] = str(note)
                 base[model] = entry
@@ -218,7 +221,11 @@ class PricingCatalog:
             r = prov_map[mdl]
             if isinstance(r, dict) and r.get("placeholder"):
                 return 0.0, 0.0, True
-            return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), False
+            return (
+                float(r.get("prompt", 0.0)),
+                float(r.get("completion", 0.0)),
+                bool(r.get("estimated", False)),
+            )
 
         # Partial match (substring)
         for mk, r in prov_map.items():
@@ -287,7 +294,11 @@ def _lookup_model_across_providers(catalog: PricingCatalog, model: str) -> tuple
             r = prov_map[mdl]
             if isinstance(r, dict) and r.get("placeholder"):
                 return 0.0, 0.0, True
-            return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), False
+            return (
+                float(r.get("prompt", 0.0)),
+                float(r.get("completion", 0.0)),
+                bool(r.get("estimated", False)),
+            )
 
     # Second pass: partial match across all providers
     for prov_name, prov_map in catalog._catalog.items():
