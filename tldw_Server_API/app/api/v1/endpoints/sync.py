@@ -498,13 +498,15 @@ async def resolve_sync_v2_conflict(
 )
 async def upload_sync_v2_attachment(
     _request: SyncAttachmentUploadRequest,
+    service: SyncV2Service = Depends(get_sync_v2_service),
 ):
+    supports_attachments = service.capabilities().supports_attachments
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail={
             "error_code": "sync_attachments_not_enabled",
             "message": "Sync v2 attachment persistence is not enabled on this server.",
-            "supports_attachments": False,
+            "supports_attachments": supports_attachments,
         },
     )
 

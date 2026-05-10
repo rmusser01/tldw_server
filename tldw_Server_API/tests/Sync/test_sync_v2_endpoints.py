@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
@@ -378,21 +379,48 @@ def test_key_recovery_bundle_endpoint_stores_safe_metadata(client: TestClient):
     assert "very-secret-key" not in str(body)
 
 
-def test_sync_v2_error_responses_do_not_expose_wrapped_keys(client: TestClient):
-    response = client.post(
-        "/api/v1/sync/keys/recovery-bundle",
-        json={
-            "dataset_id": "missing-dataset",
-            "device_id": "device-1",
-            "key_purpose": "dataset_recovery",
-            "wrapped_key_blob": "wrapped:leak-me",
-            "kdf_metadata": {"known_plaintext": "do-not-leak"},
-        },
+def test_sync_v2_errors_and_logs_do_not_expose_sensitive_material(client: TestClient):
+    log_messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} | {extra}",
     )
+    try:
+        key_response = client.post(
+            "/api/v1/sync/keys/recovery-bundle",
+            json={
+                "dataset_id": "missing-dataset",
+                "device_id": "device-1",
+                "key_purpose": "dataset_recovery",
+                "wrapped_key_blob": "wrapped:leak-me",
+                "kdf_metadata": {"known_plaintext": "do-not-leak"},
+            },
+        )
+        conflict_response = client.post(
+            "/api/v1/sync/conflicts/missing-conflict/resolve",
+            json={
+                "action": "merge",
+                "resolved_by_device_id": "device-1",
+                "resolution_envelope": _envelope(
+                    client_envelope_id="resolution-secret",
+                    payload_ciphertext="ciphertext:payload-secret",
+                    payload_clear={"status": "clear-secret"},
+                    payload_hash="sha256:resolution-secret",
+                ),
+            },
+        )
+    finally:
+        logger.remove(sink_id)
 
-    assert response.status_code == 404
-    assert "leak-me" not in str(response.json())
-    assert "do-not-leak" not in str(response.json())
+    response_text = f"{key_response.json()}\n{conflict_response.json()}"
+    log_output = "\n".join(log_messages)
+
+    assert key_response.status_code == 404
+    assert conflict_response.status_code == 404
+    assert "Sync v2 request failed" in log_output
+    for secret in ("leak-me", "do-not-leak", "payload-secret", "clear-secret"):
+        assert secret not in response_text
+        assert secret not in log_output
 
 
 def test_legacy_send_and_get_routes_preserve_existing_policy(

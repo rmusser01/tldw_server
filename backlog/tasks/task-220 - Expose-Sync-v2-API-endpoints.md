@@ -4,7 +4,7 @@ title: Expose Sync v2 API endpoints
 status: Done
 assignee: []
 created_date: '2026-05-10 04:56'
-updated_date: '2026-05-10 05:07'
+updated_date: '2026-05-10 05:17'
 labels:
   - sync
   - api
@@ -47,6 +47,8 @@ Starting Task 4 endpoint implementation from branch codex/sync-v2-schemas. MCP t
 
 Implemented Sync v2 endpoint wrappers under the existing /api/v1/sync router. Added endpoint coverage for capabilities, register, enroll, restore filters, push idempotency/rejections, pull filters/echo/paging, conflicts list/resolve, attachment feature-detect response, key recovery metadata, safe error details, and legacy /send + /get compatibility. Added minimal SyncV2Service helpers for conflict listing/resolution and encrypted key recovery storage; attachment capability now reports unsupported until persistence exists.
 Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py -v => 13 passed. python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q => 61 passed. git diff --check => clean. Bandit on touched production files wrote /tmp/bandit_sync_v2_endpoints.json with 0 results.
+
+Controller spec-fix pass: added the Sync v2 service dependency to the attachments feature-detect stub so the route remains auth/service-gated. Extended endpoint coverage with loguru log capture proving safe Sync v2 error logging does not emit wrapped keys, encrypted payload values, or known plaintext. Focused endpoint test run: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py -q -> 11 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
