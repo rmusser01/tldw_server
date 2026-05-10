@@ -1,5 +1,5 @@
 import React from "react"
-import { Globe, Layers, Search, X } from "lucide-react"
+import { Globe, Layers, Search, X, type LucideIcon } from "lucide-react"
 import { RecoveryCallout } from "@/components/ui/state"
 
 type LowQualityRecoveryBannerProps = {
@@ -12,6 +12,20 @@ type LowQualityRecoveryBannerProps = {
   refineLabel?: string
   enableWebLabel?: string
   selectSourcesLabel?: string
+}
+
+type ActionLabelProps = {
+  icon: LucideIcon
+  children: React.ReactNode
+}
+
+function ActionLabel({ icon: Icon, children }: ActionLabelProps) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Icon className="h-3 w-3" />
+      {children}
+    </span>
+  )
 }
 
 export function LowQualityRecoveryBanner({
@@ -30,41 +44,25 @@ export function LowQualityRecoveryBanner({
       state="degraded"
       title={title}
       message={description}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       primaryAction={{
-        label: (
-          <span className="inline-flex items-center gap-1">
-            <Search className="h-3 w-3" />
-            {refineLabel}
-          </span>
-        ),
+        label: <ActionLabel icon={Search}>{refineLabel}</ActionLabel>,
         onClick: onRefine
       }}
       secondaryActions={[
         {
-          label: (
-            <span className="inline-flex items-center gap-1">
-              <Globe className="h-3 w-3" />
-              {enableWebLabel}
-            </span>
-          ),
+          label: <ActionLabel icon={Globe}>{enableWebLabel}</ActionLabel>,
           onClick: onEnableWeb
         },
         {
-          label: (
-            <span className="inline-flex items-center gap-1">
-              <Layers className="h-3 w-3" />
-              {selectSourcesLabel}
-            </span>
-          ),
+          label: <ActionLabel icon={Layers}>{selectSourcesLabel}</ActionLabel>,
           onClick: onSelectSources
         },
         {
-          label: (
-            <span className="inline-flex items-center gap-1">
-              <X className="h-3 w-3" />
-              Dismiss
-            </span>
-          ),
+          label: <ActionLabel icon={X}>Dismiss</ActionLabel>,
+          ariaLabel: "Dismiss recovery suggestions",
           onClick: onDismiss
         }
       ]}

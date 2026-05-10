@@ -4,6 +4,7 @@ import { cn } from "@/libs/utils";
 
 export interface StateAction {
   label: React.ReactNode;
+  ariaLabel?: string;
   onClick?: () => void;
   loading?: boolean;
   disabled?: boolean;
@@ -40,6 +41,7 @@ export function ActionGroup({
           onClick={primaryAction.onClick}
           loading={primaryAction.loading}
           disabled={primaryAction.disabled}
+          ariaLabel={primaryAction.ariaLabel}
           data-testid={primaryAction["data-testid"]}
         >
           {primaryAction.label}
@@ -53,6 +55,7 @@ export function ActionGroup({
           onClick={action.onClick}
           loading={action.loading}
           disabled={action.disabled || action.loading}
+          ariaLabel={action.ariaLabel}
           data-testid={action["data-testid"]}
         >
           {action.label}

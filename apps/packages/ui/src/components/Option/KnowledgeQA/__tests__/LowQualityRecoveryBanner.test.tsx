@@ -30,16 +30,26 @@ describe("LowQualityRecoveryBanner", () => {
     ).toHaveAttribute("data-ds-component", "RecoveryCallout")
   })
 
+  it("announces the conditionally mounted recovery guidance as a polite status", () => {
+    render(<LowQualityRecoveryBanner {...defaultProps} />)
+    const status = screen.getByRole("status")
+
+    expect(status).toHaveAttribute("aria-live", "polite")
+    expect(status).toHaveAttribute("aria-atomic", "true")
+    expect(status).toHaveTextContent(/sources may not closely match/i)
+  })
+
   it("calls onEnableWeb when web button clicked", () => {
     render(<LowQualityRecoveryBanner {...defaultProps} />)
     fireEvent.click(screen.getByRole("button", { name: /include web/i }))
     expect(defaultProps.onEnableWeb).toHaveBeenCalled()
   })
 
-  it("calls onDismiss when close button clicked", () => {
+  it("calls onDismiss from the contextual dismiss action", () => {
     render(<LowQualityRecoveryBanner {...defaultProps} />)
-    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery suggestions" }))
     expect(defaultProps.onDismiss).toHaveBeenCalled()
+    expect(screen.getByText("Dismiss")).toBeInTheDocument()
   })
 
   it("calls onSelectSources when select sources clicked", () => {

@@ -19,6 +19,9 @@ export interface StatePanelProps {
   secondaryActions?: StateAction[]
   className?: string
   children?: React.ReactNode
+  role?: React.AriaRole
+  "aria-live"?: React.AriaAttributes["aria-live"]
+  "aria-atomic"?: React.AriaAttributes["aria-atomic"]
   "data-testid"?: string
   "data-ds-component"?: string
 }
@@ -50,6 +53,9 @@ export function StatePanel({
   secondaryActions,
   className,
   children,
+  role,
+  "aria-live": ariaLive,
+  "aria-atomic": ariaAtomic,
   "data-testid": dataTestId,
   "data-ds-component": dataDesignSystemComponent = "StatePanel"
 }: StatePanelProps) {
@@ -60,6 +66,9 @@ export function StatePanel({
   return (
     <section
       className={cn("rounded-lg border bg-surface p-4 text-text shadow-sm", className)}
+      role={role}
+      aria-live={ariaLive}
+      aria-atomic={ariaAtomic}
       data-testid={dataTestId}
       data-ds-component={dataDesignSystemComponent}
     >
