@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 17:04'
-updated_date: '2026-05-10 19:06'
+updated_date: '2026-05-10 19:20'
 labels:
   - persona
   - buddy
@@ -47,15 +47,17 @@ Add the next Stage 1 Persona/Buddy reliability slice from epic #1510. Focus on s
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Added a route-level Persona Garden setup smoke test that starts at persona choice, retries a failed starter-template creation, completes safety/test steps, and verifies dry-run handoff state. The smoke exposed a real retry gap in SetupStarterCommandsStep: a failed template creation left the template selected, so the next click only unchecked it. Patched the component to treat selected-template clicks as retries while an error is visible, preserving normal unchecked behavior when no error is present.
+Added a route-level Persona Garden setup smoke test that starts at persona choice, exercises starter-template failure recovery, completes safety/test steps, and verifies dry-run handoff state. The smoke exposed a starter-command recovery gap, and PR review clarified the required behavior: selected template clicks must continue to toggle/uncheck normally. The component now keeps those toggle semantics and exposes a dedicated Retry <template> action in the starter-command error banner for explicit retry.
 
 Verification passed: bun run test src/components/PersonaGarden/__tests__/SetupStarterCommandsStep.test.tsx src/routes/__tests__/sidepanel-persona.test.tsx --maxWorkers=1 (84 tests); git diff --check. Bandit skipped because touched files are TypeScript/Backlog only.
+
+PR #1534 review follow-up addressed the Gemini and Qodo findings by replacing the selected-template retry shortcut with the explicit retry action and updating the route smoke to use that path.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added Persona Garden setup smoke coverage for the full persona-choice to dry-run handoff path, including starter-command failure recovery. Fixed the retry behavior so a selected starter template can be retried while an error is visible instead of only being unchecked. Verification: focused Vitest files passed with 84 tests; git diff --check passed; Bandit skipped for TypeScript-only changes.
+Added Persona Garden setup smoke coverage for the full persona-choice to dry-run handoff path, including starter-command failure recovery. Addressed PR #1534 review feedback by preserving selected starter-template toggle/uncheck semantics and moving retry behavior to an explicit Retry <template> action. Verification: focused Vitest files passed with 84 tests; git diff --check passed; Bandit skipped for TypeScript-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

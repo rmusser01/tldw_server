@@ -78,7 +78,7 @@ describe("SetupStarterCommandsStep", () => {
     expect(onCreateFromTemplate).not.toHaveBeenCalled()
   })
 
-  it("retries an already-selected template when starter-command creation failed", () => {
+  it("keeps selected-template toggle semantics and exposes an explicit retry action", () => {
     const onCreateFromTemplate = vi.fn()
 
     render(
@@ -94,6 +94,16 @@ describe("SetupStarterCommandsStep", () => {
 
     const searchNotes = screen.getByRole("button", { name: "Search Notes" })
     fireEvent.click(searchNotes)
+
+    expect(onCreateFromTemplate).not.toHaveBeenCalled()
+    expect(searchNotes).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(searchNotes)
+    expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
+    expect(searchNotes).toHaveAttribute("aria-pressed", "true")
+
+    onCreateFromTemplate.mockClear()
+    fireEvent.click(screen.getByRole("button", { name: "Retry Search Notes" }))
 
     expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
     expect(searchNotes).toHaveAttribute("aria-pressed", "true")

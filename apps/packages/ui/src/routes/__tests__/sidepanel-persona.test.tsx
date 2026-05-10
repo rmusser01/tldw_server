@@ -1804,7 +1804,7 @@ describe("SidepanelPersona", () => {
     expect(await screen.findByText("Failed to create starter command")).toBeInTheDocument()
     expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
 
-    fireEvent.click(screen.getByRole("button", { name: "Search Notes" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry Search Notes" }))
 
     await waitFor(() => {
       expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("safety")
