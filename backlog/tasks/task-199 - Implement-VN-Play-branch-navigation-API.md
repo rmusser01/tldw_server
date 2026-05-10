@@ -1,10 +1,10 @@
 ---
 id: TASK-199
 title: Implement VN Play branch navigation API
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-10 00:36'
+updated_date: '2026-05-10 00:50'
 labels:
   - vn-play
   - api
@@ -102,7 +102,19 @@ Task 5 review fix complete. Fixed legacy events compatibility so omitted unfilte
 Task 5 API implementation is complete. AC4 remains unchecked until Task 6 documents the API contract.
 
 Task 6 docs and final verification complete. Updated VN Play API docs for branch navigation branch-aware events warning headers branch restore restore idempotency and stable error mapping. Final verification: VN_Play suite 119 passed. Bandit final JSON empty. Diff check clean.
+
+Post-rebase final verification on branch codex/vn-play-branch-navigation-api: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 121 passed, 5 warnings in 33.76s. Bandit final scope wrote /tmp/bandit_vn_play_branch_navigation.json with results/errors empty. git diff --check => exit 0. Final review fixes included duplicate branch path hardening and checkpoint restore replay response preservation.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented backend-owned VN Play branch navigation API for issue #1463. Added a pure branch-navigation read model, branch-aware event filtering, stable warning/error payloads, session action idempotency, shared turn/restore mutation locking, guarded branch restore, checkpoint restore replay semantics, API schemas/endpoints, and API documentation.
+
+The design keeps navigation derived from persisted VN events instead of introducing a parallel branch store, and uses repository-backed session actions for idempotency/concurrency so custom frontends get the same standalone API behavior.
+
+Verification: pytest tldw_Server_API/tests/VN_Play -q => 121 passed, 5 warnings; Bandit touched backend scope => 0 results/errors; git diff --check => clean. Known skips or blockers: none.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -110,6 +122,6 @@ Task 6 docs and final verification complete. Updated VN Play API docs for branch
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
