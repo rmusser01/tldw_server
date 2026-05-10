@@ -60,6 +60,42 @@ describe("state primitives", () => {
     expect(action).toHaveAttribute("aria-busy", "true")
   })
 
+  it("allows actions to keep short labels with contextual accessible names", () => {
+    render(
+      <ActionGroup
+        secondaryActions={[
+          {
+            label: "Dismiss",
+            ariaLabel: "Dismiss recovery suggestions",
+            onClick: vi.fn()
+          }
+        ]}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Dismiss recovery suggestions" })).toHaveTextContent(
+      "Dismiss"
+    )
+  })
+
+  it("forwards live-region semantics to state panels when requested", () => {
+    render(
+      <RecoveryCallout
+        state="degraded"
+        title="Sources may need refinement"
+        primaryAction={{ label: "Refine", onClick: vi.fn() }}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      />
+    )
+
+    const status = screen.getByRole("status")
+    expect(status).toHaveAttribute("aria-live", "polite")
+    expect(status).toHaveAttribute("aria-atomic", "true")
+    expect(status).toHaveAttribute("data-ds-component", "RecoveryCallout")
+  })
+
   it("provides semantic wrappers for permission and setup states", () => {
     render(
       <>
