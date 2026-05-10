@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useACPSession } from "@/hooks/useACPSession"
+import { WS_CONFIG } from "@/services/acp/constants"
 
 const { useStorageMock } = vi.hoisted(() => ({
   useStorageMock: vi.fn(),
@@ -35,6 +36,7 @@ class MockWebSocket {
   onclose: ((event: CloseEvent) => void) | null = null
   onerror: ((event: Event) => void) | null = null
   onmessage: ((event: MessageEvent) => void) | null = null
+  sent: string[] = []
 
   constructor(url: string) {
     this.url = url
@@ -45,7 +47,18 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED
   }
 
-  send(): void {}
+  send(payload: string): void {
+    this.sent.push(payload)
+  }
+
+  open(): void {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.()
+  }
+
+  emitMessage(payload: Record<string, unknown>): void {
+    this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
+  }
 
   closeWith(code: number, reason = ""): void {
     this.readyState = MockWebSocket.CLOSED
@@ -105,5 +118,84 @@ describe("useACPSession", () => {
 
     expect(MockWebSocket.instances).toHaveLength(1)
     expect(result.current.state).toBe("disconnected")
+  })
+
+  it("sends denied permission responses and clears the pending request", async () => {
+    const { result } = renderHook(() =>
+      useACPSession({
+        sessionId: "session-1",
+        autoConnect: true,
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      ws.emitMessage({ type: "connected", agent_capabilities: {} })
+      ws.emitMessage({
+        type: "permission_request",
+        request_id: "req-deny-1",
+        session_id: "session-1",
+        tool_name: "fs.write",
+        tool_arguments: { path: "README.md" },
+        tier: "individual",
+        timeout_seconds: 300,
+      })
+      await Promise.resolve()
+    })
+
+    expect(result.current.state).toBe("waiting_permission")
+    expect(result.current.pendingPermissions).toHaveLength(1)
+
+    await act(async () => {
+      result.current.denyPermission("req-deny-1")
+      await Promise.resolve()
+    })
+
+    expect(JSON.parse(ws.sent.at(-1) ?? "{}")).toEqual({
+      type: "permission_response",
+      request_id: "req-deny-1",
+      approved: false,
+    })
+    expect(result.current.pendingPermissions).toEqual([])
+    expect(result.current.state).toBe("running")
+  })
+
+  it("retries transient closes and exposes reconnect progress", async () => {
+    const { result } = renderHook(() =>
+      useACPSession({
+        sessionId: "session-1",
+        autoConnect: true,
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    await act(async () => {
+      MockWebSocket.instances[0].open()
+      MockWebSocket.instances[0].closeWith(1006)
+      await Promise.resolve()
+    })
+
+    expect(result.current.reconnectInfo).toEqual({
+      isReconnecting: true,
+      attempt: 1,
+      maxAttempts: 10,
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WS_CONFIG.RECONNECT_DELAY_MS)
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(result.current.state).toBe("connecting")
   })
 })
