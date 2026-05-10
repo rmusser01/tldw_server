@@ -31,8 +31,8 @@ The work splits into two PR-sized paths:
   dialogue, scene-update hints, and generated choices.
 - Support hosted and local providers through existing provider configuration,
   rate limits, policy checks, and LLM usage accounting.
-- Give API clients a stable generation-history surface with owner-only debug
-  detail access.
+- Give API clients a stable generation-history surface with owner/admin-only
+  debug detail access.
 - Keep implementation reviewable by landing backend runtime/API before WebUI.
 
 ## Non-Goals
@@ -84,11 +84,39 @@ Confirmation is not an error state.
 ### Generation Profiles
 
 Published scripts can include multiple pre-approved generation-profile snapshots.
-Each generation opcode references one profile snapshot by stable key or ID.
+Each published script version owns an immutable
+`generation_profile_snapshots` map:
+
+```json
+{
+  "default": 44,
+  "choice_writer": 45,
+  "scene_director": 46
+}
+```
+
+Map keys are authored, stable identifiers matching
+`^[a-z0-9_.-]{1,64}$`. The `default` key is required when any generation
+opcode omits `profile_key`. Snapshot IDs point to profile snapshot rows/content
+captured at publish time, not mutable live profile records.
+
+Each generation opcode references a profile with `profile_key`. Publish-time
+validation rejects:
+
+- unknown profile keys;
+- profile snapshots that do not allow the opcode's `output_schema`;
+- hosted/public snapshots without required moderation policy;
+- automatic generation batch caps below `1`;
+- dynamic choices when the profile does not allow `choice_set`.
 
 Generation opcodes cannot pass arbitrary provider/model/API routing parameters
 at runtime. Profile snapshots own provider, model, hosted/local classification,
 moderation requirements, max batch count, and supported output schemas.
+
+Runtime resolution always uses the script-version snapshot map. Generation
+requests and revisions store both `generation_profile_key` and
+`generation_profile_snapshot_id`; replay and regeneration use those stored
+values rather than re-reading a mutable script or profile.
 
 If the referenced provider/model is unavailable at runtime, the runtime persists
 a failed generation attempt with stable `provider_unavailable` detail and leaves
@@ -118,11 +146,20 @@ generation request/revision history. Successful generated/regenerated output is
 immutable. Exactly one successful revision may be active for each generation
 point.
 
+The owner of a generation point is a `vn_play_generations` row. It represents
+one authored generation opcode occurrence in one session, not one attempt. Its
+`active_revision_id` pointer is the source of truth for what public state
+renders. Revision rows do not own independent active flags.
+
 Generated revisions are read-only runtime artifacts in V1. Manual editing is a
 future authoring feature, not part of this sprint.
 
-Save slots/checkpoints pin active revision IDs at that moment. The full revision
-history remains attached to the session.
+Save slots/checkpoints pin the session's full generation activation map at that
+moment. Restoring a checkpoint updates `vn_play_generations.active_revision_id`
+in one transaction to match the checkpoint snapshot exactly. Generation rows not
+present in the restored snapshot keep their history but have
+`active_revision_id=null` until the script reaches that generation point again.
+The full revision history remains attached to the session.
 
 Public script state exposes only active generated output. Full revision history,
 raw failed output, raw prompts, parser diagnostics, and moderation diagnostics
@@ -154,7 +191,19 @@ Moderation block:
 - public state exposes stable `moderation_blocked`;
 - blocked revisions are never activatable.
 
+Moderation service failure:
+
+- for hosted/public profiles, moderation timeout, unavailable service, or policy
+  adapter error is fail-closed;
+- persist the request/revision as `moderation_failed`;
+- store public error code `moderation_unavailable`;
+- do not activate the revision;
+- keep the session at the generation point;
+- retry/regenerate creates a new request.
+
 Local/self-hosted profiles may opt out of output moderation through policy.
+Opt-out is recorded on the request/revision as `moderation_skipped_by_policy` so
+history can distinguish local policy from a missing moderation check.
 
 ### Checkpoints
 
@@ -164,6 +213,27 @@ an older successful revision.
 
 This makes nondeterministic generation recoverable without requiring clients to
 remember to create save slots first.
+
+Checkpoint payloads store generation state by generation point:
+
+```json
+{
+  "active_generation_revisions": {
+    "archive:3:map-clue": {
+      "generation_id": 12,
+      "active_revision_id": 31
+    }
+  }
+}
+```
+
+Restore does not delete generation rows or revision rows. It changes active
+revision pointers to the checkpoint's map, clears active pointers for every
+generation point absent from the map, records
+`script_generation_checkpoint_restored`, and increments scene version. This is
+true even when a later script path could reach the same generation point again;
+that future execution must create or reactivate output through normal runtime
+flow.
 
 ### Batch Generation
 
@@ -184,6 +254,120 @@ Generation opcodes choose one of a small set of strict output schemas:
 - `narrative_dialogue`: narrative lines and/or dialogue only.
 - `choice_set`: generated choices plus optional short lead-in narration.
 - `scene_update`: narrative/dialogue plus visual directive hints.
+
+All model outputs are parsed as JSON objects with `schema` equal to the selected
+opcode schema. Unknown fields fail validation at every object level, not only
+the top level. Implement schemas with `additionalProperties: false` or Pydantic
+`extra="forbid"` for:
+
+- root output objects;
+- narrative line objects;
+- dialogue line objects;
+- choice objects;
+- visual directive objects.
+
+The only intentional free-form object is `choice.metadata`, which remains
+bounded and is never interpreted as control flow.
+
+Shared limits:
+
+- string fields are UTF-8 text, max 2,000 characters unless otherwise noted;
+- arrays use server-enforced maximums from the profile snapshot;
+- `character_id`, when present, must refer to a character attached to the
+  session;
+- `speaker`, when present without `character_id`, is plain display text with max
+  length 128;
+- `metadata` is a JSON object capped at 4 KB after serialization and may contain
+  arbitrary JSON-compatible values;
+- `visual_directives.labels`, when present, is a manifest-label filter object
+  capped at 4 KB after serialization;
+- generated choice IDs must match `^[a-zA-Z0-9_-]{1,80}$` and be unique within
+  the revision;
+- no schema may set arbitrary script variables, script labels, or next targets.
+
+`narrative_dialogue` shape:
+
+```json
+{
+  "schema": "narrative_dialogue",
+  "narrative": [
+    {"text": "The archive door clicks open."}
+  ],
+  "dialogue": [
+    {
+      "speaker": "Mira",
+      "character_id": "character_mira",
+      "text": "Someone was here before us."
+    }
+  ]
+}
+```
+
+Validation requires at least one `narrative` or `dialogue` item. Default caps:
+12 narrative lines and 24 dialogue lines.
+
+`choice_set` shape:
+
+```json
+{
+  "schema": "choice_set",
+  "lead_in": "Mira watches your reaction.",
+  "choices": [
+    {
+      "id": "ask-about-the-map",
+      "text": "Ask about the map",
+      "metadata": {"tone": "curious"}
+    }
+  ]
+}
+```
+
+Validation requires 1-8 choices by default. The runtime injects
+`source`, `generation_id`, and `revision_id`; the model may not provide them.
+
+`scene_update` shape:
+
+```json
+{
+  "schema": "scene_update",
+  "narrative": [
+    {"text": "Dust hangs in the lantern light."}
+  ],
+  "dialogue": [],
+  "visual_directives": [
+    {
+      "asset_type": "background",
+      "slot_key": "archive_night",
+      "labels": {
+        "location": "archive",
+        "time": "night"
+      }
+    },
+    {
+      "asset_type": "sprite",
+      "slot_key": "mira_concerned",
+      "labels": {
+        "character": "mira",
+        "emotion": "concerned",
+        "position": "left"
+      }
+    }
+  ]
+}
+```
+
+Default cap is 12 visual directives. `visual_directives` use the existing VN
+Play resolver input shape: declared `asset_type`, optional `slot_key`, and
+optional `labels`. They do not contain command fields such as `directive_type`,
+`set_location`, `background_slot_key`, `expression_key`, or `position` outside
+the `labels` filter. `asset_type` is one of the resolver-supported asset
+families such as `background`, `sprite`, `depth_companion`, or `cg`.
+
+Visual directives are suggestions until the existing VN visual directive
+resolver validates them against the approved manifest. Resolved assets update
+scene state through existing `visual_directive_applied` events; unresolved
+directives are warning-only. `scene_update` does not generate choices in V1;
+opcodes that need choices use `choice_set`.
 
 No arbitrary variable mutation is allowed in V1. The runtime may set system
 variables such as `last_generated_choice.id`, `last_generated_choice.text`, and
@@ -217,7 +401,8 @@ This keeps control flow authored while allowing dynamic choice content.
 ### Scene Updates
 
 `scene_update` output may propose visual directives. The backend validates the
-schema, then routes directives through the existing VN visual directive resolver.
+schema, then routes directives directly through the existing VN visual directive
+resolver without translating a separate command language.
 
 Only approved/owned assets may be applied. Rejected directives are warning-only
 with stable reason codes. Public state exposes applied visuals plus safe
@@ -242,14 +427,28 @@ currently active revision. In V1 this means: if a generated choice from the old
 active revision has already been selected into branch history, activation fails
 with a stable conflict such as `generated_choice_dependency_exists`.
 
+Activation is also blocked when the generation point has later visual or script
+events that depend on the old revision's `scene_update` output and cannot be
+resolved as a read-time overlay. The implementation must choose the conservative
+path: if dependency analysis cannot prove the swap is independent, return
+`revision_activation_blocked`.
+
+Public/current scene rendering uses a read-time active-revision overlay. Events
+remain immutable audit history, but generated output shown to clients is loaded
+from `vn_play_generations.active_revision_id`. Activation updates that pointer
+and appends `script_generation_revision_activated`; it does not rewrite the
+original generation event payload. Scene-version increments make clients refetch
+the newly active overlay.
+
 ## Data Model
 
 Metadata lives in the per-user ChaChaNotes database with VN Play sessions. This
 matches existing VN session/event/checkpoint ownership and backup behavior.
 
-### `vn_play_generation_requests`
+### `vn_play_generations`
 
-One row per generation attempt/confirmation action.
+One row per generated content point in a session. This is the owner for
+`generation_id`.
 
 Suggested fields:
 
@@ -259,24 +458,124 @@ Suggested fields:
 - `script_id`
 - `script_version_id`
 - `generation_point_key`
+- `opcode_id`
+- `opcode_label`
+- `opcode_index`
+- `output_schema`
+- `generation_profile_key`
+- `generation_profile_snapshot_id`
+- `active_revision_id`
+- `latest_request_id`
+- `status`: `not_started`, `pending_confirmation`, `in_progress`, `completed`,
+  `canceled`, `model_failed`, `parse_failed`, `moderation_blocked`,
+  `moderation_failed`, `abandoned`
+- `created_at`
+- `updated_at`
+
+Constraints:
+
+- unique `(owner_user_id, session_id, generation_point_key)`;
+- `active_revision_id` must point to a `succeeded` revision for the same
+  generation;
+- `generation_profile_key` and `generation_profile_snapshot_id` are copied from
+  the published script-version snapshot map and are immutable for the generation
+  point after creation.
+
+### `vn_play_generation_requests`
+
+One row per generation attempt/confirmation action.
+
+Suggested fields:
+
+- `id`
+- `generation_id`
+- `session_id`
+- `owner_user_id`
+- `script_id`
+- `script_version_id`
+- `generation_point_key`
+- `generation_profile_key`
 - `generation_profile_snapshot_id`
 - `request_kind`: `automatic`, `confirmation`, `regenerate`
 - `status`: `pending_confirmation`, `in_progress`, `completed`, `canceled`,
-  `model_failed`, `parse_failed`, `moderation_blocked`
-- `idempotency_key`
-- `request_payload_hash`
+  `model_failed`, `parse_failed`, `moderation_blocked`, `moderation_failed`,
+  `abandoned`
+- `create_action_id`
+- `execute_action_id`
+- `cancel_action_id`
 - `client_scene_version`
 - `opcode_snapshot_json`
 - `prompt_fingerprint`
 - `checkpoint_id_before`
+- `provider_call_started_at`
+- `provider_call_completed_at`
+- `lease_expires_at`
+- `public_error_code`
 - `created_at`
 - `updated_at`
 
 Unique constraints:
 
-- `(owner_user_id, session_id, idempotency_key)` for mutating generation actions.
-- `(owner_user_id, session_id, generation_point_key, id)` as the stable request
+- `(owner_user_id, session_id, generation_id, id)` as the stable request
   identity surface.
+
+### `vn_play_generation_actions`
+
+One row per idempotent generation-related API action. This table owns payload
+hash comparison and completed response replay for create, confirm/execute,
+cancel, regenerate, and activate actions.
+
+Suggested fields:
+
+- `id`
+- `session_id`
+- `owner_user_id`
+- `generation_id`
+- `generation_request_id`
+- `generation_revision_id`
+- `action_kind`: `create_pending`, `execute`, `cancel`, `regenerate`,
+  `activate`
+- `idempotency_key`
+- `payload_hash`
+- `status`: `pending`, `in_progress`, `completed`, `failed`, `canceled`,
+  `abandoned`
+- `completed_action_response_json`
+- `public_error_code`
+- `created_at`
+- `updated_at`
+
+Unique constraints:
+
+- `(owner_user_id, session_id, idempotency_key)`.
+- `(owner_user_id, session_id, action_kind, generation_request_id,
+  idempotency_key)` for request-scoped lookup convenience.
+
+Idempotency behavior:
+
+- If a duplicate idempotency key arrives with the same payload hash and the
+  action is complete, replay `completed_action_response_json`.
+- If the same idempotency key is reused with a different payload hash, return
+  `idempotency_key_conflict`.
+- If it arrives while the request is `pending_confirmation`, return the same
+  pending confirmation state.
+- If it arrives while the request is `in_progress`, return 409
+  `generation_request_in_progress` with the current request ID; do not start a
+  second provider call.
+- If a worker restarts and finds stale `in_progress` with
+  `provider_call_started_at` set and no persisted provider result, mark the
+  request `abandoned` with public error `generation_attempt_abandoned`. Retry
+  requires a new idempotency key/request.
+- If `provider_call_started_at` is not set, the request may be safely reclaimed
+  by the same idempotency key because no provider call was made.
+
+HTTP action replay remains scoped to the existing session action idempotency
+surface from PR #1516. The generation action row stores the payload hash and
+response needed to recover the model attempt itself. For confirmation-gated
+generation, `script/advance` creates the pending request and a
+`create_pending` action; `confirm` creates or reuses an `execute` action when it
+starts the provider call; `cancel` creates or reuses a `cancel` action when it
+cancels the pending request. The request row stores the current action IDs for
+quick joins, but the action rows are the idempotency source of truth.
 
 ### `vn_play_generation_revisions`
 
@@ -285,16 +584,19 @@ One immutable row per generated output attempt.
 Suggested fields:
 
 - `id`
+- `generation_id`
 - `generation_request_id`
 - `session_id`
 - `owner_user_id`
 - `generation_point_key`
+- `generation_profile_key`
+- `generation_profile_snapshot_id`
 - `revision_number`
 - `status`: `succeeded`, `model_failed`, `parse_failed`,
-  `moderation_blocked`, `canceled`
-- `active`
+  `moderation_blocked`, `moderation_failed`, `canceled`, `abandoned`
 - `output_schema`
 - `public_output_json`
+- `public_error_code`
 - `raw_output_debug_json`
 - `parser_diagnostics_json`
 - `moderation_diagnostics_json`
@@ -303,8 +605,9 @@ Suggested fields:
 - `source`: `model`, `literal`, `regenerated`
 - `created_at`
 
-At most one `active=true` successful revision per
-`(owner_user_id, session_id, generation_point_key)`.
+Revision rows do not have an `active` flag in V1. Active status is derived by
+joining `vn_play_generations.active_revision_id` to the revision row. This avoids
+conflicts between checkpoint restore, activation, and immutable revision history.
 
 ### Script Position Additions
 
@@ -319,7 +622,10 @@ large output blobs:
   "waiting_generation_request_id": 91,
   "waiting_reason": "generation_confirmation_required",
   "active_generation_revisions": {
-    "archive:3:map-clue": 31
+    "archive:3:map-clue": {
+      "generation_id": 12,
+      "active_revision_id": 31
+    }
   },
   "last_generation_id": 12
 }
@@ -404,7 +710,10 @@ blocks activation when downstream generated-choice dependencies exist.
 
 `GET /sessions/{session_id}/script/generations`
 
-Uses the repository's standard pagination envelope and metadata conventions.
+Uses the repository's existing offset pagination conventions:
+`limit`, `offset`, top-level legacy aliases, and a nested `pagination` object
+using `OffsetPaginationMeta` with `mode="offset"`. Results are ordered by
+`created_at desc, id desc`.
 
 Suggested filters:
 
@@ -416,7 +725,7 @@ Suggested filters:
 - `created_after`
 - `created_before`
 - `limit`
-- `cursor` or standard project pagination equivalent
+- `offset`
 
 Response item shape is owner-safe:
 
@@ -430,7 +739,7 @@ Response item shape is owner-safe:
   "active": true,
   "output_schema": "choice_set",
   "public_output": {
-    "narrative": ["The map trembles in Mira's hand."],
+    "lead_in": "The map trembles in Mira's hand.",
     "choices": [
       {
         "id": "ask-about-the-map",
@@ -442,7 +751,7 @@ Response item shape is owner-safe:
     ]
   },
   "profile": {
-    "profile_id": "story_default",
+    "profile_key": "choice_writer",
     "snapshot_id": 44,
     "provider_class": "hosted",
     "moderation_required": true,
@@ -452,13 +761,39 @@ Response item shape is owner-safe:
 }
 ```
 
+Response envelope:
+
+```json
+{
+  "items": [],
+  "total": 42,
+  "limit": 25,
+  "offset": 0,
+  "has_more": true,
+  "next_offset": 25,
+  "pagination": {
+    "mode": "offset",
+    "total": 42,
+    "limit": 25,
+    "offset": 0,
+    "has_more": true,
+    "next_offset": 25
+  }
+}
+```
+
 ### Revision Debug Detail
 
-`GET /sessions/{session_id}/script/generations/{revision_id}/debug`
+`GET /sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/debug`
 
-Owner/admin-only. This is separate from the normal history endpoint so raw model
-output, prompts, parser diagnostics, and moderation details are never returned
-accidentally in list views.
+Owner/admin-only. Authorization requires the authenticated principal to own the
+session, or to be an existing AuthNZ admin in multi-user mode. The route must
+verify that `revision_id` belongs to `generation_id` and that both belong to the
+session before returning data.
+
+This is separate from the normal history endpoint so raw model output, prompts,
+parser diagnostics, and moderation details are never returned accidentally in
+list views.
 
 Debug detail includes:
 
@@ -470,10 +805,17 @@ Debug detail includes:
 - usage/accounting metadata;
 - request/revision lineage.
 
-Moderation-blocked raw output should require an explicit second confirmation in
-the WebUI before calling/revealing this endpoint. API access still requires
-normal authentication and should be audit-loggable if an existing sensitive-read
-audit path is available.
+Moderation-blocked raw output is redacted by default even on this debug route.
+To reveal it, clients must call the same endpoint with explicit reveal
+parameters, for example
+`?include_blocked_raw=true&confirm=REVEAL_MODERATION_BLOCKED`. The WebUI should
+gate that call behind a second confirmation.
+
+API access still requires normal authentication. Successful, denied, and
+moderation-blocked reveal reads should emit `vn.script_generation.debug_read`
+through the existing unified audit path where that service is configured; in
+single-user deployments without audit storage, the read proceeds and logs a
+structured warning instead of blocking local use.
 
 ## Public Script State
 
@@ -506,6 +848,7 @@ Public state must not include:
 Setup options and script version metadata should expose concrete selected
 profile details:
 
+- profile key and immutable snapshot ID;
 - provider class: `hosted`, `local`, or `self_hosted`;
 - max automatic generation batch count;
 - moderation requirement;
@@ -523,13 +866,45 @@ metadata attached:
 - `vn_session_id`
 - `script_id`
 - `script_version_id`
+- `generation_id`
 - `generation_request_id`
 - `generation_revision_id`
+- `generation_profile_key`
 - `generation_profile_snapshot_id`
 - `generation_point_key`
 
 The API should not introduce a VN-only usage ledger unless existing accounting
 cannot carry this metadata.
+
+## Model Call Transaction Boundaries
+
+Generation is intentionally split around the nondeterministic provider call:
+
+1. In a short database transaction, validate session/user/scene version,
+   acquire the per-session action lock, create or reuse `vn_play_generations`,
+   create the checkpoint, create `vn_play_generation_requests`, create the
+   matching `vn_play_generation_actions` row, and set request/action status to
+   `in_progress`.
+2. Commit before calling the model provider. The request row must contain
+   `provider_call_started_at` immediately before the call begins.
+3. Call the provider outside the database transaction.
+4. In a second transaction, persist the revision, parser/moderation result,
+   usage metadata, events, active revision pointer, scene version, and the
+   generation action's `completed_action_response_json`.
+
+Recovery rules:
+
+- A duplicate request with the same idempotency key never starts another
+  provider call once `provider_call_started_at` is set.
+- If the first transaction committed but the provider call never started, the
+  same idempotency key may reclaim the request.
+- If the provider returned and the revision was persisted but the HTTP response
+  was lost, duplicate submit replays the completed generation action response.
+- If the process crashed during the provider call and no result was persisted,
+  stale lease recovery marks the request `abandoned`; retry uses a new request.
+- The per-session action lock serializes generation, confirmation, cancel,
+  regenerate, activate, and normal script action endpoints. Stale
+  `client_scene_version` returns 409 before any provider call.
 
 ## Runtime Flow
 
@@ -538,13 +913,17 @@ cannot carry this metadata.
 1. Client calls `POST /script/advance`.
 2. Runtime validates scene version and action idempotency.
 3. Interpreter reaches a non-confirmation generation opcode.
-4. Runtime creates a checkpoint.
-5. Runtime creates generation request and marks it `in_progress`.
-6. Runtime calls the selected provider through the pinned profile snapshot.
-7. Runtime validates output schema.
-8. Runtime runs moderation if required.
-9. Runtime writes immutable revision and marks it active if successful.
-10. Runtime appends generation events, updates script position/scene state, and
+4. Runtime resolves `profile_key` through the published script-version snapshot
+   map.
+5. Runtime creates or reuses the `vn_play_generations` row.
+6. Runtime creates a checkpoint.
+7. Runtime creates generation request/action rows and marks them `in_progress`.
+8. Runtime calls the selected provider through the pinned profile snapshot.
+9. Runtime validates output schema.
+10. Runtime runs moderation if required.
+11. Runtime writes immutable revision and updates
+    `vn_play_generations.active_revision_id` if successful.
+12. Runtime appends generation events, updates script position/scene state, and
     continues until stop point or batch cap.
 
 ### Confirmation-Gated Generation
@@ -561,9 +940,14 @@ cannot carry this metadata.
 1. Client calls regenerate with generation ID and idempotency key.
 2. Runtime validates session, scene version, and activation constraints.
 3. Runtime creates checkpoint.
-4. Runtime creates a new generation request/revision.
-5. Successful revision becomes active.
-6. Public state updates for that generation point only.
+4. Runtime creates a new generation request/action tied to the existing
+   generation row.
+5. Runtime reuses the generation row's stored `generation_profile_key` and
+   `generation_profile_snapshot_id`.
+6. Runtime creates a new immutable revision.
+7. Successful revision becomes active by updating
+   `vn_play_generations.active_revision_id`.
+8. Public state updates for that generation point only.
 
 ### Revision Activation
 
@@ -571,7 +955,7 @@ cannot carry this metadata.
 2. Runtime validates revision is `succeeded`.
 3. Runtime checks downstream generated-choice dependency guard.
 4. Runtime creates checkpoint.
-5. Runtime flips active revision in a transaction.
+5. Runtime updates `vn_play_generations.active_revision_id` in a transaction.
 6. Runtime records activation event and increments scene version.
 
 ## WebUI Inspector Path
@@ -606,10 +990,11 @@ derive history from debug-state or raw events.
 Scope:
 
 - database tables/migrations/repository methods;
-- generation request/revision services;
+- published script-version generation profile snapshot map and validator rules;
+- generation request/action/revision services;
 - interpreter integration and generation batching;
 - confirmation/cancel/regenerate/activate endpoints;
-- history/debug endpoints with standard pagination;
+- history endpoints with offset pagination and debug detail endpoint;
 - provider invocation through pinned generation-profile snapshots;
 - moderation and parser failure persistence;
 - generated choices and generated-choice branch metadata;
@@ -655,6 +1040,8 @@ New or formalized stable error codes:
 - `generation_confirmation_required`
 - `generation_request_not_found`
 - `generation_request_not_pending`
+- `generation_request_in_progress`
+- `generation_attempt_abandoned`
 - `generation_canceled`
 - `generation_batch_limit`
 - `generation_profile_unavailable`
@@ -663,6 +1050,8 @@ New or formalized stable error codes:
 - `model_failed`
 - `parse_failed`
 - `moderation_blocked`
+- `moderation_failed`
+- `moderation_unavailable`
 - `revision_not_found`
 - `revision_not_succeeded`
 - `revision_activation_blocked`
@@ -675,24 +1064,25 @@ Existing errors such as `stale_scene_version`, `turn_in_progress`,
 ## Security And Safety
 
 - Debug output is never returned by default list/state endpoints.
-- Hosted/public profiles must run configured moderation before activation.
+- Hosted/public profiles must run configured moderation before activation; block,
+  timeout, or unavailable moderation is fail-closed.
 - Moderation-blocked output is never activatable.
 - Generated visual directives must resolve through approved owned assets.
 - Raw prompt/provider secrets are not stored in public output.
-- Sensitive debug reads should use the existing audit path where available.
+- Sensitive debug reads should use the existing unified audit path where
+  available, with explicit `vn.script_generation.debug_read` event names.
 - Idempotency keys must be scoped to session/user and compared by payload hash.
 
-## Open Questions For Implementation
+## Implementation Notes To Resolve In PR 1
 
 1. Which existing LLM call abstraction should scripted generation use for the
    first backend PR: the same adapter used by Story mode or a narrower service
    wrapper around the provider manager?
-2. Which existing standard pagination schema should `GET /script/generations`
-   reuse exactly?
-3. Is there an existing moderation service contract that can be called
-   synchronously for hosted/public profile output, or should PR 1 define a
-   fail-closed adapter seam with tests?
-4. Which audit path should debug revision reads use in single-user mode, where
-   audit logging may be optional?
+2. Confirm the exact existing moderation service call shape to use for the
+   fail-closed hosted/public policy path.
+3. Confirm whether single-user debug-read audit warnings should be emitted only
+   to structured logs or also to a lightweight local audit table.
 
-These are implementation-plan questions, not design blockers.
+These are implementation-plan details, not design blockers. Pagination,
+profile-snapshot identity, moderation failure behavior, debug endpoint shape,
+and generation/revision ownership are defined above.
