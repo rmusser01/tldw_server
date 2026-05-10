@@ -24,6 +24,24 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "blocked" ? "Blocked via registry" : state.label
+        }
+      }
+    )
+  }
+})
+
 describe("ChatQueuePanel", () => {
   it("shows a queue summary and lets the user edit a queued request", async () => {
     const user = userEvent.setup()
@@ -133,5 +151,54 @@ describe("ChatQueuePanel", () => {
     expect(
       screen.getAllByRole("button", { name: "Move down" })[0]
     ).toBeDisabled()
+  })
+
+  it("uses the design-system blocked label when no blocked reason is provided", () => {
+    const blocked = buildQueuedRequest({
+      promptText: "retry when the backend is ready",
+      status: "blocked"
+    })
+
+    render(
+      <ChatQueuePanel
+        queue={[blocked]}
+        isConnectionReady
+        isStreaming={false}
+        onRunNext={vi.fn()}
+        onRunNow={vi.fn()}
+        onDelete={vi.fn()}
+        onMove={vi.fn()}
+        onUpdate={vi.fn()}
+        onClearAll={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Blocked via registry")).toBeInTheDocument()
+  })
+
+  it("keeps custom blocked reasons unchanged", () => {
+    const blocked = buildQueuedRequest({
+      promptText: "retry after reviewing diagnostics",
+      status: "blocked",
+      blockedReason: "Review diagnostics before retrying"
+    })
+
+    render(
+      <ChatQueuePanel
+        queue={[blocked]}
+        isConnectionReady
+        isStreaming={false}
+        onRunNext={vi.fn()}
+        onRunNow={vi.fn()}
+        onDelete={vi.fn()}
+        onMove={vi.fn()}
+        onUpdate={vi.fn()}
+        onClearAll={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText("Review diagnostics before retrying")
+    ).toBeInTheDocument()
   })
 })
