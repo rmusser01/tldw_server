@@ -1,12 +1,30 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { WorkspaceStatusStrip } from "../WorkspaceStatusStrip"
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "ready" ? "Ready via registry" : state.label
+        }
+      }
+    )
+  }
+})
 
 describe("WorkspaceStatusStrip", () => {
   it("renders ready and keyboard hint state", () => {
     render(<WorkspaceStatusStrip backendAvailable streaming={false} stagedSourceCount={0} />)
 
-    expect(screen.getByText("Ready")).toBeInTheDocument()
+    expect(screen.getByText("Ready via registry")).toBeInTheDocument()
     expect(screen.getByText("Ctrl+K command")).toBeInTheDocument()
     expect(screen.getByText("Ctrl+Enter send")).toBeInTheDocument()
   })

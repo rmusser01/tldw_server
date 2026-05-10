@@ -489,6 +489,11 @@ const replaceAnimation = (
   }
 })
 
+const sourceBadgeClass =
+  "inline-flex min-h-[22px] items-center rounded border px-1.5 py-0.5 text-xs font-medium"
+const sourceAvailableBadgeClass = `${sourceBadgeClass} border-state-ready/30 bg-state-ready/10 text-state-ready`
+const sourceUnavailableBadgeClass = `${sourceBadgeClass} border-state-unavailable/30 bg-state-unavailable/10 text-state-unavailable`
+
 export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   selectedPersonaId,
   selectedPersonaName,
@@ -1668,9 +1673,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           </div>
           <div className="flex flex-wrap gap-1">
             {item.source_available ? (
-              <Tag color="green">available</Tag>
+              <span className={sourceAvailableBadgeClass}>available</span>
             ) : (
-              <Tag color="red">unavailable</Tag>
+              <span className={sourceUnavailableBadgeClass}>unavailable</span>
             )}
             {item.source_changed ? <Tag color="orange">source changed</Tag> : null}
             {item.tags.map((tag) => (
