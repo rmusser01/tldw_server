@@ -324,6 +324,7 @@ def _target_pack_conflicts(
     pack: Mapping[str, Any],
     target_packs: Sequence[Mapping[str, Any]] | None,
 ) -> list[dict[str, Any]]:
+    """Return title-match conflicts against the current target persona packs."""
     incoming_title = str(pack.get("title") or "").strip()
     if not incoming_title:
         return []
@@ -360,10 +361,11 @@ def _target_pack_conflicts(
 
 
 def _replaceable_pack_ids(conflicts: Sequence[Mapping[str, Any]]) -> list[str]:
+    """List conflict pack ids that can be selected for replace-draft import."""
     replaceable: list[str] = []
     for conflict in conflicts:
         allowed = conflict.get("allowed_choices")
-        if not isinstance(allowed, Sequence) or "replace_draft" not in allowed:
+        if not isinstance(allowed, (list, tuple, set)) or "replace_draft" not in allowed:
             continue
         pack_id = str(conflict.get("pack_id") or "").strip()
         if pack_id:

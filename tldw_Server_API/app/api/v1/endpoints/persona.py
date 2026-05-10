@@ -2183,6 +2183,7 @@ def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> A
 
 
 def _persona_visual_replaceable_pack_ids(conflicts: Any) -> set[str]:
+    """Return target pack ids that preview conflicts allow replacing."""
     if not isinstance(conflicts, list):
         return set()
     replaceable: set[str] = set()

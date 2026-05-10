@@ -473,6 +473,10 @@ async def test_persona_visual_import_commit_worker_creates_pack_and_remaps_asset
         archive_path=export_result.archive_path,
         owner_user_id="user-1",
         target_persona_id=persona_id,
+        target_packs=db_instance.list_persona_visual_packs(
+            persona_id=persona_id,
+            user_id="user-1",
+        ),
     )
     repo = PersonaVisualPortabilityRepository.initialized(db_instance)
     preview = repo.create_import_preview(
@@ -486,7 +490,9 @@ async def test_persona_visual_import_commit_worker_creates_pack_and_remaps_asset
         schema_version=preview_result["schema_version"],
         target_persona_id=persona_id,
         bundle_summary=preview_result["bundle_summary"],
+        conflicts=preview_result["conflicts"],
         proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
     )
     portability_job = repo.create_portability_job(
         owner_user_id="user-1",
@@ -512,6 +518,7 @@ async def test_persona_visual_import_commit_worker_creates_pack_and_remaps_asset
                 "target_persona_id": persona_id,
                 "trust_mode": "untrusted_import",
                 "target_mode": "create_new",
+                "conflict_choice_explicit": True,
             },
         }
     )
@@ -664,6 +671,222 @@ async def test_persona_visual_import_commit_worker_replaces_selected_draft_only(
     assert deleted_draft["deleted"] is True
     assert active_after is not None
     assert active_after["id"] == active_pack["id"]
+
+
+@pytest.mark.asyncio
+async def test_persona_visual_import_commit_worker_requires_choice_for_revalidated_conflicts(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualPortabilityWorker,
+    )
+
+    source_persona_id, source_pack, _source_asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    target_persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Worker Conflict Target"}
+    )
+    export_result = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(
+        persona_id=source_persona_id,
+        pack_id=str(source_pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=export_result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=target_persona_id,
+        target_packs=db_instance.list_persona_visual_packs(
+            persona_id=target_persona_id,
+            user_id="user-1",
+        ),
+    )
+    assert preview_result["conflicts"] == []
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-1",
+        status="completed",
+        stage="completed",
+        archive_path=str(export_result.archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=target_persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        conflicts=preview_result["conflicts"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+    target_draft = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id="user-1",
+        title=str(source_pack["title"]),
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+    )
+    portability_job = repo.create_portability_job(
+        owner_user_id="user-1",
+        job_id="job-commit-1",
+        operation="import_commit",
+        status="queued",
+        stage="queued",
+        preview_id=str(preview["id"]),
+        persona_id=target_persona_id,
+    )
+    worker = PersonaVisualPortabilityWorker(db=db_instance, repo=repo)
+
+    with pytest.raises(ValueError, match="import_conflict_choice_required"):
+        await worker.handle_job_async(
+            {
+                "id": "job-commit-1",
+                "job_type": PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+                "owner_user_id": "user-1",
+                "payload": {
+                    "user_id": "user-1",
+                    "preview_id": str(preview["id"]),
+                    "portability_job_id": str(portability_job["id"]),
+                    "request_id": "req-commit",
+                    "target_persona_id": target_persona_id,
+                    "trust_mode": "untrusted_import",
+                    "target_mode": "create_new",
+                },
+            }
+        )
+
+    remaining_packs = db_instance.list_persona_visual_packs(
+        persona_id=target_persona_id,
+        user_id="user-1",
+    )
+    assert [pack["id"] for pack in remaining_packs] == [target_draft["id"]]
+
+
+@pytest.mark.asyncio
+async def test_persona_visual_import_commit_worker_cleans_imported_pack_when_replace_fails(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualPortabilityWorker,
+    )
+
+    source_persona_id, source_pack, _source_asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    target_persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Worker Cleanup Target"}
+    )
+    active_pack = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id="user-1",
+        title="Active Target Visuals",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+        status="active",
+    )
+    target_draft = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id="user-1",
+        title=str(source_pack["title"]),
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+    )
+    export_result = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(
+        persona_id=source_persona_id,
+        pack_id=str(source_pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=export_result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=target_persona_id,
+        target_packs=db_instance.list_persona_visual_packs(
+            persona_id=target_persona_id,
+            user_id="user-1",
+        ),
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-1",
+        status="completed",
+        stage="completed",
+        archive_path=str(export_result.archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=target_persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        conflicts=preview_result["conflicts"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+    portability_job = repo.create_portability_job(
+        owner_user_id="user-1",
+        job_id="job-commit-1",
+        operation="import_commit",
+        status="queued",
+        stage="queued",
+        preview_id=str(preview["id"]),
+        persona_id=target_persona_id,
+    )
+    original_soft_delete = db_instance.soft_delete_persona_visual_pack_with_assets
+
+    def _fail_target_draft_delete(*, pack_id: str, persona_id: str, user_id: str, **kwargs: Any) -> bool:
+        if str(pack_id) == str(target_draft["id"]):
+            return False
+        return original_soft_delete(pack_id=pack_id, persona_id=persona_id, user_id=user_id, **kwargs)
+
+    monkeypatch.setattr(
+        db_instance,
+        "soft_delete_persona_visual_pack_with_assets",
+        _fail_target_draft_delete,
+    )
+    worker = PersonaVisualPortabilityWorker(db=db_instance, repo=repo)
+
+    with pytest.raises(ValueError, match="import_target_pack_not_replaceable"):
+        await worker.handle_job_async(
+            {
+                "id": "job-commit-1",
+                "job_type": PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+                "owner_user_id": "user-1",
+                "payload": {
+                    "user_id": "user-1",
+                    "preview_id": str(preview["id"]),
+                    "portability_job_id": str(portability_job["id"]),
+                    "request_id": "req-commit",
+                    "target_persona_id": target_persona_id,
+                    "trust_mode": "untrusted_import",
+                    "target_mode": "replace_draft",
+                    "target_pack_id": str(target_draft["id"]),
+                    "conflict_choice_explicit": True,
+                },
+            }
+        )
+
+    remaining_packs = db_instance.list_persona_visual_packs(
+        persona_id=target_persona_id,
+        user_id="user-1",
+    )
+    assert {pack["id"] for pack in remaining_packs} == {active_pack["id"], target_draft["id"]}
 
 
 @pytest.mark.asyncio

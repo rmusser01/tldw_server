@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import zipfile
 from collections.abc import Mapping
@@ -70,17 +71,7 @@ class PersonaVisualPackImporter:
         preview = self.repo.get_import_preview(str(preview_id), owner_user_id=self.user_id)
         if preview is None:
             raise ValueError("import_preview_not_found")
-        preview_conflicts = _import_preview_json_field(preview, "conflicts_json", [])
-        if preview_conflicts and not conflict_choice_explicit:
-            raise ValueError("import_conflict_choice_required")
-        replacement_pack = None
-        if target_mode_value == "replace_draft":
-            replacement_pack = self._replacement_pack_or_error(
-                target_persona_id=target_persona_id,
-                target_pack_id=target_pack_id,
-                preview_conflicts=preview_conflicts,
-            )
-        elif target_pack_id:
+        if target_mode_value != "replace_draft" and target_pack_id:
             raise ValueError("target_pack_id_requires_replace_draft")
 
         archive_path = Path(str(preview.get("archive_path") or ""))
@@ -99,6 +90,17 @@ class PersonaVisualPackImporter:
         expected_fingerprint = str(preview.get("canonical_payload_fingerprint") or "")
         if expected_fingerprint and revalidated["canonical_payload_fingerprint"] != expected_fingerprint:
             raise ValueError("import_archive_fingerprint_changed")
+        revalidated_conflicts = revalidated.get("conflicts")
+        current_conflicts = revalidated_conflicts if isinstance(revalidated_conflicts, list) else []
+        if current_conflicts and not conflict_choice_explicit:
+            raise ValueError("import_conflict_choice_required")
+        replacement_pack = None
+        if target_mode_value == "replace_draft":
+            replacement_pack = self._replacement_pack_or_error(
+                target_persona_id=target_persona_id,
+                target_pack_id=target_pack_id,
+                preview_conflicts=current_conflicts,
+            )
 
         with zipfile.ZipFile(archive_path, "r") as archive:
             members = _archive_members_by_normalized_name(archive)
@@ -179,12 +181,26 @@ class PersonaVisualPackImporter:
                 "replacing_draft",
                 {"target_pack_id": replaced_pack_id, "pack_id": str(created_pack["id"])},
             )
-            if not self.db.soft_delete_persona_visual_pack_with_assets(
-                pack_id=replaced_pack_id,
-                persona_id=target_persona_id,
-                user_id=self.user_id,
-            ):
-                raise ValueError("import_target_pack_not_found")
+            try:
+                replaced = self.db.soft_delete_persona_visual_pack_with_assets(
+                    pack_id=replaced_pack_id,
+                    persona_id=target_persona_id,
+                    user_id=self.user_id,
+                    expected_version=int(replacement_pack["version"]),
+                    allowed_statuses=_REPLACEABLE_IMPORT_TARGET_STATUSES,
+                )
+            except Exception:
+                self._cleanup_created_pack(
+                    pack_id=str(created_pack["id"]),
+                    target_persona_id=target_persona_id,
+                )
+                raise
+            if not replaced:
+                self._cleanup_created_pack(
+                    pack_id=str(created_pack["id"]),
+                    target_persona_id=target_persona_id,
+                )
+                raise ValueError("import_target_pack_not_replaceable")
         self._progress(
             progress,
             "completed",
@@ -212,6 +228,7 @@ class PersonaVisualPackImporter:
         target_pack_id: str | None,
         preview_conflicts: Any,
     ) -> dict[str, Any]:
+        """Validate that the selected target pack is currently replaceable."""
         target_pack_id_value = str(target_pack_id or "").strip()
         if not target_pack_id_value:
             raise ValueError("target_pack_id_required")
@@ -227,6 +244,15 @@ class PersonaVisualPackImporter:
         if str(replacement_pack.get("status") or "") not in _REPLACEABLE_IMPORT_TARGET_STATUSES:
             raise ValueError("import_target_pack_not_replaceable")
         return replacement_pack
+
+    def _cleanup_created_pack(self, *, pack_id: str, target_persona_id: str) -> None:
+        """Best-effort cleanup for a newly imported pack after commit failure."""
+        with contextlib.suppress(Exception):
+            self.db.soft_delete_persona_visual_pack_with_assets(
+                pack_id=pack_id,
+                persona_id=target_persona_id,
+                user_id=self.user_id,
+            )
 
     def _validate_preview_ready(self, *, preview: dict[str, Any], archive_path: Path) -> None:
         if str(preview.get("status") or "") != "completed":
@@ -246,6 +272,7 @@ class PersonaVisualPackImporter:
 
 
 def _import_preview_json_field(row: Mapping[str, Any], key: str, default: Any) -> Any:
+    """Read a JSON-backed import preview column with a typed fallback."""
     value = row.get(key)
     if value in (None, ""):
         return default
@@ -258,6 +285,7 @@ def _import_preview_json_field(row: Mapping[str, Any], key: str, default: Any) -
 
 
 def _replaceable_pack_ids_from_conflicts(conflicts: Any) -> set[str]:
+    """Extract target pack ids that current conflict metadata allows replacing."""
     if not isinstance(conflicts, list):
         return set()
     replaceable: set[str] = set()
@@ -274,6 +302,7 @@ def _replaceable_pack_ids_from_conflicts(conflicts: Any) -> set[str]:
 
 
 def _import_pack_title(*, title: str | None, pack: Mapping[str, Any]) -> str:
+    """Resolve the imported pack title from the explicit override or archive metadata."""
     title_value = str(title or "").strip()
     if title_value:
         return title_value

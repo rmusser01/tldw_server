@@ -184,11 +184,28 @@ def visual_pack_import_commit_idempotency_key(
     user_id: str,
     preview_id: str,
     request_id: str,
+    trust_mode: str,
+    target_mode: str = "create_new",
+    target_pack_id: str | None = None,
+    title: str | None = None,
+    conflict_choice_explicit: bool = False,
 ) -> str:
-    return visual_pack_import_commit_group(
-        user_id=user_id,
-        preview_id=preview_id,
-        request_id=request_id,
+    commit_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "conflict_choice_explicit": bool(conflict_choice_explicit),
+                "target_mode": str(target_mode or "create_new").strip(),
+                "target_pack_id": str(target_pack_id).strip() if target_pack_id else None,
+                "title": str(title).strip() if title else None,
+                "trust_mode": str(trust_mode).strip(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    return (
+        f"{visual_pack_import_commit_group(user_id=user_id, preview_id=preview_id, request_id=request_id)}"
+        f":{commit_digest}"
     )
 
 
@@ -375,6 +392,11 @@ def create_visual_pack_import_commit_job(
             user_id=user_id,
             preview_id=preview_id,
             request_id=request_id,
+            trust_mode=trust_mode,
+            target_mode=target_mode,
+            target_pack_id=target_pack_id,
+            title=title,
+            conflict_choice_explicit=conflict_choice_explicit,
         ),
         max_retries=2,
     )
