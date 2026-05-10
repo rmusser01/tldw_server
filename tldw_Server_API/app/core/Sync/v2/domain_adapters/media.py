@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -115,8 +116,7 @@ def legacy_media_sync_log_to_envelope(
     data = _entry_mapping(entry)
     legacy_entity = _enum_value(data["entity"])
     legacy_operation = _enum_value(data["operation"])
-    payload_text = str(data.get("payload") or "")
-    payload = _payload_mapping(payload_text)
+    payload, payload_text = _payload_mapping_and_text(data.get("payload"))
 
     if legacy_entity not in _SENDABLE_MEDIA_ENTITIES:
         raise ValueError(f"Unsupported legacy media sync entity: {legacy_entity}")
@@ -207,13 +207,19 @@ def _entry_mapping(entry: Any) -> dict[str, Any]:
     }
 
 
-def _payload_mapping(payload_text: str) -> dict[str, Any]:
-    if not payload_text:
-        return {}
-    payload = json.loads(payload_text)
+def _payload_mapping_and_text(payload_value: Any) -> tuple[dict[str, Any], str]:
+    if payload_value is None or payload_value == "":
+        return {}, ""
+    if isinstance(payload_value, Mapping):
+        payload = dict(payload_value)
+        return payload, json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    if not isinstance(payload_value, str):
+        raise ValueError("Legacy media sync payload must be a JSON object")
+
+    payload = json.loads(payload_value)
     if not isinstance(payload, dict):
         raise ValueError("Legacy media sync payload must be a JSON object")
-    return payload
+    return payload, payload_value
 
 
 def _payload_hash(payload_text: str) -> str:

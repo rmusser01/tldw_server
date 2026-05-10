@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -211,6 +213,61 @@ def test_legacy_media_sync_log_translates_without_private_plaintext_leakage():
     assert envelope.payload_size_bytes == len(entry["payload"].encode("utf-8"))
     assert "Private title" not in str(envelope.payload_clear)
     assert "Private content" not in str(envelope.payload_clear)
+
+
+def test_legacy_media_sync_log_accepts_decoded_dict_payload_from_media_db():
+    decoded_payload = {
+        "uuid": "media-1",
+        "content": "Private content",
+        "deleted": False,
+        "title": "Private title",
+    }
+    canonical_payload = json.dumps(decoded_payload, sort_keys=True, separators=(",", ":"))
+    entry = {
+        "change_id": 44,
+        "entity": "Media",
+        "entity_uuid": "media-1",
+        "operation": "update",
+        "timestamp": "2026-05-10T00:00:00Z",
+        "client_id": "client-1",
+        "version": 8,
+        "payload": decoded_payload,
+    }
+
+    envelope = legacy_media_sync_log_to_envelope(
+        entry,
+        dataset_id="dataset-1",
+        payload_ciphertext="ciphertext:decoded-media",
+    )
+
+    assert envelope.payload_clear == {"entity_kind": "Media", "deleted": False}
+    assert envelope.payload_hash == (
+        f"sha256:{hashlib.sha256(canonical_payload.encode('utf-8')).hexdigest()}"
+    )
+    assert envelope.payload_size_bytes == len(canonical_payload.encode("utf-8"))
+    assert "Private title" not in str(envelope.payload_clear)
+    assert "Private content" not in str(envelope.payload_clear)
+
+
+@pytest.mark.parametrize("payload", [["not", "an", "object"], '["not","an","object"]', 42])
+def test_legacy_media_sync_log_rejects_non_object_payloads(payload):
+    entry = {
+        "change_id": 45,
+        "entity": "Media",
+        "entity_uuid": "media-1",
+        "operation": "update",
+        "timestamp": "2026-05-10T00:00:00Z",
+        "client_id": "client-1",
+        "version": 8,
+        "payload": payload,
+    }
+
+    with pytest.raises(ValueError, match="payload must be a JSON object"):
+        legacy_media_sync_log_to_envelope(
+            entry,
+            dataset_id="dataset-1",
+            payload_ciphertext="ciphertext:bad-payload",
+        )
 
 
 def test_legacy_media_keyword_link_translates_to_pair_stable_key():
