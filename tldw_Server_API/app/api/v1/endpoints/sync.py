@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.Sync_Client import SYNC_BATCH_SIZE
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaCompatibilityAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -170,7 +171,10 @@ def _sync_user_id(user: User) -> str:
 def _default_sync_v2_registry() -> SyncAdapterRegistry:
     registry = SyncAdapterRegistry()
     for domain in V1_SYNC_DOMAINS:
-        registry.register(StaticSyncAdapter(domain=domain, supported_adapter_versions={1}))
+        if domain == "media":
+            registry.register(MediaCompatibilityAdapter())
+        else:
+            registry.register(StaticSyncAdapter(domain=domain, supported_adapter_versions={1}))
     return registry
 
 
