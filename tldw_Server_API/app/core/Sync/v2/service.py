@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from .adapters import (
     AdapterAccepted,
@@ -16,7 +18,6 @@ from .adapters import (
 from .errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
-    SyncStoreError,
 )
 from .models import (
     EncryptionPolicy,
@@ -175,8 +176,8 @@ class SyncV2Service:
     ) -> None:
         self.store = store
         self.adapters = adapters
-        self.clock = clock or (lambda: "")
-        self.id_factory = id_factory or (lambda prefix: f"{prefix}-{self.clock()}")
+        self.clock = clock or (lambda: datetime.now(timezone.utc).isoformat())
+        self.id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid4().hex}")
         self.settings = settings or SyncV2Settings()
 
     def capabilities(self) -> SyncV2Capabilities:
@@ -284,6 +285,33 @@ class SyncV2Service:
                         client_envelope_id=envelope.client_envelope_id,
                         error_code="dataset_mismatch",
                         message="Envelope dataset_id must match the push dataset_id",
+                    )
+                )
+                continue
+            if envelope.device_id is not None and envelope.device_id != device_id:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="device_mismatch",
+                        message="Envelope device_id must match the authenticated push device_id",
+                    )
+                )
+                continue
+            if envelope.domain not in dataset.domains:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="domain_not_enrolled",
+                        message=f"Sync domain is not enrolled for this dataset: {envelope.domain}",
+                    )
+                )
+                continue
+            if self._payload_exceeds_size_limit(envelope):
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="payload_too_large",
+                        message="Sync envelope payload exceeds the server size limit",
                     )
                 )
                 continue
@@ -475,6 +503,14 @@ class SyncV2Service:
             dataset=dataset,
         )
 
+    def _payload_exceeds_size_limit(self, envelope: SyncEnvelopeCreate) -> bool:
+        max_bytes = self.settings.max_envelope_payload_bytes
+        if envelope.payload_size_bytes is not None and envelope.payload_size_bytes > max_bytes:
+            return True
+        if envelope.payload_ciphertext is None:
+            return False
+        return len(envelope.payload_ciphertext.encode("utf-8")) > max_bytes
+
     def _store_conflict(
         self,
         dataset: SyncDataset,
@@ -536,17 +572,14 @@ class SyncV2Service:
         sequence: int,
     ) -> None:
         for domain in domains:
-            try:
-                self.store.update_device_cursor(
-                    SyncDeviceCursor(
-                        dataset_id=dataset_id,
-                        device_id=device_id,
-                        domain=domain,
-                        last_pulled_sequence=sequence,
-                    )
+            self.store.update_device_cursor(
+                SyncDeviceCursor(
+                    dataset_id=dataset_id,
+                    device_id=device_id,
+                    domain=domain,
+                    last_pulled_sequence=sequence,
                 )
-            except SyncStoreError:
-                continue
+            )
 
     def _scan_pull_page(
         self,
@@ -580,6 +613,8 @@ class SyncV2Service:
             scan_cursor = last_sequence
 
             for envelope in raw_chunk:
+                if envelope.status != "accepted":
+                    continue
                 if not include_own_changes and envelope.device_id == device_id:
                     continue
                 visible.append(envelope)

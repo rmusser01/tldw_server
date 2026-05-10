@@ -691,6 +691,10 @@ class SyncDatabase:
                 )
             )
             if existing:
+                if existing.get("user_id") != device.user_id:
+                    raise SyncStoreError(
+                        f"Sync device already belongs to another user: {device.device_id}"
+                    )
                 self.execute(
                     """
                     UPDATE sync_devices
@@ -759,6 +763,10 @@ class SyncDatabase:
                 )
             )
             if existing:
+                if existing.get("owner_user_id") != dataset.owner_user_id:
+                    raise SyncStoreError(
+                        f"Sync dataset already belongs to another user: {dataset.dataset_id}"
+                    )
                 self.execute(
                     """
                     UPDATE sync_datasets

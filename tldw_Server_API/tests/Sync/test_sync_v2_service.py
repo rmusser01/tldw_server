@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
     AdapterConflict,
@@ -122,6 +123,23 @@ def test_device_registration_creates_and_refreshes_same_device(sync_service: Syn
     assert refreshed.device.capabilities == {"domains": ["notes", "chat"]}
 
 
+def test_device_registration_rejects_cross_user_device_takeover(sync_service: SyncV2Service):
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="shared-device",
+    )
+
+    with pytest.raises(SyncStoreError):
+        sync_service.register_device(
+            user_id="user-2",
+            display_name="Other Laptop",
+            client_type="chatbook",
+            device_id="shared-device",
+        )
+
+
 def test_dataset_enrollment_creates_personal_dataset_by_default(sync_service: SyncV2Service):
     enrolled = sync_service.enroll_dataset(user_id="user-1")
 
@@ -131,6 +149,13 @@ def test_dataset_enrollment_creates_personal_dataset_by_default(sync_service: Sy
     assert enrolled.dataset.encryption_policy == "client_private_v1"
     assert enrolled.dataset.domains == ["chat", "notes", "source_cache"]
     assert enrolled.key_setup_required is True
+
+
+def test_dataset_enrollment_rejects_cross_user_dataset_takeover(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="shared-dataset")
+
+    with pytest.raises(SyncStoreError):
+        sync_service.enroll_dataset(user_id="user-2", dataset_id="shared-dataset")
 
 
 def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
@@ -242,6 +267,46 @@ def test_push_rejects_unsupported_adapter_versions_per_envelope(sync_service: Sy
     assert result.rejected[0].error_code == "unsupported_adapter_version"
 
 
+def test_push_rejects_mismatched_device_id_and_fills_missing_device_id(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    spoofed = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(device_id="device-2")],
+    )
+    accepted = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="env-no-device",
+                device_id=None,
+                entity_id="note-no-device",
+                stable_key="note:no-device",
+                payload_hash="sha256:no-device",
+            )
+        ],
+    )
+    same_device_pull = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor="0",
+        domains=["notes"],
+        include_own_changes=False,
+    )
+
+    assert spoofed.accepted == []
+    assert spoofed.rejected[0].error_code == "device_mismatch"
+    assert [item.client_envelope_id for item in accepted.accepted] == ["env-no-device"]
+    assert same_device_pull.envelopes == []
+
+
 def test_push_rejects_envelope_dataset_mismatch_before_persistence(
     sync_service: SyncV2Service,
 ):
@@ -313,6 +378,84 @@ def test_push_rejects_envelopes_beyond_batch_limit(sync_store: SyncV2Store, regi
     assert result.rejected[0].retryable is False
 
 
+def test_push_rejects_unenrolled_domain_before_adapter_conflict_path(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(StaticSyncAdapter(domain="notes", supported_adapter_versions={1}))
+    registry.register(
+        StaticSyncAdapter(
+            domain="chat",
+            supported_adapter_versions={1},
+            outcomes={
+                "unenrolled-conflict": AdapterConflict(
+                    client_envelope_id="unenrolled-conflict",
+                    domain="chat",
+                    entity_id="conversation-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(store=sync_store, adapters=registry, clock=_clock)
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="unenrolled-conflict",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:unenrolled-conflict",
+            )
+        ],
+    )
+
+    assert result.accepted == []
+    assert result.conflicts == []
+    assert result.rejected[0].error_code == "domain_not_enrolled"
+
+
+def test_push_rejects_payloads_over_advertised_size_limit(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(max_envelope_payload_bytes=10),
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(client_envelope_id="declared-too-large", payload_size_bytes=11),
+            _envelope(
+                client_envelope_id="ciphertext-too-large",
+                entity_id="note-2",
+                stable_key="note:2",
+                payload_hash="sha256:large-ciphertext",
+                payload_size_bytes=1,
+                payload_ciphertext="x" * 11,
+            ),
+        ],
+    )
+
+    assert result.accepted == []
+    assert [item.error_code for item in result.rejected] == [
+        "payload_too_large",
+        "payload_too_large",
+    ]
+
+
 def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
     sync_service.push(
@@ -341,6 +484,61 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert first_pull.next_cursor == "1"
     assert second_pull.envelopes == []
     assert second_pull.next_cursor == "1"
+
+
+def test_default_clock_and_id_factory_are_not_repeatable(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+):
+    service = SyncV2Service(store=sync_store, adapters=registry)
+
+    first_device = service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    second_device = service.register_device(
+        user_id="user-1",
+        display_name="Phone",
+        client_type="chatbook",
+    )
+    first_dataset = service.enroll_dataset(user_id="user-1")
+    second_dataset = service.enroll_dataset(user_id="user-1")
+
+    assert first_device.device.device_id.startswith("device-")
+    assert first_device.device.device_id != "device-"
+    assert second_device.device.device_id != first_device.device.device_id
+    assert first_dataset.dataset.dataset_id.startswith("dataset-")
+    assert second_dataset.dataset.dataset_id != first_dataset.dataset.dataset_id
+    assert service.capabilities().server_time is not None
+
+
+def test_pull_propagates_cursor_persistence_errors(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-1")],
+    )
+
+    def fail_cursor_update(*_args, **_kwargs):
+        raise SyncStoreError("cursor write failed")
+
+    monkeypatch.setattr(sync_store, "update_device_cursor", fail_cursor_update)
+
+    with pytest.raises(SyncStoreError, match="cursor write failed"):
+        sync_service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-2",
+            cursor="0",
+            include_own_changes=True,
+        )
 
 
 def test_pull_treats_missing_domain_cursors_as_zero(sync_service: SyncV2Service):
@@ -399,6 +597,13 @@ def test_pull_honors_filters_echo_policy_page_size_and_has_more(
         device_id="device-1",
         envelopes=[
             _envelope(client_envelope_id="own-note", entity_id="note-own", payload_hash="sha256:own"),
+        ],
+    )
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[
             _envelope(
                 client_envelope_id="remote-chat",
                 domain="chat",
@@ -450,6 +655,51 @@ def test_pull_honors_filters_echo_policy_page_size_and_has_more(
     assert next_page.has_more is False
 
 
+def test_pull_excludes_conflict_envelopes_from_normal_results(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    push_result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+
+    pull_result = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor="0",
+        domains=["notes"],
+        include_own_changes=True,
+    )
+
+    assert [conflict.client_envelope_id for conflict in push_result.conflicts] == ["env-conflict"]
+    assert pull_result.envelopes == []
+
+
 def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
     sync_store: SyncV2Store,
     registry: SyncAdapterRegistry,
@@ -482,7 +732,13 @@ def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
         user_id="user-1",
         dataset_id="dataset-1",
         device_id="device-1",
-        envelopes=[*own_envelopes, remote_envelope],
+        envelopes=own_envelopes,
+    )
+    service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        envelopes=[remote_envelope],
     )
 
     page = service.pull(
@@ -539,9 +795,9 @@ def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
                 payload_clear={
                     "attachment_id": "attachment-1",
                     "availability": "available",
-                    "size_bytes": 2048,
+                    "size_bytes": 512,
                 },
-                payload_size_bytes=2048,
+                payload_size_bytes=512,
             ),
         ],
     )

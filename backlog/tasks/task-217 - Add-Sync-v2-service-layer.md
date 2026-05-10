@@ -4,7 +4,7 @@ title: Add Sync v2 service layer
 status: Done
 assignee: []
 created_date: '2026-05-10 03:59'
-updated_date: '2026-05-10 04:27'
+updated_date: '2026-05-10 04:38'
 labels:
   - sync
   - service
@@ -83,6 +83,16 @@ Adapter-domain follow-up verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
 - git diff --check: passed.
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/adapters.py -f json -o /tmp/bandit_sync_v2_adapter_domains.json: 0 findings.
+
+Code quality review follow-up: patching production blockers for ownership invariants, request-device enforcement, accepted-only pull visibility, unenrolled-domain prevalidation, payload-size enforcement, non-repeatable default IDs, and cursor persistence errors. Plan: add regression tests first across service/store, verify failures, implement minimal store/service fixes, rerun focused Sync tests plus diff/Bandit, then mark task done and commit.
+
+Code quality review follow-up complete. Added ownership guards in SyncDatabase for device and dataset upserts so existing records cannot be reassigned across users. Hardened SyncV2Service push/pull invariants: request device_id is enforced, missing envelope device_id is filled from the request, unenrolled domains and oversized payloads are rejected per envelope before adapter/store work, normal pulls exclude non-accepted envelopes, cursor persistence errors now propagate, and default clock/ID generation uses UTC timestamps plus UUID-style IDs. Added regression coverage for all required critical and important issues. Deferred only the service file size concern, as allowed by review.
+
+Code quality follow-up verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 28 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 28 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/DB_Management/Sync_DB.py -f json -o /tmp/bandit_sync_v2_ownership_invariants.json: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -95,6 +105,8 @@ Spec review fix: hardened SyncV2Service.pull paging so echo-filtered pulls conti
 Second spec re-review fix: tightened service invariants so stored cursor resolution treats missing selected-domain cursors as 0, push rejects envelope dataset mismatches before persistence, and push returns explicit non-retryable batch_limit_exceeded outcomes instead of silently dropping overflow envelopes.
 
 Final spec re-review fix: SyncAdapterRegistry now rejects unknown adapter domains at runtime using a core-owned Sync v2 domain allowlist, with regression coverage for bogus domains.
+
+Code quality follow-up: closed ownership takeover vectors for datasets/devices, enforced authenticated request device identity in push, added per-envelope domain/payload validation, kept normal pull results to accepted envelopes, propagated cursor persistence errors, and replaced repeatable default IDs with UUID-style generation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

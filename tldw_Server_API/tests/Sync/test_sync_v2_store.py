@@ -179,6 +179,16 @@ def test_device_upsert_is_idempotent(sync_store: SyncV2Store):
     assert second.last_seen_at >= first.last_seen_at
 
 
+def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):
+    sync_store.upsert_device(_device(device_id="device-shared", user_id="user-1"))
+
+    with pytest.raises(SyncStoreError):
+        sync_store.upsert_device(_device(device_id="device-shared", user_id="user-2"))
+
+    assert [device.user_id for device in sync_store.list_devices_for_user("user-1")] == ["user-1"]
+    assert sync_store.list_devices_for_user("user-2") == []
+
+
 def test_dataset_enrollment_is_idempotent(sync_store: SyncV2Store):
     first = sync_store.enroll_dataset(_dataset())
     second = sync_store.enroll_dataset(
@@ -191,6 +201,17 @@ def test_dataset_enrollment_is_idempotent(sync_store: SyncV2Store):
     assert second.domains == ["notes", "chat", "workspaces"]
     assert second.metadata == {"label": "Updated"}
     assert fetched == second
+
+
+def test_dataset_enrollment_rejects_cross_user_takeover(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset(dataset_id="dataset-shared", owner_user_id="user-1"))
+
+    with pytest.raises(SyncStoreError):
+        sync_store.enroll_dataset(_dataset(dataset_id="dataset-shared", owner_user_id="user-2"))
+
+    dataset = sync_store.get_dataset("dataset-shared")
+    assert dataset is not None
+    assert dataset.owner_user_id == "user-1"
 
 
 def test_get_dataset_can_be_scoped_by_owner(sync_store: SyncV2Store):
