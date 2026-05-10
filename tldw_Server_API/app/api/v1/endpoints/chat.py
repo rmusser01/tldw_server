@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache, partial
@@ -545,15 +545,16 @@ _PERSONA_IOR_LOW_ALERT_THRESHOLD = 0.10
 _PERSONA_IOR_HIGH_ALERT_THRESHOLD = 0.60
 _PERSONA_IOO_SUSTAIN_WINDOW = 8
 _PERSONA_IOO_SUSTAIN_MIN_HITS = 3
+_PERSONA_IOO_WINDOW_MAX_KEYS = 10000
+_PERSONA_TELEMETRY_ASSISTANT_ID_MAX_LEN = 128
+_PERSONA_TELEMETRY_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _PERSONA_IOO_BUDGET_AUTO_ADJUST_ENABLED = _resolve_persona_ioo_budget_auto_adjust_enabled(_chat_config)
 _PERSONA_IOO_BUDGET_AUTO_REDUCTION_FACTOR = _resolve_persona_ioo_budget_auto_reduction_factor(_chat_config)
 _PERSONA_IOO_BUDGET_AUTO_MIN_TOKENS = _resolve_persona_ioo_budget_auto_min_tokens(_chat_config)
 _PERSONA_ID_ALIAS_DEPRECATION_START_DATE = date(2026, 2, 9)
 _PERSONA_ID_ALIAS_SUNSET_DATE = date(2026, 6, 30)
 _PERSONA_ID_ALIAS_REMOVAL_DATE = date(2026, 7, 1)
-_persona_ioo_windows: dict[str, deque[int]] = defaultdict(
-    lambda: deque(maxlen=_PERSONA_IOO_SUSTAIN_WINDOW)
-)
+_persona_ioo_windows: OrderedDict[str, deque[int]] = OrderedDict()
 _persona_alert_guard = threading.Lock()
 
 
@@ -1170,15 +1171,59 @@ def _resolve_character_id_from_persona_alias(request_data: ChatCompletionRequest
     return True
 
 
+def _normalize_persona_telemetry_assistant_id(value: Any, *, default: str = "none") -> str:
+    """Return a bounded, redaction-safe assistant id for telemetry labels."""
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return default
+    if (
+        len(raw_value) <= _PERSONA_TELEMETRY_ASSISTANT_ID_MAX_LEN
+        and _PERSONA_TELEMETRY_SAFE_ID_RE.fullmatch(raw_value)
+    ):
+        return raw_value
+    digest = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+    return f"hash:{digest}"
+
+
+def _persona_ioo_window_key(
+    *,
+    user_id: str | None,
+    character_id: int | None,
+    assistant_kind: str | None = None,
+    assistant_id: str | None = None,
+) -> str:
+    """Return the IOO alert-window key while preserving legacy character keying."""
+    normalized_user_id = str(user_id or "unknown")
+    normalized_assistant_kind = str(assistant_kind or "").strip().lower()
+    if normalized_assistant_kind == "persona":
+        safe_assistant_id = _normalize_persona_telemetry_assistant_id(assistant_id)
+        return f"{normalized_user_id}:persona:{safe_assistant_id}:{str(character_id or 'none')}"
+    return f"{normalized_user_id}:{character_id}"
+
+
+def _get_persona_ioo_window_locked(window_key: str) -> deque[int]:
+    """Return a bounded LRU alert window for ``window_key``."""
+    window = _persona_ioo_windows.get(window_key)
+    if window is None:
+        while len(_persona_ioo_windows) >= max(1, _PERSONA_IOO_WINDOW_MAX_KEYS):
+            _persona_ioo_windows.popitem(last=False)
+        window = deque(maxlen=_PERSONA_IOO_SUSTAIN_WINDOW)
+        _persona_ioo_windows[window_key] = window
+    else:
+        _persona_ioo_windows.move_to_end(window_key)
+    return window
+
+
 def _has_sustained_persona_ioo_alerts(user_id: str | None, character_id: int | None) -> bool:
     """Return True when the per-user/character IOO window indicates sustained over-copying risk."""
     if not user_id or character_id is None:
         return False
-    window_key = f"{str(user_id)}:{character_id}"
+    window_key = _persona_ioo_window_key(user_id=user_id, character_id=character_id)
     with _persona_alert_guard:
         window = _persona_ioo_windows.get(window_key)
         if not window:
             return False
+        _persona_ioo_windows.move_to_end(window_key)
         if len(window) < _PERSONA_IOO_SUSTAIN_WINDOW:
             return False
         return sum(window) >= _PERSONA_IOO_SUSTAIN_MIN_HITS
@@ -1296,19 +1341,17 @@ def _record_persona_telemetry_hooks(
 ) -> None:
     """Emit metric/log hooks for persona telemetry diagnostics."""
     normalized_assistant_kind = str(
-        assistant_kind or ("character" if character_id is not None else "unknown")
+        assistant_kind or ""
     ).strip().lower() or "unknown"
-    normalized_assistant_id = str(
-        assistant_id or (character_id if normalized_assistant_kind == "character" else "none")
-    ).strip() or "none"
     labels = {
         "provider": str(provider or "unknown"),
         "model": str(model or "unknown"),
         "user_id": str(user_id or "unknown"),
         "character_id": str(character_id or "none"),
-        "assistant_kind": normalized_assistant_kind,
-        "assistant_id": normalized_assistant_id,
     }
+    if normalized_assistant_kind == "persona":
+        labels["assistant_kind"] = "persona"
+        labels["assistant_id"] = _normalize_persona_telemetry_assistant_id(assistant_id)
 
     try:
         ioo = float(telemetry.get("ioo", 0.0))
@@ -1337,27 +1380,38 @@ def _record_persona_telemetry_hooks(
 
     if ioo >= _PERSONA_IOO_ALERT_THRESHOLD:
         log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
-        logger.warning(
-            "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={} assistant_kind={} assistant_id={}",
-            debug_id or "n/a",
-            ioo,
-            labels["user_id"],
-            labels["character_id"],
-            labels["assistant_kind"],
-            labels["assistant_id"],
-        )
+        if normalized_assistant_kind == "persona":
+            logger.warning(
+                "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={} assistant_kind={} assistant_id={}",
+                debug_id or "n/a",
+                ioo,
+                labels["user_id"],
+                labels["character_id"],
+                labels["assistant_kind"],
+                labels["assistant_id"],
+            )
+        else:
+            logger.warning(
+                "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={}",
+                debug_id or "n/a",
+                ioo,
+                labels["user_id"],
+                labels["character_id"],
+            )
 
     if ior < _PERSONA_IOR_LOW_ALERT_THRESHOLD:
         log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "low"})
     elif ior > _PERSONA_IOR_HIGH_ALERT_THRESHOLD:
         log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
 
-    window_key = (
-        f"{labels['user_id']}:{labels['assistant_kind']}:"
-        f"{labels['assistant_id']}:{labels['character_id']}"
+    window_key = _persona_ioo_window_key(
+        user_id=user_id,
+        character_id=character_id,
+        assistant_kind=normalized_assistant_kind,
+        assistant_id=assistant_id,
     )
     with _persona_alert_guard:
-        window = _persona_ioo_windows[window_key]
+        window = _get_persona_ioo_window_locked(window_key)
         window.append(1 if ioo >= _PERSONA_IOO_ALERT_THRESHOLD else 0)
         if (
             len(window) == window.maxlen
@@ -3386,16 +3440,14 @@ async def create_chat_completion(
                 if isinstance(assistant_context, dict)
                 else ""
             )
-            telemetry_assistant_id = (
-                telemetry_assistant_id_from_context
-                if telemetry_assistant_id_from_context
-                else (
-                    str(character_db_id_for_context)
-                    if telemetry_assistant_kind != "persona"
-                    and character_db_id_for_context is not None
-                    else ""
-                )
-            )
+            if is_persona_backed_chat:
+                telemetry_assistant_id = persona_assistant_id
+            elif telemetry_assistant_id_from_context:
+                telemetry_assistant_id = telemetry_assistant_id_from_context
+            elif telemetry_assistant_kind != "persona" and character_db_id_for_context is not None:
+                telemetry_assistant_id = str(character_db_id_for_context)
+            else:
+                telemetry_assistant_id = ""
             should_record_persona_telemetry = (
                 is_persona_backed_chat or character_db_id_for_context is not None
             )

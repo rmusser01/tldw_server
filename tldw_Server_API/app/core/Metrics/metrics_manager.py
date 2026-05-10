@@ -2122,11 +2122,17 @@ class MetricsRegistry:
         *,
         missing_label: str,
     ) -> dict[str, int]:
-        """Return recorded sample counts grouped by a normalized label key."""
+        """Return sample counts grouped by a normalized label key."""
         metric_name = self._normalize_metric_name(metric_name)
         normalized_label = self._normalize_label_name(label_name)
         totals: dict[str, int] = defaultdict(int)
         with self._lock:
+            histogram_series = dict(self._cumulative_histograms.get(metric_name, {}))
+            if histogram_series:
+                for label_key, histogram in histogram_series.items():
+                    label_value = dict(label_key).get(normalized_label) or missing_label
+                    totals[str(label_value)] += int(histogram.get("count", 0))
+                return dict(sorted(totals.items()))
             values = list(self.values.get(metric_name, ()))
 
         for metric_value in values:

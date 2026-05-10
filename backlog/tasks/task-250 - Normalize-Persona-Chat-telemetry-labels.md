@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 23:08'
-updated_date: '2026-05-10 23:25'
+updated_date: '2026-05-10 23:49'
 labels:
   - persona
   - chat
@@ -72,6 +72,14 @@ Verification:
 - Full chat integration file attempted but timed out in TestClient app-lifecycle setup after earlier tests passed; narrower deterministic checks are recorded above.
 - Bandit touched backend files -> 0 findings in /tmp/bandit_persona_chat_telemetry_labels.json.
 - git diff --check -> clean.
+
+Review-fix pass for PR #1558 addressed 5 actionable review threads: preserved legacy character metric labels, restored character IOO reader/writer key compatibility, sanitized and bounded persona assistant_id labels, capped persona IOO alert-window storage with LRU eviction, used persona_assistant_id for persona-backed chat telemetry, and switched metrics sample counts to cumulative histogram series when available.
+
+Review-fix verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_persona_telemetry_hooks.py tldw_Server_API/tests/Evaluations/test_persona_telemetry_metrics_summary.py tldw_Server_API/tests/Persona/test_persona_chat_quality_fixtures.py tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py::test_persona_backed_chat_records_telemetry_with_persona_identity_labels tldw_Server_API/tests/Metrics/test_metrics_logger_registry_bridge.py -q -> 24 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/app/core/Evaluations/persona_telemetry_metrics.py tldw_Server_API/app/core/Metrics/metrics_manager.py -f json -o /tmp/bandit_persona_chat_telemetry_labels_review.json -> 0 findings.
+- python -m py_compile touched production modules -> exit 0.
+- git diff --check -> exit 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
