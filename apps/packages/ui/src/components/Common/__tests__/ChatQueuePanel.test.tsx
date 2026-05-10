@@ -24,12 +24,23 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@/design-system", () => ({
-  getDesignSystemState: vi.fn((key: string) => ({
-    key,
-    label: key === "blocked" ? "Blocked via registry" : key
-  }))
-}))
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "blocked" ? "Blocked via registry" : state.label
+        }
+      }
+    )
+  }
+})
 
 describe("ChatQueuePanel", () => {
   it("shows a queue summary and lets the user edit a queued request", async () => {
