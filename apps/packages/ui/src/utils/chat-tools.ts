@@ -28,6 +28,25 @@ export type ChatToolFilterState = {
   counts: ChatToolFilterCounts
 }
 
+export type ChatToolRequestChoice = "auto" | "none" | "required"
+export type EffectiveChatToolRequestChoice = "auto" | "required"
+
+export type ChatToolOmissionReason =
+  | "tool_choice_none"
+  | "model_lacks_tool_capability"
+  | "mcp_absent"
+  | "mcp_unavailable"
+  | "mcp_unhealthy"
+  | "no_enabled_executable_tools"
+  | "no_normalized_request_tools"
+
+export type ResolvedChatToolRequest = {
+  tools?: ChatToolRecord[]
+  toolChoice?: EffectiveChatToolRequestChoice
+  omittedReason?: ChatToolOmissionReason
+  counts: ChatToolFilterCounts
+}
+
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
 
 const isRecord = (value: unknown): value is ChatToolRecord =>
@@ -195,12 +214,10 @@ const readParameters = (tool: ChatToolRecord): ChatToolRecord => {
   return parameters ?? { type: "object", properties: {} }
 }
 
-export const normalizeChatToolsForRequest = (
-  tools?: unknown[]
-): ChatToolRecord[] | undefined => {
-  const state = buildChatToolFilterState({ tools })
-  if (state.chatTools.length === 0) return undefined
-  return state.chatTools.map((tool) => ({
+const normalizeRequestToolsFromState = (
+  state: ChatToolFilterState
+): ChatToolRecord[] =>
+  state.chatTools.map((tool) => ({
     type: "function",
     function: {
       name: tool.chatName,
@@ -208,4 +225,65 @@ export const normalizeChatToolsForRequest = (
       parameters: readParameters(tool.tool)
     }
   }))
+
+export const normalizeChatToolsForRequest = (
+  tools?: unknown[]
+): ChatToolRecord[] | undefined => {
+  const state = buildChatToolFilterState({ tools })
+  const requestTools = normalizeRequestToolsFromState(state)
+  return requestTools.length > 0 ? requestTools : undefined
+}
+
+export const resolveChatToolRequest = ({
+  tools,
+  toolChoice,
+  modelSupportsTools = true,
+  mcpHealthState = "healthy",
+  hasMcp = true,
+  disabledToolNames = [],
+  counts: countsOverride
+}: {
+  tools?: unknown[]
+  toolChoice?: ChatToolRequestChoice | string | null
+  modelSupportsTools?: boolean
+  mcpHealthState?: string | null
+  hasMcp?: boolean
+  disabledToolNames?: string[]
+  counts?: ChatToolFilterCounts
+}): ResolvedChatToolRequest => {
+  const state = buildChatToolFilterState({ tools, disabledToolNames })
+  const counts = countsOverride ?? state.counts
+  const omit = (
+    omittedReason: ChatToolOmissionReason
+  ): ResolvedChatToolRequest => ({
+    omittedReason,
+    counts
+  })
+
+  if (toolChoice === "none") return omit("tool_choice_none")
+  if (!modelSupportsTools) return omit("model_lacks_tool_capability")
+  if (!hasMcp) return omit("mcp_absent")
+  if (mcpHealthState === "unavailable") return omit("mcp_unavailable")
+  if (mcpHealthState === "unhealthy") return omit("mcp_unhealthy")
+
+  if (state.chatTools.length === 0 || counts.chatEnabled === 0) {
+    const rawToolCount = Array.isArray(tools) ? tools.length : 0
+    return omit(
+      counts.discovered === 0 && rawToolCount > 0
+        ? "no_normalized_request_tools"
+        : "no_enabled_executable_tools"
+    )
+  }
+
+  const requestTools = normalizeRequestToolsFromState(state)
+  if (requestTools.length === 0) return omit("no_normalized_request_tools")
+
+  const effectiveToolChoice =
+    toolChoice === "auto" || toolChoice === "required" ? toolChoice : undefined
+
+  return {
+    tools: requestTools,
+    toolChoice: effectiveToolChoice,
+    counts
+  }
 }

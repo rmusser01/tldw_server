@@ -1,4 +1,9 @@
 import type { ChatCompletionRequest } from "./TldwApiClient"
+import type {
+  ChatToolFilterCounts,
+  EffectiveChatToolRequestChoice,
+  ChatToolOmissionReason
+} from "@/utils/chat-tools"
 
 export type ChatRequestDebugMode = "stream" | "non-stream"
 
@@ -8,6 +13,18 @@ export type ChatRequestDebugSnapshot = {
   mode: ChatRequestDebugMode
   sentAt: string
   body: unknown
+  metadata?: ChatRequestDebugMetadata
+}
+
+export type ChatToolRequestDebugMetadata = {
+  model?: string
+  toolChoice?: EffectiveChatToolRequestChoice
+  toolOmissionReason?: ChatToolOmissionReason
+  toolCounts?: ChatToolFilterCounts
+}
+
+export type ChatRequestDebugMetadata = ChatToolRequestDebugMetadata & {
+  toolRequests?: ChatToolRequestDebugMetadata[]
 }
 
 type CaptureChatRequestDebugSnapshotInput = {
@@ -15,6 +32,7 @@ type CaptureChatRequestDebugSnapshotInput = {
   method: string
   mode: ChatRequestDebugMode
   body: unknown
+  metadata?: ChatRequestDebugMetadata
 }
 
 let lastChatRequestDebugSnapshot: ChatRequestDebugSnapshot | null = null
@@ -31,14 +49,18 @@ export const captureChatRequestDebugSnapshot = ({
   endpoint,
   method,
   mode,
-  body
+  body,
+  metadata
 }: CaptureChatRequestDebugSnapshotInput) => {
   lastChatRequestDebugSnapshot = {
     endpoint,
     method,
     mode,
     sentAt: new Date().toISOString(),
-    body: clonePayload(body)
+    body: clonePayload(body),
+    metadata: metadata
+      ? (clonePayload(metadata) as ChatRequestDebugMetadata)
+      : undefined
   }
 }
 
@@ -51,6 +73,7 @@ export type ChatCompletionDebugSnapshot = {
   mode: ChatRequestDebugMode
   sentAt: string
   request: ChatCompletionRequest
+  metadata?: ChatRequestDebugMetadata
 }
 
 export const getLastChatCompletionDebugSnapshot =
@@ -63,6 +86,7 @@ export const getLastChatCompletionDebugSnapshot =
       endpoint: "/api/v1/chat/completions",
       mode: snapshot.mode,
       sentAt: snapshot.sentAt,
-      request: (snapshot.body || {}) as ChatCompletionRequest
+      request: (snapshot.body || {}) as ChatCompletionRequest,
+      metadata: snapshot.metadata
     }
   }

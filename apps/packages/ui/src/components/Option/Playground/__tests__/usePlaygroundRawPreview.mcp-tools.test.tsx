@@ -80,6 +80,16 @@ describe("usePlaygroundRawPreview MCP tools", () => {
     })
 
     const body = result.current.rawRequestSnapshot?.body as any
+    expect(result.current.rawRequestSnapshot?.metadata).toMatchObject({
+      toolChoice: "auto",
+      toolCounts: {
+        discovered: 1,
+        executable: 1,
+        disabled: 0,
+        colliding: 0,
+        chatEnabled: 1
+      }
+    })
     expect(body.tool_choice).toBe("auto")
     expect(body.tools).toEqual([
       {
@@ -115,5 +125,100 @@ describe("usePlaygroundRawPreview MCP tools", () => {
     const body = result.current.rawRequestSnapshot?.body as any
     expect(body).not.toHaveProperty("tool_choice")
     expect(body).not.toHaveProperty("tools")
+    expect(result.current.rawRequestSnapshot?.metadata).toMatchObject({
+      toolOmissionReason: "no_enabled_executable_tools",
+      toolCounts: {
+        discovered: 2,
+        executable: 2,
+        disabled: 0,
+        colliding: 2,
+        chatEnabled: 0
+      }
+    })
+  })
+
+  it("keeps selected none out of the raw body and explains the omission in metadata", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          toolChoice: "none",
+          mcpTools: [{ name: "notes.search", canExecute: true }]
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    const body = result.current.rawRequestSnapshot?.body as any
+    expect(body).not.toHaveProperty("tool_choice")
+    expect(body).not.toHaveProperty("tools")
+    expect(result.current.rawRequestSnapshot?.metadata).toMatchObject({
+      toolOmissionReason: "tool_choice_none"
+    })
+  })
+
+  it("omits tools for models without tool support and reports metadata", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          composerModels: [{ id: "plain-model", capabilities: [] }],
+          selectedModel: "plain-model",
+          mcpTools: [{ name: "notes.search", canExecute: true }]
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    const body = result.current.rawRequestSnapshot?.body as any
+    expect(body).not.toHaveProperty("tool_choice")
+    expect(body).not.toHaveProperty("tools")
+    expect(result.current.rawRequestSnapshot?.metadata).toMatchObject({
+      toolOmissionReason: "model_lacks_tool_capability"
+    })
+  })
+
+  it("uses the same resolver metadata for comparison previews", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          compareModeActive: true,
+          selectedModel: null,
+          compareSelectedModels: ["tool-model", "plain-model"],
+          composerModels: [
+            { id: "tool-model", capabilities: ["tools"] },
+            { id: "plain-model", capabilities: [] }
+          ],
+          mcpTools: [{ name: "notes.search", canExecute: true }]
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    const body = result.current.rawRequestSnapshot?.body as any
+    expect(body.requests).toHaveLength(2)
+    expect(body.requests[0].tool_choice).toBe("auto")
+    expect(body.requests[0].tools).toHaveLength(1)
+    expect(body.requests[1]).not.toHaveProperty("tool_choice")
+    expect(body.requests[1]).not.toHaveProperty("tools")
+    expect(result.current.rawRequestSnapshot?.metadata).toMatchObject({
+      toolRequests: [
+        {
+          model: "tool-model",
+          toolChoice: "auto"
+        },
+        {
+          model: "plain-model",
+          toolOmissionReason: "model_lacks_tool_capability"
+        }
+      ]
+    })
   })
 })

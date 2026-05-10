@@ -8,6 +8,8 @@ import type { ChatScope } from '@/types/chat-scope'
 import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
 import type {
+  ChatCompletionRequestOptions,
+  ChatCompletionStreamOptions,
   ChatCompletionRequest,
   ServerChatSummary,
   ServerChatMessage,
@@ -265,14 +267,15 @@ export const chatRagMethods = {
   async createChatCompletion(
     this: TldwApiClientCore,
     request: ChatCompletionRequest,
-    options?: { signal?: AbortSignal }
+    options?: ChatCompletionRequestOptions
   ): Promise<Response> {
     // Non-stream request via background
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "non-stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     const res = await bgRequest<Response>({
       path: '/api/v1/chat/completions',
@@ -288,13 +291,14 @@ export const chatRagMethods = {
     return createJsonResponseLike(safeData, { status: 200 })
   },
 
-  async *streamChatCompletion(this: TldwApiClientCore, request: ChatCompletionRequest, options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }): AsyncGenerator<any, void, unknown> {
+  async *streamChatCompletion(this: TldwApiClientCore, request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
     request.stream = true
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
       try {

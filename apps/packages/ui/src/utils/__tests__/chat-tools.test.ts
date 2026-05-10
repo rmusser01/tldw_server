@@ -5,6 +5,7 @@ import {
   getMcpToolGroupLabel,
   normalizeChatToolName,
   normalizeChatToolsForRequest,
+  resolveChatToolRequest,
   resolveMcpToolIdentity
 } from "../chat-tools"
 
@@ -178,5 +179,122 @@ describe("MCP tool grouping", () => {
     ).toBe("notes")
 
     expect(getMcpToolGroupLabel({ name: "unknown" })).toBe("MCP")
+  })
+})
+
+describe("chat tool request resolver", () => {
+  const executableTool = {
+    name: "notes.search",
+    description: "Search notes",
+    parameters: { type: "object", properties: { q: { type: "string" } } },
+    canExecute: true
+  }
+
+  it.each([
+    [
+      "selected none",
+      { tools: [executableTool], toolChoice: "none" as const },
+      "tool_choice_none"
+    ],
+    [
+      "model lacks tools",
+      {
+        tools: [executableTool],
+        toolChoice: "auto" as const,
+        modelSupportsTools: false
+      },
+      "model_lacks_tool_capability"
+    ],
+    [
+      "MCP absent",
+      {
+        tools: [executableTool],
+        toolChoice: "auto" as const,
+        hasMcp: false
+      },
+      "mcp_absent"
+    ],
+    [
+      "MCP unavailable",
+      {
+        tools: [executableTool],
+        toolChoice: "auto" as const,
+        mcpHealthState: "unavailable"
+      },
+      "mcp_unavailable"
+    ],
+    [
+      "MCP unhealthy",
+      {
+        tools: [executableTool],
+        toolChoice: "auto" as const,
+        mcpHealthState: "unhealthy"
+      },
+      "mcp_unhealthy"
+    ],
+    [
+      "all executable tools filtered out",
+      {
+        tools: [
+          { name: "docs.search", canExecute: true },
+          { name: "docs_search", canExecute: true }
+        ],
+        toolChoice: "auto" as const
+      },
+      "no_enabled_executable_tools"
+    ],
+    [
+      "no normalized request tools",
+      {
+        tools: [{ name: "..." }],
+        toolChoice: "auto" as const
+      },
+      "no_normalized_request_tools"
+    ]
+  ])("omits tools when %s", (_label, input, omittedReason) => {
+    const resolved = resolveChatToolRequest({
+      modelSupportsTools: true,
+      hasMcp: true,
+      mcpHealthState: "healthy",
+      ...input
+    })
+
+    expect(resolved.tools).toBeUndefined()
+    expect(resolved.toolChoice).toBeUndefined()
+    expect(resolved.omittedReason).toBe(omittedReason)
+    expect(resolved.counts).toHaveProperty("chatEnabled")
+  })
+
+  it("includes normalized request tools and only effective tool choices", () => {
+    const resolved = resolveChatToolRequest({
+      tools: [executableTool],
+      toolChoice: "required",
+      modelSupportsTools: true,
+      hasMcp: true,
+      mcpHealthState: "healthy"
+    })
+
+    expect(resolved.omittedReason).toBeUndefined()
+    expect(resolved.toolChoice).toBe("required")
+    expect(resolved.counts).toMatchObject({
+      discovered: 1,
+      executable: 1,
+      disabled: 0,
+      colliding: 0,
+      chatEnabled: 1
+    })
+    expect(resolved.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "notes_search",
+          description: "Search notes",
+          parameters: {
+            type: "object",
+            properties: { q: { type: "string" } }
+          }
+        }
+      }
+    ])
   })
 })

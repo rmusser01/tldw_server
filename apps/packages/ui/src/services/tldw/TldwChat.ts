@@ -9,7 +9,8 @@ import { extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
 import {
   captureChatRequestDebugSnapshot,
   getLastChatCompletionDebugSnapshot,
-  type ChatCompletionDebugSnapshot
+  type ChatCompletionDebugSnapshot,
+  type ChatRequestDebugMetadata
 } from "./chat-request-debug"
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 
@@ -277,6 +278,7 @@ export interface TldwChatOptions {
   grammarOverride?: string
   jsonMode?: boolean
   researchContext?: ChatResearchContext
+  chatDebugMetadata?: ChatRequestDebugMetadata
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
@@ -331,8 +333,15 @@ export class TldwChatService {
   ): Promise<string> {
     try {
       await tldwClient.initialize()
-      const normalizedTools = normalizeChatToolsForRequest(options.tools)
-      const toolChoice = normalizedTools ? options.toolChoice : undefined
+      const normalizedTools =
+        options.toolChoice === "none"
+          ? undefined
+          : normalizeChatToolsForRequest(options.tools)
+      const toolChoice =
+        normalizedTools &&
+        (options.toolChoice === "auto" || options.toolChoice === "required")
+          ? options.toolChoice
+          : undefined
       const requestMessages = buildRequestMessages(messages, options)
       if (requestMessages.length === 0) {
         throw new Error(
@@ -358,7 +367,7 @@ export class TldwChatService {
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
-              tool_choice: toolChoice,
+              ...(toolChoice ? { tool_choice: toolChoice } : {}),
               tools: normalizedTools
             }
           : {}),
@@ -382,10 +391,13 @@ export class TldwChatService {
         endpoint: "/api/v1/chat/completions",
         method: "POST",
         mode: "non-stream",
-        body: request
+        body: request,
+        metadata: options.chatDebugMetadata
       })
 
-      const response = await tldwClient.createChatCompletion(request)
+      const response = await tldwClient.createChatCompletion(request, {
+        debugMetadata: options.chatDebugMetadata
+      })
       const data = await response.json().catch(() => null)
       if (onResponse) {
         onResponse(data)
@@ -411,8 +423,15 @@ export class TldwChatService {
   ): AsyncGenerator<string, void, unknown> {
     try {
       await tldwClient.initialize()
-      const normalizedTools = normalizeChatToolsForRequest(options.tools)
-      const toolChoice = normalizedTools ? options.toolChoice : undefined
+      const normalizedTools =
+        options.toolChoice === "none"
+          ? undefined
+          : normalizeChatToolsForRequest(options.tools)
+      const toolChoice =
+        normalizedTools &&
+        (options.toolChoice === "auto" || options.toolChoice === "required")
+          ? options.toolChoice
+          : undefined
       const requestMessages = buildRequestMessages(messages, options)
       if (requestMessages.length === 0) {
         throw new Error(
@@ -451,7 +470,7 @@ export class TldwChatService {
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
-              tool_choice: toolChoice,
+              ...(toolChoice ? { tool_choice: toolChoice } : {}),
               tools: normalizedTools
             }
           : {}),
@@ -475,7 +494,8 @@ export class TldwChatService {
         endpoint: "/api/v1/chat/completions",
         method: "POST",
         mode: "stream",
-        body: request
+        body: request,
+        metadata: options.chatDebugMetadata
       })
 
       const startupTimeoutMs = coercePositiveTimeout(
@@ -488,7 +508,8 @@ export class TldwChatService {
       )
       const stream = tldwClient.streamChatCompletion(request, {
         signal: this.currentController.signal,
-        streamIdleTimeoutMs
+        streamIdleTimeoutMs,
+        debugMetadata: options.chatDebugMetadata
       })
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null

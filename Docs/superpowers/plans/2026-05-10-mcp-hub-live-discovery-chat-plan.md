@@ -36,7 +36,9 @@
 - [ ] Add MCP Hub endpoint tests in `tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py` for permission enforcement, successful live refresh, and external federation unavailable response.
 - [ ] Add protocol/module coverage in `tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py` or adjacent tests for `external.tools.refresh` validation and external write-tool validator behavior.
 
-**Status:** Not Started
+**Status:** Complete
+
+**Verification Notes:** Committed in `118004a1d`. Focused MCP backend pytest passed 61 tests; Bandit over touched backend production files reported 0 findings; `git diff --check` passed.
 
 ---
 
@@ -63,7 +65,9 @@
 - [ ] Extend `apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx` for create/import/update/delete refresh calls and refresh-failure warning copy.
 - [ ] Extend `apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx` for the explicit refresh action and registry reload.
 
-**Status:** Not Started
+**Status:** Complete
+
+**Verification Notes:** Committed in `3a2b3bb75`. Package-local Vitest for `ExternalServersTab` and `ToolCatalogsTab` passed 13 tests; `git diff --check` passed. Bandit was not applicable to frontend-only TypeScript changes.
 
 ---
 
@@ -90,7 +94,9 @@
 - [ ] Extend `apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts` for model-without-tools, unhealthy MCP, `none` tool choice, collision-only tools, and successful inclusion.
 - [ ] Extend `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx` for omission reasons and comparison mode parity.
 
-**Status:** Not Started
+**Status:** In Progress
+
+**Verification Notes:** Initial Stage 3 focused Vitest passed 26 tests and `git diff --check` passed. Quality follow-up added RED tests for live debug metadata forwarding; RED failed on missing lower-level client options, then package-local Vitest passed 42 tests across `chat-tools`, `pageAssistModel`, raw preview, and `TldwChatService` coverage. `git diff --check` passed. Focused quality re-review approved the fix.
 
 ---
 
