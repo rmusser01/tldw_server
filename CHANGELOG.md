@@ -20,6 +20,11 @@ and this project adheres to Some kind of Versioning
   downstream ACP stdio agent plus required provider credentials. Binary
   detection for tools such as Claude Code or Codex is not, by itself, a
   live-agent create/prompt/cancel verification. (Issue #1504)
+- Clarified the ACP release posture for retention and transcript redaction:
+  session detail, events, and artifacts are authenticated operator
+  drill-through surfaces rather than redacted transcript views; diagnostics and
+  audit metadata are sanitized, but automatic transcript/artifact hard-delete
+  retention is not yet a release-certified claim.
 
 ### Fixed
 

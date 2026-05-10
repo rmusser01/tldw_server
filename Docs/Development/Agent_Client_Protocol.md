@@ -204,6 +204,51 @@ session diagnostic exists, the orchestration run error is exposed as the fallbac
 failure source. Reviewer runs include a `review_decision` summary when a matching
 durable review row exists.
 
+### Retention And Redaction Policy
+
+ACP session history is an authenticated operator drill-through surface, not a
+redacted transcript vault. The current release posture is:
+
+- Session metadata and normalized message text are persisted in
+  `acp_sessions.db`; prompt and assistant raw payloads are also retained so
+  session detail, event replay, artifacts, diagnostics, forking, and run-history
+  inspection can reconstruct what happened.
+- `ACP_SESSION_TTL_SECONDS` and `ACP_MAX_SESSION_DURATION_SECONDS` close active
+  sessions through the ACP session cleanup task. They do not hard-delete session
+  rows, message transcripts, or artifact references.
+- `GET /api/v1/acp/sessions/{session_id}/detail` and
+  `/events` return the authenticated session history, including stored message
+  content and raw payload fields. These endpoints are owner-scoped by session
+  access checks, but they are not redacted transcript views.
+- `/artifacts` returns artifact dictionaries emitted in session messages. The
+  server does not scrub arbitrary agent-provided artifact payloads, file paths,
+  or embedded content before returning them to an authorized caller.
+- `/diagnostics` normalizes failure reason codes and redacts diagnostic messages
+  that look like API keys, bearer tokens, Slack bot tokens, or OpenAI-style
+  secret keys. It also truncates long diagnostic text.
+- `/audit` returns ACP audit events after audit metadata has been sanitized.
+  The audit sanitizer redacts sensitive metadata keys such as prompts,
+  messages, content, command arguments, `cwd`, environment values, MCP server
+  definitions, API keys, and authorization tokens. It also redacts strings with
+  common secret markers and truncates long string values.
+- `ACP_AUDIT_RETENTION_DAYS` is parsed by ACP configuration and the audit DB
+  has a purge helper, but automatic audit-retention enforcement is not wired as
+  a release-certified scheduler. Do not claim automatic ACP audit deletion until
+  that wiring is implemented and verified.
+- Workspace `env_vars` and runner environment configuration are operational
+  configuration. They may be stored or forwarded as plaintext in orchestration
+  metadata and process environment. Use external secret managers or host-level
+  environment injection for real secrets.
+
+Release notes may claim authenticated ACP session drill-through, bounded run
+previews, sanitized audit metadata, and sanitized diagnostics. They must not
+claim automatic transcript redaction, artifact payload redaction, or hard-delete
+retention for ACP sessions until dedicated retention/redaction implementation
+work lands and is verified. Follow-up implementation is tracked by
+[#1512](https://github.com/rmusser01/tldw_server/issues/1512) for retention
+cleanup and [#1513](https://github.com/rmusser01/tldw_server/issues/1513) for
+redacted transcript/artifact views.
+
 ### Frontend Setup And Diagnostics Surfaces
 
 Agent Tasks, Agent Registry, and ACP Playground share the same browser transport
