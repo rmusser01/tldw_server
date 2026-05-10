@@ -110,6 +110,14 @@ session-control row and restart only the helper process owned by the smoke
 harness restart lease. They then verify the next same-session command provisions
 a fresh VM and completes. Scheduled runs must not enable these drills by default.
 
+Host reboot and launchd-managed restart are not part of the current host-gated
+CI contract. Maintainers validating those paths should treat them as manual
+operator procedures: restore or verify helper readiness first, inspect
+`/api/v1/sandbox/admin/macos-diagnostics`, run reconciliation repair in dry-run
+mode before any mutation, and then run the real host smoke. A host reboot drill
+must not be added to scheduled CI until a dedicated prepared runner can tolerate
+disruptive reboot testing and preserve helper/stdout/serial logs reliably.
+
 ## Expected Skips And Non-Blocking Conditions
 
 These are expected and should not block ordinary PRs:
@@ -122,6 +130,8 @@ These are expected and should not block ordinary PRs:
 - local developer machines without a prepared bundle/helper environment
 - failure-drill coverage skipped because manual dispatch did not set
   `include_failure_drills=true`
+- host reboot or launchd-managed restart validation handled through a manual
+  operator procedure rather than the workflow
 
 A manual run that fails before VM execution because the runner is missing the
 configured bundle path is an operator setup failure, not a sandbox runtime
