@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { act, render, renderHook, screen } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 
 import {
   getChatErrorBannerScanSignature,
@@ -23,7 +23,7 @@ const encodeError = (
   })
 
 describe("PlaygroundChatErrorBanner", () => {
-  it("renders chat errors through the shared alert primitive", () => {
+  it("renders chat errors through the shared RecoveryCallout primitive", () => {
     const error = {
       ...JSON.parse(
         JSON.stringify({
@@ -35,6 +35,11 @@ describe("PlaygroundChatErrorBanner", () => {
       key: "assistant-error-1:abc"
     }
 
+    const LocationProbe = () => {
+      const location = useLocation()
+      return <div data-testid="current-location">{location.pathname}</div>
+    }
+
     render(
       <MemoryRouter>
         <PlaygroundChatErrorBanner
@@ -43,17 +48,18 @@ describe("PlaygroundChatErrorBanner", () => {
           dismissLabel="Dismiss error"
           onDismiss={() => undefined}
         />
+        <LocationProbe />
       </MemoryRouter>
     )
 
     const banner = screen.getByTestId("playground-chat-error-banner")
 
-    expect(banner).toHaveAttribute("data-ds-component", "Alert")
+    expect(banner).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(banner).toHaveAttribute("role", "alert")
-    expect(screen.getByRole("link", { name: "Health & diagnostics" })).toHaveAttribute(
-      "href",
-      "/settings/health"
-    )
+    expect(banner).toHaveTextContent("Generation failed")
+    expect(banner).toHaveTextContent("Open diagnostics for details")
+    fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
+    expect(screen.getByTestId("current-location")).toHaveTextContent("/settings/health")
     expect(screen.getByRole("button", { name: "Dismiss error" })).toBeInTheDocument()
   })
 
