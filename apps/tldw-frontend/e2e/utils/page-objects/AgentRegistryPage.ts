@@ -9,7 +9,7 @@
  * Route: /agents
  * Component: packages/ui/src/components/Option/AgentRegistry/index.tsx
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -92,20 +92,42 @@ export class AgentRegistryPage extends BasePage {
 
   // -- Helpers ----------------------------------------------------------------
 
+  /** Wait for the health card to finish its loading state. */
+  async waitForHealthSettled(timeout = 20_000): Promise<void> {
+    await Promise.race([
+      this.runnerBinaryLabel.waitFor({ state: "visible", timeout }),
+      this.healthUnavailableWarning.waitFor({ state: "visible", timeout }),
+    ])
+  }
+
   /** Check if health data loaded successfully (status indicators are visible) */
   async isHealthDataLoaded(): Promise<boolean> {
+    await this.waitForHealthSettled().catch(() => {})
     const runnerVisible = await this.runnerBinaryLabel.isVisible().catch(() => false)
     const agentVisible = await this.agentStatusLabel.isVisible().catch(() => false)
     return runnerVisible && agentVisible
   }
 
+  /** Wait for the agent list to finish its loading state. */
+  async waitForAgentListSettled(timeout = 20_000): Promise<void> {
+    await Promise.race([
+      this.agentCards.first().waitFor({ state: "visible", timeout }),
+      this.launchButtons.first().waitFor({ state: "visible", timeout }),
+      this.noAgentsMessage.waitFor({ state: "visible", timeout }),
+    ])
+  }
+
   /** Get the count of visible agent cards */
   async getAgentCount(): Promise<number> {
-    return this.agentCards.count()
+    await this.waitForAgentListSettled()
+    const cardCount = await this.agentCards.count()
+    if (cardCount > 0) return cardCount
+    return this.launchButtons.count()
   }
 
   /** Check if the page is showing health warning (server unreachable) */
   async isHealthUnavailable(): Promise<boolean> {
+    await this.waitForHealthSettled().catch(() => {})
     return this.healthUnavailableWarning.isVisible().catch(() => false)
   }
 
