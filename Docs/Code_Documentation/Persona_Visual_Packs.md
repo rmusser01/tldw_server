@@ -44,6 +44,46 @@ work. It keeps today's pack attached to one persona while leaving room for later
 duplicate-to-persona, import/export, and shared-library workflows without
 changing the core pack format.
 
+## Personal Library
+
+The personal library is a user-scoped metadata layer over existing Persona
+Visual packs. A library item references a source persona and source pack owned by
+the same user, stores editable display metadata, and keeps source display
+snapshots so deleted or stale sources can still be shown and removed.
+
+Saving a source pack to the library is idempotent for the same user, source
+persona, and source pack. It updates the library metadata without copying assets,
+changing the source pack, or changing active-pack state.
+
+Listing derives source state from the live source rows:
+
+1. `source_available` is false when the referenced source persona or pack is no
+   longer present.
+2. `source_changed` is true when the saved source pack version differs from the
+   current source pack version.
+3. snapshot fields remain available for unavailable entries.
+
+Using a library item duplicates the referenced source pack to a target persona as
+a draft through the existing duplicate-to-persona service path. It does not
+activate the target persona. Unavailable source entries cannot be used but can be
+removed.
+
+Current personal-library API routes:
+
+1. `GET /api/v1/persona/visual-library`
+2. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/library`
+3. `PATCH /api/v1/persona/visual-library/{item_id}`
+4. `DELETE /api/v1/persona/visual-library/{item_id}`
+5. `POST /api/v1/persona/visual-library/{item_id}/use`
+
+Core implementation points:
+
+1. `persona_visual_library_items` in the ChaChaNotes persona store.
+2. `PersonaStateStore` library helpers for upsert/list/get/update/soft-delete.
+3. `PersonaVisualLibraryService` for ownership checks, metadata normalization,
+   stale-source rejection on use, and duplicate-to-persona draft creation.
+4. `VisualPackEditor` for save/list/edit/remove/use controls in Persona Garden.
+
 ## Import Preview And Commit
 
 Import is staged:

@@ -358,7 +358,7 @@
 
 **Tests:** Focused backend, frontend, Bandit, and diff checks.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 7: Update docs and trackers
 
@@ -368,15 +368,15 @@
 - Modify: `backlog/tasks/task-203 - Implement-personal-Persona-Visual-pack-library-foundation.md` via Backlog CLI
 - GitHub issue comments: #1449, #1468
 
-- [ ] **Step 1: Update product PRD**
+- [x] **Step 1: Update product PRD**
 
   Add a Phase 3 personal library note describing reference-backed, user-owned V1 library entries and non-goals.
 
-- [ ] **Step 2: Update code documentation**
+- [x] **Step 2: Update code documentation**
 
   Add endpoint/service/schema notes under a Personal Library section.
 
-- [ ] **Step 3: Update Backlog task notes**
+- [x] **Step 3: Update Backlog task notes**
 
   Use `backlog task edit TASK-203 --append-notes ... --plain` with implementation and verification notes.
 
@@ -388,19 +388,19 @@
 
 **Files:** All touched files.
 
-- [ ] **Step 1: Run focused backend tests**
+- [x] **Step 1: Run focused backend tests**
 
   ```bash
   /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visual_library_db.py tldw_Server_API/tests/Persona/test_persona_visual_library_service.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q
   ```
 
-- [ ] **Step 2: Run existing persona visual regression tests**
+- [x] **Step 2: Run existing persona visual regression tests**
 
   ```bash
   /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py tldw_Server_API/tests/Persona/test_persona_visual_service.py -q
   ```
 
-- [ ] **Step 3: Run frontend focused tests**
+- [x] **Step 3: Run frontend focused tests**
 
   ```bash
   bunx vitest run apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx apps/packages/ui/src/services/__tests__/persona-visuals.test.ts
@@ -408,20 +408,20 @@
 
   If there is no service unit-test file, omit it and record why.
 
-- [ ] **Step 4: Run Bandit on touched backend code**
+- [x] **Step 4: Run Bandit on touched backend code**
 
   ```bash
   /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py tldw_Server_API/app/core/Persona/visual_library_service.py tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/api/v1/schemas/persona.py -f json -o /tmp/bandit_persona_visual_library.json
   ```
 
-- [ ] **Step 5: Run diff checks**
+- [x] **Step 5: Run diff checks**
 
   ```bash
   git diff --check
   git status --short --branch
   ```
 
-- [ ] **Step 6: Update Backlog final summary**
+- [x] **Step 6: Update Backlog final summary**
 
   Check acceptance criteria and Definition of Done items via Backlog CLI, then add final summary.
 
