@@ -765,7 +765,7 @@ git commit -m "Add Backlog.md read-only CLI"
 - Modify: `tools/backlog-py/pyproject.toml` only after dependency verification
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Verify MCP dependency availability before editing package deps**
+- [x] **Step 1: Verify MCP dependency availability before editing package deps**
 
 Run:
 
@@ -779,7 +779,7 @@ PY
 
 Expected: prints `True` if MCP SDK is already available. If `False`, do not add an unverified dependency yet; implement and test `resources.py` and `tools.py` as pure functions first, then ask before installing network dependencies.
 
-- [ ] **Step 2: Write failing pure registry tests**
+- [x] **Step 2: Write failing pure registry tests**
 
 Test:
 
@@ -789,7 +789,7 @@ Test:
 - task view tool returns fixture task
 - unsupported mutation tools return explicit not-implemented errors until Task 7
 
-- [ ] **Step 3: Implement resource and tool registry**
+- [x] **Step 3: Implement resource and tool registry**
 
 Implement pure functions:
 
@@ -802,11 +802,11 @@ repository layer:
 
 Do not expose generic shell execution.
 
-- [ ] **Step 4: Add stdio server adapter only when SDK is available**
+- [x] **Step 4: Add stdio server adapter only when SDK is available**
 
 If `mcp` SDK is installed, implement `server.py` as a thin adapter over the pure registry. If not installed, leave `server.py` with a clear import-time message and keep tests focused on pure functions.
 
-- [ ] **Step 5: Run MCP tests**
+- [x] **Step 5: Run MCP tests**
 
 Run:
 
@@ -817,7 +817,7 @@ python -m pytest tools/backlog-py/tests/test_mcp_resources.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
