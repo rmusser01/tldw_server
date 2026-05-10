@@ -1,7 +1,7 @@
 ---
 id: TASK-224
 title: Design broader Persona/Buddy assistant maturity roadmap
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-10 06:26'
 labels:
@@ -29,11 +29,11 @@ Create the approved staged design spec for the broader Persona/Buddy assistant f
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design spec documents the approved staged roadmap from audit through reliability/UX baseline, Persona Chat quality, runtime/MCP expansion, and visual/renderer future work.
-- [ ] #2 Spec identifies the first implementation target as reliability/UX baseline and explains why it precedes Persona Chat quality and runtime expansion.
-- [ ] #3 Spec is grounded in current repo surfaces and open/closed GitHub tracker state, including #635, #1388, #1389, #1449, and #1497.
-- [ ] #4 Spec lists proposed follow-up issue slices without implementing code.
-- [ ] #5 Verification and review status are recorded in the Backlog task.
+- [x] #1 Design spec documents the approved staged roadmap from audit through reliability/UX baseline, Persona Chat quality, runtime/MCP expansion, and visual/renderer future work.
+- [x] #2 Spec identifies the first implementation target as reliability/UX baseline and explains why it precedes Persona Chat quality and runtime expansion.
+- [x] #3 Spec is grounded in current repo surfaces and open/closed GitHub tracker state, including #635, #1388, #1389, #1449, and #1497.
+- [x] #4 Spec lists proposed follow-up issue slices without implementing code.
+- [x] #5 Verification and review status are recorded in the Backlog task.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,12 +48,12 @@ Create the approved staged design spec for the broader Persona/Buddy assistant f
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -64,5 +64,11 @@ Create the approved staged design spec for the broader Persona/Buddy assistant f
 - Spec grounds the roadmap in closed Persona/Buddy visual/runtime trackers and the open/stale #635 Persona Chat tracker.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because this is a docs/backlog-only design change with no touched Python code.
-- Spec review status: pending explicit authorization to dispatch a reviewer subagent in this environment.
+- Spec review status: approved by reviewer subagent `019e109f-5507-7a21-8c63-acb055cf5b54` after the first review attempt stalled and was shut down without a verdict.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Committed the approved staged Persona/Buddy assistant maturity roadmap design. The spec identifies Stage 0 current-state audit as the immediate next planning slice and Stage 1 reliability/UX baseline as the first implementation target before Persona Chat quality, unified runtime/MCP expansion, and visual/renderer follow-ups.
+<!-- SECTION:FINAL_SUMMARY:END -->
