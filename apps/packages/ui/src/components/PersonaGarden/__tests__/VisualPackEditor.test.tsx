@@ -1978,6 +1978,172 @@ describe("VisualPackEditor", () => {
     ).toBe(false)
   })
 
+  it("sends explicit replace-draft choices for conflicted visual imports", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    let commitPayload: any = null
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          archive_sha256: "sha-preview",
+          canonical_payload_fingerprint: "fingerprint-preview",
+          schema_version: "persona_visual_pack.v1",
+          bundle_summary: {
+            pack_title: "Imported Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: [],
+          conflicts: [
+            {
+              conflict_id: "target_pack_title_match:draft-pack-1",
+              type: "target_pack_title_match",
+              message: "Target persona already has a draft visual pack named Imported Visuals.",
+              pack_id: "draft-pack-1",
+              pack_title: "Imported Visuals",
+              pack_status: "draft",
+              allowed_choices: ["create_new", "replace_draft"]
+            }
+          ],
+          proposed_plan: {
+            target_mode: "create_new",
+            target_modes: ["create_new", "replace_draft"],
+            replaceable_pack_ids: ["draft-pack-1"]
+          },
+          quota_estimate: { asset_bytes: 512 },
+          required_choices: [
+            {
+              choice_id: "import_target_mode",
+              reason: "target_pack_conflicts",
+              default_target_mode: "create_new",
+              allowed_target_modes: ["create_new", "replace_draft"],
+              replaceable_pack_ids: ["draft-pack-1"]
+            }
+          ],
+          target_warnings: []
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
+        method === "POST"
+      ) {
+        commitPayload = parseJsonBody(init?.body)
+        return okResponse({
+          job_id: "import-job-1",
+          portability_job_id: "portability-import-1",
+          operation: "import_commit",
+          preview_id: "preview-1",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-conflict-choice")).toBeInTheDocument()
+    )
+    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+
+    fireEvent.change(screen.getByTestId("persona-visual-import-target-mode"), {
+      target: { value: "replace_draft" }
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-replace-pack")).toHaveValue(
+        "draft-pack-1"
+      )
+    )
+    fireEvent.change(screen.getByTestId("persona-visual-import-draft-title"), {
+      target: { value: "Replacement Visuals" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+
+    await waitFor(() => expect(commitPayload).not.toBeNull())
+    expect(commitPayload).toMatchObject({
+      trust_mode: "untrusted_import",
+      target_mode: "replace_draft",
+      target_pack_id: "draft-pack-1",
+      title: "Replacement Visuals"
+    })
+  })
+
   it("allows failed import commit jobs to be retried", async () => {
     const pack = {
       id: "pack-1",

@@ -235,7 +235,9 @@ def test_create_persona_visual_pack_import_commit_job_uses_preview_group() -> No
         request_id="request-1",
         target_persona_id="persona-2",
         trust_mode="untrusted_import",
-        target_mode="create_new",
+        target_mode="replace_draft",
+        target_pack_id="draft-pack-1",
+        title="Replacement Pack",
     )
 
     expected_key = visual_pack_import_commit_idempotency_key(
@@ -254,7 +256,9 @@ def test_create_persona_visual_pack_import_commit_job_uses_preview_group() -> No
         "request_id": "request-1",
         "target_persona_id": "persona-2",
         "trust_mode": "untrusted_import",
-        "target_mode": "create_new",
+        "target_mode": "replace_draft",
+        "target_pack_id": "draft-pack-1",
+        "title": "Replacement Pack",
     }
 
 

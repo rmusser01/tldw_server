@@ -283,6 +283,27 @@ export interface PersonaVisualImportPreviewStartResponse {
   stage: string
 }
 
+export type PersonaVisualImportTargetMode = "create_new" | "replace_draft"
+
+export interface PersonaVisualImportConflict {
+  conflict_id?: string
+  type?: string
+  severity?: string
+  message?: string
+  pack_id?: string
+  pack_title?: string
+  pack_status?: string
+  allowed_choices?: PersonaVisualImportTargetMode[]
+}
+
+export interface PersonaVisualImportRequiredChoice {
+  choice_id: string
+  reason?: string
+  default_target_mode?: PersonaVisualImportTargetMode
+  allowed_target_modes?: PersonaVisualImportTargetMode[]
+  replaceable_pack_ids?: string[]
+}
+
 export interface PersonaVisualImportPreviewResponse {
   preview_id: string
   job_id: string
@@ -297,10 +318,10 @@ export interface PersonaVisualImportPreviewResponse {
   schema_version?: string | null
   bundle_summary: Record<string, unknown>
   validation_warnings: unknown[]
-  conflicts: unknown[]
+  conflicts: PersonaVisualImportConflict[]
   proposed_plan: Record<string, unknown>
   quota_estimate: Record<string, unknown>
-  required_choices: unknown[]
+  required_choices: PersonaVisualImportRequiredChoice[]
   target_warnings: unknown[]
   error_code?: string | null
   error_message?: string | null
@@ -310,7 +331,9 @@ export interface PersonaVisualImportPreviewResponse {
 export interface PersonaVisualImportCommitRequest {
   request_id?: string | null
   trust_mode?: "trusted_restore" | "untrusted_import"
-  target_mode?: "create_new"
+  target_mode?: PersonaVisualImportTargetMode
+  target_pack_id?: string | null
+  title?: string | null
 }
 
 export interface PersonaVisualImportCommitStartResponse {

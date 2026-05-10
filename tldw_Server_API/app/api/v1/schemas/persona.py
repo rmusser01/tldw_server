@@ -363,7 +363,17 @@ class PersonaVisualImportPreviewResponse(BaseModel):
 class PersonaVisualImportCommitRequest(BaseModel):
     request_id: str | None = Field(default=None, max_length=120)
     trust_mode: Literal["trusted_restore", "untrusted_import"] = "untrusted_import"
-    target_mode: Literal["create_new"] = "create_new"
+    target_mode: Literal["create_new", "replace_draft"] = "create_new"
+    target_pack_id: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("request_id", "target_pack_id", "title", mode="before")
+    @classmethod
+    def _normalize_optional_text(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
 
 class PersonaVisualImportCommitStartResponse(BaseModel):

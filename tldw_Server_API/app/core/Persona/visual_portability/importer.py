@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +31,9 @@ from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 from tldw_Server_API.app.core.Persona.visuals import validate_visual_manifest
 
 
+_REPLACEABLE_IMPORT_TARGET_STATUSES = frozenset({"draft", "review", "failed"})
+
+
 class PersonaVisualPackImporter:
     """Commit a completed persona visual pack preview into a new draft pack."""
 
@@ -51,9 +56,13 @@ class PersonaVisualPackImporter:
         target_persona_id: str,
         trust_mode: str,
         target_mode: str = "create_new",
+        target_pack_id: str | None = None,
+        title: str | None = None,
+        conflict_choice_explicit: bool = False,
         progress: Any | None = None,
     ) -> dict[str, Any]:
-        if target_mode != "create_new":
+        target_mode_value = str(target_mode or "create_new").strip()
+        if target_mode_value not in {"create_new", "replace_draft"}:
             raise ValueError("unsupported_import_target_mode")
         if trust_mode not in {TRUST_MODE_TRUSTED_RESTORE, TRUST_MODE_UNTRUSTED_IMPORT}:
             raise ValueError("unsupported_import_trust_mode")
@@ -61,13 +70,31 @@ class PersonaVisualPackImporter:
         preview = self.repo.get_import_preview(str(preview_id), owner_user_id=self.user_id)
         if preview is None:
             raise ValueError("import_preview_not_found")
+        preview_conflicts = _import_preview_json_field(preview, "conflicts_json", [])
+        if preview_conflicts and not conflict_choice_explicit:
+            raise ValueError("import_conflict_choice_required")
+        replacement_pack = None
+        if target_mode_value == "replace_draft":
+            replacement_pack = self._replacement_pack_or_error(
+                target_persona_id=target_persona_id,
+                target_pack_id=target_pack_id,
+                preview_conflicts=preview_conflicts,
+            )
+        elif target_pack_id:
+            raise ValueError("target_pack_id_requires_replace_draft")
+
         archive_path = Path(str(preview.get("archive_path") or ""))
         self._validate_preview_ready(preview=preview, archive_path=archive_path)
         self._progress(progress, "revalidating_preview", {"preview_id": str(preview_id)})
+        target_packs = self.db.list_persona_visual_packs(
+            persona_id=target_persona_id,
+            user_id=self.user_id,
+        )
         revalidated = PersonaVisualPackImportPreviewer().create_preview(
             archive_path=archive_path,
             owner_user_id=self.user_id,
             target_persona_id=target_persona_id,
+            target_packs=target_packs,
         )
         expected_fingerprint = str(preview.get("canonical_payload_fingerprint") or "")
         if expected_fingerprint and revalidated["canonical_payload_fingerprint"] != expected_fingerprint:
@@ -81,10 +108,11 @@ class PersonaVisualPackImporter:
             assets = _section_list(assets_payload, key="assets", path="metadata/assets.json")
 
             self._progress(progress, "creating_pack", {"target_persona_id": target_persona_id})
+            pack_title = _import_pack_title(title=title, pack=pack)
             created_pack = self.db.create_persona_visual_pack(
                 persona_id=target_persona_id,
                 user_id=self.user_id,
-                title=str(pack.get("title") or "Imported visual pack"),
+                title=pack_title,
                 renderer_type=str(pack.get("renderer_type") or "sprite_frames"),
                 manifest={
                     "manifest_version": 1,
@@ -143,6 +171,20 @@ class PersonaVisualPackImporter:
             manifest=validation.manifest,
             expected_version=int(created_pack["version"]),
         )
+        replaced_pack_id = None
+        if replacement_pack is not None:
+            replaced_pack_id = str(replacement_pack["id"])
+            self._progress(
+                progress,
+                "replacing_draft",
+                {"target_pack_id": replaced_pack_id, "pack_id": str(created_pack["id"])},
+            )
+            if not self.db.soft_delete_persona_visual_pack_with_assets(
+                pack_id=replaced_pack_id,
+                persona_id=target_persona_id,
+                user_id=self.user_id,
+            ):
+                raise ValueError("import_target_pack_not_found")
         self._progress(
             progress,
             "completed",
@@ -152,13 +194,39 @@ class PersonaVisualPackImporter:
             "status": "imported",
             "preview_id": str(preview_id),
             "pack_id": str(created_pack["id"]),
+            "target_mode": target_mode_value,
+            "replaced_pack_id": replaced_pack_id,
             "pack": updated_pack,
             "id_maps": id_maps,
             "created_records": {
                 "pack_id": str(created_pack["id"]),
                 "asset_ids": [str(asset["id"]) for asset in imported_assets],
+                "replaced_pack_id": replaced_pack_id,
             },
         }
+
+    def _replacement_pack_or_error(
+        self,
+        *,
+        target_persona_id: str,
+        target_pack_id: str | None,
+        preview_conflicts: Any,
+    ) -> dict[str, Any]:
+        target_pack_id_value = str(target_pack_id or "").strip()
+        if not target_pack_id_value:
+            raise ValueError("target_pack_id_required")
+        if target_pack_id_value not in _replaceable_pack_ids_from_conflicts(preview_conflicts):
+            raise ValueError("import_target_pack_not_replaceable")
+        replacement_pack = self.db.get_persona_visual_pack(
+            pack_id=target_pack_id_value,
+            persona_id=target_persona_id,
+            user_id=self.user_id,
+        )
+        if replacement_pack is None:
+            raise ValueError("import_target_pack_not_found")
+        if str(replacement_pack.get("status") or "") not in _REPLACEABLE_IMPORT_TARGET_STATUSES:
+            raise ValueError("import_target_pack_not_replaceable")
+        return replacement_pack
 
     def _validate_preview_ready(self, *, preview: dict[str, Any], archive_path: Path) -> None:
         if str(preview.get("status") or "") != "completed":
@@ -175,6 +243,43 @@ class PersonaVisualPackImporter:
     def _progress(self, progress: Any | None, stage: str, payload: dict[str, Any]) -> None:
         if progress is not None:
             progress(stage, payload)
+
+
+def _import_preview_json_field(row: Mapping[str, Any], key: str, default: Any) -> Any:
+    value = row.get(key)
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except json.JSONDecodeError:
+        return default
+
+
+def _replaceable_pack_ids_from_conflicts(conflicts: Any) -> set[str]:
+    if not isinstance(conflicts, list):
+        return set()
+    replaceable: set[str] = set()
+    for conflict in conflicts:
+        if not isinstance(conflict, dict):
+            continue
+        allowed_choices = conflict.get("allowed_choices")
+        if not isinstance(allowed_choices, list) or "replace_draft" not in allowed_choices:
+            continue
+        pack_id = str(conflict.get("pack_id") or "").strip()
+        if pack_id:
+            replaceable.add(pack_id)
+    return replaceable
+
+
+def _import_pack_title(*, title: str | None, pack: Mapping[str, Any]) -> str:
+    title_value = str(title or "").strip()
+    if title_value:
+        return title_value
+    pack_title = str(pack.get("title") or "").strip()
+    return pack_title or "Imported visual pack"
+
 
 def _parse_datetime(value: Any) -> datetime | None:
     if not value:

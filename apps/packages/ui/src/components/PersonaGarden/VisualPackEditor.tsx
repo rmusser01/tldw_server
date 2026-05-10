@@ -56,8 +56,11 @@ import type {
   PersonaVisualImportCommitStartResponse,
   PersonaVisualFrame,
   PersonaVisualGenerationReadinessResponse,
+  PersonaVisualImportConflict,
   PersonaVisualImportPreviewResponse,
   PersonaVisualImportPreviewStartResponse,
+  PersonaVisualImportRequiredChoice,
+  PersonaVisualImportTargetMode,
   PersonaVisualManifest,
   PersonaVisualPack,
   PersonaVisualPackExportResponse,
@@ -329,6 +332,42 @@ const isFullImportPreview = (
 ): preview is PersonaVisualImportPreviewResponse =>
   Boolean(preview && "bundle_summary" in preview)
 
+const getImportTargetChoice = (
+  preview: PersonaVisualImportPreviewResponse | null
+): PersonaVisualImportRequiredChoice | null =>
+  preview?.required_choices.find(
+    (choice) => choice.choice_id === "import_target_mode"
+  ) || null
+
+const getAllowedImportTargetModes = (
+  choice: PersonaVisualImportRequiredChoice | null
+): PersonaVisualImportTargetMode[] => {
+  const modes = choice?.allowed_target_modes || []
+  return modes.length ? modes : ["create_new"]
+}
+
+const getReplaceableImportConflicts = (
+  conflicts: PersonaVisualImportConflict[]
+): PersonaVisualImportConflict[] =>
+  conflicts.filter(
+    (conflict) =>
+      Boolean(conflict.pack_id) &&
+      (conflict.allowed_choices || []).includes("replace_draft")
+  )
+
+const getImportConflictLabel = (conflict: PersonaVisualImportConflict): string => {
+  const title = conflict.pack_title || conflict.pack_id || "Draft pack"
+  const status = conflict.pack_status ? ` (${conflict.pack_status})` : ""
+  return `${title}${status}`
+}
+
+const getDefaultImportDraftTitle = (
+  preview: PersonaVisualImportPreviewResponse | null
+): string => {
+  const title = preview?.bundle_summary?.pack_title
+  return typeof title === "string" ? title : ""
+}
+
 const formatImportPreviewSummary = (
   preview: PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse
 ): string => {
@@ -480,6 +519,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [importPreview, setImportPreview] = React.useState<
     PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
   >(null)
+  const [importTargetMode, setImportTargetMode] =
+    React.useState<PersonaVisualImportTargetMode | "">("create_new")
+  const [importReplacePackId, setImportReplacePackId] = React.useState("")
+  const [importDraftTitle, setImportDraftTitle] = React.useState("")
   const [importCommitJob, setImportCommitJob] = React.useState<
     PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null
   >(null)
@@ -1148,6 +1191,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportPreview(preview)
       setImportCommitJob(null)
+      setImportTargetMode("create_new")
+      setImportReplacePackId("")
+      setImportDraftTitle("")
       setSelectedImportPreviewFile(null)
       if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
       setStatusMessage("Import preview queued.")
@@ -1186,15 +1232,21 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const handleStartImportCommit = async () => {
     if (!selectedPersonaId || !fullImportPreview?.preview_id) return
     if (fullImportPreview.status !== "completed") return
+    if (importConflictChoiceRequired && !importTargetMode) return
     setCommittingImport(true)
     setError(null)
     try {
+      const targetMode = importTargetMode || "create_new"
+      const title = importDraftTitle.trim()
       const job = await startPersonaVisualImportCommit(
         selectedPersonaId,
         fullImportPreview.preview_id,
         {
           trust_mode: "untrusted_import",
-          target_mode: "create_new"
+          target_mode: targetMode,
+          target_pack_id:
+            targetMode === "replace_draft" ? importReplacePackId : null,
+          title: title || null
         }
       )
       setImportCommitJob(job)
@@ -1766,15 +1818,37 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     : []
   const importPreviewConflicts = fullImportPreview?.conflicts || []
   const importPreviewPlan = fullImportPreview?.proposed_plan || null
+  const importTargetChoice = getImportTargetChoice(fullImportPreview)
+  const importAllowedTargetModes = getAllowedImportTargetModes(importTargetChoice)
+  const replaceableImportConflicts = getReplaceableImportConflicts(importPreviewConflicts)
+  const importConflictChoiceRequired = Boolean(importTargetChoice)
+  const importConflictChoiceValid =
+    !importConflictChoiceRequired ||
+    importTargetMode === "create_new" ||
+    Boolean(importReplacePackId)
   const canCommitImportPreview = fullImportPreview?.status === "completed"
   const importCommitStatus = importCommitJob?.status || null
   const importCommitIsTerminal = importCommitStatus
     ? IMPORT_COMMIT_TERMINAL_STATUSES.has(importCommitStatus)
     : false
   const canStartImportCommit =
-    !importCommitJob?.job_id || importCommitStatus === "failed"
+    importConflictChoiceValid &&
+    (!importCommitJob?.job_id || importCommitStatus === "failed")
   const canRefreshImportCommit =
     Boolean(importCommitJob?.job_id) && !importCommitIsTerminal
+
+  React.useEffect(() => {
+    if (!fullImportPreview) {
+      setImportTargetMode("create_new")
+      setImportReplacePackId("")
+      setImportDraftTitle("")
+      return
+    }
+    const choice = getImportTargetChoice(fullImportPreview)
+    setImportTargetMode(choice ? "" : "create_new")
+    setImportReplacePackId("")
+    setImportDraftTitle(getDefaultImportDraftTitle(fullImportPreview))
+  }, [fullImportPreview?.preview_id])
 
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
@@ -2248,6 +2322,76 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                         <div className="mt-1 text-text-muted">
                           Commit creates a new draft pack. Activation remains separate.
                         </div>
+                        {importConflictChoiceRequired ? (
+                          <div
+                            data-testid="persona-visual-import-conflict-choice"
+                            className="mt-2 grid gap-2 md:grid-cols-[minmax(140px,180px)_minmax(180px,1fr)_minmax(180px,1fr)]"
+                          >
+                            <label className="text-xs text-text-muted">
+                              <span className="mb-1 block">Target mode</span>
+                              <select
+                                data-testid="persona-visual-import-target-mode"
+                                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                                value={importTargetMode}
+                                onChange={(event) => {
+                                  const nextMode = event.target
+                                    .value as PersonaVisualImportTargetMode | ""
+                                  setImportTargetMode(nextMode)
+                                  if (nextMode !== "replace_draft") {
+                                    setImportReplacePackId("")
+                                  } else if (!importReplacePackId) {
+                                    setImportReplacePackId(
+                                      replaceableImportConflicts[0]?.pack_id || ""
+                                    )
+                                  }
+                                }}
+                              >
+                                <option value="">Choose</option>
+                                {importAllowedTargetModes.map((mode) => (
+                                  <option key={mode} value={mode}>
+                                    {mode === "replace_draft"
+                                      ? "Replace draft"
+                                      : "Create new draft"}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            {importTargetMode === "replace_draft" ? (
+                              <label className="text-xs text-text-muted">
+                                <span className="mb-1 block">Draft</span>
+                                <select
+                                  data-testid="persona-visual-import-replace-pack"
+                                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                                  value={importReplacePackId}
+                                  onChange={(event) =>
+                                    setImportReplacePackId(event.target.value)
+                                  }
+                                >
+                                  <option value="">Select draft</option>
+                                  {replaceableImportConflicts.map((conflict) => (
+                                    <option
+                                      key={conflict.pack_id}
+                                      value={conflict.pack_id}
+                                    >
+                                      {getImportConflictLabel(conflict)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : null}
+                            <label className="text-xs text-text-muted">
+                              <span className="mb-1 block">Draft title</span>
+                              <input
+                                data-testid="persona-visual-import-draft-title"
+                                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                                value={importDraftTitle}
+                                onChange={(event) =>
+                                  setImportDraftTitle(event.target.value)
+                                }
+                              />
+                            </label>
+                          </div>
+                        ) : null}
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <Button
                             data-testid="persona-visual-import-commit-button"

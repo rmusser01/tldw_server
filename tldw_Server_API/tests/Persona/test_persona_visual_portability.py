@@ -274,6 +274,82 @@ def test_import_preview_validates_archive_without_mutating_packs(
     assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id="user-1") == packs_before  # nosec B101
 
 
+def test_import_preview_reports_target_pack_conflicts_and_choices(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_persona_id, pack, _asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    target_persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Target Persona"}
+    )
+    active_pack = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id="user-1",
+        title="Portable Visuals",
+        status="active",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+    )
+    draft_pack = db_instance.create_persona_visual_pack(
+        persona_id=target_persona_id,
+        user_id="user-1",
+        title="Portable Visuals",
+        status="draft",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+    )
+    exporter = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    )
+    result = exporter.export_pack(
+        persona_id=source_persona_id,
+        pack_id=str(pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=target_persona_id,
+        target_packs=db_instance.list_persona_visual_packs(
+            persona_id=target_persona_id,
+            user_id="user-1",
+        ),
+    )
+
+    conflict_ids = {conflict["conflict_id"] for conflict in preview["conflicts"]}
+    assert conflict_ids == {  # nosec B101
+        f"target_pack_title_match:{active_pack['id']}",
+        f"target_pack_title_match:{draft_pack['id']}",
+    }
+    active_conflict = next(
+        conflict for conflict in preview["conflicts"] if conflict["pack_id"] == active_pack["id"]
+    )
+    draft_conflict = next(
+        conflict for conflict in preview["conflicts"] if conflict["pack_id"] == draft_pack["id"]
+    )
+    assert active_conflict["pack_status"] == "active"  # nosec B101
+    assert active_conflict["allowed_choices"] == ["create_new"]  # nosec B101
+    assert draft_conflict["pack_status"] == "draft"  # nosec B101
+    assert draft_conflict["allowed_choices"] == ["create_new", "replace_draft"]  # nosec B101
+    assert preview["proposed_plan"]["target_modes"] == ["create_new", "replace_draft"]  # nosec B101
+    assert preview["proposed_plan"]["replaceable_pack_ids"] == [draft_pack["id"]]  # nosec B101
+    assert preview["required_choices"] == [  # nosec B101
+        {
+            "choice_id": "import_target_mode",
+            "reason": "target_pack_conflicts",
+            "default_target_mode": "create_new",
+            "allowed_target_modes": ["create_new", "replace_draft"],
+            "replaceable_pack_ids": [draft_pack["id"]],
+        }
+    ]
+
+
 def test_import_preview_reports_missing_asset_bytes_as_warning(
     db_instance: CharactersRAGDB,
     tmp_path: Path,

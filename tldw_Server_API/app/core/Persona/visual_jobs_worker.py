@@ -340,12 +340,19 @@ class PersonaVisualPortabilityWorker:
             "target_persona_id",
             default=str(preview.get("target_persona_id") or ""),
         ) or None
+        target_packs = []
+        if target_persona_id:
+            target_packs = self._db.list_persona_visual_packs(
+                persona_id=target_persona_id,
+                user_id=user_id,
+            )
         try:
             result = await asyncio.to_thread(
                 lambda: PersonaVisualPackImportPreviewer().create_preview(
                     archive_path=archive_path,
                     owner_user_id=user_id,
                     target_persona_id=target_persona_id,
+                    target_packs=target_packs,
                     progress=_progress,
                 )
             )
@@ -427,6 +434,9 @@ class PersonaVisualPortabilityWorker:
         target_persona_id = _payload_text(payload, "target_persona_id")
         trust_mode = _payload_text(payload, "trust_mode", default="untrusted_import")
         target_mode = _payload_text(payload, "target_mode", default="create_new")
+        target_pack_id = _payload_text(payload, "target_pack_id", default="") or None
+        title = _payload_text(payload, "title", default="") or None
+        conflict_choice_explicit = bool(payload.get("conflict_choice_explicit"))
         if not user_id or not preview_id or not target_persona_id:
             raise ValueError("invalid_persona_visual_import_commit_payload")
 
@@ -471,6 +481,9 @@ class PersonaVisualPortabilityWorker:
                     target_persona_id=target_persona_id,
                     trust_mode=trust_mode,
                     target_mode=target_mode,
+                    target_pack_id=target_pack_id,
+                    title=title,
+                    conflict_choice_explicit=conflict_choice_explicit,
                     progress=_progress,
                 )
             )
