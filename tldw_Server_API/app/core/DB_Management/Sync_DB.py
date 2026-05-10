@@ -845,26 +845,6 @@ class SyncDatabase:
                 connection=conn,
             )
 
-            existing = _first(
-                self.execute(
-                    """
-                    SELECT * FROM sync_envelopes
-                     WHERE dataset_id = ? AND client_envelope_id = ?
-                    """,
-                    (envelope.dataset_id, envelope.client_envelope_id),
-                    connection=conn,
-                )
-            )
-            if existing:
-                if (
-                    _envelope_fingerprint_from_row(existing)
-                    != _envelope_fingerprint_from_create(envelope)
-                ):
-                    raise SyncIdempotencyConflictError(
-                        "Sync envelope idempotency key was reused with different content"
-                    )
-                return _envelope_from_row(existing)
-
             now = utcnow_iso()
             self.execute(
                 """
@@ -876,6 +856,7 @@ class SyncDatabase:
                     payload_size_bytes, adapter_version, status
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, client_envelope_id) DO NOTHING
                 """,
                 (
                     envelope.dataset_id,
@@ -919,6 +900,32 @@ class SyncDatabase:
                         (sequence,),
                         connection=conn,
                     )
+                )
+                if (
+                    row is None
+                    or row.get("dataset_id") != envelope.dataset_id
+                    or row.get("client_envelope_id") != envelope.client_envelope_id
+                ):
+                    row = _first(
+                        self.execute(
+                            """
+                            SELECT * FROM sync_envelopes
+                             WHERE dataset_id = ? AND client_envelope_id = ?
+                            """,
+                            (envelope.dataset_id, envelope.client_envelope_id),
+                            connection=conn,
+                        )
+                    )
+            if row is None:
+                raise SyncStoreError(
+                    "Sync envelope insert did not produce a retrievable record"
+                )
+            if (
+                _envelope_fingerprint_from_row(row)
+                != _envelope_fingerprint_from_create(envelope)
+            ):
+                raise SyncIdempotencyConflictError(
+                    "Sync envelope idempotency key was reused with different content"
                 )
             inserted = _envelope_from_row(row)
             self._ensure_domain_state(
@@ -1152,53 +1159,48 @@ class SyncDatabase:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
             self._require_dataset(record.dataset_id, connection=conn)
-            existing = _first(
+            self.execute(
+                """
+                INSERT INTO sync_key_records (
+                    key_record_id, dataset_id, user_id, device_id, key_purpose,
+                    wrapped_key_blob, kdf_metadata_json, recovery_hint,
+                    rotation_of_key_record_id, created_at, revoked_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (key_record_id) DO NOTHING
+                """,
+                (
+                    record.key_record_id,
+                    record.dataset_id,
+                    record.user_id,
+                    record.device_id,
+                    record.key_purpose,
+                    record.wrapped_key_blob,
+                    encode_json(record.kdf_metadata, default={}),
+                    record.recovery_hint,
+                    record.rotation_of_key_record_id,
+                    now,
+                    record.revoked_at,
+                ),
+                connection=conn,
+            )
+            row = _first(
                 self.execute(
                     "SELECT * FROM sync_key_records WHERE key_record_id = ?",
                     (record.key_record_id,),
                     connection=conn,
                 )
             )
-            if existing:
-                if (
-                    _key_record_fingerprint_from_row(existing)
-                    != _key_record_fingerprint_from_create(record)
-                ):
-                    raise SyncIdempotencyConflictError(
-                        "Sync key record ID was reused with different key material"
-                    )
-                row = existing
-            else:
-                self.execute(
-                    """
-                    INSERT INTO sync_key_records (
-                        key_record_id, dataset_id, user_id, device_id, key_purpose,
-                        wrapped_key_blob, kdf_metadata_json, recovery_hint,
-                        rotation_of_key_record_id, created_at, revoked_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        record.key_record_id,
-                        record.dataset_id,
-                        record.user_id,
-                        record.device_id,
-                        record.key_purpose,
-                        record.wrapped_key_blob,
-                        encode_json(record.kdf_metadata, default={}),
-                        record.recovery_hint,
-                        record.rotation_of_key_record_id,
-                        now,
-                        record.revoked_at,
-                    ),
-                    connection=conn,
+            if row is None:
+                raise SyncStoreError(
+                    "Sync key record insert did not produce a retrievable record"
                 )
-                row = _first(
-                    self.execute(
-                        "SELECT * FROM sync_key_records WHERE key_record_id = ?",
-                        (record.key_record_id,),
-                        connection=conn,
-                    )
+            if (
+                _key_record_fingerprint_from_row(row)
+                != _key_record_fingerprint_from_create(record)
+            ):
+                raise SyncIdempotencyConflictError(
+                    "Sync key record ID was reused with different key material"
                 )
         return _key_record_from_row(row)
 

@@ -212,6 +212,23 @@ def test_insert_envelope_is_idempotent_by_dataset_and_client_envelope(sync_store
     assert sync_store.list_envelopes_after("dataset-1", 0) == [first]
 
 
+def test_insert_envelope_idempotency_uses_envelope_key_after_other_insert(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+    envelope = _envelope(client_envelope_id="env-1")
+
+    first = sync_store.insert_envelope(envelope)
+    sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="env-2",
+            entity_id="note-2",
+            payload_hash="sha256:note-2",
+        )
+    )
+    duplicate = sync_store.insert_envelope(envelope)
+
+    assert duplicate.server_sequence == first.server_sequence
+
+
 def test_insert_envelope_rejects_duplicate_drift(sync_store: SyncV2Store):
     sync_store.enroll_dataset(_dataset())
     envelope = _envelope(client_envelope_id="env-1")
