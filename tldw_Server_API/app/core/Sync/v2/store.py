@@ -89,6 +89,19 @@ class SyncV2Store:
     ) -> list[SyncConflict]:
         return self.db.list_conflicts(dataset_id, status=status)
 
+    def get_unresolved_conflict_for_envelope(
+        self,
+        dataset_id: str,
+        *,
+        local_envelope_id: str,
+        server_sequence: int | None = None,
+    ) -> SyncConflict | None:
+        return self.db.get_unresolved_conflict_for_envelope(
+            dataset_id,
+            local_envelope_id=local_envelope_id,
+            server_sequence=server_sequence,
+        )
+
     def resolve_conflict(
         self,
         conflict_id: str,

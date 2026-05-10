@@ -456,6 +456,103 @@ def test_push_rejects_payloads_over_advertised_size_limit(
     ]
 
 
+def test_push_rejects_clear_payloads_over_actual_serialized_size_limit(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(max_envelope_payload_bytes=40),
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes"],
+        encryption_policy="server_trusted",
+    )
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="clear-too-large-missing-size",
+                payload_ciphertext=None,
+                payload_clear={"body": "x" * 80},
+                payload_size_bytes=None,
+            ),
+            _envelope(
+                client_envelope_id="clear-too-large-underreported",
+                entity_id="note-2",
+                stable_key="note:2",
+                payload_hash="sha256:clear-underreported",
+                payload_ciphertext=None,
+                payload_clear={"status": "active"},
+                routing_metadata={"entity_kind": "note", "summary": "y" * 80},
+                dependencies=[{"entity_id": "source-1", "label": "z" * 80}],
+                payload_size_bytes=1,
+            ),
+        ],
+    )
+
+    assert result.accepted == []
+    assert [item.error_code for item in result.rejected] == [
+        "payload_too_large",
+        "payload_too_large",
+    ]
+
+
+def test_conflict_push_retry_reuses_existing_unresolved_conflict(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    conflict_ids = iter(["conflict-first", "conflict-second"])
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: next(conflict_ids) if prefix == "conflict" else f"{prefix}-generated",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    first = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+    retried = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+    manifest = service.restore_manifest(user_id="user-1")
+
+    assert first.conflicts[0].conflict_id == "conflict-first"
+    assert retried.conflicts[0].conflict_id == first.conflicts[0].conflict_id
+    assert retried.conflicts[0].server_sequence == first.conflicts[0].server_sequence
+    assert len(sync_store.list_conflicts("dataset-1", status="unresolved")) == 1
+    assert manifest.datasets[0].unresolved_conflicts == 1
+
+
 def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
     sync_service.push(
@@ -484,6 +581,30 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert first_pull.next_cursor == "1"
     assert second_pull.envelopes == []
     assert second_pull.next_cursor == "1"
+
+
+def test_pull_rejects_invalid_cursor(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    with pytest.raises(SyncStoreError, match="Invalid sync cursor"):
+        sync_service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            cursor="not-a-cursor",
+        )
+
+
+def test_pull_rejects_non_positive_page_size(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    with pytest.raises(SyncStoreError, match="page_size must be greater than zero"):
+        sync_service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            page_size=0,
+        )
 
 
 def test_default_clock_and_id_factory_are_not_repeatable(

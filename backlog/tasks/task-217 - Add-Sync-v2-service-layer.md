@@ -4,7 +4,7 @@ title: Add Sync v2 service layer
 status: Done
 assignee: []
 created_date: '2026-05-10 03:59'
-updated_date: '2026-05-10 04:38'
+updated_date: '2026-05-10 04:47'
 labels:
   - sync
   - service
@@ -93,6 +93,16 @@ Code quality follow-up verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 28 passed, 5 warnings.
 - git diff --check: passed.
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/DB_Management/Sync_DB.py -f json -o /tmp/bandit_sync_v2_ownership_invariants.json: 0 findings.
+
+Code quality re-review follow-up: patching clear-payload payload-size enforcement, conflict retry idempotency, invalid cursor validation, and page_size validation. Plan: add regressions first, verify failures, patch service/store helpers, rerun focused Sync tests, diff check, Bandit, update task, and commit.
+
+Code quality re-review follow-up complete. Enforced max_envelope_payload_bytes against actual compact JSON byte size for clear payload, routing metadata, and dependencies in addition to declared size and ciphertext bytes. Added conflict retry idempotency by reusing an existing unresolved conflict for the retried conflict envelope/server sequence. Added typed SyncStoreError validation for invalid cursors and non-positive page_size. Added regression coverage for all four re-review issues.
+
+Code quality re-review verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 32 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 28 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/store.py tldw_Server_API/app/core/DB_Management/Sync_DB.py -f json -o /tmp/bandit_sync_v2_payload_conflict_invariants.json: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -107,6 +117,8 @@ Second spec re-review fix: tightened service invariants so stored cursor resolut
 Final spec re-review fix: SyncAdapterRegistry now rejects unknown adapter domains at runtime using a core-owned Sync v2 domain allowlist, with regression coverage for bogus domains.
 
 Code quality follow-up: closed ownership takeover vectors for datasets/devices, enforced authenticated request device identity in push, added per-envelope domain/payload validation, kept normal pull results to accepted envelopes, propagated cursor persistence errors, and replaced repeatable default IDs with UUID-style generation.
+
+Code quality re-review: closed clear-payload size bypasses with compact JSON byte accounting, made conflict retries idempotent at the conflict layer, and converted invalid cursor/page_size inputs into SyncStoreError validation failures.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

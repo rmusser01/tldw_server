@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Business service for Sync v2 protocol operations."""
 
+import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -18,6 +19,7 @@ from .adapters import (
 from .errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
+    SyncStoreError,
 )
 from .models import (
     EncryptionPolicy,
@@ -410,9 +412,11 @@ class SyncV2Service:
         page_size: int | None = None,
         include_own_changes: bool = False,
     ) -> SyncPullResult:
+        if page_size is not None and page_size < 1:
+            raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
         if dataset is None:
-            since_sequence = int(cursor) if cursor is not None else 0
+            since_sequence = self._parse_cursor(cursor)
             return SyncPullResult(dataset_id=dataset_id, next_cursor=str(since_sequence))
 
         selected_domains = self._selected_domains(dataset, domains)
@@ -507,9 +511,13 @@ class SyncV2Service:
         max_bytes = self.settings.max_envelope_payload_bytes
         if envelope.payload_size_bytes is not None and envelope.payload_size_bytes > max_bytes:
             return True
-        if envelope.payload_ciphertext is None:
-            return False
-        return len(envelope.payload_ciphertext.encode("utf-8")) > max_bytes
+        actual_size = 0
+        if envelope.payload_ciphertext is not None:
+            actual_size += len(envelope.payload_ciphertext.encode("utf-8"))
+        actual_size += _compact_json_size(envelope.payload_clear)
+        actual_size += _compact_json_size(envelope.routing_metadata)
+        actual_size += _compact_json_size(envelope.dependencies)
+        return actual_size > max_bytes
 
     def _store_conflict(
         self,
@@ -518,6 +526,20 @@ class SyncV2Service:
         outcome: AdapterConflict,
     ) -> SyncPushConflict:
         inserted = self.store.insert_envelope(replace(envelope, status="conflict"))
+        existing = self.store.get_unresolved_conflict_for_envelope(
+            dataset.dataset_id,
+            local_envelope_id=envelope.client_envelope_id,
+            server_sequence=inserted.server_sequence,
+        )
+        if existing is not None:
+            return SyncPushConflict(
+                conflict_id=existing.conflict_id,
+                client_envelope_id=outcome.client_envelope_id,
+                domain=existing.domain,
+                entity_id=existing.entity_id,
+                server_sequence=existing.server_sequence,
+                message=outcome.message,
+            )
         conflict = self.store.insert_conflict(
             SyncConflictCreate(
                 conflict_id=self.id_factory("conflict"),
@@ -547,13 +569,24 @@ class SyncV2Service:
         domains: Sequence[SyncDomain] | None,
     ) -> int:
         if cursor is not None:
-            return int(cursor)
+            return self._parse_cursor(cursor)
         cursor_domains = list(domains or self.adapters.supported_domains)
         cursors: list[int] = []
         for domain in cursor_domains:
             stored = self.store.get_device_cursor(dataset_id, device_id, domain)
             cursors.append(stored.last_pulled_sequence if stored is not None else 0)
         return min(cursors, default=0)
+
+    def _parse_cursor(self, cursor: str | int | None) -> int:
+        if cursor is None:
+            return 0
+        try:
+            parsed = int(cursor)
+        except (TypeError, ValueError) as exc:
+            raise SyncStoreError(f"Invalid sync cursor: {cursor!r}") from exc
+        if parsed < 0:
+            raise SyncStoreError(f"Invalid sync cursor: {cursor!r}")
+        return parsed
 
     def _selected_domains(
         self,
@@ -691,6 +724,14 @@ def _size_class(size_bytes: int) -> str:
     if size_bytes <= 16_777_216:
         return "medium"
     return "large"
+
+
+def _compact_json_size(value: object) -> int:
+    return len(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
+    )
 
 
 __all__ = [

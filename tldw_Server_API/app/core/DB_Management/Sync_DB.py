@@ -1137,6 +1137,31 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_conflict_from_row(row) for row in result.rows]
 
+    def get_unresolved_conflict_for_envelope(
+        self,
+        dataset_id: str,
+        *,
+        local_envelope_id: str,
+        server_sequence: int | None = None,
+    ) -> SyncConflict | None:
+        """Return an unresolved conflict already recorded for a local envelope."""
+
+        params: list[Any] = [dataset_id, local_envelope_id]
+        sql = """
+            SELECT * FROM sync_conflicts
+             WHERE dataset_id = ?
+               AND local_envelope_id = ?
+               AND status = 'unresolved'
+        """
+        if server_sequence is not None:
+            sql += " AND server_sequence = ?"
+            params.append(server_sequence)
+        sql += " ORDER BY created_at ASC, conflict_id ASC LIMIT 1"
+        row = _first(self.execute(sql, tuple(params)))
+        if row is None:
+            return None
+        return _conflict_from_row(row)
+
     def resolve_conflict(
         self,
         conflict_id: str,
