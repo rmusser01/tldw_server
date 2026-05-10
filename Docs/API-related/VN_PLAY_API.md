@@ -1,6 +1,6 @@
 # VN Play API
 
-VN Play provides durable visual-novel runtime sessions backed by approved VN asset packs. V1 supports Freeform and Story/CYOA modes, ordered event history, server-authoritative scene state, turn idempotency, checkpoints, and branch metadata.
+VN Play provides durable visual-novel runtime sessions backed by approved VN asset packs. V1 supports Freeform and Story/CYOA modes, ordered event history, server-authoritative scene state, turn idempotency, checkpoints, branch navigation, and guarded branch restore.
 
 Base path: `/api/v1/vn-play`
 
@@ -27,11 +27,13 @@ Linked chat is read-only in V1. `linked_chat_id` may be stored as session contex
 | `DELETE` | `/sessions/{session_id}` | Soft-delete one session. |
 | `POST` | `/sessions/{session_id}/turn` | Submit one user turn. |
 | `POST` | `/sessions/{session_id}/retry-last-turn` | Retry the latest failed accepted turn with a new idempotency key. |
-| `GET` | `/sessions/{session_id}/events` | List ordered event history. |
+| `GET` | `/sessions/{session_id}/events` | List ordered event history, optionally filtered by branch. |
 | `POST` | `/sessions/{session_id}/checkpoint` | Create a named checkpoint at the current scene state. |
 | `GET` | `/sessions/{session_id}/checkpoints` | List checkpoints. |
 | `POST` | `/sessions/{session_id}/restore` | Restore a checkpoint. |
 | `GET` | `/sessions/{session_id}/branches` | List branch metadata. |
+| `GET` | `/sessions/{session_id}/branch-navigation` | Get the backend-derived branch navigation read model. |
+| `POST` | `/sessions/{session_id}/branches/{branch_id}/restore` | Restore a Story session to a branch target. |
 
 ## Setup Options
 
@@ -244,7 +246,25 @@ Validation errors returned as HTTP 400 include:
 
 ## Events And Scene State
 
-`GET /sessions/{session_id}/events` returns append-only ordered events. Scene state is derived from these events and persisted for fast reads. Important event types include:
+`GET /sessions/{session_id}/events` returns append-only ordered events. Scene state is derived from these events and persisted for fast reads. Omitting branch filter query parameters preserves the legacy unbounded event list behavior.
+
+Optional branch filter query parameters:
+
+- `branch_id`: filter events to one Story branch.
+- `after_sequence`: return only events after a sequence number.
+- `limit`: bounded page size, maximum `250`. For branch-filtered requests the default is `100`; for unfiltered requests omission means unbounded.
+- `include_descendants`: include descendant branch events when `true`.
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/events?branch_id=12&include_descendants=true&limit=100" \
+  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+```
+
+The response body remains the existing event list for compatibility. If branch filtering needs to report replay-cap or ambiguity warnings, the endpoint sets `X-VN-Play-Warnings` to a compact JSON list using the stable warning shape documented below.
+
+Important event types include:
 
 - `session_started`
 - `turn_started`
@@ -288,9 +308,98 @@ Visual directive event behavior:
 
 Custom frontends should prefer `scene_state.background`, `scene_state.depth`, and `scene_state.active_sprites` from VN Play responses instead of calling VN asset-pack internals directly for runtime rendering.
 
+## Branch Navigation
+
+`GET /sessions/{session_id}/branch-navigation` returns a backend-derived read model for Story/CYOA navigation. Custom frontends should use this endpoint instead of reconstructing branch menus from raw events.
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/branch-navigation" \
+  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+```
+
+Abbreviated response:
+
+```json
+{
+  "session_id": 1,
+  "mode": "story",
+  "scene_version": 6,
+  "last_event_id": 41,
+  "active_branch_node_id": 12,
+  "active_path": [
+    {
+      "branch_id": 8,
+      "branch_label": "Open the archive door",
+      "choice_id": "open-door",
+      "choice_text": "Open the archive door",
+      "depth": 1
+    },
+    {
+      "branch_id": 12,
+      "branch_label": "Step inside",
+      "choice_id": "step-inside",
+      "choice_text": "Step inside",
+      "depth": 2
+    }
+  ],
+  "branches": [
+    {
+      "branch_id": 12,
+      "parent_branch_id": 8,
+      "parent_event_id": 32,
+      "choice_selected_event_id": 33,
+      "branch_label": "Step inside",
+      "choice_id": "step-inside",
+      "choice_text": "Step inside",
+      "depth": 2,
+      "status": "active",
+      "is_active": true,
+      "is_on_active_path": true,
+      "event_range": {
+        "start_event_id": 33,
+        "start_sequence_number": 18,
+        "latest_event_id": 41,
+        "latest_sequence_number": 26
+      },
+      "subtree_event_range": {
+        "start_event_id": 33,
+        "start_sequence_number": 18,
+        "latest_event_id": 41,
+        "latest_sequence_number": 26
+      },
+      "restore": {
+        "supported": true,
+        "default_target": "branch_latest",
+        "target_names": ["branch_latest", "choice_point"],
+        "targets": {
+          "branch_latest": { "event_id": 41, "sequence_number": 26 },
+          "choice_point": { "event_id": 32 }
+        }
+      },
+      "warnings": []
+    }
+  ],
+  "warnings": []
+}
+```
+
+Warning payloads are frontend-safe and never contain stack traces:
+
+```json
+{
+  "code": "parent_branch_unresolved",
+  "severity": "warning",
+  "message": "Parent branch could not be resolved from branch path prefix.",
+  "branch_id": 12,
+  "recoverable": true
+}
+```
+
 ## Branches And Retry
 
-`GET /sessions/{session_id}/branches` returns durable Story branch metadata. `branch_path` is always a list so clients can render path breadcrumbs without special-casing single-choice branches:
+`GET /sessions/{session_id}/branches` remains a compatibility endpoint for durable Story branch metadata. New clients should prefer `GET /branch-navigation`. `branch_path` is always a list so clients can render path breadcrumbs without special-casing single-choice branches:
 
 ```json
 [
@@ -341,7 +450,57 @@ curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/restore" \
   }'
 ```
 
-Restore appends a `session_restored` event and returns the updated session. V1 restore uses the checkpoint id as the durable action; clients should still send a fresh idempotency key for request tracing and forward compatibility.
+Checkpoint restore appends a `session_restored` event, advances the visible `scene_version`, and returns the updated session. The `idempotency_key` is enforced through the session action table: a duplicate request with the same key and payload replays the stored response, while reusing the key for a different restore payload returns `409 idempotency_key_conflict`.
+
+## Branch Restore
+
+`POST /sessions/{session_id}/branches/{branch_id}/restore` restores a Story session to a backend-resolved branch target. It is guarded by the same session mutation gate as turns and checkpoint restore.
+
+Targets:
+
+- `branch_latest`: resume from the latest direct event range for the branch.
+- `choice_point`: rewind to the choice-presented state that produced the branch, so the user can choose that branch again or choose a sibling.
+
+Example:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/branches/12/restore" \
+  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_scene_version": 6,
+    "idempotency_key": "session-1-restore-branch-12",
+    "target": "choice_point"
+  }'
+```
+
+Abbreviated response:
+
+```json
+{
+  "status": "completed",
+  "replayed": false,
+  "restore_event_id": 42,
+  "branch_id": 12,
+  "target": "choice_point",
+  "target_event_id": 32,
+  "scene_version": 7,
+  "session": {},
+  "current_scene": {},
+  "branch_navigation": {}
+}
+```
+
+Restore conflict and validation responses:
+
+- `404 branch_not_found`: the branch does not belong to the session/user.
+- `409 stale_scene_version`: the client restored from an old scene version.
+- `409 turn_in_progress`: a turn is currently mutating the session.
+- `409 restore_action_in_progress`: another restore action is active for the session.
+- `409 idempotency_key_conflict`: the key was reused for a different restore payload.
+- `400 branch_restore_not_allowed`: branch restore was requested for a non-Story session.
+- `400 branch_restore_target_unavailable`: the requested restore target cannot be resolved.
+- `400 branch_restore_ambiguous`: the target is ambiguous and the server refused to guess.
 
 ## Character Safety Metadata
 

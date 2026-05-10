@@ -4,7 +4,7 @@ title: Implement VN Play branch navigation API
 status: In Progress
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-10 00:34'
+updated_date: '2026-05-10 00:36'
 labels:
   - vn-play
   - api
@@ -31,8 +31,8 @@ Implement GitHub issue #1463 from the reviewed design spec and saved implementat
 - [x] #1 Pure branch navigation read model derives active path, parent branch ids, direct/subtree event ranges, and stable warning payloads.
 - [x] #2 Repository persists session restore actions, enforces restore idempotency, and shares a session mutation gate with turn requests.
 - [x] #3 Service exposes branch navigation, branch-aware event filtering, branch restore, and checkpoint restore idempotency while preserving existing Freeform and Story turn behavior.
-- [ ] #4 API exposes branch-navigation and branch restore endpoints, extends events filtering compatibly, maps stable errors, and documents the contract.
-- [ ] #5 Focused VN Play tests pass, Bandit is run for touched backend scope, and final diff hygiene is clean.
+- [x] #4 API exposes branch-navigation and branch restore endpoints, extends events filtering compatibly, maps stable errors, and documents the contract.
+- [x] #5 Focused VN Play tests pass, Bandit is run for touched backend scope, and final diff hygiene is clean.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -100,14 +100,16 @@ Task 5 API slice complete after worker handoff required controller cleanup. API 
 Task 5 review fix complete. Fixed legacy events compatibility so omitted unfiltered limit remains unbounded while branch-filtered omitted limit defaults to 100. Re-review found no Critical Important or Minor issues and approved commit. Verification after fix: API tests 32 passed, VN_Play suite 119 passed, diff check clean, Bandit task5 JSON empty.
 
 Task 5 API implementation is complete. AC4 remains unchecked until Task 6 documents the API contract.
+
+Task 6 docs and final verification complete. Updated VN Play API docs for branch navigation branch-aware events warning headers branch restore restore idempotency and stable error mapping. Final verification: VN_Play suite 119 passed. Bandit final JSON empty. Diff check clean.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
