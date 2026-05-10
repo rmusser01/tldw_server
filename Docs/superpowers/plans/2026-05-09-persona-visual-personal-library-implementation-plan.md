@@ -358,7 +358,7 @@
 
 **Tests:** Focused backend, frontend, Bandit, and diff checks.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 7: Update docs and trackers
 
@@ -380,7 +380,7 @@
 
   Use `backlog task edit TASK-203 --append-notes ... --plain` with implementation and verification notes.
 
-- [ ] **Step 4: Update GitHub issues**
+- [x] **Step 4: Update GitHub issues**
 
   Comment on #1468 with summary and PR link. Update #1449 checklist only after PR is merged, not before.
 
@@ -425,14 +425,14 @@
 
   Check acceptance criteria and Definition of Done items via Backlog CLI, then add final summary.
 
-- [ ] **Step 7: Commit docs/verification updates**
+- [x] **Step 7: Commit docs/verification updates**
 
   ```bash
   git add Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md Docs/Code_Documentation/Persona_Visual_Packs.md "backlog/tasks/task-203 - Implement-personal-Persona-Visual-pack-library-foundation.md"
   git commit -m "Document persona visual library foundation"
   ```
 
-- [ ] **Step 8: Push and open PR**
+- [x] **Step 8: Push and open PR**
 
   ```bash
   git push -u origin codex/persona-visual-library-foundation
