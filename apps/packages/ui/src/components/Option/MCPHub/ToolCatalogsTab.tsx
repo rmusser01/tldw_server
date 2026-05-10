@@ -20,6 +20,16 @@ type ToolCatalogsTabProps = {
   onAddServer?: () => void
 }
 
+const describeLoadFailure = (reason: unknown, fallback: string) => {
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message
+  }
+  if (typeof reason === "string" && reason.trim()) {
+    return reason
+  }
+  return fallback
+}
+
 export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
   const queryClient = useQueryClient()
   const latestLoadRequestId = useRef(0)
@@ -29,23 +39,21 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [serverInventoryError, setServerInventoryError] = useState<string | null>(null)
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
   const managedExternalServers = useMemo(
     () => getManagedExternalServers(externalServers),
     [externalServers]
   )
   const mcpTools = useMcpTools()
-  const executableToolCount = Number(mcpTools.toolCounts?.executable ?? 0)
   const chatEnabledToolCount = Number(mcpTools.toolCounts?.chatEnabled ?? 0)
   const hasExecutableChatTools =
     mcpTools.toolsAvailable === null
       ? null
-      : executableToolCount > 0 ||
-        chatEnabledToolCount > 0 ||
-        mcpTools.chatTools.length > 0 ||
-        mcpTools.availableTools.length > 0
+      : chatEnabledToolCount > 0 || mcpTools.chatTools.length > 0
   const showExecutableAccessGuidance =
     groupedModules.length > 0 && hasExecutableChatTools === false
+  const serverInventoryUnavailable = Boolean(serverInventoryError)
 
   const loadRegistrySummary = useCallback(async (options: { clearOnError?: boolean } = {}) => {
     const requestId = ++latestLoadRequestId.current
@@ -70,8 +78,11 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
       }
       if (serverResult.status === "fulfilled") {
         setExternalServers(Array.isArray(serverResult.value) ? serverResult.value : [])
+        setServerInventoryError(null)
       } else {
-        setExternalServers([])
+        setServerInventoryError(
+          describeLoadFailure(serverResult.reason, "Failed to load managed server inventory.")
+        )
       }
     } catch {
       if (requestId !== latestLoadRequestId.current) return
@@ -125,6 +136,14 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
           showIcon
           title="Tools are registered but not executable in chat"
           description="Review profile assignments and disabled tool settings before testing these tools in Chat."
+        />
+      ) : null}
+      {serverInventoryError ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Could not load server inventory"
+          description={`${serverInventoryError} Tool Catalog guidance may be incomplete until the server list loads.`}
         />
       ) : null}
 
@@ -211,12 +230,16 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
             description={
               <Space orientation="vertical" size={4}>
                 <Typography.Text type="secondary">
-                  {managedExternalServers.length > 0
-                    ? "No tools discovered yet"
-                    : "No managed MCP servers yet"}
+                  {serverInventoryUnavailable
+                    ? "Server inventory unavailable"
+                    : managedExternalServers.length > 0
+                      ? "No tools discovered yet"
+                      : "No managed MCP servers yet"}
                 </Typography.Text>
                 <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                  {managedExternalServers.length > 0 ? (
+                  {serverInventoryUnavailable ? (
+                    "Retry loading server inventory before deciding whether to add a server or refresh discovery."
+                  ) : managedExternalServers.length > 0 ? (
                     "Managed servers are configured, but no registry tools are available yet. Refresh discovery after creating or editing a server."
                   ) : (
                     "Add a managed server before looking for tool catalog entries."
@@ -225,7 +248,15 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
               </Space>
             }
           >
-            {managedExternalServers.length > 0 ? (
+            {serverInventoryUnavailable ? (
+              <Button
+                type="primary"
+                onClick={() => void loadRegistrySummary({ clearOnError: false })}
+                loading={loading}
+              >
+                Retry server inventory
+              </Button>
+            ) : managedExternalServers.length > 0 ? (
               <Button type="primary" onClick={handleRefreshTools} loading={refreshing}>
                 Refresh discovery
               </Button>

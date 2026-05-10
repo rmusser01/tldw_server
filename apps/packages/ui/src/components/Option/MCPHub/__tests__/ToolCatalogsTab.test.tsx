@@ -243,6 +243,34 @@ describe("ToolCatalogsTab", () => {
     expect(onAddServer).toHaveBeenCalledTimes(1)
   })
 
+  it("surfaces server inventory load errors instead of showing an empty server state", async () => {
+    const user = userEvent.setup()
+    mocks.getToolRegistrySummary
+      .mockResolvedValueOnce({
+        entries: [],
+        modules: []
+      })
+      .mockResolvedValueOnce({
+        entries: [],
+        modules: []
+      })
+    mocks.listExternalServers
+      .mockRejectedValueOnce(new Error("inventory timeout"))
+      .mockResolvedValueOnce([])
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/could not load server inventory/i)).toBeTruthy()
+    expect(screen.getByText(/inventory timeout/i)).toBeTruthy()
+    expect(screen.getByText(/server inventory unavailable/i)).toBeTruthy()
+    expect(screen.queryByText(/no managed mcp servers yet/i)).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: /retry server inventory/i }))
+
+    expect(await screen.findByText(/no managed mcp servers yet/i)).toBeTruthy()
+    expect(screen.queryByText(/server inventory unavailable/i)).toBeNull()
+  })
+
   it("offers discovery refresh when managed servers exist but no tools are registered", async () => {
     const user = userEvent.setup()
     mocks.getToolRegistrySummary
@@ -265,13 +293,13 @@ describe("ToolCatalogsTab", () => {
   it("shows access guidance when registry tools are present but none are executable in chat", async () => {
     mocks.useMcpTools.mockReturnValue({
       healthState: "healthy",
-      toolsAvailable: false,
-      availableTools: [],
+      toolsAvailable: true,
+      availableTools: [{ rawName: "notes.search" }],
       chatTools: [],
       toolCounts: {
         discovered: 1,
-        executable: 0,
-        disabled: 1,
+        executable: 1,
+        disabled: 0,
         colliding: 0,
         chatEnabled: 0
       }

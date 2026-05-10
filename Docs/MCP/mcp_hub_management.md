@@ -52,11 +52,13 @@ For a disposable local run, start the API from a shell with explicit temporary p
 ```bash
 export TLDW_MCP_WALKTHROUGH_ROOT="$(mktemp -d)"
 export AUTH_MODE=single_user
-export SINGLE_USER_API_KEY="toy-mcp-walkthrough-key"
+export SINGLE_USER_API_KEY="$(openssl rand -hex 32)"
 export USER_DB_BASE_DIR="$TLDW_MCP_WALKTHROUGH_ROOT/user_databases"
 export DATABASE_URL="sqlite:///$TLDW_MCP_WALKTHROUGH_ROOT/authnz.db"
 export MCP_DATABASE_URL="sqlite+aiosqlite:///$TLDW_MCP_WALKTHROUGH_ROOT/mcp_unified.db"
 ```
+
+Generate a unique `SINGLE_USER_API_KEY` for each walkthrough run, and use that value in the WebUI or extension test session. If OpenSSL is unavailable, set the variable to another locally generated high-entropy value instead of reusing a committed example key.
 
 `DATABASE_URL` only controls the AuthNZ database. MCP runtime metadata uses `MCP_DATABASE_URL`, while media, notes, prompts, Prompt Studio, vector-store metadata, Chroma storage, Chatbooks, and most per-user evaluation paths derive from `USER_DB_BASE_DIR`. Some legacy or test-only evaluation paths still have dedicated overrides such as `EVALUATIONS_TEST_DB_PATH`; set those separately if the same process will exercise those modules and you need a fully disposable run.
 

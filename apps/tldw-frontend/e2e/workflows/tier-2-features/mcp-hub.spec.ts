@@ -8,7 +8,7 @@
  *
  * Run: npx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts
  */
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -101,11 +101,11 @@ rl.on("line", (line) => {
 });
 `
 
-async function writeToyMcpServer(): Promise<string> {
+async function writeToyMcpServer(): Promise<{ dir: string; scriptPath: string }> {
   const dir = await mkdtemp(join(tmpdir(), "tldw-toy-mcp-"))
   const scriptPath = join(dir, "toy-mcp-server.mjs")
   await writeFile(scriptPath, TOY_MCP_SERVER_SCRIPT, "utf8")
-  return scriptPath
+  return { dir, scriptPath }
 }
 
 test.describe("MCP Hub", () => {
@@ -332,7 +332,7 @@ test.describe("MCP Hub", () => {
     }) => {
       skipIfServerUnavailable(serverInfo)
 
-      const scriptPath = await writeToyMcpServer()
+      const { dir, scriptPath } = await writeToyMcpServer()
       const suffix = Date.now().toString(36)
       const serverId = `toy-stdio-${suffix}`
       const serverName = `Toy Stdio ${suffix}`
@@ -394,6 +394,7 @@ test.describe("MCP Hub", () => {
           await authedPage.getByRole("button", { name: new RegExp(`delete ${serverName}`, "i") }).click().catch(() => {})
           await authedPage.getByRole("button", { name: /^delete$/i }).click().catch(() => {})
         }
+        await rm(dir, { recursive: true, force: true }).catch(() => {})
       }
     })
   })
