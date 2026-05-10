@@ -36,11 +36,11 @@ test.describe('VN asset packs smoke', () => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
     });
 
-    await page.route(/\/api\/v1\/vn-assets(?:\/.*)?$/, async (route) => {
+    await page.route(/\/api\/v1\/vn\/vn-assets(?:\/.*)?$/, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const method = request.method().toUpperCase();
-      const path = url.pathname.replace('/api/v1/vn-assets', '');
+      const path = url.pathname.replace('/api/v1/vn/vn-assets', '');
 
       if (method === 'GET' && path === '/starter-matrices') {
         await fulfillJson(route, 200, {

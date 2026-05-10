@@ -54,7 +54,7 @@ describe('vnPlay api client', () => {
     });
 
     expect(session.id).toBe(1);
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions', {
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions', {
       mode: 'freeform',
       title: 'Library',
       primary_character_id: 1,
@@ -74,7 +74,7 @@ describe('vnPlay api client', () => {
       idempotency_key: 'turn-1',
     });
 
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/turn', {
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/turn', {
       input_text: 'Hello',
       client_scene_version: 0,
       idempotency_key: 'turn-1',
@@ -93,24 +93,24 @@ describe('vnPlay api client', () => {
     await restoreVNPlaySession(1, { checkpoint_id: 5, idempotency_key: 'restore-1' });
     await listVNPlayBranches(1);
 
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions');
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1');
-    expect(mocks.apiClient.patch).toHaveBeenCalledWith('/vn-play/sessions/1', { title: 'Updated' });
-    expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn-play/sessions/1');
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/retry-last-turn', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1');
+    expect(mocks.apiClient.patch).toHaveBeenCalledWith('/vn/vn-play/sessions/1', { title: 'Updated' });
+    expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn/vn-play/sessions/1');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/retry-last-turn', {
       client_scene_version: 2,
       idempotency_key: 'retry-1',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/events');
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/checkpoint', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/events');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/checkpoint', {
       label: 'Before choice',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/checkpoints');
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/restore', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/checkpoints');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/restore', {
       checkpoint_id: 5,
       idempotency_key: 'restore-1',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/branches');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branches');
   });
 
   it('loads VN play setup options with server-side selector parameters', async () => {
@@ -134,7 +134,7 @@ describe('vnPlay api client', () => {
       pack_query: 'archive',
     });
 
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/setup-options', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/setup-options', {
       params: {
         mode: 'story',
         selected_character_id: 7,

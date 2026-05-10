@@ -703,25 +703,27 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             default_stable=False,
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vn_capabilities",
+            log_name="vn_capabilities",
+            prefix=f"{API_V1_PREFIX}/vn",
+            tags=("vn-capabilities",),
+            route_key="vn-capabilities",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.vn_assets",
             log_name="vn_assets",
-            prefix=f"{API_V1_PREFIX}",
+            prefix=f"{API_V1_PREFIX}/vn",
             tags=("vn-assets",),
             route_key="vn-assets",
         ),
-    ):
-        append_imported_router_spec(specs, tail_spec)
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.vn_play import router as vn_play_router
-
-        specs.append(RouterSpec(
-            router=vn_play_router,
-            prefix=f"{API_V1_PREFIX}",
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vn_play",
+            log_name="vn_play",
+            prefix=f"{API_V1_PREFIX}/vn",
             tags=("vn-play",),
             route_key="vn-play",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping VN play router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, tail_spec)
 
     return specs

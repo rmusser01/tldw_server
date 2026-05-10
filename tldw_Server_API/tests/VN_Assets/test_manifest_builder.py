@@ -120,7 +120,7 @@ def test_manifest_uses_runtime_contract_shape_and_content_urls() -> None:
         "depth_companions",
         "cgs",
     }
-    assert sprite["content_url"] == "/api/v1/vn-assets/packs/1/items/1/content"
+    assert sprite["content_url"] == "/api/v1/vn/vn-assets/packs/1/items/1/content"
     assert sprite["labels"] == {"expression": "neutral", "pose": "front"}
     assert sprite["preferred"] is True
     assert sprite["crop_box"] is None

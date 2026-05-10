@@ -25,7 +25,7 @@ import type {
   VNPackPortabilityJob,
 } from '@web/types/vn-assets';
 
-const VN_ASSETS_BASE = '/vn-assets';
+const VN_ASSETS_BASE = '/vn/vn-assets';
 
 export function listVNAssetPacks(): Promise<VNAssetPack[]> {
   return apiClient.get(`${VN_ASSETS_BASE}/packs`);

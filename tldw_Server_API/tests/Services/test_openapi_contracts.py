@@ -119,7 +119,7 @@ AUDIT_EXPORT_CONTENT_TYPES = {
 }
 MEETING_EVENTS_PATH = "/api/v1/meetings/sessions/{session_id}/events"
 NOTIFICATIONS_STREAM_PATH = "/api/v1/notifications/stream"
-VN_ASSET_CONTENT_PATH = "/api/v1/vn-assets/packs/{pack_id}/items/{item_id}/content"
+VN_ASSET_CONTENT_PATH = "/api/v1/vn/vn-assets/packs/{pack_id}/items/{item_id}/content"
 SLIDES_EXPORT_PATH = "/api/v1/slides/presentations/{presentation_id}/export"
 SLIDES_EXPORT_CONTENT_TYPES = {
     "application/json",
@@ -967,7 +967,7 @@ def test_vn_asset_content_openapi_documents_file_response() -> None:
     from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 
     app = FastAPI()
-    app.include_router(vn_assets_router, prefix="/api/v1")
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
     operation = app.openapi()["paths"][VN_ASSET_CONTENT_PATH]["get"]
 
     _assert_file_response_content(operation, {"application/octet-stream", "image/jpeg", "image/png", "image/webp"})

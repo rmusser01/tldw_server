@@ -3821,12 +3821,30 @@ def test_iter_content_router_specs_defers_tail_router_attr_lookup(
             "default_stable": False,
         },
         {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.vn_capabilities",
+            "expected_name": "vn_capabilities",
+            "path": "/vn-capabilities",
+            "prefix": "/api/v1/vn",
+            "tags": ("vn-capabilities",),
+            "route_key": "vn-capabilities",
+            "default_stable": True,
+        },
+        {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.vn_assets",
             "expected_name": "vn_assets",
             "path": "/vn-assets",
-            "prefix": "/api/v1",
+            "prefix": "/api/v1/vn",
             "tags": ("vn-assets",),
             "route_key": "vn-assets",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.vn_play",
+            "expected_name": "vn_play",
+            "path": "/vn-play",
+            "prefix": "/api/v1/vn",
+            "tags": ("vn-play",),
+            "route_key": "vn-play",
             "default_stable": True,
         },
     ]
@@ -11046,6 +11064,21 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.vn_capabilities",
+        path="/vn-capabilities",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.vn_assets",
+        path="/vn-assets",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.vn_play",
+        path="/vn-play",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.research",
         path="/research",
     )
@@ -11256,6 +11289,12 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["integrations"].tags == ("integrations",)
     assert by_key["scheduled-tasks"].prefix == "/api/v1"
     assert by_key["scheduled-tasks"].tags == ("scheduled-tasks",)
+    assert by_key["vn-capabilities"].prefix == "/api/v1/vn"
+    assert by_key["vn-capabilities"].tags == ("vn-capabilities",)
+    assert by_key["vn-assets"].prefix == "/api/v1/vn"
+    assert by_key["vn-assets"].tags == ("vn-assets",)
+    assert by_key["vn-play"].prefix == "/api/v1/vn"
+    assert by_key["vn-play"].tags == ("vn-play",)
     assert by_tags[("research",)].prefix == "/api/v1/research"
     assert by_tags[("research",)].tags == ("research",)
     assert by_tags[("research-runs",)].prefix == "/api/v1"
