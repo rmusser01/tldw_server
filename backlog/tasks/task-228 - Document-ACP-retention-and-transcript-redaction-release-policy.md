@@ -4,7 +4,7 @@ title: Document ACP retention and transcript redaction release policy
 status: Done
 assignee: []
 created_date: '2026-05-10 07:17'
-updated_date: '2026-05-10 15:08'
+updated_date: '2026-05-10 15:40'
 labels:
   - acp
   - release-signoff
@@ -47,12 +47,14 @@ Define the #1502 release policy for ACP session/artifact retention and transcrip
 Audit findings: ACP session TTL closes active sessions but does not hard-delete session rows/messages/artifact references; audit metadata and diagnostics have sanitizers; detail/events/artifacts remain full-fidelity authenticated drill-through surfaces; audit purge helper exists but automatic configured enforcement is not release-certified. Follow-up issues created: #1512 retention cleanup, #1513 redacted transcript/artifact views.
 
 Verification: git diff --check passed. Targeted rg confirmed policy wording and #1512/#1513 links in CHANGELOG.md, Docs/Development/Agent_Client_Protocol.md, and Docs/Development/ACP_Production_Readiness.md. Bandit skipped because this slice changes docs/backlog only.
+
+Review follow-up for PR #1515: added an explicit compliant/partial/blocked classification table for ACP session detail/events, artifacts, diagnostics, audit metadata, session TTL cleanup, audit retention, workspace environment metadata, and redacted transcript/artifact views. Replaced ambiguous `/events` shorthand with the full session-scoped `/api/v1/acp/sessions/{session_id}/events` route.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Documented ACP #1502 retention/redaction release policy and linked implementation follow-ups #1512 and #1513. The docs now state that session detail/events/artifacts are authenticated full-fidelity operator drill-through surfaces, while audit metadata and diagnostics are sanitized; automatic hard-delete retention and redacted transcript/artifact views remain follow-up implementation work. Verification: git diff --check and targeted rg review passed; Bandit skipped for docs-only changes.
+Documented ACP #1502 retention/redaction release policy and linked implementation follow-ups #1512 and #1513. The docs now state that session detail/events/artifacts are authenticated full-fidelity operator drill-through surfaces, while audit metadata and diagnostics are sanitized; automatic hard-delete retention and redacted transcript/artifact views remain follow-up implementation work. Review follow-up added an explicit compliant/partial/blocked status map and corrected the session events endpoint path. Verification: git diff --check and targeted rg review passed; Bandit skipped for docs-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
