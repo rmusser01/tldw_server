@@ -1156,11 +1156,16 @@ def status_helper(
     return CheckResult(ok=True, reason="helper_not_running")
 
 
-def _prefixed_results(prefix: str, results: Iterable[tuple[str, CheckResult]]) -> list[tuple[str, CheckResult]]:
+def _prefixed_results(
+    prefix: str,
+    results: Iterable[tuple[str, CheckResult]],
+) -> list[tuple[str, CheckResult]]:
+    """Namespace drill sub-results so pre/post status rows remain distinguishable."""
     return [(f"{prefix}_{name}", result) for name, result in results]
 
 
 def _result_named(results: Iterable[tuple[str, CheckResult]], name: str) -> CheckResult | None:
+    """Return the first result matching a lifecycle check name."""
     for result_name, result in results:
         if result_name == name:
             return result
@@ -1168,6 +1173,7 @@ def _result_named(results: Iterable[tuple[str, CheckResult]], name: str) -> Chec
 
 
 def _managed_helper_running_result(results: list[tuple[str, CheckResult]]) -> CheckResult:
+    """Validate that status output proves a managed helper process is pingable."""
     for _, result in results:
         if not result.ok:
             return result

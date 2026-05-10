@@ -4,7 +4,7 @@ title: Add managed VZ helper restart/status drill
 status: Done
 assignee: []
 created_date: '2026-05-10 00:55'
-updated_date: '2026-05-10 01:04'
+updated_date: '2026-05-10 01:19'
 labels:
   - sandbox
   - vz-linux
@@ -42,12 +42,18 @@ Plan: Docs/superpowers/plans/2026-05-10-vz-helper-managed-restart-drill.md
 Verification: pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q => 93 passed, 1 skipped; git diff --check => pass; Bandit production script => 0 findings; Bandit test file with baseline test skips B101/B108/B404/B603 => 0 findings.
 
 Known skips/blockers: no real VZ VM restart drill was run in this portable slice; real host lifecycle validation remains operator-gated.
+
+Review fix pass: Qodo opened two still-valid threads on missing helper docstrings and overlong _prefixed_results signature.
+
+Review fix verification: pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q => 93 passed, 1 skipped; git diff --check => pass; Bandit helper script => 0 findings; Bandit helper tests with baseline skips B101/B108/B404/B603 => 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added a managed vz-helperctl restart-drill command that verifies a helperctl-owned helper is running, stops it through the existing pid/socket lease, starts it again on the same managed paths, and verifies status afterward. Added portable unit coverage and operator documentation clarifying this is a local lifecycle drill, not launchd or host reboot automation.
+
+Review follow-up added docstrings for the new restart-drill helper functions and wrapped the overlong _prefixed_results signature.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
