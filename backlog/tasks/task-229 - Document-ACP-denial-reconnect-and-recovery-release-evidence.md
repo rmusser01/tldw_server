@@ -4,7 +4,7 @@ title: Document ACP denial reconnect and recovery release evidence
 status: Done
 assignee: []
 created_date: '2026-05-10 15:16'
-updated_date: '2026-05-10 15:26'
+updated_date: '2026-05-10 15:48'
 labels:
   - acp
   - release-signoff
@@ -12,6 +12,8 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1501'
+  - 'https://github.com/rmusser01/tldw_server/issues/1500#issuecomment-4415656791'
+  - 'https://github.com/rmusser01/tldw_server/pull/1517'
 documentation:
   - Docs/Development/ACP_Production_Readiness.md
   - apps/packages/ui/src/hooks/useACPSession.tsx
@@ -50,12 +52,14 @@ Close the #1501 ACP release-signoff workstream by inventorying existing denial, 
 Implemented deterministic useACPSession tests for denial response payload/queue cleanup and transient close retry state.
 Updated ACP_Production_Readiness with a #1501 addendum covering permission denial, reconnect/session replay, failed-run recovery, and explicit live downstream-agent caveats tied to #1504/#1505.
 Verification: Vitest passed for useACPSession, ACPPermissionModal, ACPChatPanel, and AgentTasksPage.connection (19 tests). Pytest passed for selected ACP permission/reconnect/SSE/replay/orchestration diagnostics coverage (18 tests). git diff --check passed. Bandit skipped because touched source is Markdown plus TypeScript test code only; no Python code was changed.
+
+Review follow-up for PR #1517: replaced the reconnect test hardcoded 1000ms timer advance with WS_CONFIG.RECONNECT_DELAY_MS, added an explicit supported downstream-agent table documenting that no live ACP stdio downstream agent/version is certified for this release host, and added the #1500 parent-tracker evidence link to task references.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-#1501 release evidence now has deterministic frontend hook tests for denial and reconnect behavior plus a readiness addendum mapping existing backend/frontend/browser evidence to release posture and caveats. Live downstream-agent permission denial and live browser reconnect remain explicitly caveated until #1504/#1505 provide the seeded/live-agent environment.
+#1501 release evidence now has deterministic frontend hook tests for denial and reconnect behavior plus a readiness addendum mapping existing backend/frontend/browser evidence to release posture and caveats. Review follow-up added an explicit supported-agent table showing no live downstream ACP stdio agent/version is certified for this release host, linked the parent #1500 evidence comment, and tied reconnect timer coverage to WS_CONFIG.RECONNECT_DELAY_MS. Live downstream-agent permission denial and live browser reconnect remain explicitly caveated until #1504/#1505 provide the seeded/live-agent environment.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

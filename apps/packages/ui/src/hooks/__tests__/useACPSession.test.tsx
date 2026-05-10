@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useACPSession } from "@/hooks/useACPSession"
+import { WS_CONFIG } from "@/services/acp/constants"
 
 const { useStorageMock } = vi.hoisted(() => ({
   useStorageMock: vi.fn(),
@@ -191,7 +192,7 @@ describe("useACPSession", () => {
     })
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000)
+      await vi.advanceTimersByTimeAsync(WS_CONFIG.RECONNECT_DELAY_MS)
     })
 
     expect(MockWebSocket.instances).toHaveLength(2)

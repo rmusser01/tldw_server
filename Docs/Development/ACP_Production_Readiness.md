@@ -182,6 +182,12 @@ deterministic release evidence plus an explicit live-agent caveat, not as proof
 that every installed third-party agent can produce the same permission and
 recovery events.
 
+Supported downstream ACP agents for this release host:
+
+| Agent | Version | Release status | Evidence |
+| --- | --- | --- | --- |
+| None certified | N/A | No live downstream ACP stdio agent is supported or claimed for this release host yet. Candidate local tools were inventoried during #1504, but no installed binary plus provider credentials exposed a verifiable ACP stdio downstream-agent path. | #1504 / #1508 |
+
 | Flow | Automated evidence | Release posture |
 | --- | --- | --- |
 | Permission denial | Backend coverage includes `test_acp_websocket.py` permission denial, `test_acp_session_management.py` permission-response audit metadata, `test_acp_governance_coordinator.py` governance/policy deny paths, and `test_acp_integration_stub.py` stub-agent policy denial. Frontend coverage includes `ACPPermissionModal.test.tsx` deny action wiring and `useACPSession.test.tsx` WebSocket denial payload/queue cleanup. | Verified for backend policy/audit behavior and frontend denial controls. Live browser denial against a real downstream ACP stdio agent remains release-caveated until #1504 has a real compatible agent and provider credentials. |
