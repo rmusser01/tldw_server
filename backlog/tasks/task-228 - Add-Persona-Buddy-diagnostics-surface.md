@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-10 07:18'
-updated_date: '2026-05-10 15:10'
+updated_date: '2026-05-10 15:15'
 labels:
   - persona
   - buddy
@@ -54,6 +54,8 @@ Stages:
 Planning started in isolated worktree .worktrees/persona-buddy-diagnostics on branch codex/persona-buddy-diagnostics. GitHub tracking: epic #1510, Stage 1 issue #1511.
 
 Task 1 complete: added pure Persona/Buddy diagnostics projector and unit tests. Verification: bunx vitest run apps/packages/ui/src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts passed (5 tests).
+
+Task 2 complete: added PersonaBuddyDiagnosticsPanel using the existing StatePanel design-system component. Verification: bun run test src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx passed (2 tests) from apps/packages/ui.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
