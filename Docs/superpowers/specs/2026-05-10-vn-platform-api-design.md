@@ -124,11 +124,13 @@ Important stable codes include:
 - `idempotency_key_conflict`
 - `stale_scene_version`
 - `turn_in_progress`
+- `action_request_abandoned`
 - `restore_action_in_progress`
 - `draft_revision_conflict`
 - `script_publish_validation_failed`
 - `script_runtime_error`
 - `job_not_cancellable`
+- `cleanup_blocked`
 - `content_unavailable`
 
 Warning payloads should be frontend-safe and never include stack traces or
@@ -138,12 +140,13 @@ private prompt content.
 
 ### Idempotency
 
-Mutating VN commands that create work, publish, or advance state require a body
-field named `idempotency_key`.
+Mutating VN commands that create work, publish, or advance state require an
+`idempotency_key` in the JSON body or multipart form fields.
 
 Required examples:
 
 - asset generation, export/import, cleanup execution;
+- image item upload and import-preview archive upload;
 - script publish;
 - Story start;
 - runtime turns and script commands;
@@ -155,6 +158,65 @@ The backend normalizes the request body, hashes the payload, and scopes keys by
 owner plus resource/action. A duplicate key with the same payload replays the
 stored response, current job status, or completed action result. The same key with
 a different payload returns `409 idempotency_key_conflict`.
+
+Multipart endpoints carry `idempotency_key` as a form field. Their payload hash
+includes canonical form fields, file name where relevant, declared content type,
+file size, and a streaming SHA-256 of uploaded bytes. Replaying the same item
+upload key returns the existing draft item instead of creating a duplicate.
+Replaying the same import-preview key returns the existing preview/job status.
+Changing metadata or bytes under the same key returns
+`409 idempotency_key_conflict`.
+
+### Runtime Action Requests
+
+Interactive runtime commands are not Jobs, but they still need durable request
+state because clients retry slow turns and HTTP connections can close while a
+model or script command is running.
+
+Before executing a runtime command, the backend creates a per-session action
+request row keyed by `(owner_user_id, session_id, idempotency_key)` with:
+
+- request kind: `story_start`, `turn`, `script_advance`, `script_choice`,
+  `script_regenerate`, `checkpoint_restore`, `branch_restore`,
+  `save_slot_restore`;
+- normalized payload hash;
+- `client_scene_version` and starting `scene_version`;
+- status: `pending`, `running`, `model_failed`, `parse_failed`,
+  `runtime_failed`, `completed`, or `abandoned`;
+- lease/heartbeat fields for active execution;
+- stored response or stable error payload once terminal.
+
+Only one non-terminal action request can hold the per-session runtime lease.
+Concurrent commands return `409 turn_in_progress` or the more specific restore
+conflict code with the active request ID and retry guidance. Stale
+`client_scene_version` values return `409 stale_scene_version` before model or
+script execution starts.
+
+If the process crashes or the lease expires before a terminal result is written,
+reads reconcile the row to `abandoned`. A duplicate submission with the same key
+may atomically reacquire the lease and resume only when the operation is
+explicitly marked safe to resume before side effects. Otherwise it returns
+`409 action_request_abandoned` with instructions to refresh the session and submit
+a new key if the user still wants the action. A duplicate completed key always
+replays the stored response. A duplicate failed key replays the stored failure
+unless the endpoint is explicitly documented as retryable.
+
+### Policy And Generation Profile Snapshots
+
+Published script versions and runtime sessions must not depend on mutable admin
+profile rows for deterministic replay.
+
+At publish time, the backend resolves named policy and generation profiles into
+effective immutable snapshots containing provider/model routing, bounds,
+structured-output requirements, content-rating constraints, persistence/quota
+rules, and audit settings. The published script stores snapshot IDs and the
+profile names/versions they came from.
+
+At session creation, the backend records the effective runtime policy and
+generation profile snapshots actually used by the session, including permitted
+session overrides. Later admin edits, disables, or deletes of profile definitions
+do not mutate existing published script versions or sessions. New sessions and
+new published script versions resolve the latest permitted profile versions.
 
 ### Pagination
 
@@ -321,6 +383,12 @@ portability. Audio assets are not added to VN asset packs in V1.
 - Runtime manifests include approved items only.
 - Draft, rejected, and hidden items are workbench-only.
 - Cleanup never happens through `DELETE /packs/{pack_id}`.
+- Cleanup dry-runs must report generated-file blockers from published manifest
+  snapshots, active or historical sessions, checkpoints, save slots, branch
+  restore targets, and persisted VN TTS outputs before execution.
+- Confirmed cleanup can physically delete only unreferenced generated files.
+  Referenced files are skipped with `cleanup_blocked` details unless a future
+  admin-only retention override is explicitly designed.
 - Generation enqueues one parent fanout job and gradually creates child variant
   jobs.
 - Local image backends remain globally concurrency-gated by backend configuration.
@@ -361,7 +429,7 @@ draft and immutable published versions. A published version pins:
 
 - one primary VN asset pack;
 - the approved manifest snapshot at publish time;
-- script defaults, policy metadata, and generation profile references.
+- script defaults and immutable effective policy/generation profile snapshots.
 
 Play sessions pin a published script version. Draft edits do not affect running
 or historical sessions.
@@ -486,6 +554,8 @@ Publish response:
   "status": "published",
   "asset_pack_id": 7,
   "manifest_snapshot_id": "manifest_snapshot_9",
+  "policy_snapshot_id": "policy_snapshot_9",
+  "generation_profile_snapshot_id": "generation_snapshot_9",
   "validation": { "valid": true, "errors": [], "warnings": [] },
   "created_at": "2026-05-10T00:00:00Z"
 }
@@ -649,16 +719,18 @@ failures before returning.
 
 Public script state exposes:
 
-- current label;
-- command cursor;
+- spoiler-safe progress token;
+- optional public scene/chapter key;
 - public variables only;
 - visible choices;
 - current visual/audio cues;
 - current scene state;
 - script version metadata.
 
-It does not expose private interpreter stack details. `debug-state` can expose
-author diagnostics behind ownership/admin checks.
+It does not expose raw labels, command indices, private variables, hidden branch
+conditions, or interpreter stack details. `debug-state` can expose current label,
+command cursor, stack frames, last opcode, and author diagnostics behind
+ownership/admin checks.
 
 Model expansions inside scripts may occur from any scene when allowed by policy
 and generation profile. Generated narration, dialogue, choices, and scene beats
@@ -762,6 +834,22 @@ Response:
 }
 ```
 
+### Character Safety Metadata
+
+Policy profiles define fail-open, warn, or fail-closed behavior for absent,
+unknown, conflicting, or imported character safety metadata. V1 defaults are:
+
+| Situation | `general` local default | `suggestive`/`mature` local default | hosted/strict profile |
+| --- | --- | --- | --- |
+| Missing age/status metadata | Warn and require acknowledgement | Block until metadata is completed | Block |
+| Unknown or ambiguous metadata | Warn and require acknowledgement | Block until clarified | Block |
+| Conflicting card/import metadata | Block | Block | Block |
+| Imported metadata without trusted provenance | Warn and require acknowledgement | Warn or block by profile | Block unless trusted |
+
+The policy decision records the metadata source, trust level, acknowledgement
+requirement, and any user/admin acknowledgement ID. Runtime and publish endpoints
+repeat authoritative policy evaluation; `/evaluate` is advisory preflight only.
+
 Generation profiles include:
 
 - provider/model routing;
@@ -837,15 +925,23 @@ outputs are still served through authenticated content endpoints while available
 
 - VN asset pack metadata: per-user `ChaChaNotes.db`.
 - VN script metadata, drafts, versions, manifest snapshots: per-user
-  `ChaChaNotes.db` or a VN-owned section of the same per-user database boundary.
+  `ChaChaNotes.db` through a VN scripts repository/module.
 - VN play sessions, events, scene state, branches, checkpoints, save slots:
   per-user `ChaChaNotes.db`.
+- VN TTS job/output metadata: per-user `ChaChaNotes.db` through a VN audio
+  repository/module.
 - Generated image and audio bytes: AuthNZ generated-file storage.
 - Policy/generation profile global definitions: admin-owned config/database
   boundary consistent with existing admin/RBAC infrastructure.
+- Immutable policy/generation profile snapshots used by published scripts and
+  sessions: per-user `ChaChaNotes.db` when tied to user-owned runtime state;
+  global/admin snapshots remain in the admin-owned boundary.
 
 Cross-store references to generated files are application-validated. VN APIs must
 validate owner, source feature, media type, and policy before serving content.
+Retention and cleanup code must treat published manifest snapshots, sessions,
+checkpoints, save slots, and persisted audio output rows as live references until
+the owning metadata is deleted according to the feature's retention policy.
 
 ## End-To-End Flows
 
@@ -892,10 +988,19 @@ Design verification:
 Implementation plans cut from this spec should include:
 
 - schema tests for request/response/error shapes;
-- API tests for idempotency, conflicts, auth, ownership, and pagination;
+- API tests for idempotency, including multipart upload byte-hash conflicts,
+  request replay, conflicts, auth, ownership, and pagination;
 - script validation unit/property tests;
 - runtime replay tests for model output persistence and seeded random results;
+- runtime action-request recovery tests for duplicate in-flight requests,
+  abandoned leases, stale scene versions, and stored terminal responses;
+- publish/session snapshot tests proving admin profile edits do not mutate
+  existing script versions or sessions;
+- cleanup blocker tests for manifest snapshots, sessions, checkpoints, save
+  slots, branch restore targets, and persisted VN TTS outputs;
 - policy profile tests for allow/warn/block decisions;
+- character safety metadata tests for missing, unknown, conflicting, and imported
+  metadata across local-default and strict profiles;
 - VN TTS job lifecycle tests;
 - migration docs/OpenAPI checks for canonical `/api/v1/vn/vn-*` routes.
 
