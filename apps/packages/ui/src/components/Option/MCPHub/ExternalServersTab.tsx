@@ -30,15 +30,10 @@ import {
   getManagedExternalServers,
   getManagedExternalServerSlots
 } from "./policyHelpers"
+import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
 const DEFAULT_SLOT_SECRET_KIND = "bearer_token"
 const DEFAULT_SLOT_PRIVILEGE_CLASS = "read"
-const MCP_RUNTIME_QUERY_FAMILIES = [
-  ["mcp-tools"],
-  ["mcp-tool-catalogs"],
-  ["mcp-tool-modules"],
-  ["mcp-health"]
-] as const
 const AUTH_TEMPLATE_TARGET_BY_TRANSPORT: Record<string, "header" | "env"> = {
   websocket: "header",
   stdio: "env"
@@ -174,17 +169,13 @@ export const ExternalServersTab = ({
       const refreshResult = serverId
         ? await refreshExternalServerDiscovery(serverId)
         : await refreshExternalServerDiscovery()
+      await invalidateMcpRuntimeQueries(queryClient)
       if (!refreshResult.ok) {
         return {
           ok: false,
           message: describeExternalServerDiscoveryRefreshFailure(refreshResult)
         }
       }
-      await Promise.all(
-        MCP_RUNTIME_QUERY_FAMILIES.map((queryKey) =>
-          queryClient.invalidateQueries({ queryKey })
-        )
-      )
       return { ok: true }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"

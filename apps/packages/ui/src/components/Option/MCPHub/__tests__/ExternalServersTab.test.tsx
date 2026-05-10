@@ -514,7 +514,10 @@ describe("ExternalServersTab", () => {
 
     expect(await screen.findByText(/server created, but discovery refresh failed/i)).toBeTruthy()
     expect(screen.getByText(/external_server_discovery_failed/i)).toBeTruthy()
-    expect(mocks.invalidateQueries).not.toHaveBeenCalled()
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
     expect(mocks.listExternalServers).toHaveBeenCalledTimes(2)
   })
 

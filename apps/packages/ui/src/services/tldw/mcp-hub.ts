@@ -1148,9 +1148,6 @@ export const refreshExternalServerDiscovery = async (
     method: "POST",
     body: serverId ? { server_id: serverId } : undefined
   })
-  if (!result.ok) {
-    throw new Error(describeExternalServerDiscoveryRefreshFailure(result))
-  }
   return result
 }
 

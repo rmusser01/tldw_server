@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 15:08'
+updated_date: '2026-05-10 15:34'
 labels:
   - mcp
   - webui
@@ -96,12 +96,16 @@ Stage 3 quality follow-up RED/GREEN: added service tests requiring chatDebugMeta
 2026-05-10 Stage 5 final verification completed. Backend: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q -> 61 passed, 5 warnings. UI package: bun run test chat-tools/pageAssistModel/raw-preview/TldwChatService/MCPHub tab tests -> 6 files passed, 55 tests. Frontend readiness: bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx -> 6 passed. Bandit: 0 findings, output /tmp/bandit_mcp_hub_pr1.json. git diff --check passed.
 
 2026-05-10: Draft PR created for the completed PR 1 slice: https://github.com/rmusser01/tldw_server/pull/1514. PR is draft pending a human-authored Change summary per the repo AI-generated PR policy.
+
+2026-05-10 requested code review follow-up: final reviewer requested fixes before merge. Actionable items: propagate external virtual tool write classification into protocol write policy, return structured ok:false refresh results from the frontend service and invalidate/reload on completed partial refreshes, make Tool Catalog refresh invalidate shared MCP runtime queries, and clean up Stage 3 plan status. Reopening task while applying TDD fixes.
+
+2026-05-10 requested code review follow-up completed in .worktrees/mcp-hub-pr1-live-discovery. RED evidence: backend protocol test initially failed because ext.docs.repo.set executed with MCP_DISABLE_WRITE_TOOLS=true; service/client Vitest failed because ok:false refresh responses threw instead of returning structured results; MCP Hub tab tests failed because completed partial refreshes did not invalidate shared runtime queries. Implemented external virtual tool write_capable metadata plus ExternalFederationModule call-time write classification, returned structured refresh responses from refreshExternalServerDiscovery, centralized MCP runtime query invalidation, reloaded Tool Catalogs after completed partial refreshes, and cleaned Stage 3 plan status. Verification: backend external-federation pytest 11 passed; UI package focused Vitest 63 passed; frontend readiness Vitest 6 passed; Bandit over touched backend production files had 0 findings at /tmp/bandit_mcp_hub_pr1_review_fix.json; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR 1 implementation completed for MCP Hub live discovery and chat payload correctness. Added backend live external discovery reconciliation so managed server changes can refresh the running MCP runtime without backend restart, including registry remapping and external federation argument validation. Added MCP Hub frontend refresh/invalidation hooks and Tool Catalog refresh feedback so setup/catalog surfaces report refresh success and degraded refresh outcomes. Shared chat MCP tool eligibility between pageAssistModel and raw preview, preserved omission reasons in debug metadata outside the wire payload, and forwarded metadata through the live chat client capture path. Updated the frontend readiness gate to allow degraded but enterable HTTP 200/206 health responses while preserving retry/blocking for unreachable, malformed, non-enterable, and unhealthy responses. Verification passed: backend focused pytest 61 passed; UI package focused Vitest 55 passed; frontend readiness Vitest 6 passed; Bandit over touched backend production files had 0 findings at /tmp/bandit_mcp_hub_pr1.json; git diff --check passed.
+PR 1 implementation completed for MCP Hub live discovery and chat payload correctness. Added backend live external discovery reconciliation so managed server changes can refresh the running MCP runtime without backend restart, including registry remapping and external federation argument validation. Added MCP Hub frontend refresh/invalidation hooks and Tool Catalog refresh feedback so setup/catalog surfaces report refresh success, degraded refresh outcomes, and completed partial refreshes without losing structured error details. Shared chat MCP tool eligibility between pageAssistModel and raw preview, preserved omission reasons in debug metadata outside the wire payload, and forwarded metadata through the live chat client capture path. Updated the frontend readiness gate to allow degraded but enterable HTTP 200/206 health responses while preserving retry/blocking for unreachable, malformed, non-enterable, and unhealthy responses. PR review follow-up propagated external virtual-tool write classification into protocol write gating and centralized runtime cache invalidation for completed refreshes. Verification passed: backend focused pytest 11 passed for external federation review fixes plus earlier backend suite 61 passed; UI package focused Vitest 63 passed; frontend readiness Vitest 6 passed; Bandit over touched backend production files had 0 findings at /tmp/bandit_mcp_hub_pr1_review_fix.json; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

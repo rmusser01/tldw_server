@@ -130,11 +130,26 @@ class ExternalFederationModule(BaseModule):
                         "server_id": virtual_tool.server_id,
                         "upstream_tool": virtual_tool.upstream_tool_name,
                         **(virtual_tool.metadata or {}),
+                        "write_capable": bool(virtual_tool.is_write),
                     },
                 }
             )
 
         return tools
+
+    def is_write_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        tool_def: dict[str, Any] | None = None,
+    ) -> bool:
+        """Classify federated virtual tools using discovery-time write metadata."""
+
+        if tool_name.startswith("ext.") and self._manager is not None:
+            for virtual_tool in self._manager.list_virtual_tools():
+                if virtual_tool.virtual_name == tool_name:
+                    return bool(virtual_tool.is_write)
+        return super().is_write_tool_call(tool_name, arguments, tool_def=tool_def)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         """Validate external federation management and virtual tool arguments."""

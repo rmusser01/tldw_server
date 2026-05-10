@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -8,11 +9,14 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
+from tldw_Server_API.app.core.MCP_unified.config import get_config
+from tldw_Server_API.app.core.MCP_unified.external_servers import VirtualExternalTool
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.external_federation_module import (
     ExternalFederationModule,
 )
-from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
     ExternalServerRegistryPartialLoadError,
@@ -79,6 +83,50 @@ class _RuntimeRowsRepo:
 
     async def list_external_servers(self) -> list[dict[str, Any]]:
         return self._rows
+
+
+class _StaticExternalWriteManager:
+    def __init__(self) -> None:
+        self.called = False
+
+    def list_virtual_tools(self) -> list[VirtualExternalTool]:
+        return [
+            VirtualExternalTool(
+                virtual_name="ext.docs.repo.set",
+                server_id="docs",
+                upstream_tool_name="repo.set",
+                description="Set repository metadata",
+                input_schema={"type": "object"},
+                metadata={},
+                is_write=True,
+            )
+        ]
+
+    async def execute_virtual_tool(
+        self,
+        virtual_tool_name: str,
+        arguments: dict[str, Any],
+        context: Any = None,
+    ) -> dict[str, Any]:
+        del virtual_tool_name, arguments, context
+        self.called = True
+        return {"ok": True}
+
+    async def list_servers(self) -> list[dict[str, Any]]:
+        return []
+
+    async def shutdown(self) -> None:
+        return None
+
+
+class _StaticExternalWriteModule(ExternalFederationModule):
+    async def on_initialize(self) -> None:
+        self._manager = _StaticExternalWriteManager()
+
+
+class _AllowAllRBAC:
+    async def check_permission(self, *args: Any, **kwargs: Any) -> bool:
+        return True
 
 
 @pytest.mark.asyncio
@@ -574,6 +622,49 @@ def test_external_federation_validates_virtual_tool_argument_shape_and_confirmat
         module.validate_tool_arguments("ext.docs.repo.search", "q=x")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="__confirm_write must be a boolean"):
         module.validate_tool_arguments("ext.docs.repo.update", {"__confirm_write": "true"})
+
+
+@pytest.mark.asyncio
+async def test_external_federation_virtual_write_tools_respect_protocol_write_disable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "true")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    registry = get_module_registry()
+    module_id = "external_write_policy_test"
+    await registry.register_module(
+        module_id,
+        _StaticExternalWriteModule,
+        ModuleConfig(name=module_id),
+    )
+
+    try:
+        proto = MCPProtocol()
+        proto.rbac_policy = _AllowAllRBAC()
+        ctx = RequestContext(request_id="external-write-policy", user_id="u1", client_id="c1")
+        req = MCPRequest(
+            method="tools/call",
+            params={
+                "name": "ext.docs.repo.set",
+                "arguments": {"value": "x", "__confirm_write": True},
+            },
+            id="external-write-policy",
+        )
+
+        resp = await proto.process_request(req, ctx)
+
+        assert resp.error is not None
+        assert resp.error.code == -32001
+        assert "write tools are disabled" in (resp.error.message or "").lower()
+        module = await registry.get_module(module_id)
+        assert isinstance(module, _StaticExternalWriteModule)
+        assert isinstance(module._manager, _StaticExternalWriteManager)
+        assert module._manager.called is False
+    finally:
+        with contextlib.suppress(Exception):
+            await registry.unregister_module(module_id)
+        get_config.cache_clear()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

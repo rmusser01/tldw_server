@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd"
+import { useQueryClient } from "@tanstack/react-query"
 
 import {
   describeExternalServerDiscoveryRefreshFailure,
@@ -10,8 +11,10 @@ import {
 } from "@/services/tldw/mcp-hub"
 
 import { getPathScopeLabel, getToolEntriesByModule } from "./policyHelpers"
+import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
 export const ToolCatalogsTab = () => {
+  const queryClient = useQueryClient()
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
   const [loading, setLoading] = useState(false)
@@ -47,10 +50,11 @@ export const ToolCatalogsTab = () => {
     setErrorMessage(null)
     try {
       const refreshResult = await refreshExternalServerDiscovery()
-      if (!refreshResult.ok) {
-        throw new Error(describeExternalServerDiscoveryRefreshFailure(refreshResult))
-      }
+      await invalidateMcpRuntimeQueries(queryClient)
       await loadRegistrySummary({ clearOnError: false })
+      if (!refreshResult.ok) {
+        setErrorMessage(`Failed to refresh tool discovery: ${describeExternalServerDiscoveryRefreshFailure(refreshResult)}`)
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(`Failed to refresh tool discovery: ${msg}`)

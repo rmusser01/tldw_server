@@ -83,20 +83,20 @@
 - Character `complete-v2`, image generation, and specialized flows remain out of scope unless they already use `pageAssistModel`.
 
 **Implementation Tasks:**
-- [ ] Extend `apps/packages/ui/src/utils/chat-tools.ts` with a shared resolver, for example `resolveChatToolRequest({ tools, toolChoice, modelSupportsTools, mcpHealthState, hasMcp })`, returning `tools`, `toolChoice`, `omittedReason`, and filter counts.
-- [ ] Update `apps/packages/ui/src/models/index.ts` to use the shared resolver, preserving current model capability lookup and `X-TLDW-Loop-Compat` header behavior only when effective tools exist.
-- [ ] Update `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts` to use the same resolver for normal and comparison previews.
-- [ ] Extend `ChatRequestDebugSnapshot` in `apps/packages/ui/src/services/tldw/chat-request-debug.ts` with optional metadata/debug fields for `toolOmissionReason` so the captured debug snapshot can explain omitted tools without polluting the request body.
-- [ ] Thread the resolver status into `useMcpToolsControl` or the raw request modal state only where the control already has enough information; keep copy concise and avoid adding a broad new diagnostics panel in PR 1.
+- [x] Extend `apps/packages/ui/src/utils/chat-tools.ts` with a shared resolver, for example `resolveChatToolRequest({ tools, toolChoice, modelSupportsTools, mcpHealthState, hasMcp })`, returning `tools`, `toolChoice`, `omittedReason`, and filter counts.
+- [x] Update `apps/packages/ui/src/models/index.ts` to use the shared resolver, preserving current model capability lookup and `X-TLDW-Loop-Compat` header behavior only when effective tools exist.
+- [x] Update `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts` to use the same resolver for normal and comparison previews.
+- [x] Extend `ChatRequestDebugSnapshot` in `apps/packages/ui/src/services/tldw/chat-request-debug.ts` with optional metadata/debug fields for `toolOmissionReason` so the captured debug snapshot can explain omitted tools without polluting the request body.
+- [x] Thread the resolver status into `useMcpToolsControl` or the raw request modal state only where the control already has enough information; keep copy concise and avoid adding a broad new diagnostics panel in PR 1.
 
 **Tests:**
-- [ ] Extend `apps/packages/ui/src/utils/__tests__/chat-tools.test.ts` for each omission reason and one successful inclusion case.
-- [ ] Extend `apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts` for model-without-tools, unhealthy MCP, `none` tool choice, collision-only tools, and successful inclusion.
-- [ ] Extend `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx` for omission reasons and comparison mode parity.
+- [x] Extend `apps/packages/ui/src/utils/__tests__/chat-tools.test.ts` for each omission reason and one successful inclusion case.
+- [x] Extend `apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts` for model-without-tools, unhealthy MCP, `none` tool choice, collision-only tools, and successful inclusion.
+- [x] Extend `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx` for omission reasons and comparison mode parity.
 
-**Status:** In Progress
+**Status:** Complete
 
-**Verification Notes:** Initial Stage 3 focused Vitest passed 26 tests and `git diff --check` passed. Quality follow-up added RED tests for live debug metadata forwarding; RED failed on missing lower-level client options, then package-local Vitest passed 42 tests across `chat-tools`, `pageAssistModel`, raw preview, and `TldwChatService` coverage. `git diff --check` passed. Focused quality re-review approved the fix.
+**Verification Notes:** Initial Stage 3 focused Vitest passed 26 tests and `git diff --check` passed. Quality follow-up added RED tests for live debug metadata forwarding; RED failed on missing lower-level client options, then package-local Vitest passed 42 tests across `chat-tools`, `pageAssistModel`, raw preview, and `TldwChatService` coverage. `git diff --check` passed. Focused quality re-review approved the fix. PR review follow-up cleaned the Stage 3 task/status bookkeeping.
 
 ---
 

@@ -5,7 +5,14 @@ import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
   getToolRegistrySummary: vi.fn(),
+  invalidateQueries: vi.fn(),
   refreshExternalServerDiscovery: vi.fn()
+}))
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({
+    invalidateQueries: mocks.invalidateQueries
+  })
 }))
 
 vi.mock("@/services/tldw/mcp-hub", () => ({
@@ -24,6 +31,7 @@ import { ToolCatalogsTab } from "../ToolCatalogsTab"
 describe("ToolCatalogsTab", () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mocks.invalidateQueries.mockResolvedValue(undefined)
     mocks.getToolRegistrySummary.mockResolvedValue({
       entries: [
         {
@@ -116,6 +124,10 @@ describe("ToolCatalogsTab", () => {
     await user.click(screen.getByRole("button", { name: /refresh tools/i }))
 
     expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith()
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
     expect(await screen.findByText("External Web")).toBeTruthy()
     expect(screen.getByText("web.search")).toBeTruthy()
     expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
@@ -152,6 +164,10 @@ describe("ToolCatalogsTab", () => {
     expect(await screen.findByText(/failed to refresh tool discovery/i)).toBeTruthy()
     expect(screen.getByText(/external_server_discovery_failed/i)).toBeTruthy()
     expect(screen.getByText("notes.search")).toBeTruthy()
-    expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(1)
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
+    expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
   })
 })
