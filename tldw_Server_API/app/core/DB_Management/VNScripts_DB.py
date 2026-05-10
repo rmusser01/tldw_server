@@ -756,6 +756,56 @@ class VNScriptsRepository:
         )
         return [_decode_version(row) for row in cursor.fetchall()], total
 
+    def list_latest_versions_for_setup(
+        self,
+        *,
+        owner_user_id: int,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return the latest published version for each active script."""
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT
+                version.*,
+                script.title AS script_title,
+                script.policy_profile_id AS policy_profile_id,
+                script.generation_profile_id AS generation_profile_id,
+                script.content_rating AS script_content_rating
+            FROM vn_script_versions AS version
+            JOIN vn_scripts AS script ON script.id = version.script_id
+            JOIN (
+                SELECT script_id, MAX(version_number) AS latest_version_number
+                FROM vn_script_versions
+                WHERE owner_user_id = ?
+                GROUP BY script_id
+            ) AS latest
+              ON latest.script_id = version.script_id
+             AND latest.latest_version_number = version.version_number
+            WHERE version.owner_user_id = ?
+              AND script.owner_user_id = version.owner_user_id
+              AND script.deleted = 0
+            ORDER BY version.created_at DESC, version.id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (
+                owner_user_id,
+                owner_user_id,
+                max(1, min(int(limit), 100)),
+                max(0, int(offset)),
+            ),
+        )
+        versions: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            version = _decode_version(row)
+            version["title"] = row["script_title"]
+            version["policy_profile_id"] = row["policy_profile_id"]
+            version["generation_profile_id"] = row["generation_profile_id"]
+            version["content_rating"] = row["script_content_rating"]
+            versions.append(version)
+        return versions
+
     def get_version(
         self,
         script_id: int,
