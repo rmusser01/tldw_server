@@ -6,6 +6,8 @@ import userEvent from "@testing-library/user-event"
 const mocks = vi.hoisted(() => ({
   getToolRegistrySummary: vi.fn(),
   invalidateQueries: vi.fn(),
+  listExternalServers: vi.fn(),
+  useMcpTools: vi.fn(),
   refreshExternalServerDiscovery: vi.fn()
 }))
 
@@ -23,7 +25,12 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
     return [result.message, errorText].filter(Boolean).join(" - ") || "Discovery refresh failed"
   },
   getToolRegistrySummary: (...args: unknown[]) => mocks.getToolRegistrySummary(...args),
+  listExternalServers: (...args: unknown[]) => mocks.listExternalServers(...args),
   refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args)
+}))
+
+vi.mock("@/hooks/useMcpTools", () => ({
+  useMcpTools: (...args: unknown[]) => mocks.useMcpTools(...args)
 }))
 
 import { ToolCatalogsTab } from "../ToolCatalogsTab"
@@ -109,6 +116,37 @@ describe("ToolCatalogsTab", () => {
       ok: true,
       status: "refreshed"
     })
+    mocks.listExternalServers.mockResolvedValue([
+      {
+        id: "docs-managed",
+        name: "Docs Managed",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "stdio",
+        config: {},
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 1,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: null,
+        credential_slots: []
+      }
+    ])
+    mocks.useMcpTools.mockReturnValue({
+      healthState: "healthy",
+      toolsAvailable: true,
+      availableTools: [{ rawName: "notes.search" }],
+      chatTools: [{ rawName: "notes.search" }],
+      toolCounts: {
+        discovered: 1,
+        executable: 1,
+        disabled: 0,
+        colliding: 0,
+        chatEnabled: 1
+      }
+    })
   })
 
   it("renders registry-backed module and tool metadata", async () => {
@@ -162,7 +200,7 @@ describe("ToolCatalogsTab", () => {
 
     render(<ToolCatalogsTab />)
 
-    expect(await screen.findByText(/no tools registered yet/i)).toBeTruthy()
+    expect(await screen.findByText(/no tools discovered yet/i)).toBeTruthy()
     await user.click(screen.getByRole("button", { name: /refresh tools/i }))
 
     expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith()
@@ -173,6 +211,77 @@ describe("ToolCatalogsTab", () => {
     expect(await screen.findByText("External Web")).toBeTruthy()
     expect(screen.getByText("web.search")).toBeTruthy()
     expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
+  })
+
+  it("offers Add Server when no managed servers or tools exist", async () => {
+    const user = userEvent.setup()
+    const onAddServer = vi.fn()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([])
+    mocks.useMcpTools.mockReturnValue({
+      healthState: "healthy",
+      toolsAvailable: false,
+      availableTools: [],
+      chatTools: [],
+      toolCounts: {
+        discovered: 0,
+        executable: 0,
+        disabled: 0,
+        colliding: 0,
+        chatEnabled: 0
+      }
+    })
+
+    render(<ToolCatalogsTab onAddServer={onAddServer} />)
+
+    expect(await screen.findByText(/no managed mcp servers yet/i)).toBeTruthy()
+    expect(screen.getByText(/add a managed server before looking for tool catalog entries/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /add server/i }))
+    expect(onAddServer).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers discovery refresh when managed servers exist but no tools are registered", async () => {
+    const user = userEvent.setup()
+    mocks.getToolRegistrySummary
+      .mockResolvedValueOnce({
+        entries: [],
+        modules: []
+      })
+      .mockResolvedValueOnce(registrySummary("docs.lookup", "External Docs"))
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/no tools discovered yet/i)).toBeTruthy()
+    expect(screen.getByText(/managed servers are configured/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /refresh discovery/i }))
+
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith()
+    expect(await screen.findByText("docs.lookup")).toBeTruthy()
+  })
+
+  it("shows access guidance when registry tools are present but none are executable in chat", async () => {
+    mocks.useMcpTools.mockReturnValue({
+      healthState: "healthy",
+      toolsAvailable: false,
+      availableTools: [],
+      chatTools: [],
+      toolCounts: {
+        discovered: 1,
+        executable: 0,
+        disabled: 1,
+        colliding: 0,
+        chatEnabled: 0
+      }
+    })
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText("notes.search")).toBeTruthy()
+    expect(screen.getByText(/tools are registered but not executable in chat/i)).toBeTruthy()
+    expect(screen.getByText(/review profile assignments and disabled tool settings/i)).toBeTruthy()
   })
 
   it("surfaces explicit refresh failures without clearing the current registry", async () => {

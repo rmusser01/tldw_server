@@ -5,23 +5,47 @@ import { useQueryClient } from "@tanstack/react-query"
 import {
   describeExternalServerDiscoveryRefreshFailure,
   getToolRegistrySummary,
+  listExternalServers,
   refreshExternalServerDiscovery,
+  type McpHubExternalServer,
   type McpHubToolRegistryEntry,
   type McpHubToolRegistryModule
 } from "@/services/tldw/mcp-hub"
+import { useMcpTools } from "@/hooks/useMcpTools"
 
-import { getPathScopeLabel, getToolEntriesByModule } from "./policyHelpers"
+import { getManagedExternalServers, getPathScopeLabel, getToolEntriesByModule } from "./policyHelpers"
 import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
-export const ToolCatalogsTab = () => {
+type ToolCatalogsTabProps = {
+  onAddServer?: () => void
+}
+
+export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
   const queryClient = useQueryClient()
   const latestLoadRequestId = useRef(0)
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
+  const [externalServers, setExternalServers] = useState<McpHubExternalServer[]>([])
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
+  const managedExternalServers = useMemo(
+    () => getManagedExternalServers(externalServers),
+    [externalServers]
+  )
+  const mcpTools = useMcpTools()
+  const executableToolCount = Number(mcpTools.toolCounts?.executable ?? 0)
+  const chatEnabledToolCount = Number(mcpTools.toolCounts?.chatEnabled ?? 0)
+  const hasExecutableChatTools =
+    mcpTools.toolsAvailable === null
+      ? null
+      : executableToolCount > 0 ||
+        chatEnabledToolCount > 0 ||
+        mcpTools.chatTools.length > 0 ||
+        mcpTools.availableTools.length > 0
+  const showExecutableAccessGuidance =
+    groupedModules.length > 0 && hasExecutableChatTools === false
 
   const loadRegistrySummary = useCallback(async (options: { clearOnError?: boolean } = {}) => {
     const requestId = ++latestLoadRequestId.current
@@ -29,10 +53,26 @@ export const ToolCatalogsTab = () => {
     setLoading(true)
     setErrorMessage(null)
     try {
-      const summary = await getToolRegistrySummary()
+      const [summaryResult, serverResult] = await Promise.allSettled([
+        getToolRegistrySummary(),
+        listExternalServers()
+      ])
       if (requestId !== latestLoadRequestId.current) return
-      setEntries(Array.isArray(summary?.entries) ? summary.entries : [])
-      setModules(Array.isArray(summary?.modules) ? summary.modules : [])
+      if (summaryResult.status === "fulfilled") {
+        setEntries(Array.isArray(summaryResult.value?.entries) ? summaryResult.value.entries : [])
+        setModules(Array.isArray(summaryResult.value?.modules) ? summaryResult.value.modules : [])
+      } else {
+        if (clearOnError) {
+          setEntries([])
+          setModules([])
+        }
+        setErrorMessage("Failed to load tool registry metadata.")
+      }
+      if (serverResult.status === "fulfilled") {
+        setExternalServers(Array.isArray(serverResult.value) ? serverResult.value : [])
+      } else {
+        setExternalServers([])
+      }
     } catch {
       if (requestId !== latestLoadRequestId.current) return
       if (clearOnError) {
@@ -79,6 +119,14 @@ export const ToolCatalogsTab = () => {
         </Button>
       </Space>
       {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
+      {showExecutableAccessGuidance ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Tools are registered but not executable in chat"
+          description="Review profile assignments and disabled tool settings before testing these tools in Chat."
+        />
+      ) : null}
 
       {groupedModules.length > 0 ? (
         groupedModules.map((module) => (
@@ -162,14 +210,31 @@ export const ToolCatalogsTab = () => {
           <Empty
             description={
               <Space orientation="vertical" size={4}>
-                <Typography.Text type="secondary">No tools registered yet</Typography.Text>
+                <Typography.Text type="secondary">
+                  {managedExternalServers.length > 0
+                    ? "No tools discovered yet"
+                    : "No managed MCP servers yet"}
+                </Typography.Text>
                 <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                  Tools are discovered automatically when you connect external MCP servers.
-                  Add a server in the <Typography.Text strong>Servers &amp; Credentials</Typography.Text> tab to get started.
+                  {managedExternalServers.length > 0 ? (
+                    "Managed servers are configured, but no registry tools are available yet. Refresh discovery after creating or editing a server."
+                  ) : (
+                    "Add a managed server before looking for tool catalog entries."
+                  )}
                 </Typography.Text>
               </Space>
             }
-          />
+          >
+            {managedExternalServers.length > 0 ? (
+              <Button type="primary" onClick={handleRefreshTools} loading={refreshing}>
+                Refresh discovery
+              </Button>
+            ) : (
+              <Button type="primary" onClick={onAddServer}>
+                Add Server
+              </Button>
+            )}
+          </Empty>
         </Card>
       )}
     </Space>

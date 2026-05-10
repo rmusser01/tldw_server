@@ -257,6 +257,64 @@ describe("ExternalServersTab", () => {
     expect(mocks.importExternalServer).toHaveBeenCalledWith("search-legacy")
   })
 
+  it("renders no-auth local stdio servers as credential-complete", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([
+      {
+        id: "toy-stdio",
+        name: "Toy Stdio",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "stdio",
+        config: { command: "node", args: ["toy-server.mjs"], auth: { mode: "none" } },
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 0,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: "no_auth_template",
+        credential_slots: []
+      }
+    ])
+
+    render(<ExternalServersTab />)
+
+    expect((await screen.findAllByText("Toy Stdio")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/no credentials required/i)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/^No auth template$/i)).toBeNull()
+    expect(screen.queryByText(/^no secret$/i)).toBeNull()
+    expect(screen.queryByText(/legacy secret fallback/i)).toBeNull()
+    expect(screen.queryByText(/add at least one credential slot/i)).toBeNull()
+  })
+
+  it("keeps the legacy server-level secret fallback when auth is still configured without slots", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([
+      {
+        id: "docs-server-secret",
+        name: "Docs Server Secret",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "stdio",
+        config: { command: "node", args: ["docs-server.mjs"], auth: { mode: "bearer_token", env: "DOCS_TOKEN" } },
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 0,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: "no_auth_template",
+        credential_slots: []
+      }
+    ])
+
+    render(<ExternalServersTab />)
+
+    expect((await screen.findAllByText("Docs Server Secret")).length).toBeGreaterThan(0)
+    expect(await screen.findByText(/legacy secret fallback/i)).toBeTruthy()
+    expect(screen.getByLabelText(/^secret$/i)).toBeTruthy()
+    expect(screen.queryByText(/no credentials required/i)).toBeNull()
+  })
+
   it("renders auth template readiness and saves transport-aware mappings", async () => {
     const user = userEvent.setup()
     render(<ExternalServersTab />)
