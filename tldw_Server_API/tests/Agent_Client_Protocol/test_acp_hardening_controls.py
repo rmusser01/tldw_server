@@ -109,6 +109,7 @@ class _StubSessionRecord:
                         "content": "artifact body contains api_key=sk-artifact-secret",
                         "metadata": {
                             "title": "Safe artifact title",
+                            "location": "\\\\server\\share\\report.md",
                             "api_key": "sk-metadata-secret",
                         },
                     }
@@ -292,6 +293,7 @@ def test_acp_artifacts_redacted_mode_scrubs_payloads_but_keeps_operational_conte
     assert artifact["id"] == "artifact-secret"
     assert artifact["type"] == "summary"
     assert artifact["metadata"]["title"] == "Safe artifact title"
+    assert artifact["metadata"]["location"] == "[redacted]"
     assert artifact["metadata"]["api_key"] == "[redacted]"
     assert artifact["path"] == "[redacted]"
     assert artifact["content"] == "[redacted]"

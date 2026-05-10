@@ -451,7 +451,12 @@ def _redact_acp_string(value: str) -> str:
     lowered = text.lower()
     if any(marker in lowered for marker in _ACP_REDACTION_MARKERS):
         return _ACP_REDACTED_VALUE
-    if text.startswith("/") or text.startswith("~") or ":\\" in text:
+    if (
+        text.startswith("/")
+        or text.startswith("~")
+        or text.startswith("\\\\")
+        or ":\\" in text
+    ):
         return _ACP_REDACTED_VALUE
     if len(text) > 300:
         return f"{text[:300]}..."

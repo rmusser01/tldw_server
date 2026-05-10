@@ -6,6 +6,7 @@ import importlib.machinery
 import os
 import sys
 import tempfile
+import time
 import types
 from types import SimpleNamespace
 
@@ -283,6 +284,28 @@ def test_audit_db_purge():
         assert len(events) == 0
 
         db.close()
+
+
+def test_audit_db_singleton_updates_explicit_retention(monkeypatch):
+    """Explicit retention overrides are applied to an existing audit singleton."""
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_module
+
+    monkeypatch.setattr(audit_db_module, "_audit_db", None)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "audit.db")
+        first = audit_db_module.get_acp_audit_db(db_path=db_path, retention_days=30)
+        second = audit_db_module.get_acp_audit_db(db_path=db_path, retention_days=0)
+
+        assert second is first
+        second.record_event(action="retention_override", user_id=1, session_id="s1")
+        second.flush()
+
+        deleted = second.purge_old_events(now=time.time() + 5)
+        assert deleted >= 1
+        assert second.query_events() == []
+
+        second.close()
+        monkeypatch.setattr(audit_db_module, "_audit_db", None)
 
 
 def test_audit_db_double_flush_is_idempotent():

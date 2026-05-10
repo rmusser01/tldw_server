@@ -4,7 +4,7 @@ title: ACP Stage 1 retention and redaction implementation
 status: Done
 assignee: []
 created_date: '2026-05-10 19:30'
-updated_date: '2026-05-10 19:52'
+updated_date: '2026-05-10 20:02'
 labels:
   - ACP
   - retention
@@ -55,6 +55,10 @@ Whitespace: git diff --check passed.
 Post-rebase verification: branch rebased cleanly onto current origin/dev, focused ACP pytest passed with 78 passed and 5 warnings in 22.63s, git diff --check origin/dev..HEAD passed, and Bandit wrote /tmp/bandit_acp_stage1_rebased.json with the same pre-existing ACP DB baseline findings only.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1548
+
+Review-fix pass for PR #1548: actionable Gemini inline comments are UNC path redaction coverage and ACP audit DB singleton retention override behavior.
+
+PR #1548 review fixes: added UNC path redaction coverage and fixed ACP audit DB singleton retention override handling. Verification: review-specific regression tests passed with 2 passed, 5 warnings; broader affected ACP tests passed with 28 passed, 5 warnings; focused Stage 1 ACP suite passed with 79 passed, 5 warnings; git diff --check passed; Bandit wrote /tmp/bandit_acp_pr1548_review_fixes.json with 0 high, 1 medium, 0 low, the existing ACP_Audit_DB.py:170 B608 baseline finding.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

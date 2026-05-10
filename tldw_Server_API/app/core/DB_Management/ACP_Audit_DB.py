@@ -253,13 +253,14 @@ def get_acp_audit_db(
 ) -> ACPAuditDB:
     """Get or create the module-level ACPAuditDB singleton."""
     global _audit_db
-    if _audit_db is None:
-        with _audit_db_lock:
-            if _audit_db is None:
-                _audit_db = ACPAuditDB(
-                    db_path=db_path,
-                    retention_days=_default_audit_retention_days()
-                    if retention_days is None
-                    else retention_days,
-                )
+    with _audit_db_lock:
+        if _audit_db is None:
+            _audit_db = ACPAuditDB(
+                db_path=db_path,
+                retention_days=_default_audit_retention_days()
+                if retention_days is None
+                else retention_days,
+            )
+        elif retention_days is not None:
+            _audit_db._retention_days = int(retention_days)
     return _audit_db
