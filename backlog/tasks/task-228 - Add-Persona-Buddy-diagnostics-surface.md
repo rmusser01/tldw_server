@@ -1,11 +1,11 @@
 ---
 id: TASK-228
 title: Add Persona/Buddy diagnostics surface
-status: In Progress
+status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 07:18'
-updated_date: '2026-05-10 15:20'
+updated_date: '2026-05-10 15:21'
 labels:
   - persona
   - buddy
@@ -28,12 +28,12 @@ Implement the first Stage 1 Persona/Buddy reliability slice from the merged curr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Diagnostics projection covers selected persona identity, profile load state, Buddy summary/dormant state, active visual pack load/render diagnostic, Persona Live websocket/session state, live voice/recovery state, wake armed/state/rejection reason, and available persona_visuals MCP readiness from existing client/runtime state.
-- [ ] #2 Persona Garden or Live displays a compact diagnostics summary without blocking existing controls or changing normal healthy flows.
-- [ ] #3 Diagnostics distinguish healthy, unavailable, degraded, and recovering states with actionable copy derived from existing reason codes and state inputs.
-- [ ] #4 Broken or missing visual packs continue to fail open and expose the relevant visual diagnostic in the summary.
-- [ ] #5 Focused tests cover diagnostic derivation and at least one route-level degraded state.
-- [ ] #6 Docs or developer notes link back to the Stage 0 audit and GitHub issue #1511.
+- [x] #1 Diagnostics projection covers selected persona identity, profile load state, Buddy summary/dormant state, active visual pack load/render diagnostic, Persona Live websocket/session state, live voice/recovery state, wake armed/state/rejection reason, and available persona_visuals MCP readiness from existing client/runtime state.
+- [x] #2 Persona Garden or Live displays a compact diagnostics summary without blocking existing controls or changing normal healthy flows.
+- [x] #3 Diagnostics distinguish healthy, unavailable, degraded, and recovering states with actionable copy derived from existing reason codes and state inputs.
+- [x] #4 Broken or missing visual packs continue to fail open and expose the relevant visual diagnostic in the summary.
+- [x] #5 Focused tests cover diagnostic derivation and at least one route-level degraded state.
+- [x] #6 Docs or developer notes link back to the Stage 0 audit and GitHub issue #1511.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -58,14 +58,22 @@ Task 1 complete: added pure Persona/Buddy diagnostics projector and unit tests. 
 Task 2 complete: added PersonaBuddyDiagnosticsPanel using the existing StatePanel design-system component. Verification: bun run test src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx passed (2 tests) from apps/packages/ui.
 
 Task 3 complete: wired diagnostics into Persona Live, added visual runtime diagnostics to the existing persona visual runtime store, and published BuddyShellHost visual diagnostics for route consumption. Verification: bun run test src/routes/__tests__/sidepanel-persona.test.tsx -t diagnostics passed; bun run test src/store/__tests__/persona-visual-runtime.test.ts passed; bun run test src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx passed; bun run test src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx -t visual passed.
+
+Final verification passed from apps/packages/ui: bun run test src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts src/store/__tests__/persona-visual-runtime.test.ts src/components/PersonaGarden/__tests__/LiveSessionPanel.test.ts (33 tests); bun run test src/routes/__tests__/sidepanel-persona.test.tsx -t diagnostics (1 selected test); bun run test src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx -t visual (4 selected tests); git diff --check passed. Bandit skipped because no Python files changed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Stage 1 Persona/Buddy diagnostics as a read-only frontend surface. Added a pure diagnostics projector, StatePanel-backed panel, Persona Live route integration, visual runtime diagnostics bridge from BuddyShellHost, focused tests for projection/panel/route visual degradation, and an audit tracking note for issue #1511. Verification passed; Bandit skipped because the touched scope is TypeScript/Markdown/Backlog only.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
