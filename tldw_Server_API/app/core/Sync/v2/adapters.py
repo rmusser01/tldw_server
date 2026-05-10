@@ -8,6 +8,10 @@ from typing import Protocol
 
 from .models import SyncDataset, SyncDomain, SyncEnvelopeCreate
 
+KNOWN_SYNC_DOMAINS: frozenset[str] = frozenset(
+    {"notes", "chat", "workspaces", "source_cache", "media"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AdapterAccepted:
@@ -96,6 +100,8 @@ class SyncAdapterRegistry:
             self.register(adapter)
 
     def register(self, adapter: SyncDomainAdapter) -> None:
+        if adapter.domain not in KNOWN_SYNC_DOMAINS:
+            raise ValueError(f"Unknown Sync adapter domain: {adapter.domain}")
         if not adapter.supported_adapter_versions:
             raise ValueError(f"Sync adapter for {adapter.domain} has no supported versions")
         if any(version < 1 for version in adapter.supported_adapter_versions):
@@ -124,6 +130,7 @@ __all__ = [
     "AdapterConflict",
     "AdapterDeferred",
     "AdapterRejected",
+    "KNOWN_SYNC_DOMAINS",
     "StaticSyncAdapter",
     "SyncAdapterOutcome",
     "SyncAdapterRegistry",

@@ -4,7 +4,7 @@ title: Add Sync v2 service layer
 status: Done
 assignee: []
 created_date: '2026-05-10 03:59'
-updated_date: '2026-05-10 04:21'
+updated_date: '2026-05-10 04:27'
 labels:
   - sync
   - service
@@ -73,6 +73,16 @@ Second follow-up verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
 - git diff --check: passed.
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py -f json -o /tmp/bandit_sync_v2_service_invariants.json: 0 findings.
+
+Spec re-review follow-up: enforce runtime adapter domain validation in core. Plan: add a regression asserting SyncAdapterRegistry.register rejects StaticSyncAdapter(domain="bogus"), verify the focused tests fail, add a core allowlist for Sync v2 domains in adapters.py, rerun focused tests, existing Sync model/store tests, git diff --check, and Bandit; then mark TASK-217 done and commit.
+
+Spec re-review follow-up complete. Added runtime Sync adapter domain validation with a core allowlist for notes, chat, workspaces, source_cache, and media. Added regression coverage proving StaticSyncAdapter(domain="bogus") is rejected during registry registration.
+
+Adapter-domain follow-up verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 20 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/adapters.py -f json -o /tmp/bandit_sync_v2_adapter_domains.json: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -83,6 +93,8 @@ Added the Sync v2 service layer for capabilities, device registration, dataset e
 Spec review fix: hardened SyncV2Service.pull paging so echo-filtered pulls continue scanning in bounded server-sequence chunks until a visible page or exhaustion, and expanded private log redaction to recursively redact human-readable private fields such as labels, titles, bodies, and content.
 
 Second spec re-review fix: tightened service invariants so stored cursor resolution treats missing selected-domain cursors as 0, push rejects envelope dataset mismatches before persistence, and push returns explicit non-retryable batch_limit_exceeded outcomes instead of silently dropping overflow envelopes.
+
+Final spec re-review fix: SyncAdapterRegistry now rejects unknown adapter domains at runtime using a core-owned Sync v2 domain allowlist, with regression coverage for bogus domains.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

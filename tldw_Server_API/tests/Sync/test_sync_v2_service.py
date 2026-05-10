@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
+    SyncDomain,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
 )
@@ -138,6 +140,11 @@ def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
 
     with pytest.raises(KeyError):
         registry.get("media")
+
+    with pytest.raises(ValueError):
+        registry.register(
+            StaticSyncAdapter(domain=cast(SyncDomain, "bogus"), supported_adapter_versions={1})
+        )
 
 
 def test_push_rejects_envelopes_for_datasets_user_cannot_access(sync_service: SyncV2Service):
