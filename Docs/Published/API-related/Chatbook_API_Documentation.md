@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Chatbook API provides functionality for exporting and importing collections of content (conversations, notes, characters, etc.) in a portable archive format. This enables users to backup, share, and migrate their data between instances or users.
+The Chatbook API provides functionality for exporting and importing collections of content (conversations, notes, characters, etc.) in a portable archive format. It also supports importing OpenWebUI chat export JSON through the same import and preview endpoints. This enables users to backup, share, and migrate their data between instances or users.
 
 Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 
@@ -61,7 +61,9 @@ Export (async)
 
 Import (sync/async)
   Client → POST /api/v1/chatbooks/import (multipart)
-         → Save temp → Validate ZIP → Secure extract → Import selections
+         → Save temp → Branch by source_format
+         → Chatbook archive: Validate ZIP → Secure extract → Import selections
+         → OpenWebUI JSON: Parse export JSON → Import chat trees
          ← Sync: { success, imported_items, warnings } or Async: { job_id }
 ```
 
@@ -137,30 +139,41 @@ Implementation notes:
 
 **Endpoint**: `POST /api/v1/chatbooks/import`
 
-**Description**: Import content from an uploaded chatbook file.
+**Description**: Import content from an uploaded chatbook archive or OpenWebUI chat export JSON.
 
-**Request**: Multipart form data + query parameters
-- `file` (form field): The chatbook file (required)
-- Additional import options are provided as query parameters (see Options JSON for fields). For example: `?conflict_resolution=skip&import_media=true`
+**Request**: Multipart form data
+- `file` (form field): The import file (required)
+- `source_format` (form field): `chatbook` (default) or `openwebui_json`
+- `conflict_resolution` (form field): `skip` (default) or `rename` for current import flows
+- `prefix_imported` (form field): boolean, default `false`
+- `content_selections` (form field): optional JSON object encoded as a string; unsupported content types are rejected
+- `import_media` and `import_embeddings` (form fields): must remain `false` in v1; true values are rejected
 
-Supported options (as query parameters or structured by clients that map to query params):
+Supported multipart fields:
 ```json
 {
-  "content_selections": {
+  "source_format": "chatbook",
+  "content_selections": "{\"conversation\":[\"conv_123\"],\"note\":[]}",
+  "content_selections_json_shape": {
     "conversation": ["conv_123"],  // Only import specific items
-    "note": []  // Import all notes
+    "note": []  // Import all notes if content selections are supported
   },
-  "conflict_resolution": "skip",  // skip, overwrite, rename, merge
+  "conflict_resolution": "skip",
   "prefix_imported": false,
-  "import_media": true,
+  "import_media": false,
   "import_embeddings": false,
   "async_mode": false
 }
 ```
 
+For `source_format=chatbook`, the upload must be a `.zip` or `.chatbook` archive. For `source_format=openwebui_json`, the upload must be a safe `.json` filename and the server does not run ZIP validation or Chatbook manifest extraction.
+
+OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It imports every valid chat as one tldw conversation and preserves all valid message branches through `parent_message_id`. Duplicate detection uses `source=openwebui` and a deterministic external reference. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, direct `webui.db` import, admin export import, live OpenWebUI server import, attachment hydration, media import, embeddings import, or content selections.
+
 **Response**:
 ```json
 {
+  "source_format": "chatbook",
   "success": true,
   "message": "Chatbook imported successfully",
   "imported_items": {
@@ -171,18 +184,38 @@ Supported options (as query parameters or structured by clients that map to quer
 }
 ```
 
+**OpenWebUI JSON Response**:
+```json
+{
+  "source_format": "openwebui_json",
+  "success": true,
+  "message": "OpenWebUI chats imported successfully",
+  "openwebui_result": {
+    "imported_chats": 4,
+    "skipped_chats": 1,
+    "failed_chats": 0,
+    "imported_messages": 128,
+    "skipped_messages": 0,
+    "duplicate_chats": 1,
+    "warnings": []
+  }
+}
+```
+
 ### 3. Preview Chatbook
 
 **Endpoint**: `POST /api/v1/chatbooks/preview`
 
-**Description**: Preview chatbook contents without importing.
+**Description**: Preview chatbook archive or OpenWebUI JSON contents without importing.
 
 **Request**: Multipart form data
-- `file`: The chatbook file to preview
+- `file`: The file to preview
+- `source_format`: `chatbook` (default) or `openwebui_json`
 
 **Response**:
 ```json
 {
+  "source_format": "chatbook",
   "manifest": {
     "version": "1.0.0",
     "name": "My Chatbook",
@@ -194,6 +227,32 @@ Supported options (as query parameters or structured by clients that map to quer
     "total_characters": 3,
     "total_size_bytes": 5242880,
     "content_items": []  // Preview omits detailed items for performance
+  }
+}
+```
+
+**OpenWebUI JSON Preview Response**:
+```json
+{
+  "source_format": "openwebui_json",
+  "openwebui_preview": {
+    "chat_count": 5,
+    "message_count": 132,
+    "branched_chat_count": 2,
+    "duplicate_chat_count": 1,
+    "attachment_reference_count": 3,
+    "malformed_chat_count": 0,
+    "warnings": [],
+    "items": [
+      {
+        "title": "Research thread",
+        "external_ref": "chat_abc123",
+        "message_count": 31,
+        "branched": true,
+        "duplicate": false,
+        "warning_count": 0
+      }
+    ]
   }
 }
 ```
@@ -395,6 +454,8 @@ Lightweight liveness check for the Chatbooks subsystem.
 - merge: Combine with existing (future feature)
 ```
 
+OpenWebUI JSON imports support `skip` and `rename` in v1.
+
 ### ExportStatus Enum
 ```
 - pending: Job queued
@@ -566,10 +627,16 @@ if job_id:
 
         time.sleep(5)  # Check every 5 seconds
 
-# Import a chatbook (options as query parameters)
+# Import a chatbook (options as multipart form fields)
 with open("my_backup.chatbook", "rb") as f:
     boundary, body = encode_multipart(
-        {},
+        {
+            "source_format": "chatbook",
+            "conflict_resolution": "skip",
+            "prefix_imported": "false",
+            "import_media": "false",
+            "import_embeddings": "false",
+        },
         [("file", "my_backup.chatbook", f.read(), "application/octet-stream")],
     )
     upload_headers = {
@@ -577,7 +644,7 @@ with open("my_backup.chatbook", "rb") as f:
         "Content-Type": f"multipart/form-data; boundary={boundary}",
     }
     req = Request(
-        f"{API_BASE}/chatbooks/import?conflict_resolution=skip&prefix_imported=false",
+        f"{API_BASE}/chatbooks/import",
         data=body,
         headers=upload_headers,
         method="POST",
@@ -643,12 +710,17 @@ async function monitorJob(jobId) {
   }
 }
 
-// Import chatbook (options as query parameters)
+// Import chatbook (options as multipart form fields)
 async function importChatbook(file) {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('source_format', 'chatbook');
+  formData.append('conflict_resolution', 'skip');
+  formData.append('prefix_imported', 'false');
+  formData.append('import_media', 'false');
+  formData.append('import_embeddings', 'false');
 
-  const response = await fetch(`${API_BASE}/chatbooks/import?conflict_resolution=skip&prefix_imported=false`, {
+  const response = await fetch(`${API_BASE}/chatbooks/import`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${TOKEN}`

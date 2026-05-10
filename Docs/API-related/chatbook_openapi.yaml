@@ -118,13 +118,18 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Chatbook file to import
+                  description: Chatbook archive to import, or OpenWebUI JSON when source_format is openwebui_json
+                source_format:
+                  type: string
+                  enum:
+                    - chatbook
+                    - openwebui_json
+                  default: chatbook
+                  description: Import source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files.
                 content_selections:
-                  type: object
-                  additionalProperties:
-                    type: array
-                    items:
-                      type: string
+                  type: string
+                  format: json
+                  description: Optional JSON object encoded as a string, for example '{"conversation":["conv_123"]}'. Unsupported import content types are rejected.
                 conflict_resolution:
                   $ref: '#/components/schemas/ConflictResolution'
                 prefix_imported:
@@ -184,7 +189,14 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Chatbook file to preview
+                  description: Chatbook archive to preview, or OpenWebUI JSON when source_format is openwebui_json
+                source_format:
+                  type: string
+                  enum:
+                    - chatbook
+                    - openwebui_json
+                  default: chatbook
+                  description: Preview source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files.
       responses:
         '200':
           description: Chatbook preview retrieved

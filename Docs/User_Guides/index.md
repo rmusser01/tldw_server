@@ -75,7 +75,7 @@ This section is organized by product surface so you can quickly find the right d
 
 ### Chatbooks and Workflows
 
-- [Chatbook User Guide](WebUI_Extension/Chatbook_User_Guide.md)
+- [Chatbook User Guide](WebUI_Extension/Chatbook_User_Guide.md) - backup, restore, sharing, and OpenWebUI chat JSON import
 - [Chatbook Tools Getting Started](WebUI_Extension/Chatbook_Tools_Getting_Started.md)
 - [Google Keep Notes Import and Export](WebUI_Extension/Google_Keep_Notes_Import_Export_Guide.md)
 - [Workflows Examples](WebUI_Extension/Workflows_Examples.md)

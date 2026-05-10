@@ -122,6 +122,18 @@ Reading List supports URL capture, clean text extraction, tagging, import/export
 
 See: [Reading List API](Reading_List_API.md)
 
+#### Chatbooks - `/api/v1/chatbooks`
+
+Chatbooks provide portable backup, restore, sharing, and migration workflows. The same import and preview endpoints also support OpenWebUI "Export Chats" JSON files when `source_format=openwebui_json`.
+
+- `POST /api/v1/chatbooks/export` - create a `.chatbook` archive
+- `POST /api/v1/chatbooks/import` - import a `.chatbook` archive or OpenWebUI chat export JSON
+- `POST /api/v1/chatbooks/preview` - inspect a chatbook or OpenWebUI JSON export before importing
+- `GET /api/v1/chatbooks/export/jobs` and `GET /api/v1/chatbooks/import/jobs` - list background jobs
+- `GET /api/v1/chatbooks/download/{job_id}` - download a completed export
+
+See: [Chatbook API Documentation](Chatbook_API_Documentation.md)
+
 #### Reminder Tasks and Notifications
 
 - Tasks: `POST /api/v1/tasks`, `GET /api/v1/tasks`, `PATCH /api/v1/tasks/{task_id}`, `DELETE /api/v1/tasks/{task_id}`
