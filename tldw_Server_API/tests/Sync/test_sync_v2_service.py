@@ -235,6 +235,77 @@ def test_push_rejects_unsupported_adapter_versions_per_envelope(sync_service: Sy
     assert result.rejected[0].error_code == "unsupported_adapter_version"
 
 
+def test_push_rejects_envelope_dataset_mismatch_before_persistence(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    sync_service.enroll_dataset(user_id="user-2", dataset_id="dataset-2", domains=["notes"])
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="cross-dataset",
+                dataset_id="dataset-2",
+                payload_hash="sha256:cross-dataset",
+            )
+        ],
+    )
+    leaked = sync_service.pull(
+        user_id="user-2",
+        dataset_id="dataset-2",
+        device_id="device-2",
+        cursor="0",
+        domains=["notes"],
+        include_own_changes=True,
+    )
+
+    assert result.accepted == []
+    assert result.conflicts == []
+    assert result.rejected[0].client_envelope_id == "cross-dataset"
+    assert result.rejected[0].error_code == "dataset_mismatch"
+    assert leaked.envelopes == []
+
+
+def test_push_rejects_envelopes_beyond_batch_limit(sync_store: SyncV2Store, registry: SyncAdapterRegistry):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(max_batch_size=2),
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(client_envelope_id="env-1", payload_hash="sha256:1"),
+            _envelope(
+                client_envelope_id="env-2",
+                entity_id="note-2",
+                stable_key="note:2",
+                payload_hash="sha256:2",
+            ),
+            _envelope(
+                client_envelope_id="env-3",
+                entity_id="note-3",
+                stable_key="note:3",
+                payload_hash="sha256:3",
+            ),
+        ],
+    )
+
+    assert [item.client_envelope_id for item in result.accepted] == ["env-1", "env-2"]
+    assert [item.client_envelope_id for item in result.rejected] == ["env-3"]
+    assert result.rejected[0].error_code == "batch_limit_exceeded"
+    assert result.rejected[0].retryable is False
+
+
 def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
     sync_service.push(
@@ -263,6 +334,52 @@ def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     assert first_pull.next_cursor == "1"
     assert second_pull.envelopes == []
     assert second_pull.next_cursor == "1"
+
+
+def test_pull_treats_missing_domain_cursors_as_zero(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes", "chat"])
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="chat-before-notes",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:chat-before-notes",
+            ),
+            _envelope(
+                client_envelope_id="note-pulled-first",
+                entity_id="note-1",
+                stable_key="note:1",
+                payload_hash="sha256:note-pulled-first",
+            ),
+        ],
+    )
+    notes_only = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        domains=["notes"],
+        include_own_changes=True,
+    )
+
+    multi_domain = sync_service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        domains=["notes", "chat"],
+        include_own_changes=True,
+    )
+
+    assert [envelope.client_envelope_id for envelope in notes_only.envelopes] == [
+        "note-pulled-first"
+    ]
+    assert "chat-before-notes" in [
+        envelope.client_envelope_id for envelope in multi_domain.envelopes
+    ]
 
 
 def test_pull_honors_filters_echo_policy_page_size_and_has_more(

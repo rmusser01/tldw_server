@@ -4,7 +4,7 @@ title: Add Sync v2 service layer
 status: Done
 assignee: []
 created_date: '2026-05-10 03:59'
-updated_date: '2026-05-10 04:14'
+updated_date: '2026-05-10 04:21'
 labels:
   - sync
   - service
@@ -63,6 +63,16 @@ Follow-up verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
 - git diff --check: passed.
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/security.py -f json -o /tmp/bandit_sync_v2_service_fix.json: 0 findings.
+
+Spec re-review follow-up: fixing three remaining service invariants. Plan: add failing regressions for missing-domain cursor defaults, cross-dataset envelope rejection, and max-batch overflow outcomes; patch service cursor resolution and push validation; rerun focused service/security tests, existing Sync model/store tests, git diff --check, and Bandit; then mark TASK-217 done and commit.
+
+Spec re-review follow-up complete. Added regression coverage for missing domain cursors during stored-cursor pulls, cross-dataset envelope rejection before persistence, and explicit batch_limit_exceeded outcomes for envelopes beyond max_batch_size. Fixed SyncV2Service.push to validate envelope dataset IDs and return overflow rejections for every submitted envelope. Fixed SyncV2Service.pull to resolve stored cursors after selecting dataset domains, with missing selected-domain cursors contributing 0.
+
+Second follow-up verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py -v: 20 passed, 5 warnings.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q: 26 passed, 5 warnings.
+- git diff --check: passed.
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Sync/v2/service.py -f json -o /tmp/bandit_sync_v2_service_invariants.json: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -71,6 +81,8 @@ Follow-up verification:
 Added the Sync v2 service layer for capabilities, device registration, dataset enrollment, push, pull, and restore manifest assembly without wiring endpoints or concrete domain adapters. The implementation keeps adapters injectable, returns per-envelope push outcomes, validates adapter versions and private payload metadata, redacts ciphertext/key material from log helpers, and exposes metadata-only restore manifests for private datasets. Added focused service/security tests and small Sync DB/store read helpers needed by restore manifests.
 
 Spec review fix: hardened SyncV2Service.pull paging so echo-filtered pulls continue scanning in bounded server-sequence chunks until a visible page or exhaustion, and expanded private log redaction to recursively redact human-readable private fields such as labels, titles, bodies, and content.
+
+Second spec re-review fix: tightened service invariants so stored cursor resolution treats missing selected-domain cursors as 0, push rejects envelope dataset mismatches before persistence, and push returns explicit non-retryable batch_limit_exceeded outcomes instead of silently dropping overflow envelopes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

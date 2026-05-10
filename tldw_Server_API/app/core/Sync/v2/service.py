@@ -268,7 +268,25 @@ class SyncV2Service:
         rejected: list[SyncPushRejected] = []
         conflicts: list[SyncPushConflict] = []
 
-        for envelope in envelopes[: self.settings.max_batch_size]:
+        for index, envelope in enumerate(envelopes):
+            if index >= self.settings.max_batch_size:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="batch_limit_exceeded",
+                        message="Sync push batch exceeded the server envelope limit",
+                    )
+                )
+                continue
+            if envelope.dataset_id != dataset_id:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="dataset_mismatch",
+                        message="Envelope dataset_id must match the push dataset_id",
+                    )
+                )
+                continue
             envelope = replace(envelope, device_id=envelope.device_id or device_id)
             try:
                 outcome = self._evaluate_envelope(dataset, envelope)
@@ -365,11 +383,12 @@ class SyncV2Service:
         include_own_changes: bool = False,
     ) -> SyncPullResult:
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, domains)
         if dataset is None:
+            since_sequence = int(cursor) if cursor is not None else 0
             return SyncPullResult(dataset_id=dataset_id, next_cursor=str(since_sequence))
 
         selected_domains = self._selected_domains(dataset, domains)
+        since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
         page_limit = min(page_size or self.settings.max_pull_page_size, self.settings.max_pull_page_size)
         raw_envelopes, visible = self._scan_pull_page(
             dataset_id=dataset_id,
@@ -494,11 +513,10 @@ class SyncV2Service:
         if cursor is not None:
             return int(cursor)
         cursor_domains = list(domains or self.adapters.supported_domains)
-        cursors = [
-            stored.last_pulled_sequence
-            for domain in cursor_domains
-            if (stored := self.store.get_device_cursor(dataset_id, device_id, domain)) is not None
-        ]
+        cursors: list[int] = []
+        for domain in cursor_domains:
+            stored = self.store.get_device_cursor(dataset_id, device_id, domain)
+            cursors.append(stored.last_pulled_sequence if stored is not None else 0)
         return min(cursors, default=0)
 
     def _selected_domains(
