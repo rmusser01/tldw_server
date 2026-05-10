@@ -36,9 +36,7 @@
 - [ ] Add MCP Hub endpoint tests in `tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py` for permission enforcement, successful live refresh, and external federation unavailable response.
 - [ ] Add protocol/module coverage in `tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py` or adjacent tests for `external.tools.refresh` validation and external write-tool validator behavior.
 
-**Status:** Complete
-
-**Verification Notes:** Committed in `118004a1d`. Focused MCP backend pytest passed 61 tests; Bandit over touched backend production files reported 0 findings; `git diff --check` passed.
+**Status:** Not Started
 
 ---
 
@@ -65,9 +63,7 @@
 - [ ] Extend `apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx` for create/import/update/delete refresh calls and refresh-failure warning copy.
 - [ ] Extend `apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx` for the explicit refresh action and registry reload.
 
-**Status:** Complete
-
-**Verification Notes:** Committed in `3a2b3bb75`. Package-local Vitest for `ExternalServersTab` and `ToolCatalogsTab` passed 13 tests; `git diff --check` passed. Bandit was not applicable to frontend-only TypeScript changes.
+**Status:** Not Started
 
 ---
 
@@ -83,20 +79,18 @@
 - Character `complete-v2`, image generation, and specialized flows remain out of scope unless they already use `pageAssistModel`.
 
 **Implementation Tasks:**
-- [x] Extend `apps/packages/ui/src/utils/chat-tools.ts` with a shared resolver, for example `resolveChatToolRequest({ tools, toolChoice, modelSupportsTools, mcpHealthState, hasMcp })`, returning `tools`, `toolChoice`, `omittedReason`, and filter counts.
-- [x] Update `apps/packages/ui/src/models/index.ts` to use the shared resolver, preserving current model capability lookup and `X-TLDW-Loop-Compat` header behavior only when effective tools exist.
-- [x] Update `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts` to use the same resolver for normal and comparison previews.
-- [x] Extend `ChatRequestDebugSnapshot` in `apps/packages/ui/src/services/tldw/chat-request-debug.ts` with optional metadata/debug fields for `toolOmissionReason` so the captured debug snapshot can explain omitted tools without polluting the request body.
-- [x] Thread the resolver status into `useMcpToolsControl` or the raw request modal state only where the control already has enough information; keep copy concise and avoid adding a broad new diagnostics panel in PR 1.
+- [ ] Extend `apps/packages/ui/src/utils/chat-tools.ts` with a shared resolver, for example `resolveChatToolRequest({ tools, toolChoice, modelSupportsTools, mcpHealthState, hasMcp })`, returning `tools`, `toolChoice`, `omittedReason`, and filter counts.
+- [ ] Update `apps/packages/ui/src/models/index.ts` to use the shared resolver, preserving current model capability lookup and `X-TLDW-Loop-Compat` header behavior only when effective tools exist.
+- [ ] Update `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts` to use the same resolver for normal and comparison previews.
+- [ ] Extend `ChatRequestDebugSnapshot` in `apps/packages/ui/src/services/tldw/chat-request-debug.ts` with optional metadata/debug fields for `toolOmissionReason` so the captured debug snapshot can explain omitted tools without polluting the request body.
+- [ ] Thread the resolver status into `useMcpToolsControl` or the raw request modal state only where the control already has enough information; keep copy concise and avoid adding a broad new diagnostics panel in PR 1.
 
 **Tests:**
-- [x] Extend `apps/packages/ui/src/utils/__tests__/chat-tools.test.ts` for each omission reason and one successful inclusion case.
-- [x] Extend `apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts` for model-without-tools, unhealthy MCP, `none` tool choice, collision-only tools, and successful inclusion.
-- [x] Extend `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx` for omission reasons and comparison mode parity.
+- [ ] Extend `apps/packages/ui/src/utils/__tests__/chat-tools.test.ts` for each omission reason and one successful inclusion case.
+- [ ] Extend `apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts` for model-without-tools, unhealthy MCP, `none` tool choice, collision-only tools, and successful inclusion.
+- [ ] Extend `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx` for omission reasons and comparison mode parity.
 
-**Status:** Complete
-
-**Verification Notes:** Initial Stage 3 focused Vitest passed 26 tests and `git diff --check` passed. Quality follow-up added RED tests for live debug metadata forwarding; RED failed on missing lower-level client options, then package-local Vitest passed 42 tests across `chat-tools`, `pageAssistModel`, raw preview, and `TldwChatService` coverage. `git diff --check` passed. Focused quality re-review approved the fix. PR review follow-up cleaned the Stage 3 task/status bookkeeping.
+**Status:** Not Started
 
 ---
 
@@ -117,9 +111,7 @@
 **Tests:**
 - [ ] Add readiness tests in `apps/tldw-frontend/__tests__/app/app-networking-guard.test.tsx` or a focused gate test to cover HTTP 206 degraded entry, healthy entry, and unhealthy retry/timeout behavior.
 
-**Status:** Complete
-
-**Verification Notes:** Stage 4 RED focused Vitest failed as expected on HTTP 206 degraded and HTTP 200 degraded health responses staying in the retrying gate. Implemented structured readiness parsing that accepts HTTP 200/206 with `status: degraded`, `status: healthy`, or `status: ok`. Focused readiness Vitest passed 6 tests.
+**Status:** Not Started
 
 ---
 
@@ -134,12 +126,9 @@
 - The final PR notes call out why refresh is explicit and why chat eligibility is shared.
 
 **Verification Commands:**
-- [x] `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q`
-- [x] `cd apps/packages/ui && bun run test src/utils/__tests__/chat-tools.test.ts src/models/__tests__/pageAssistModel.mcp-tools.test.ts src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx src/services/__tests__/tldw-chat.message-sanitization.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx`
-- [x] `cd apps/tldw-frontend && bun run test:run components/networking/__tests__/ServerReadinessGate.test.tsx`
-- [x] `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py tldw_Server_API/app/core/MCP_unified/modules/registry.py tldw_Server_API/app/core/MCP_unified/modules/implementations/external_federation_module.py -f json -o /tmp/bandit_mcp_hub_pr1.json`
-- [x] `git diff --check`
+- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -q`
+- [ ] `bunx vitest run apps/packages/ui/src/utils/__tests__/chat-tools.test.ts apps/packages/ui/src/models/__tests__/pageAssistModel.mcp-tools.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx apps/tldw-frontend/__tests__/app/app-networking-guard.test.tsx`
+- [ ] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py tldw_Server_API/app/core/MCP_unified/modules/registry.py tldw_Server_API/app/core/MCP_unified/modules/implementations/external_federation_module.py -f json -o /tmp/bandit_mcp_hub_pr1.json`
+- [ ] `git diff --check`
 
-**Status:** Complete
-
-**Verification Notes:** Backend focused pytest passed 61 tests with 5 warnings. UI package focused Vitest passed 55 tests across six files. Frontend readiness Vitest passed 6 tests. Bandit reported 0 findings in `/tmp/bandit_mcp_hub_pr1.json`. `git diff --check` passed.
+**Status:** Not Started
