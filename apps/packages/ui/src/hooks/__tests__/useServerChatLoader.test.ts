@@ -211,6 +211,38 @@ describe("resolveServerChatAssistantIdentity", () => {
     })
   })
 
+  it("preserves read-write persona restore identity without legacy character fallback", () => {
+    expect(
+      resolveServerChatAssistantIdentity({
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_write",
+        character_id: null
+      } as any)
+    ).toEqual({
+      assistantKind: "persona",
+      assistantId: "garden-helper",
+      characterId: null,
+      personaMemoryMode: "read_write"
+    })
+  })
+
+  it("keeps persona identity even when memory mode metadata is invalid", () => {
+    expect(
+      resolveServerChatAssistantIdentity({
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "session",
+        character_id: null
+      } as any)
+    ).toEqual({
+      assistantKind: "persona",
+      assistantId: "garden-helper",
+      characterId: null,
+      personaMemoryMode: null
+    })
+  })
+
   it("backfills character-backed assistant identity from legacy character_id", () => {
     expect(
       resolveServerChatAssistantIdentity({
@@ -396,6 +428,37 @@ describe("applyAssistantPresentationToMessages", () => {
       name: "You"
     })
   })
+
+  it("applies generic Persona fallback presentation without rewriting explicit speaker labels", () => {
+    const result = applyAssistantPresentationToMessages({
+      messages: [
+        createMessage({
+          isBot: true,
+          role: "assistant",
+          name: "Assistant",
+          modelName: "Assistant"
+        }),
+        createMessage({
+          isBot: true,
+          role: "assistant",
+          name: "Garden Helper",
+          modelName: "Garden Helper"
+        })
+      ],
+      assistantName: "Persona",
+      assistantAvatarUrl: null
+    })
+
+    expect(result[0]).toMatchObject({
+      name: "Persona",
+      modelName: "Persona",
+      modelImage: undefined
+    })
+    expect(result[1]).toMatchObject({
+      name: "Garden Helper",
+      modelName: "Garden Helper"
+    })
+  })
 })
 
 describe("reportDeferredAssistantPresentationError", () => {
@@ -418,6 +481,32 @@ describe("reportDeferredAssistantPresentationError", () => {
         assistantKind: "character",
         assistantId: "42",
         characterId: 42,
+        error: failure
+      })
+    )
+
+    warnSpy.mockRestore()
+  })
+
+  it("logs persona profile fallback failures while preserving assistant metadata", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const failure = new Error("persona lookup failed")
+
+    reportDeferredAssistantPresentationError({
+      stage: "persona-profile",
+      assistantKind: "persona",
+      assistantId: "garden-helper",
+      characterId: null,
+      error: failure
+    })
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[useServerChatLoader] Deferred assistant presentation failed",
+      expect.objectContaining({
+        stage: "persona-profile",
+        assistantKind: "persona",
+        assistantId: "garden-helper",
+        characterId: null,
         error: failure
       })
     )
