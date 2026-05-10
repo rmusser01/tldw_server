@@ -7,6 +7,12 @@ from typing import Any
 
 from ..adapters import AdapterAccepted, AdapterConflict, SyncAdapterContext, SyncAdapterOutcome
 from ..models import SyncDataset, SyncDomain, SyncEnvelope, SyncEnvelopeCreate
+from ._lineage import (
+    current_head,
+    delete_update_conflict,
+    incoming_references_head,
+    prior_envelopes,
+)
 
 _CONTENT_UPDATE_KINDS = {
     "body",
@@ -37,11 +43,18 @@ class NotesDomainAdapter:
         """Accept metadata-only changes and conflict concurrent encrypted edits."""
 
         del dataset
-        prior = _prior_envelopes(envelope, context)
-        delete_conflict = _delete_update_conflict(envelope, prior)
+        prior = prior_envelopes(envelope, context)
+        delete_conflict = delete_update_conflict(
+            envelope,
+            prior,
+            is_delete=_is_delete,
+            conflict_factory=_manual_delete_conflict,
+        )
         if delete_conflict is not None:
             return delete_conflict
-        if _is_content_bearing(envelope):
+        if _is_content_bearing(envelope) and not incoming_references_head(
+            envelope, current_head(prior)
+        ):
             conflicting = next(
                 (
                     item
@@ -62,29 +75,6 @@ class NotesDomainAdapter:
                     metadata={"conflicting_envelope_id": conflicting.client_envelope_id},
                 )
         return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
-
-
-def _prior_envelopes(
-    envelope: SyncEnvelopeCreate,
-    context: SyncAdapterContext | None,
-) -> list[SyncEnvelope]:
-    return [
-        item
-        for item in (context.prior_envelopes if context is not None else [])
-        if item.client_envelope_id != envelope.client_envelope_id
-    ]
-
-
-def _delete_update_conflict(
-    envelope: SyncEnvelopeCreate,
-    prior: list[SyncEnvelope],
-) -> AdapterConflict | None:
-    incoming_delete = _is_delete(envelope)
-    if incoming_delete and any(not _is_delete(item) for item in prior):
-        return _manual_delete_conflict(envelope)
-    if not incoming_delete and any(_is_delete(item) for item in prior):
-        return _manual_delete_conflict(envelope)
-    return None
 
 
 def _manual_delete_conflict(envelope: SyncEnvelopeCreate) -> AdapterConflict:

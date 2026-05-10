@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Business service for Sync v2 protocol operations."""
 
+import inspect
 import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
@@ -15,6 +16,7 @@ from .adapters import (
     AdapterDeferred,
     AdapterRejected,
     SyncAdapterContext,
+    SyncDomainAdapter,
     SyncAdapterRegistry,
 )
 from .errors import (
@@ -654,11 +656,8 @@ class SyncV2Service:
                 limit=100,
             )
         )
-        return self.adapters.get(envelope.domain).evaluate_envelope(
-            envelope,
-            dataset=dataset,
-            context=context,
-        )
+        adapter = self.adapters.get(envelope.domain)
+        return _call_adapter_evaluate(adapter, envelope, dataset=dataset, context=context)
 
     def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
         if not device_id:
@@ -892,6 +891,31 @@ def _compact_json_size(value: object) -> int:
         json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
             "utf-8"
         )
+    )
+
+
+def _call_adapter_evaluate(
+    adapter: SyncDomainAdapter,
+    envelope: SyncEnvelopeCreate,
+    *,
+    dataset: SyncDataset,
+    context: SyncAdapterContext,
+) -> AdapterAccepted | AdapterRejected | AdapterConflict | AdapterDeferred:
+    evaluate = adapter.evaluate_envelope
+    if _evaluate_accepts_context(evaluate):
+        return evaluate(envelope, dataset=dataset, context=context)
+    return evaluate(envelope, dataset=dataset)
+
+
+def _evaluate_accepts_context(evaluate: Callable[..., object]) -> bool:
+    parameters = inspect.signature(evaluate).parameters.values()
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        or (
+            parameter.name == "context"
+            and parameter.kind != inspect.Parameter.POSITIONAL_ONLY
+        )
+        for parameter in parameters
     )
 
 

@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
+    SyncDataset,
     SyncDomain,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
@@ -186,6 +187,40 @@ def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
         registry.register(
             StaticSyncAdapter(domain=cast(SyncDomain, "bogus"), supported_adapter_versions={1})
         )
+
+
+def test_push_supports_legacy_adapter_without_context_keyword(sync_store: SyncV2Store):
+    class LegacyNotesAdapter:
+        domain: SyncDomain = "notes"
+        supported_adapter_versions = {1}
+
+        def __init__(self) -> None:
+            self.dataset_id: str | None = None
+
+        def evaluate_envelope(
+            self,
+            envelope: SyncEnvelopeCreate,
+            *,
+            dataset: SyncDataset,
+        ) -> AdapterAccepted:
+            self.dataset_id = dataset.dataset_id
+            return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
+
+    adapter = LegacyNotesAdapter()
+    registry = SyncAdapterRegistry([adapter])
+    service = SyncV2Service(store=sync_store, adapters=registry, clock=_clock)
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope()],
+    )
+
+    assert result.accepted[0].client_envelope_id == "env-1"
+    assert adapter.dataset_id == "dataset-1"
 
 
 def test_push_rejects_envelopes_for_datasets_user_cannot_access(sync_service: SyncV2Service):

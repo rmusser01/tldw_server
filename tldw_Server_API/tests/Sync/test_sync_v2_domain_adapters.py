@@ -88,6 +88,25 @@ def _context(*envelopes: SyncEnvelope) -> SyncAdapterContext:
     return SyncAdapterContext(prior_envelopes=list(envelopes))
 
 
+def _adapter_for_domain(domain: str):
+    return {
+        "notes": NotesDomainAdapter,
+        "chat": ChatDomainAdapter,
+        "workspaces": WorkspacesDomainAdapter,
+        "source_cache": SourceCacheAdapter,
+    }[domain]()
+
+
+def _domain_payload(domain: str) -> dict[str, object]:
+    if domain == "source_cache":
+        return {
+            "entity_kind": "source_cache_entry",
+            "source_id": "source-1",
+            "payload_hash": "content-a",
+        }
+    return {"entity_kind": domain.rstrip("s")}
+
+
 def test_notes_adapter_accepts_metadata_only_tag_status_merge():
     prior = _stored(
         _envelope(
@@ -139,6 +158,90 @@ def test_notes_adapter_conflicts_concurrent_encrypted_content_edits():
     assert outcome.entity_id == "note-1"
 
 
+def test_notes_adapter_accepts_linear_encrypted_content_edit_against_current_head():
+    prior = _stored(
+        _envelope(
+            client_envelope_id="note-content-a",
+            routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+            payload_clear={"entity_kind": "note"},
+            payload_hash="sha256:content-a",
+            entity_version="note-v1",
+        )
+    )
+    incoming = _envelope(
+        client_envelope_id="note-content-b",
+        routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+        payload_clear={"entity_kind": "note"},
+        payload_hash="sha256:content-b",
+        base_version="note-v1",
+        entity_version="note-v2",
+    )
+
+    outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id="note-content-b")
+
+
+def test_notes_adapter_conflicts_stale_encrypted_content_edit():
+    prior = _stored(
+        _envelope(
+            client_envelope_id="note-content-a",
+            routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+            payload_clear={"entity_kind": "note"},
+            payload_hash="sha256:content-a",
+            entity_version="note-v2",
+        )
+    )
+    incoming = _envelope(
+        client_envelope_id="note-content-b",
+        routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+        payload_clear={"entity_kind": "note"},
+        payload_hash="sha256:content-b",
+        base_version="note-v1",
+        entity_version="note-v3",
+    )
+
+    outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.conflict_type == "encrypted_content_edit"
+
+
+def test_notes_adapter_accepts_linear_delete_after_upsert():
+    prior = _stored(
+        _envelope(
+            client_envelope_id="note-update",
+            payload_clear={"entity_kind": "note", "status": "active"},
+            payload_hash="sha256:update",
+            entity_version="note-v1",
+        )
+    )
+    incoming = _envelope(
+        client_envelope_id="note-delete",
+        operation="delete",
+        payload_clear={"entity_kind": "note", "deleted": True},
+        payload_hash="sha256:delete",
+        base_version="note-v1",
+        entity_version="note-v2",
+    )
+
+    outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id="note-delete")
+
+
 def test_notes_adapter_conflicts_delete_vs_update():
     prior = _stored(
         _envelope(
@@ -155,6 +258,69 @@ def test_notes_adapter_conflicts_delete_vs_update():
     )
 
     outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.conflict_type == "delete_update_conflict"
+
+
+@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache"])
+def test_domain_adapters_accept_linear_delete_after_upsert(domain: str):
+    prior = _stored(
+        _envelope(
+            client_envelope_id=f"{domain}-update",
+            domain=domain,
+            payload_clear=_domain_payload(domain),
+            payload_hash=f"sha256:{domain}-update",
+            entity_version=f"{domain}-v1",
+        )
+    )
+    incoming_payload = {**_domain_payload(domain), "deleted": True}
+    incoming = _envelope(
+        client_envelope_id=f"{domain}-delete",
+        domain=domain,
+        operation="delete",
+        payload_clear=incoming_payload,
+        payload_hash=f"sha256:{domain}-delete",
+        base_version=f"{domain}-v1",
+        entity_version=f"{domain}-v2",
+    )
+
+    outcome = _adapter_for_domain(domain).evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id=f"{domain}-delete")
+
+
+@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache"])
+def test_domain_adapters_conflict_stale_delete_after_upsert(domain: str):
+    prior = _stored(
+        _envelope(
+            client_envelope_id=f"{domain}-update",
+            domain=domain,
+            payload_clear=_domain_payload(domain),
+            payload_hash=f"sha256:{domain}-update",
+            entity_version=f"{domain}-v2",
+        )
+    )
+    incoming_payload = {**_domain_payload(domain), "deleted": True}
+    incoming = _envelope(
+        client_envelope_id=f"{domain}-delete",
+        domain=domain,
+        operation="delete",
+        payload_clear=incoming_payload,
+        payload_hash=f"sha256:{domain}-delete",
+        base_version=f"{domain}-v1",
+        entity_version=f"{domain}-v3",
+    )
+
+    outcome = _adapter_for_domain(domain).evaluate_envelope(
         incoming,
         dataset=_dataset(),
         context=_context(prior),

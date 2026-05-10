@@ -72,9 +72,12 @@ class SyncDomainAdapter(Protocol):
         envelope: SyncEnvelopeCreate,
         *,
         dataset: SyncDataset,
-        context: SyncAdapterContext | None = None,
     ) -> SyncAdapterOutcome:
-        """Validate an envelope before the service persists or conflicts it."""
+        """Validate an envelope before the service persists or conflicts it.
+
+        Implementations may also accept an optional ``context`` keyword. The
+        service detects support before passing it so old adapters remain valid.
+        """
 
 
 @dataclass(slots=True)
