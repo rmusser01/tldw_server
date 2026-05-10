@@ -27,14 +27,16 @@ The Stage 0 audit explicitly kept Persona Chat quality out of Stage 1 Buddy/Live
 
 The useful #635 references should be treated as inspiration for quality axes and evaluation design, not as direct implementation requirements:
 
-| Reference | How to use it |
-| --- | --- |
-| StickToYourRoleLeaderboard | Inspiration for role-adherence failure categories and human review rubrics. |
-| UGI-Leaderboard | Inspiration for instruction-following and user-goal interaction checks. |
-| NovelChallenge | Inspiration for longer-form character/persona consistency scenarios. |
-| Guided Generations | Inspiration for guided generation and constraints, not a requirement to change runtime architecture. |
-| semperai/amica | Related assistant/avatar product reference; out of scope for Persona Chat quality metrics. |
-| LlamaTale | Related roleplay/story interaction reference; keep VN/CYOA runtime work in #1391. |
+| Reference | Recheck result | Stage 2 use |
+| --- | --- | --- |
+| StickToYourRoleLeaderboard | Current persona-backed chat has identity, exemplar, memory-mode, and telemetry hooks, but no ordinary-chat role-adherence trace taxonomy or sampled label set. Existing tests prove plumbing rather than role consistency across varied prompts. | Use as inspiration for Slice 1 failure labels and later human review rubrics; do not adopt its benchmark format as a dependency. |
+| UGI-Leaderboard | Current tests cover assistant identity submission and memory mode boundaries, but do not yet distinguish instruction-following failure from persona-specific drift in ordinary chat. | Use to split general instruction-following errors from persona-role errors in the taxonomy. |
+| NovelChallenge | The repo has character role-play exemplar tests and dialogue-tree robustness recipes, but ordinary persona-backed chat lacks long-horizon continuity fixtures after reopen, memory-mode changes, and exemplar changes. | Use as inspiration for deterministic continuity fixtures in Slice 2 after the trace taxonomy is defined. |
+| Guided Generations | Persona exemplar assembly already injects boundary and style guidance through shared prompt assembly; there is no need to change runtime architecture just to support guided responses. | Use to define prompt-assembly and constraint-presence checks, not a new generation engine. |
+| semperai/amica | The Buddy/Persona Live shell and visual/avatar work is tracked separately from ordinary Persona Chat quality. No Stage 2 chat-quality gap requires adopting avatar product behavior. | Keep as product inspiration only; do not make avatar/live interaction a prerequisite for Persona Chat evaluation. |
+| LlamaTale | Story/VN style interaction remains separate in #1391. Current Persona Chat quality work should not inherit branching-story runtime requirements. | Keep VN/CYOA out of this Stage 2 scope; only borrow role-consistency scenario ideas if they fit ordinary chat traces. |
+
+Recheck summary: the #635 references mostly point to evaluation categories rather than missing runtime infrastructure. The current repo already has persona-backed chat identity, persona exemplar prompt assembly, memory-mode controls, frontend create/restore paths, and some telemetry/evaluation primitives. The material gap is evidence quality: ordinary persona chat does not yet have trace-backed failure labels, deterministic scenario fixtures, or user-visible effective-context checks. That directly drives the Slice 1 to Slice 5 sequence below.
 
 ## Current Contract Inventory
 
@@ -51,7 +53,7 @@ The useful #635 references should be treated as inspiration for quality axes and
 | Memory writeback | `tldw_Server_API/app/api/v1/endpoints/chat.py:1234` and `:1244` | Durable persona memory writes only happen for `persona_memory_mode=read_write`; current persistence stores assistant reply text as a persona turn. | Stage 2 should test and explain what is read, what is written, and what is not written. |
 | Telemetry primitives | `tldw_Server_API/app/api/v1/endpoints/chat.py:1286` and `tldw_Server_API/tests/Evaluations/test_persona_telemetry_metrics_summary.py:52` | IOO, IOR, LCS, and safety counters exist for persona-style telemetry. Labels remain character-shaped in places. | First quality slice should normalize persona-backed labels and avoid misleading character-only summaries. |
 | Existing backend tests | `tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py:187` and `:448` | Tests cover persona identity, exemplar guidance, prompt preview parity, current-turn classification, async lookup, memory read-only, and read-write behavior. | The gap is not basic coverage; it is scenario coverage and quality failure taxonomy. |
-| Existing frontend tests | `apps/packages/ui/src/hooks/chat/__tests__/personaServerChat.test.ts:24` and `useChatActions.persona.integration.test.tsx:230` | Tests cover persona chat creation/reuse and action submission with assistant identity. | Add restore/effective-context tests before adding new UI. |
+| Existing frontend tests | `apps/packages/ui/src/hooks/chat/__tests__/personaServerChat.test.ts:24` and `apps/packages/ui/src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx:230` | Tests cover persona chat creation/reuse and action submission with assistant identity. | Add restore/effective-context tests before adding new UI. |
 | Character role-play eval stack | `Docs/Product/Completed/Persona_Roleplay_PRD.md:170`, `tldw_Server_API/tests/Chat_NEW/integration/test_chat_persona_exemplars_integration.py:64`, and `tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_selector.py:35` | Character-scoped exemplar selection, debug metadata, telemetry, and performance tests exist. | Reuse ideas carefully; do not conflate character exemplar metrics with persona-backed chat identity. |
 | Dialogue-tree robustness | `tldw_Server_API/app/core/Evaluations/README.md:58` and `tldw_Server_API/tests/Evaluations/test_persona_dialogue_tree_recipe.py:35` | Defensive persona dialogue-tree recipe exists for robustness, policy, privacy, and grounded refusal behavior. | Treat as safety/robustness substrate, not as a direct Persona Chat role-adherence score. |
 
@@ -199,7 +201,7 @@ This document is a planning/audit artifact. Runtime tests are not required for t
 Required closeout checks:
 
 ```bash
-rg placeholder/deferred-marker patterns against Docs/Reviews/PERSONA_CHAT_QUALITY_EVAL_FOLLOWUP_2026_05_10.md
+rg -n "TO[D]O|TB[D]|FIX[M]E|PLACE[H]OLDER|\\?\\?" Docs/Reviews/PERSONA_CHAT_QUALITY_EVAL_FOLLOWUP_2026_05_10.md
 git diff --check
 ```
 
