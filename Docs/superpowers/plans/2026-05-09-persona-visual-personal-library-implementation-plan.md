@@ -128,7 +128,7 @@
 
 **Tests:** `tldw_Server_API/tests/Persona/test_persona_visual_library_service.py`, `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 3: Add failing service tests
 
@@ -136,22 +136,22 @@
 - Create: `tldw_Server_API/tests/Persona/test_persona_visual_library_service.py`
 - Create later: `tldw_Server_API/app/core/Persona/visual_library_service.py`
 
-- [ ] **Step 1: Write save/list metadata test**
+- [x] **Step 1: Write save/list metadata test**
 
   Assert `PersonaVisualLibraryService.save_pack(...)` saves a source pack with normalized metadata and does not mutate source pack status or assets.
 
-- [ ] **Step 2: Write use-library-item test**
+- [x] **Step 2: Write use-library-item test**
 
   Create source and target personas with a valid source pack and asset. Save source pack to library, call `use_for_persona(...)`, and assert:
   - returned pack is a draft on the target persona
   - `parent_pack_id` points at source pack
   - active source/target packs are unchanged
 
-- [ ] **Step 3: Write stale/cross-user service tests**
+- [x] **Step 3: Write stale/cross-user service tests**
 
   Assert stale source entries raise `source_pack_unavailable` on use and cross-user source/target attempts raise not-found style service errors.
 
-- [ ] **Step 4: Run tests and verify RED**
+- [x] **Step 4: Run tests and verify RED**
 
   Run:
 
@@ -169,7 +169,7 @@
 - Modify: `tldw_Server_API/app/api/v1/endpoints/persona.py`
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`
 
-- [ ] **Step 1: Implement `PersonaVisualLibraryService`**
+- [x] **Step 1: Implement `PersonaVisualLibraryService`**
 
   Add service methods:
   - `save_pack(...)`
@@ -180,7 +180,7 @@
 
   The service should normalize title, notes, and tags; enforce item/source/target ownership through DB helpers; and call `PersonaVisualService.duplicate_pack_to_persona(...)` for use.
 
-- [ ] **Step 2: Add schemas**
+- [x] **Step 2: Add schemas**
 
   Add Pydantic models:
   - `PersonaVisualLibraryItemResponse`
@@ -191,7 +191,7 @@
 
   Validators should trim text, cap title/notes/tags, and reject empty titles/tags.
 
-- [ ] **Step 3: Add dependency and error mapping**
+- [x] **Step 3: Add dependency and error mapping**
 
   In `persona.py`, add `get_persona_visual_library_service(...)` and map service codes:
   - `library_item_not_found` -> 404
@@ -202,7 +202,7 @@
   - `invalid_library_metadata` -> 422
   - `library_item_conflict` -> 409
 
-- [ ] **Step 4: Add endpoints**
+- [x] **Step 4: Add endpoints**
 
   Add:
   - `GET /api/v1/persona/visual-library`
@@ -211,7 +211,7 @@
   - `DELETE /api/v1/persona/visual-library/{item_id}`
   - `POST /api/v1/persona/visual-library/{item_id}/use`
 
-- [ ] **Step 5: Add API tests**
+- [x] **Step 5: Add API tests**
 
   Extend `test_persona_visuals_api.py` for:
   - save/list/update/delete happy path
@@ -219,7 +219,7 @@
   - stale source returns 409 on use but delete succeeds
   - cross-user item/source/target access returns 404
 
-- [ ] **Step 6: Run service/API tests**
+- [x] **Step 6: Run service/API tests**
 
   Run:
 
@@ -229,7 +229,7 @@
 
   Expected: pass.
 
-- [ ] **Step 7: Commit service/API**
+- [x] **Step 7: Commit service/API**
 
   ```bash
   git add tldw_Server_API/app/core/Persona/visual_library_service.py tldw_Server_API/app/api/v1/schemas/persona.py tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/tests/Persona/test_persona_visual_library_service.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py

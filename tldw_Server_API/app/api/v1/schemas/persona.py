@@ -52,6 +52,24 @@ PersonaSetupEventType = Literal[
 ]
 
 
+def _normalize_persona_visual_library_tags(value: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in value:
+        tag = str(raw_tag or "").strip().lower()
+        if not tag:
+            raise ValueError("tags cannot contain empty values")
+        if len(tag) > 64:
+            raise ValueError("tags must be 64 characters or fewer")
+        if tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+        if len(normalized) > 20:
+            raise ValueError("at most 20 tags are allowed")
+    return normalized
+
+
 class PersonaVisualPackCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     manifest: dict[str, Any] = Field(default_factory=dict)
@@ -76,6 +94,90 @@ class PersonaVisualPackDuplicateRequest(BaseModel):
             return None
         normalized = str(value).strip()
         return normalized or None
+
+
+class PersonaVisualLibrarySaveRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("title cannot be empty")
+        return normalized
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, value: list[str]) -> list[str]:
+        return _normalize_persona_visual_library_tags(value)
+
+
+class PersonaVisualLibraryUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=4000)
+    tags: list[str] | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("title cannot be empty")
+        return normalized
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return _normalize_persona_visual_library_tags(value)
+
+
+class PersonaVisualLibraryUseRequest(BaseModel):
+    target_persona_id: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("target_persona_id")
+    @classmethod
+    def normalize_target_persona_id(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("target_persona_id is required")
+        return normalized
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("title cannot be empty")
+        return normalized
 
 
 class PersonaVisualManifestUpdate(BaseModel):
@@ -120,6 +222,36 @@ class PersonaVisualPackResponse(BaseModel):
     created_at: str
     last_modified: str
     version: int = 1
+
+
+class PersonaVisualLibraryItemResponse(BaseModel):
+    id: str
+    user_id: str
+    source_persona_id: str | None = None
+    source_pack_id: str | None = None
+    title: str
+    notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    source_persona_name: str | None = None
+    source_pack_title: str | None = None
+    source_persona_name_snapshot: str | None = None
+    source_pack_title_snapshot: str | None = None
+    source_pack_version: int | None = None
+    source_current_version: int | None = None
+    source_available: bool = False
+    source_changed: bool = False
+    created_at: str
+    last_modified: str
+    version: int = 1
+
+
+class PersonaVisualLibraryListResponse(BaseModel):
+    items: list[PersonaVisualLibraryItemResponse] = Field(default_factory=list)
+
+
+class PersonaVisualLibraryDeleteResponse(BaseModel):
+    status: Literal["deleted"]
+    item_id: str
 
 
 class PersonaVisualCandidateReviewRequest(BaseModel):
