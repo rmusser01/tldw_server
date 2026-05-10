@@ -23672,6 +23672,7 @@ for _conversation_store_method in (
     "_normalize_conversation_assistant_identity",
     "add_conversation",
     "get_conversation_by_id",
+    "get_conversation_by_source_ref",
     "get_conversations_for_character",
     "count_conversations_for_user",
     "count_conversations_for_user_by_character",

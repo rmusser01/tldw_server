@@ -23,6 +23,7 @@ _DELEGATED_CONVERSATION_METHODS = {
     "_normalize_conversation_assistant_identity",
     "add_conversation",
     "get_conversation_by_id",
+    "get_conversation_by_source_ref",
     "get_conversations_for_character",
     "count_conversations_for_user",
     "count_conversations_for_user_by_character",
@@ -126,6 +127,67 @@ def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
         scope_type="workspace",
         workspace_id="ws-store",
     ) == 1
+
+
+def test_conversation_store_get_conversation_by_source_ref_scopes_client_and_deleted(db):
+    conversation_id = db.add_conversation(
+        {
+            "character_id": 1,
+            "title": "OpenWebUI import",
+            "source": "openwebui",
+            "external_ref": "chat-1",
+            "client_id": db.client_id,
+        }
+    )
+    other_id = db.add_conversation(
+        {
+            "character_id": 1,
+            "title": "Other client import",
+            "source": "openwebui",
+            "external_ref": "chat-1",
+            "client_id": "other-client",
+        }
+    )
+
+    found = db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id=db.client_id,
+    )
+
+    assert found is not None
+    assert found["id"] == conversation_id
+    assert db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id="missing-client",
+    ) is None
+
+    created = db.get_conversation_by_id(conversation_id)
+    assert created is not None
+    assert db.soft_delete_conversation(conversation_id, expected_version=created["version"]) is True
+
+    assert db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id=db.client_id,
+    ) is None
+    deleted = db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id=db.client_id,
+        include_deleted=True,
+    )
+    assert deleted is not None
+    assert deleted["id"] == conversation_id
+
+    other = db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id="other-client",
+    )
+    assert other is not None
+    assert other["id"] == other_id
 
 
 def test_conversation_store_preserves_assistant_identity_updates(db):

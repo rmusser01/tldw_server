@@ -386,6 +386,53 @@ class ConversationStore:
             logger.error(f"Database error fetching conversation ID {conversation_id}: {exc}")
             raise
 
+    def get_conversation_by_source_ref(
+        self,
+        source: str,
+        external_ref: str,
+        client_id: str | None = None,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Fetch one conversation by imported source identity scoped to a client."""
+        normalized_source = self._db._normalize_nullable_text(source)
+        normalized_ref = self._db._normalize_nullable_text(external_ref)
+        if not normalized_source or not normalized_ref:
+            return None
+
+        client_filter = self._db.client_id if client_id is None else client_id
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            clauses = ["source = %s", "external_ref = %s"]
+            params: list[Any] = [normalized_source, normalized_ref]
+            if client_filter is not None:
+                clauses.append("client_id = %s")
+                params.append(client_filter)
+            if not include_deleted:
+                clauses.append("deleted = FALSE")
+            query = f"SELECT * FROM conversations WHERE {' AND '.join(clauses)} ORDER BY last_modified DESC LIMIT 1"  # nosec B608
+            try:
+                result = self._db.backend.execute(query, tuple(params))
+                row = result.fetchone()
+                return dict(row) if row else None
+            except CharactersRAGDBError as exc:
+                logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
+                raise
+
+        clauses = ["source = ?", "external_ref = ?"]
+        params = [normalized_source, normalized_ref]
+        if client_filter is not None:
+            clauses.append("client_id = ?")
+            params.append(client_filter)
+        if not include_deleted:
+            clauses.append("deleted = 0")
+        query = f"SELECT * FROM conversations WHERE {' AND '.join(clauses)} ORDER BY last_modified DESC LIMIT 1"  # nosec B608
+        try:
+            cursor = self._db.execute_query(query, tuple(params))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
+            raise
+
     def get_conversations_for_character(
         self,
         character_id: int,

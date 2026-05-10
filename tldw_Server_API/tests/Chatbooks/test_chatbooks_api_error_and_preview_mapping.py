@@ -120,6 +120,53 @@ class _PreviewExplodingService:
         raise RuntimeError("preview exploded")
 
 
+class _OpenWebUIPreviewService:
+    db = None
+
+    def preview_openwebui_json(self, file_path: str):
+        assert file_path.endswith(".json")
+        return {
+            "chat_count": 1,
+            "message_count": 2,
+            "branched_chat_count": 1,
+            "duplicate_chat_count": 0,
+            "attachment_reference_count": 0,
+            "malformed_chat_count": 0,
+            "warnings": [],
+            "items": [
+                {
+                    "external_ref": "chat-1",
+                    "title": "OpenWebUI chat",
+                    "message_count": 2,
+                    "branched": True,
+                    "duplicate": False,
+                    "warning_count": 0,
+                }
+            ],
+        }, None
+
+
+class _OpenWebUIImportService:
+    db = None
+
+    def __init__(self) -> None:
+        self.called_kwargs = None
+
+    async def import_chatbook(self, **kwargs):
+        self.called_kwargs = kwargs
+        assert kwargs["file_path"].endswith(".json")
+        assert kwargs["source_format"] == "openwebui_json"
+        return True, "ok", {
+            "imported_chats": 1,
+            "skipped_chats": 0,
+            "failed_chats": 0,
+            "imported_messages": 2,
+            "skipped_messages": 0,
+            "duplicate_chats": 0,
+            "warnings": [],
+        }
+
+
 class _ListJobsService:
     db = None
 
@@ -238,6 +285,55 @@ def test_preview_maps_unexpected_service_failures_to_500():
 
     assert response.status_code == 500
     assert response.json().get("detail") == "An error occurred while previewing the chatbook"
+
+
+def test_preview_openwebui_json_source_format_skips_archive_validation(monkeypatch):
+    app = _make_app(_OpenWebUIPreviewService())
+
+    def _fail_zip_validation(_path: str):
+        raise AssertionError("OpenWebUI JSON preview must not validate as a ZIP archive")
+
+    monkeypatch.setattr(chatbooks_endpoints.ChatbookValidator, "validate_zip_file", _fail_zip_validation)
+
+    files = {"file": ("openwebui.json", b"[]", "application/json")}
+    data = {"source_format": "openwebui_json"}
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/chatbooks/preview", files=files, data=data)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_format"] == "openwebui_json"
+    assert body["manifest"] is None
+    assert body["openwebui_preview"]["chat_count"] == 1
+    assert body["openwebui_preview"]["items"][0]["branched"] is True
+
+
+def test_import_openwebui_json_source_format_skips_archive_validation(monkeypatch):
+    service = _OpenWebUIImportService()
+    app = _make_app(service)
+
+    def _fail_zip_validation(_path: str):
+        raise AssertionError("OpenWebUI JSON import must not validate as a ZIP archive")
+
+    monkeypatch.setattr(chatbooks_endpoints.ChatbookValidator, "validate_zip_file", _fail_zip_validation)
+
+    files = {"file": ("openwebui.json", b"[]", "application/json")}
+    data = {
+        "source_format": "openwebui_json",
+        "import_media": "false",
+        "import_embeddings": "false",
+        "async_mode": "false",
+    }
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/chatbooks/import", files=files, data=data)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_format"] == "openwebui_json"
+    assert body["openwebui_result"]["imported_chats"] == 1
+    assert service.called_kwargs["source_format"] == "openwebui_json"
 
 
 def test_job_list_routes_include_canonical_pagination():

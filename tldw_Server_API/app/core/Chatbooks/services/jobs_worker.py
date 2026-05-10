@@ -121,7 +121,8 @@ def _map_content_selections(raw: Any) -> dict[ContentType, list]:
     for key, value in raw.items():
         try:
             selections[ContentType(key)] = list(value or [])
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            logger.debug(f"Ignoring invalid Chatbooks content selection key {key!r}: {exc}")
             continue
     return selections
 
@@ -192,9 +193,49 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
 
     selections = _map_content_selections(payload.get("content_selections") or {})
     conflict_resolution = _parse_conflict_resolution(payload.get("conflict_resolution", "skip"))
+    source_format = str(payload.get("source_format") or "chatbook").strip().lower()
     file_ref = payload.get("file_token") or payload.get("file_path")
     if not file_ref or not str(file_ref).strip():
         raise ChatbooksJobError("Missing file reference for import job", retryable=False)
+    if source_format == "openwebui_json":
+        try:
+            resolved_path = service._resolve_import_upload_path(file_ref)
+        except Exception as exc:
+            raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False) from exc
+        resolved_file_path = str(resolved_path or "").strip()
+        if not resolved_file_path:
+            raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False)
+        try:
+            ok, msg, result = await asyncio.to_thread(
+                service.import_openwebui_json,
+                resolved_file_path,
+                conflict_resolution,
+                bool(payload.get("prefix_imported", False)),
+            )
+        finally:
+            try:
+                if resolved_path.exists() and resolved_path.is_file():
+                    resolved_path.unlink()
+            except Exception as cleanup_err:
+                logger.debug(f"Chatbooks Jobs worker: failed to remove OpenWebUI import file {resolved_path}: {cleanup_err}")
+
+        ij = service._get_import_job(job_id)
+        if ok:
+            if ij and ij.status != ImportStatus.CANCELLED:
+                ij.status = ImportStatus.COMPLETED
+                ij.completed_at = datetime.now(timezone.utc)
+                service._save_import_job(ij)
+            return {"openwebui_result": result or {}}
+
+        if ij:
+            ij.status = ImportStatus.FAILED
+            ij.completed_at = datetime.now(timezone.utc)
+            ij.error_message = msg
+            service._save_import_job(ij)
+        raise ChatbooksJobError(str(msg), retryable=False)
+
+    if source_format != "chatbook":
+        raise ChatbooksJobError(f"Unsupported import source format: {source_format}", retryable=False)
     try:
         resolved_path = service._resolve_import_archive_path(file_ref)
     except Exception as exc:

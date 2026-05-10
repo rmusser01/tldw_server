@@ -9,6 +9,7 @@ Provides REST API endpoints for creating, importing, and managing chatbooks.
 """
 
 import asyncio
+import json
 import os
 import shutil
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -39,7 +40,9 @@ from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as get_chacha
 from ..schemas.chatbook_schemas import (
     CancelJobResponse,
     ChatbookManifestResponse,
+    ChatbookImportSourceFormat,
     CleanupExpiredExportsResponse,
+    ConflictResolution as APIConflictResolution,
     ContinueExportRequest,
     CreateChatbookRequest,
     CreateChatbookResponse,
@@ -115,6 +118,21 @@ def _setup_secure_temp_directory(user_id: str) -> Path:
         raise HTTPException(status_code=400, detail="Invalid chatbooks temp directory path") from None
 
     return temp_dir
+
+
+def _parse_import_content_selections_field(value: str | None) -> dict | None:
+    """Parse multipart content_selections JSON, preserving omitted fields as None."""
+    if value is None or value == "":
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="content_selections must be valid JSON") from None
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="content_selections must be a JSON object")
+    return parsed
 
 
 def _persist_completed_sync_export_job(
@@ -470,6 +488,13 @@ async def import_chatbook(
     request: Request,
     file: UploadFile = File(...),
     import_request: ImportChatbookRequest = Depends(),
+    source_format: ChatbookImportSourceFormat | None = Form(None),
+    conflict_resolution: APIConflictResolution | None = Form(None),
+    prefix_imported: bool | None = Form(None),
+    import_media: bool | None = Form(None),
+    import_embeddings: bool | None = Form(None),
+    async_mode: bool | None = Form(None),
+    content_selections: str | None = Form(None),
     service: ChatbookService = Depends(get_chatbook_service),
     user: User = Depends(get_request_user),
     audit_service=Depends(get_audit_service_for_user),
@@ -493,6 +518,22 @@ async def import_chatbook(
     """
     temp_file: Optional[Path] = None  # Initialize for proper cleanup in finally
     try:
+        source_format_value = source_format or import_request.source_format
+        import_request.source_format = source_format_value
+        if conflict_resolution is not None:
+            import_request.conflict_resolution = conflict_resolution
+        if prefix_imported is not None:
+            import_request.prefix_imported = prefix_imported
+        if import_media is not None:
+            import_request.import_media = import_media
+        if import_embeddings is not None:
+            import_request.import_embeddings = import_embeddings
+        if async_mode is not None:
+            import_request.async_mode = async_mode
+        parsed_content_selections = _parse_import_content_selections_field(content_selections)
+        if parsed_content_selections is not None:
+            import_request.content_selections = parsed_content_selections
+
         # Initialize quota manager (DB-backed)
         quota_manager = QuotaManager(str(user.id), getattr(user, "tier", "free"), db=service.db)
 
@@ -535,8 +576,11 @@ async def import_chatbook(
         ):
             raise HTTPException(status_code=400, detail="Invalid filename")
 
-        # Validate and sanitize filename
-        valid, error, safe_filename = ChatbookValidator.validate_filename(file.filename)
+        # Validate and sanitize filename for the selected source format.
+        if import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
+            valid, error, safe_filename = ChatbookValidator.validate_json_filename(file.filename)
+        else:
+            valid, error, safe_filename = ChatbookValidator.validate_filename(file.filename)
         if not valid:
             raise HTTPException(status_code=400, detail=error)
         if Path(safe_filename).name != safe_filename or "/" in safe_filename or "\\" in safe_filename:
@@ -568,21 +612,22 @@ async def import_chatbook(
         with open(temp_file, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        # Validate the uploaded ZIP file
-        valid, error = ChatbookValidator.validate_zip_file(str(temp_file))
-        if not valid:
-            try:
-                temp_file.unlink()
-            except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(
-                    f"Failed to remove invalid uploaded file during import: path={temp_file}, user={user.id}, error={e}"
+        # Validate chatbook archives before extraction. JSON sources are parsed by the adapter.
+        if import_request.source_format == ChatbookImportSourceFormat.CHATBOOK:
+            valid, error = ChatbookValidator.validate_zip_file(str(temp_file))
+            if not valid:
+                try:
+                    temp_file.unlink()
+                except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(
+                        f"Failed to remove invalid uploaded file during import: path={temp_file}, user={user.id}, error={e}"
+                    )
+                _safe_increment_metric(
+                    "app_warning_events_total",
+                    labels={"component": "chatbooks", "event": "import_invalid_upload_cleanup_failed"},
+                    error_context="chatbooks import_invalid_upload_cleanup_failed",
                 )
-            _safe_increment_metric(
-                "app_warning_events_total",
-                labels={"component": "chatbooks", "event": "import_invalid_upload_cleanup_failed"},
-                error_context="chatbooks import_invalid_upload_cleanup_failed",
-            )
-            raise HTTPException(status_code=400, detail=error)
+                raise HTTPException(status_code=400, detail=error)
 
         # Convert content selections if provided (schema enum or string keys)
         content_selections = None
@@ -604,6 +649,7 @@ async def import_chatbook(
             import_embeddings=import_request.import_embeddings,
             async_mode=import_request.async_mode,
             request_id=rid,
+            source_format=import_request.source_format.value,
         )
 
         if success:
@@ -626,7 +672,12 @@ async def import_chatbook(
                     )
                 except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as audit_err:
                     logger.warning(f"Failed to log audit event for import start: {audit_err}")
-                return ImportChatbookResponse(success=True, message=message, job_id=result)
+                return ImportChatbookResponse(
+                    success=True,
+                    message=message,
+                    source_format=import_request.source_format,
+                    job_id=result,
+                )
             else:
                 # Sync mode - return the structured import result from the service wrapper.
                 try:
@@ -645,9 +696,18 @@ async def import_chatbook(
                 except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as audit_err:
                     logger.warning(f"Failed to log audit event for import completion: {audit_err}")
                 result_data = result if isinstance(result, dict) else {"imported_items": {}, "warnings": result or []}
+                if import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
+                    return ImportChatbookResponse(
+                        success=True,
+                        message=message,
+                        source_format=import_request.source_format,
+                        openwebui_result=result_data,
+                        warnings=result_data.get("warnings") or [],
+                    )
                 return ImportChatbookResponse(
                     success=True,
                     message=message,
+                    source_format=import_request.source_format,
                     imported_items=result_data.get("imported_items") or {},
                     warnings=result_data.get("warnings") or [],
                 )
@@ -667,7 +727,12 @@ async def import_chatbook(
                             labels={"component": "chatbooks", "event": "import_cleanup_failed"},
                             error_context="chatbooks import_cleanup_failed",
                         )
-                return ImportChatbookResponse(success=False, message=message, job_id=result)
+                return ImportChatbookResponse(
+                    success=False,
+                    message=message,
+                    source_format=import_request.source_format,
+                    job_id=result,
+                )
             raise HTTPException(status_code=400, detail=message)
 
     except HTTPException:
@@ -698,6 +763,7 @@ async def import_chatbook(
 async def preview_chatbook(
     request: Request,
     file: UploadFile = File(...),
+    source_format: ChatbookImportSourceFormat = Form(ChatbookImportSourceFormat.CHATBOOK),
     service: ChatbookService = Depends(get_chatbook_service),
     user: User = Depends(get_request_user),
     audit_service=Depends(get_audit_service_for_user),
@@ -728,8 +794,11 @@ async def preview_chatbook(
         ):
             raise HTTPException(status_code=400, detail="Invalid filename")
 
-        # Validate and sanitize filename
-        valid, error, safe_filename = ChatbookValidator.validate_filename(file.filename)
+        # Validate and sanitize filename for the selected source format.
+        if source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
+            valid, error, safe_filename = ChatbookValidator.validate_json_filename(file.filename)
+        else:
+            valid, error, safe_filename = ChatbookValidator.validate_filename(file.filename)
         if not valid:
             raise HTTPException(status_code=400, detail=error)
         if Path(safe_filename).name != safe_filename or "/" in safe_filename or "\\" in safe_filename:
@@ -767,21 +836,41 @@ async def preview_chatbook(
         with open(temp_file, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        # Validate archive using centralized validator prior to extracting
-        ok, err = ChatbookValidator.validate_zip_file(str(temp_file))
-        if not ok:
+        # Validate chatbook archives before extraction. JSON sources are parsed by the adapter.
+        if source_format == ChatbookImportSourceFormat.CHATBOOK:
+            ok, err = ChatbookValidator.validate_zip_file(str(temp_file))
+            if not ok:
+                try:
+                    temp_file.unlink()
+                except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(
+                        f"Failed to remove invalid uploaded file during preview: path={temp_file}, user={user.id}, error={e}"
+                    )
+                _safe_increment_metric(
+                    "app_warning_events_total",
+                    labels={"component": "chatbooks", "event": "preview_invalid_upload_cleanup_failed"},
+                    error_context="chatbooks preview_invalid_upload_cleanup_failed",
+                )
+                raise HTTPException(status_code=400, detail=err or "Invalid archive")
+
+        if source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
+            preview_data, error = service.preview_openwebui_json(str(temp_file))
             try:
                 temp_file.unlink()
             except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(
-                    f"Failed to remove invalid uploaded file during preview: path={temp_file}, user={user.id}, error={e}"
+                logger.warning(f"Cleanup of preview temp file failed: path={temp_file}, user={user.id}, error={e}")
+                _safe_increment_metric(
+                    "app_warning_events_total",
+                    labels={"component": "chatbooks", "event": "preview_cleanup_failed"},
+                    error_context="chatbooks preview_cleanup_failed",
                 )
-            _safe_increment_metric(
-                "app_warning_events_total",
-                labels={"component": "chatbooks", "event": "preview_invalid_upload_cleanup_failed"},
-                error_context="chatbooks preview_invalid_upload_cleanup_failed",
+            if preview_data is None:
+                raise HTTPException(status_code=400, detail=error or "Invalid OpenWebUI JSON export")
+            return PreviewChatbookResponse(
+                source_format=source_format,
+                manifest=None,
+                openwebui_preview=preview_data,
             )
-            raise HTTPException(status_code=400, detail=err or "Invalid archive")
 
         # Preview chatbook
         manifest, error = service.preview_chatbook(str(temp_file))
@@ -861,7 +950,7 @@ async def preview_chatbook(
             )
         except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as audit_err:
             logger.warning(f"Failed to log audit event for preview: {audit_err}")
-        return PreviewChatbookResponse(manifest=manifest_response)
+        return PreviewChatbookResponse(source_format=source_format, manifest=manifest_response)
 
     except HTTPException:
         raise
