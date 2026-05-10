@@ -1729,8 +1729,8 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                 </span>
                 <span className="text-[11px] text-text-muted">{c.meta}</span>
               </div>
-              <Tag color={c.status === "Processing" ? "orange" : "green"}>
-                {c.status}
+              <Tag color={c.statusKey === "processing" ? "orange" : "green"}>
+                {c.statusLabel}
               </Tag>
             </div>
             <div className="divide-y divide-border">

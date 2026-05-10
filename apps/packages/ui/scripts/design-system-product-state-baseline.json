@@ -5401,39 +5401,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/utils/demo-content.ts:Ready#label-ready-demo-content-line-137-151ahk2",
-    "path": "src/utils/demo-content.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/utils/demo-content.ts before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/utils/demo-content.ts:Ready#label-ready-demo-content-line-157-5ixvdc",
-    "path": "src/utils/demo-content.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/utils/demo-content.ts before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/utils/demo-content.ts:Ready#label-ready-demo-content-line-20-yq5yw3",
-    "path": "src/utils/demo-content.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/utils/demo-content.ts before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx:Alert",
     "path": "src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx",
     "rule": "antd-product-state-import",
