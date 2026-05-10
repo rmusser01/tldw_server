@@ -93,14 +93,14 @@ Modify:
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1.1: Add failing adapter tests
 
 **Files:**
 - Create: `tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py`
 
-- [ ] Add a fixture helper that creates temporary OpenWebUI-shaped SQLite DBs:
+- [x] Add a fixture helper that creates temporary OpenWebUI-shaped SQLite DBs:
 
 ```python
 def write_openwebui_db(path: Path, *, users: list[dict], chats: list[dict], folders: list[dict] | None = None) -> Path:
@@ -111,7 +111,7 @@ def write_openwebui_db(path: Path, *, users: list[dict], chats: list[dict], fold
     ...
 ```
 
-- [ ] Test cases:
+- [x] Test cases:
   - non-SQLite bytes are rejected with `"Invalid OpenWebUI SQLite database"`.
   - DB missing `user`, `chat`, or required columns is rejected with a schema-focused error.
   - preview lists two users with separate chat, folder, message, branched, archived/pinned, duplicate, and attachment counts.
@@ -119,7 +119,7 @@ def write_openwebui_db(path: Path, *, users: list[dict], chats: list[dict], fold
   - `chat.folder_id` drives folder membership; inconsistent `folder.items` only creates a warning.
   - folder cycle or missing parent yields `Unfiled` warning plan data.
 
-- [ ] Run the focused tests and verify they fail for missing module/types:
+- [x] Run the focused tests and verify they fail for missing module/types:
 
 ```bash
 source .venv/bin/activate
@@ -134,26 +134,26 @@ Expected: FAIL because `openwebui_db.py` does not exist yet.
 - Create: `tldw_Server_API/app/core/Chatbooks/import_adapters/openwebui_db.py`
 - Modify: `tldw_Server_API/app/core/Chatbooks/import_adapters/openwebui.py`
 
-- [ ] Add dataclasses:
+- [x] Add dataclasses:
   - `OpenWebUIDatabaseUserPreview`
   - `OpenWebUIDatabasePreview`
   - `OpenWebUIDatabaseFolderPlan`
   - `OpenWebUIDatabaseExtractionResult`
-- [ ] Add constants for required table/column allowlists.
-- [ ] Add SQLite safety helpers:
+- [x] Add constants for required table/column allowlists.
+- [x] Add SQLite safety helpers:
   - check first 16 bytes equal `b"SQLite format 3\x00"`.
   - open with `sqlite3.connect(..., uri=True)` using read-only URI mode.
   - call `conn.enable_load_extension(False)` when available.
   - set `conn.row_factory = sqlite3.Row`.
   - use parameterized queries for selected user id.
-- [ ] Reuse the existing OpenWebUI message-tree normalization shape:
+- [x] Reuse the existing OpenWebUI message-tree normalization shape:
   - Prefer adding a small public helper in `openwebui.py` to convert a wrapper/chat payload into `OpenWebUIConversationPlan`.
   - Keep existing JSON behavior unchanged.
-- [ ] Preserve DB-specific metadata in `source_metadata`, including `source_kind`, `source_user_id`, row timestamps, `folder_id`, `pinned`, `archived`, `share_id`, `meta`, and project-like metadata if present.
-- [ ] Attach folder plans to extraction results rather than writing folders from the adapter.
-- [ ] Return DB preview via `.to_dict()` with users and aggregate warnings.
+- [x] Preserve DB-specific metadata in `source_metadata`, including `source_kind`, `source_user_id`, row timestamps, `folder_id`, `pinned`, `archived`, `share_id`, `meta`, and project-like metadata if present.
+- [x] Attach folder plans to extraction results rather than writing folders from the adapter.
+- [x] Return DB preview via `.to_dict()` with users and aggregate warnings.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -168,11 +168,11 @@ Expected: PASS.
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_validators.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbook_security.py`
 
-- [ ] Add `VALID_SQLITE_EXTENSIONS = {".db", ".sqlite"}`.
-- [ ] Add `validate_sqlite_filename()` that delegates to `_validate_filename_for_extensions`.
-- [ ] Add tests for accepted `.db`/`.sqlite`, rejected double extensions, traversal, and unsupported extensions.
+- [x] Add `VALID_SQLITE_EXTENSIONS = {".db", ".sqlite"}`.
+- [x] Add `validate_sqlite_filename()` that delegates to `_validate_filename_for_extensions`.
+- [x] Add tests for accepted `.db`/`.sqlite`, rejected double extensions, traversal, and unsupported extensions.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -183,9 +183,9 @@ Expected: PASS.
 
 ### Task 1.4: Commit adapter slice
 
-- [ ] Review staged diff for raw content/path logging.
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Review staged diff for raw content/path logging.
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/import_adapters/openwebui.py \
