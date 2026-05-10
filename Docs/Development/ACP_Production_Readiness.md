@@ -133,9 +133,14 @@ python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_acp_<task>.jso
 - Workspace `env_vars` are stored as plaintext orchestration metadata and passed
   to ACP session creation. Treat them as operational configuration, not a secret
   vault; prefer external secret managers where available.
-- Live downstream agents need their own binaries, API keys, and workspace
-  permissions. Stub-agent protocol tests are not a substitute for live-agent
-  release notes.
+- Live downstream agents need their own ACP stdio-compatible entrypoints, API
+  keys, and workspace permissions. Stub-agent protocol tests are not a
+  substitute for live-agent verification before release notes claim downstream
+  agent support.
+- Until #1504 records a real downstream-agent create/prompt/cancel run, release
+  notes must describe ACP downstream-agent support as protocol/runner
+  validation only. Binary presence for tools such as Claude Code or Codex is not
+  enough unless the configured command is verified to speak ACP stdio.
 - Browser E2E requires a running backend, deterministic auth state, and a known
   API key. If a child issue only changes backend internals, browser E2E can be
   deferred until the UX and closeout rows.

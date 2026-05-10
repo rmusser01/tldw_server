@@ -15,6 +15,11 @@ and this project adheres to Some kind of Versioning
 - Expanded ACP release-signoff evidence for permission denial, reconnect, and
   recovery paths with deterministic frontend hook coverage and a readiness
   addendum that separates automated evidence from live downstream-agent caveats.
+- ACP release notes now explicitly limit downstream-agent support to
+  protocol/runner validation unless operators configure and verify a real
+  downstream ACP stdio agent plus required provider credentials. Binary
+  detection for tools such as Claude Code or Codex is not, by itself, a
+  live-agent create/prompt/cancel verification. (Issue #1504)
 
 ### Fixed
 
