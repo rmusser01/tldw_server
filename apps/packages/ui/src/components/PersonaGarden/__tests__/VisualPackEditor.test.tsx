@@ -1270,6 +1270,306 @@ describe("VisualPackEditor", () => {
     expect(openTarget).toHaveBeenCalledWith("persona-2")
   })
 
+  it("saves the selected pack to the personal library and shows source status", async () => {
+    const calls: string[] = []
+    const sourcePack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const changedLibraryItem = {
+      id: "library-1",
+      user_id: "user-1",
+      source_persona_id: "persona-1",
+      source_pack_id: "pack-1",
+      title: "Saved animated pack",
+      notes: "Reusable idle and speaking poses.",
+      tags: ["idle", "speaking"],
+      source_persona_name: "Source Persona",
+      source_pack_title: "Animated pack",
+      source_persona_name_snapshot: "Source Persona",
+      source_pack_title_snapshot: "Animated pack",
+      source_pack_version: 2,
+      source_current_version: 3,
+      source_available: true,
+      source_changed: true,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 2
+    }
+    const savedLibraryItem = {
+      ...changedLibraryItem,
+      title: "Animated pack",
+      notes: null,
+      tags: [],
+      source_pack_version: 3,
+      source_changed: false,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([sourcePack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Research Buddy" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [changedLibraryItem] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/library" &&
+        method === "POST"
+      ) {
+        expect(parseJsonBody(init?.body)).toEqual({
+          title: "Animated pack",
+          tags: []
+        })
+        return okResponse(savedLibraryItem)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Source Persona"
+        isActive
+      />
+    )
+
+    const libraryPanel = await screen.findByTestId("persona-visual-library-panel")
+    expect(libraryPanel).toHaveTextContent("Personal library")
+    expect(within(libraryPanel).getByText("Saved animated pack")).toBeInTheDocument()
+    expect(within(libraryPanel).getByText("source changed")).toBeInTheDocument()
+    expect(within(libraryPanel).getByText("idle")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("persona-visual-library-save-button"))
+
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/library"
+      )
+    )
+    expect(await screen.findByText("Saved to personal library.")).toBeInTheDocument()
+    expect(screen.getByTestId("persona-visual-library-item-library-1")).toHaveTextContent(
+      "Animated pack"
+    )
+  })
+
+  it("edits, removes, and uses personal library entries as draft target packs", async () => {
+    const calls: string[] = []
+    const sourcePack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    let libraryItems: any[] = [
+      {
+        id: "library-1",
+        user_id: "user-1",
+        source_persona_id: "persona-1",
+        source_pack_id: "pack-1",
+        title: "Reusable source pack",
+        notes: "Useful for research persona.",
+        tags: ["idle"],
+        source_persona_name: "Source Persona",
+        source_pack_title: "Animated pack",
+        source_persona_name_snapshot: "Source Persona",
+        source_pack_title_snapshot: "Animated pack",
+        source_pack_version: 3,
+        source_current_version: 3,
+        source_available: true,
+        source_changed: false,
+        created_at: "2026-05-09T00:00:00Z",
+        last_modified: "2026-05-09T00:00:00Z",
+        version: 2
+      },
+      {
+        id: "library-stale",
+        user_id: "user-1",
+        source_persona_id: null,
+        source_pack_id: null,
+        title: "Missing source pack",
+        notes: null,
+        tags: [],
+        source_persona_name: "Old Persona",
+        source_pack_title: "Deleted pack",
+        source_persona_name_snapshot: "Old Persona",
+        source_pack_title_snapshot: "Deleted pack",
+        source_pack_version: 1,
+        source_current_version: null,
+        source_available: false,
+        source_changed: false,
+        created_at: "2026-05-08T00:00:00Z",
+        last_modified: "2026-05-08T00:00:00Z",
+        version: 1
+      }
+    ]
+    const duplicatedPack = {
+      ...sourcePack,
+      id: "pack-library-copy",
+      persona_id: "persona-2",
+      title: "Reusable source pack",
+      status: "draft",
+      parent_pack_id: "pack-1"
+    }
+    const openTarget = vi.fn()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([sourcePack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Research Buddy" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: libraryItems })
+      }
+      if (path === "/api/v1/persona/visual-library/library-1" && method === "PATCH") {
+        expect(parseJsonBody(init?.body)).toEqual({
+          title: "Edited library title",
+          notes: "Ready for reuse.",
+          tags: ["idle", "formal"],
+          expected_version: 2
+        })
+        libraryItems = libraryItems.map((item) =>
+          item.id === "library-1"
+            ? {
+                ...item,
+                title: "Edited library title",
+                notes: "Ready for reuse.",
+                tags: ["idle", "formal"],
+                version: 3
+              }
+            : item
+        )
+        return okResponse(libraryItems[0])
+      }
+      if (path === "/api/v1/persona/visual-library/library-stale" && method === "DELETE") {
+        libraryItems = libraryItems.filter((item) => item.id !== "library-stale")
+        return okResponse({ status: "deleted", item_id: "library-stale" })
+      }
+      if (path === "/api/v1/persona/visual-library/library-1/use" && method === "POST") {
+        expect(parseJsonBody(init?.body)).toEqual({
+          target_persona_id: "persona-2"
+        })
+        return okResponse(duplicatedPack)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Source Persona"
+        isActive
+        onOpenPersonaVisuals={openTarget}
+      />
+    )
+
+    const staleItem = await screen.findByTestId(
+      "persona-visual-library-item-library-stale"
+    )
+    expect(staleItem).toHaveTextContent("Missing source pack")
+    expect(staleItem).toHaveTextContent("unavailable")
+    expect(
+      screen.getByTestId("persona-visual-library-use-library-stale")
+    ).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-library-edit-library-1"))
+    fireEvent.change(screen.getByTestId("persona-visual-library-edit-title-library-1"), {
+      target: { value: "Edited library title" }
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-library-edit-notes-library-1"), {
+      target: { value: "Ready for reuse." }
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-library-edit-tags-library-1"), {
+      target: { value: "idle, formal" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-library-save-edit-library-1"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-library-item-library-1")).toHaveTextContent(
+        "Edited library title"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-library-remove-library-stale"))
+    await waitFor(() =>
+      expect(calls).toContain("DELETE /api/v1/persona/visual-library/library-stale")
+    )
+    expect(screen.queryByText("Missing source pack")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("persona-visual-library-target-library-1"), {
+      target: { value: "persona-2" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-library-use-library-1"))
+
+    await waitFor(() =>
+      expect(calls).toContain("POST /api/v1/persona/visual-library/library-1/use")
+    )
+    expect(
+      await screen.findByText(/Library item copied as a draft for Research Buddy/)
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("persona-visual-duplicate-open-target"))
+    expect(openTarget).toHaveBeenCalledWith("persona-2")
+  })
+
   it("queues, polls, and downloads visual pack exports through the authenticated client", async () => {
     const calls: string[] = []
     const pack = {

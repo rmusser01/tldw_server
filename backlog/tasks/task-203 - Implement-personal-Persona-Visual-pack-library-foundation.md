@@ -4,7 +4,7 @@ title: Implement personal Persona Visual pack library foundation
 status: In Progress
 assignee: []
 created_date: '2026-05-09 23:41'
-updated_date: '2026-05-10 00:06'
+updated_date: '2026-05-10 00:21'
 labels:
   - persona
   - buddy
@@ -49,6 +49,8 @@ Created implementation plan for the reference-backed personal Persona Visual pac
 Stage 1 persistence foundation implemented. Schema v46 creates persona_visual_library_items and DB helpers now upsert list get update and soft-delete user-scoped entries while preserving stale source rows as unavailable. Verification: DB library test 4 passed. Persona visual DB service API suite 54 passed. git diff --check clean. Bandit on touched production files reported 0 results.
 
 Stage 2 service and API implemented. Added PersonaVisualLibraryService and REST endpoints to save list update delete and use personal visual library items. Using a library item duplicates the source pack to the target persona as a draft and keeps activation explicit. Verification: persona visual focused backend suite 62 passed. git diff --check clean. Bandit on touched Stage 2 production files reported 0 results.
+
+Stage 3 WebUI library panel implemented. Added TypeScript types and service functions for list save update delete and use. VisualPackEditor now loads the personal library, saves the selected pack, shows available source-changed and unavailable states, edits and removes entries, and uses entries as draft copies for target personas. Verification: RED and GREEN component tests run in apps/packages/ui with ./node_modules/.bin/vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx; final result 19 passed. Root bunx vitest form still uses a transient runner and misses the UI package alias config in this isolated worktree. git diff --check clean.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

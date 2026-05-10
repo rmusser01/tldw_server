@@ -244,7 +244,7 @@
 
 **Tests:** `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 5: Add failing frontend service and editor tests
 
@@ -254,11 +254,11 @@
 - Modify: `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`
 - Modify: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Add TypeScript types**
+- [x] **Step 1: Add TypeScript types**
 
   Add `PersonaVisualLibraryItem`, save/update/use request types, and `PersonaVisualLibraryListResponse`.
 
-- [ ] **Step 2: Add service function tests through component mocks**
+- [x] **Step 2: Add service function tests through component mocks**
 
   Extend component tests to expect calls to:
   - `GET /api/v1/persona/visual-library`
@@ -267,7 +267,7 @@
   - `DELETE /api/v1/persona/visual-library/{item_id}`
   - `POST /api/v1/persona/visual-library/{item_id}/use`
 
-- [ ] **Step 3: Add UI behavior tests**
+- [x] **Step 3: Add UI behavior tests**
 
   Add tests that verify:
   - selected pack can be saved to library
@@ -275,7 +275,7 @@
   - use-for-persona sends target payload and shows target handoff
   - remove entry updates the panel without deleting the pack
 
-- [ ] **Step 4: Run frontend test and verify RED**
+- [x] **Step 4: Run frontend test and verify RED**
 
   Run:
 
@@ -293,7 +293,7 @@
 - Modify: `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`
 - Modify: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Add service functions**
+- [x] **Step 1: Add service functions**
 
   Implement:
   - `listPersonaVisualLibraryItems`
@@ -302,15 +302,15 @@
   - `deletePersonaVisualLibraryItem`
   - `usePersonaVisualLibraryItem`
 
-- [ ] **Step 2: Add editor state and loaders**
+- [x] **Step 2: Add editor state and loaders**
 
   Add state for library items, loading/mutating item IDs, selected library target, and edit metadata.
 
-- [ ] **Step 3: Add save-to-library controls**
+- [x] **Step 3: Add save-to-library controls**
 
   In the selected-pack header area, add an icon+text button `Save to library`, saved/source-changed tags, and failure copy. Keep active pack copy separate.
 
-- [ ] **Step 4: Add Personal Library panel**
+- [x] **Step 4: Add Personal Library panel**
 
   Add a compact panel under Portability or beside it with:
   - item title
@@ -324,11 +324,11 @@
 
   Use existing `duplicateTargets` for target persona options.
 
-- [ ] **Step 5: Wire use action to draft handoff**
+- [x] **Step 5: Wire use action to draft handoff**
 
   On success, set `lastDuplicatedPersonaId`, reuse the existing "Open target Visuals" affordance/copy, and do not merge the created pack into the current persona's pack list unless the target is the current persona, which V1 rejects.
 
-- [ ] **Step 6: Run frontend test and verify GREEN**
+- [x] **Step 6: Run frontend test and verify GREEN**
 
   Run:
 
@@ -337,6 +337,11 @@
   ```
 
   Expected: pass.
+
+  Verification note: in the isolated worktree, the root `bunx vitest ...`
+  command uses a transient runner that misses the UI package alias config.
+  Green verification was run from `apps/packages/ui` with
+  `./node_modules/.bin/vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`.
 
 - [ ] **Step 7: Commit WebUI panel**
 

@@ -3,13 +3,16 @@ import { Button, Tag, Typography } from "antd"
 import {
   ArrowDown,
   ArrowUp,
+  BookOpen,
   CheckCircle2,
   Copy,
   Download,
+  Edit3,
   FileSearch,
   Plus,
   RefreshCw,
   Save,
+  Trash2,
   Upload,
   XCircle
 } from "lucide-react"
@@ -20,6 +23,7 @@ import {
   createPersonaVisualGenerationJob,
   createPersonaVisualImportPreview,
   createPersonaVisualPack,
+  deletePersonaVisualLibraryItem,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
   duplicatePersonaVisualPack,
@@ -27,15 +31,19 @@ import {
   getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
+  listPersonaVisualLibraryItems,
   listPersonaVisualCandidates,
   listPersonaVisualDuplicateTargets,
   listPersonaVisualPacks,
   PersonaVisualApiError,
   reviewPersonaVisualCandidate,
+  savePersonaVisualPackToLibrary,
   startPersonaVisualImportCommit,
   startPersonaVisualPackExport,
+  updatePersonaVisualLibraryItem,
   updatePersonaVisualManifest,
-  uploadPersonaVisualAsset
+  uploadPersonaVisualAsset,
+  usePersonaVisualLibraryItem
 } from "@/services/persona-visuals"
 import type {
   PersonaVisualAnimation,
@@ -44,6 +52,7 @@ import type {
   PersonaVisualAuthoredTrigger,
   PersonaVisualCandidate,
   PersonaVisualDuplicateTarget,
+  PersonaVisualLibraryItem,
   PersonaVisualImportCommitStartResponse,
   PersonaVisualFrame,
   PersonaVisualGenerationReadinessResponse,
@@ -79,6 +88,12 @@ type TriggerDraft = {
   state: PersonaVisualStateId
   durationMs: string
   priority: string
+}
+
+type LibraryEditDraft = {
+  title: string
+  notes: string
+  tags: string
 }
 
 const getGenerationReadinessCopy = (
@@ -340,6 +355,39 @@ const buildExportFilename = (pack: PersonaVisualPack): string => {
   return `${slug || "persona-visual-pack"}${PORTABLE_VISUAL_PACK_EXTENSION}`
 }
 
+const parseLibraryTagsInput = (value: string): string[] => {
+  const seen = new Set<string>()
+  const tags: string[] = []
+  for (const rawTag of value.split(",")) {
+    const tag = rawTag.trim()
+    if (!tag || seen.has(tag)) continue
+    seen.add(tag)
+    tags.push(tag)
+  }
+  return tags
+}
+
+const getLibrarySourcePersonaName = (item: PersonaVisualLibraryItem): string =>
+  item.source_persona_name ||
+  item.source_persona_name_snapshot ||
+  item.source_persona_id ||
+  "Unavailable persona"
+
+const getLibrarySourcePackTitle = (item: PersonaVisualLibraryItem): string =>
+  item.source_pack_title ||
+  item.source_pack_title_snapshot ||
+  item.source_pack_id ||
+  "Unavailable pack"
+
+const upsertLibraryItem = (
+  items: PersonaVisualLibraryItem[],
+  item: PersonaVisualLibraryItem
+): PersonaVisualLibraryItem[] => {
+  const found = items.some((current) => current.id === item.id)
+  if (!found) return [item, ...items]
+  return items.map((current) => (current.id === item.id ? item : current))
+}
+
 const getAnimationIds = (manifest: PersonaVisualManifest): string[] =>
   Object.keys(manifest.animations || {}).sort((a, b) => a.localeCompare(b))
 
@@ -445,6 +493,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [duplicateTitle, setDuplicateTitle] = React.useState("")
   const [duplicatingPack, setDuplicatingPack] = React.useState(false)
   const [lastDuplicatedPersonaId, setLastDuplicatedPersonaId] = React.useState("")
+  const [libraryItems, setLibraryItems] = React.useState<PersonaVisualLibraryItem[]>([])
+  const [libraryLoading, setLibraryLoading] = React.useState(false)
+  const [savingToLibrary, setSavingToLibrary] = React.useState(false)
+  const [libraryMutatingItemId, setLibraryMutatingItemId] = React.useState("")
+  const [libraryTargetByItemId, setLibraryTargetByItemId] = React.useState<
+    Record<string, string>
+  >({})
+  const [libraryEditingItemId, setLibraryEditingItemId] = React.useState("")
+  const [libraryEditDraft, setLibraryEditDraft] =
+    React.useState<LibraryEditDraft>({
+      title: "",
+      notes: "",
+      tags: ""
+    })
   const [previewingImport, setPreviewingImport] = React.useState(false)
   const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
   const [committingImport, setCommittingImport] = React.useState(false)
@@ -476,6 +538,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
+  const libraryRequestIdRef = React.useRef(0)
 
   const selectedPack =
     packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
@@ -485,6 +548,22 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   )
   const selectedDuplicateTarget =
     availableDuplicateTargets.find((target) => target.id === duplicateTargetId) ?? null
+  const selectedPackLibraryItem = React.useMemo(
+    () =>
+      selectedPack
+        ? libraryItems.find(
+            (item) =>
+              item.source_persona_id === selectedPack.persona_id &&
+              item.source_pack_id === selectedPack.id
+          ) ?? null
+        : null,
+    [libraryItems, selectedPack]
+  )
+  const getLibraryTargetOptions = React.useCallback(
+    (item: PersonaVisualLibraryItem): PersonaVisualDuplicateTarget[] =>
+      duplicateTargets.filter((target) => target.id !== item.source_persona_id),
+    [duplicateTargets]
+  )
   const assets = React.useMemo(() => getPackAssets(selectedPack), [selectedPack])
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
@@ -661,6 +740,35 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId, selectedPack?.id])
 
+  const loadLibrary = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId) {
+      libraryRequestIdRef.current += 1
+      setLibraryItems([])
+      setLibraryLoading(false)
+      return
+    }
+    const requestId = libraryRequestIdRef.current + 1
+    libraryRequestIdRef.current = requestId
+    const isLatestRequest = () => libraryRequestIdRef.current === requestId
+    setLibraryLoading(true)
+    try {
+      const response = await listPersonaVisualLibraryItems()
+      if (isLatestRequest()) setLibraryItems(response.items || [])
+    } catch (loadError) {
+      if (!isLatestRequest()) return
+      setLibraryItems([])
+      if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load personal visual library."
+        )
+      }
+    } finally {
+      if (isLatestRequest()) setLibraryLoading(false)
+    }
+  }, [isActive, selectedPersonaId])
+
   React.useEffect(() => {
     void loadPacks()
   }, [loadPacks])
@@ -676,6 +784,25 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     void loadDuplicateTargets()
   }, [loadDuplicateTargets])
+
+  React.useEffect(() => {
+    void loadLibrary()
+  }, [loadLibrary])
+
+  React.useEffect(() => {
+    setLibraryTargetByItemId((current) => {
+      const next: Record<string, string> = {}
+      for (const item of libraryItems) {
+        const targets = getLibraryTargetOptions(item)
+        const currentTarget = current[item.id]
+        next[item.id] =
+          currentTarget && targets.some((target) => target.id === currentTarget)
+            ? currentTarget
+            : targets[0]?.id ?? ""
+      }
+      return next
+    })
+  }, [getLibraryTargetOptions, libraryItems])
 
   React.useEffect(() => {
     if (!selectedPack) {
@@ -706,6 +833,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setImportCommitJob(null)
     setSelectedImportPreviewFile(null)
     setLastDuplicatedPersonaId("")
+    setLibraryEditingItemId("")
+    setLibraryEditDraft({ title: "", notes: "", tags: "" })
     if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
   }, [selectedPersonaId, selectedPack?.id])
 
@@ -886,6 +1015,122 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setDuplicatingPack(false)
+    }
+  }
+
+  const handleSavePackToLibrary = async () => {
+    if (!selectedPersonaId || !selectedPack) return
+    setSavingToLibrary(true)
+    setError(null)
+    try {
+      const item = await savePersonaVisualPackToLibrary(
+        selectedPersonaId,
+        selectedPack.id,
+        {
+          title: selectedPack.title,
+          tags: []
+        }
+      )
+      setLibraryItems((current) => upsertLibraryItem(current, item))
+      setStatusMessage("Saved to personal library.")
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save pack to personal library."
+      )
+    } finally {
+      setSavingToLibrary(false)
+    }
+  }
+
+  const handleStartLibraryEdit = (item: PersonaVisualLibraryItem) => {
+    setLibraryEditingItemId(item.id)
+    setLibraryEditDraft({
+      title: item.title,
+      notes: item.notes || "",
+      tags: (item.tags || []).join(", ")
+    })
+  }
+
+  const handleSaveLibraryEdit = async (item: PersonaVisualLibraryItem) => {
+    const title = libraryEditDraft.title.trim()
+    if (!title) return
+    setLibraryMutatingItemId(item.id)
+    setError(null)
+    try {
+      const updated = await updatePersonaVisualLibraryItem(item.id, {
+        title,
+        notes: libraryEditDraft.notes.trim() || null,
+        tags: parseLibraryTagsInput(libraryEditDraft.tags),
+        expected_version: item.version ?? null
+      })
+      setLibraryItems((current) => upsertLibraryItem(current, updated))
+      setLibraryEditingItemId("")
+      setLibraryEditDraft({ title: "", notes: "", tags: "" })
+      setStatusMessage("Library item updated.")
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Failed to update library item."
+      )
+    } finally {
+      setLibraryMutatingItemId("")
+    }
+  }
+
+  const handleRemoveLibraryItem = async (item: PersonaVisualLibraryItem) => {
+    setLibraryMutatingItemId(item.id)
+    setError(null)
+    try {
+      await deletePersonaVisualLibraryItem(item.id)
+      setLibraryItems((current) => current.filter((currentItem) => currentItem.id !== item.id))
+      setStatusMessage("Library item removed.")
+      if (libraryEditingItemId === item.id) {
+        setLibraryEditingItemId("")
+        setLibraryEditDraft({ title: "", notes: "", tags: "" })
+      }
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Failed to remove library item."
+      )
+    } finally {
+      setLibraryMutatingItemId("")
+    }
+  }
+
+  const handleUseLibraryItem = async (item: PersonaVisualLibraryItem) => {
+    const targetPersonaId = libraryTargetByItemId[item.id] || ""
+    if (!targetPersonaId || !item.source_available) return
+    setLibraryMutatingItemId(item.id)
+    setError(null)
+    try {
+      const duplicated = await usePersonaVisualLibraryItem(item.id, {
+        target_persona_id: targetPersonaId
+      })
+      if (duplicated.persona_id === selectedPersonaId) {
+        setPacks((current) => mergePack(current, duplicated))
+        setSelectedPackId(duplicated.id)
+      }
+      setLastDuplicatedPersonaId(duplicated.persona_id)
+      const target =
+        duplicateTargets.find((candidate) => candidate.id === duplicated.persona_id) ??
+        duplicateTargets.find((candidate) => candidate.id === targetPersonaId)
+      const targetName = target?.name || target?.id || duplicated.persona_id
+      setStatusMessage(
+        `Library item copied as a draft for ${targetName}. Review and activate it from that persona's Visuals tab.`
+      )
+    } catch (useError) {
+      setError(
+        useError instanceof Error
+          ? useError.message
+          : "Failed to use library item."
+      )
+    } finally {
+      setLibraryMutatingItemId("")
     }
   }
 
@@ -1347,6 +1592,164 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     </>
   )
 
+  const renderLibraryItem = (item: PersonaVisualLibraryItem) => {
+    const isEditing = libraryEditingItemId === item.id
+    const targetOptions = getLibraryTargetOptions(item)
+    const targetId = libraryTargetByItemId[item.id] || ""
+    const isMutating = libraryMutatingItemId === item.id
+
+    return (
+      <div
+        key={item.id}
+        data-testid={`persona-visual-library-item-${item.id}`}
+        className="rounded border border-border bg-bg p-2 text-xs"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="font-medium text-text">{item.title}</div>
+            <div className="mt-1 text-text-muted">
+              {`${getLibrarySourcePersonaName(item)} / ${getLibrarySourcePackTitle(item)}`}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {item.source_available ? (
+              <Tag color="green">available</Tag>
+            ) : (
+              <Tag color="red">unavailable</Tag>
+            )}
+            {item.source_changed ? <Tag color="orange">source changed</Tag> : null}
+            {item.tags.map((tag) => (
+              <Tag key={tag}>{tag}</Tag>
+            ))}
+          </div>
+        </div>
+        {item.notes ? <div className="mt-2 text-text-muted">{item.notes}</div> : null}
+        {isEditing ? (
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(160px,1fr)_minmax(160px,1fr)_minmax(120px,1fr)_auto]">
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">Title</span>
+              <input
+                data-testid={`persona-visual-library-edit-title-${item.id}`}
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                value={libraryEditDraft.title}
+                onChange={(event) =>
+                  setLibraryEditDraft((current) => ({
+                    ...current,
+                    title: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">Notes</span>
+              <input
+                data-testid={`persona-visual-library-edit-notes-${item.id}`}
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                value={libraryEditDraft.notes}
+                onChange={(event) =>
+                  setLibraryEditDraft((current) => ({
+                    ...current,
+                    notes: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">Tags</span>
+              <input
+                data-testid={`persona-visual-library-edit-tags-${item.id}`}
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                value={libraryEditDraft.tags}
+                onChange={(event) =>
+                  setLibraryEditDraft((current) => ({
+                    ...current,
+                    tags: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <div className="flex items-end gap-1">
+              <Button
+                data-testid={`persona-visual-library-save-edit-${item.id}`}
+                size="small"
+                type="primary"
+                loading={isMutating}
+                disabled={!libraryEditDraft.title.trim()}
+                onClick={() => void handleSaveLibraryEdit(item)}
+              >
+                Save
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  setLibraryEditingItemId("")
+                  setLibraryEditDraft({ title: "", notes: "", tags: "" })
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(160px,1fr)_auto_auto_auto]">
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">Use for persona</span>
+              <select
+                data-testid={`persona-visual-library-target-${item.id}`}
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+                value={targetId}
+                disabled={!item.source_available || !targetOptions.length}
+                onChange={(event) =>
+                  setLibraryTargetByItemId((current) => ({
+                    ...current,
+                    [item.id]: event.target.value
+                  }))
+                }
+              >
+                {targetOptions.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.name || target.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              data-testid={`persona-visual-library-use-${item.id}`}
+              className="self-end"
+              size="small"
+              icon={<Copy className="h-3.5 w-3.5" />}
+              loading={isMutating}
+              disabled={!item.source_available || !targetId}
+              onClick={() => void handleUseLibraryItem(item)}
+            >
+              Use as draft
+            </Button>
+            <Button
+              data-testid={`persona-visual-library-edit-${item.id}`}
+              className="self-end"
+              size="small"
+              icon={<Edit3 className="h-3.5 w-3.5" />}
+              onClick={() => handleStartLibraryEdit(item)}
+            >
+              Edit details
+            </Button>
+            <Button
+              data-testid={`persona-visual-library-remove-${item.id}`}
+              className="self-end"
+              size="small"
+              danger
+              icon={<Trash2 className="h-3.5 w-3.5" />}
+              loading={isMutating}
+              onClick={() => void handleRemoveLibraryItem(item)}
+            >
+              Remove
+            </Button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const exportWarnings =
     exportJob && "warnings" in exportJob && Array.isArray(exportJob.warnings)
       ? exportJob.warnings
@@ -1453,8 +1856,28 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             <Tag data-testid="persona-visual-pack-status" color="blue">
               {selectedPack.status}
             </Tag>
+            {selectedPackLibraryItem ? (
+              <>
+                <Tag data-testid="persona-visual-library-selected-status" color="green">
+                  in library
+                </Tag>
+                {selectedPackLibraryItem.source_changed ? (
+                  <Tag color="orange">source changed</Tag>
+                ) : null}
+              </>
+            ) : null}
             <span className="font-medium text-text">{selectedPack.title}</span>
             <span className="text-text-muted">{`v${selectedPack.version ?? 1}`}</span>
+            <Button
+              data-testid="persona-visual-library-save-button"
+              size="small"
+              icon={<BookOpen className="h-3.5 w-3.5" />}
+              loading={savingToLibrary}
+              disabled={savingToLibrary}
+              onClick={() => void handleSavePackToLibrary()}
+            >
+              Save to library
+            </Button>
           </div>
         ) : null}
         {selectedPack ? (
@@ -1834,6 +2257,40 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   <div className="mt-2 text-xs text-text-muted">No import preview.</div>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div
+            data-testid="persona-visual-library-panel"
+            className="rounded-lg border border-border bg-surface p-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                  Personal library
+                </div>
+                <div className="mt-1 text-xs text-text-muted">
+                  Save reusable Persona Buddy visual packs as user-owned references.
+                  Using one creates a draft on the target persona.
+                </div>
+              </div>
+              <Button
+                size="small"
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
+                loading={libraryLoading}
+                onClick={() => void loadLibrary()}
+              >
+                Refresh library
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {libraryItems.length ? (
+                libraryItems.map(renderLibraryItem)
+              ) : (
+                <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
+                  No saved visual packs.
+                </div>
+              )}
             </div>
           </div>
 
