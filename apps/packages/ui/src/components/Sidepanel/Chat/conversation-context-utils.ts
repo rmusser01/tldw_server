@@ -1,3 +1,4 @@
+import { getDesignSystemState } from "@/design-system"
 import type {
   ConversationContextComposition,
   ConversationContextPiece,
@@ -141,10 +142,18 @@ export const resolveContextReadiness = ({
 
   const readiness = composition?.readiness ?? "ready"
   if (readiness === "blocked") {
-    return { readiness, label: "Blocked", tone: "blocked" }
+    return {
+      readiness,
+      label: getDesignSystemState("blocked").label,
+      tone: "blocked"
+    }
   }
   if (readiness === "partial") {
     return { readiness, label: "Partial", tone: "partial" }
   }
-  return { readiness, label: "Ready", tone: "ready" }
+  return {
+    readiness,
+    label: getDesignSystemState("ready").label,
+    tone: "ready"
+  }
 }
