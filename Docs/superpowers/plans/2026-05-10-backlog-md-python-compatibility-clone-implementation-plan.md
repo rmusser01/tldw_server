@@ -576,11 +576,11 @@ git commit -m "Add Backlog.md project discovery"
 - Modify: `tools/backlog-py/src/backlog_py/core/models.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write fixture task**
+- [x] **Step 1: Write fixture task**
 
 Create `tools/backlog-py/tests/fixtures/repos/basic/backlog/tasks/task-1 - Example-task.md` with frontmatter, unknown metadata, Description, Acceptance Criteria, Implementation Notes, Final Summary, and Definition of Done section markers.
 
-- [ ] **Step 2: Write failing parser tests**
+- [x] **Step 2: Write failing parser tests**
 
 Create `tools/backlog-py/tests/test_task_parser.py`:
 
@@ -609,7 +609,7 @@ def test_round_trip_without_mutation_is_exact():
     assert render_task_markdown(parsed) == source
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run:
 
@@ -620,7 +620,7 @@ python -m pytest tools/backlog-py/tests/test_task_parser.py -v
 
 Expected: FAIL with missing parser.
 
-- [ ] **Step 4: Implement parser**
+- [x] **Step 4: Implement parser**
 
 Implement a deliberately conservative parser:
 
@@ -631,7 +631,7 @@ Implement a deliberately conservative parser:
 - preserve all unrecognized body content
 - raise a structured error on unterminated owned sections
 
-- [ ] **Step 5: Run parser tests**
+- [x] **Step 5: Run parser tests**
 
 Run:
 
@@ -642,7 +642,7 @@ python -m pytest tools/backlog-py/tests/test_task_parser.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
