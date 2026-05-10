@@ -41,6 +41,23 @@ def test_pricing_overrides_env(monkeypatch):
     assert est2 is True
 
 
+def test_pricing_overrides_env_preserves_estimated_metadata(monkeypatch):
+    monkeypatch.setenv(
+        "PRICING_OVERRIDES",
+        '{"Qwen": {"qwen-new-current": {"prompt": 0.001, "completion": 0.002, "estimated": true}}}',
+    )
+
+    from tldw_Server_API.app.core.Usage.pricing_catalog import PricingCatalog
+
+    catalog = PricingCatalog()
+
+    p_in, p_out, est = catalog.get_rates("qwen", "qwen-new-current")
+    assert pytest.approx(p_in, rel=1e-6) == 0.001
+    assert pytest.approx(p_out, rel=1e-6) == 0.002
+    assert est is True
+    assert "qwen-new-current" in catalog._catalog["qwen"]
+
+
 def test_pricing_overrides_env_parse_warning_is_sanitized(monkeypatch):
     mod = importlib.import_module("tldw_Server_API.app.core.Usage.pricing_catalog")
     monkeypatch.setenv("PRICING_OVERRIDES", "{invalid")
