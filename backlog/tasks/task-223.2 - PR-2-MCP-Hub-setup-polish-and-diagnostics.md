@@ -18,6 +18,8 @@ priority: medium
 documentation:
   - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
   - Docs/superpowers/plans/2026-05-10-mcp-hub-setup-polish-diagnostics-plan.md
+references:
+  - https://github.com/rmusser01/tldw_server/pull/1531
 ---
 
 ## Description
@@ -65,6 +67,7 @@ Stages:
 2026-05-10: Started PR 2 from merged PR #1514 and current origin/dev in .worktrees/mcp-hub-pr2-setup-polish on branch codex/mcp-hub-pr2-setup-polish. Baseline focused MCP Hub UI tests passed after installing frontend dependencies from apps/: ExternalServersTab and ToolCatalogsTab, 14 tests passed. Plan created for a frontend/docs-heavy PR 2 using existing PR 1 refresh contract.
 2026-05-10: Implemented no-auth stdio setup states, Tool Catalog recovery guidance, Setup deployment diagnostics, toy MCP Playwright smoke coverage, and the isolated local walkthrough docs.
 2026-05-10: Verification: `cd apps/packages/ui && bun run test src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx src/components/Option/MCPHub/__tests__/DeploymentDiagnosticsPanel.test.tsx src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx` passed 4 files / 29 tests. `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts --list` listed 9 tests. `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts --reporter=line` passed 3 and skipped 6 live-server-dependent cases. Initial sandboxed Playwright run could not bind `0.0.0.0:8080`; reran with approved escalation. `git diff --check` passed. Bandit skipped because this slice changed TypeScript, docs, and Playwright only; no Python production files were touched.
+2026-05-10: Opened PR #1531 for branch codex/mcp-hub-pr2-setup-polish.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
