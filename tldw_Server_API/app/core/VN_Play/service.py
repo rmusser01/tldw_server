@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from loguru import logger
@@ -28,6 +29,8 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
     ERROR_CHOICE_NOT_ALLOWED,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_GENERATION_ATTEMPT_ABANDONED,
+    ERROR_GENERATION_REQUEST_IN_PROGRESS,
     ERROR_INTERNAL_ERROR,
     ERROR_INVALID_CHOICE_ID,
     ERROR_RESTORE_ACTION_IN_PROGRESS,
@@ -66,6 +69,16 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     TURN_STATUS_MODEL_FAILED,
     TURN_STATUS_PARSE_FAILED,
     TURN_STATUS_PENDING,
+)
+from tldw_Server_API.app.core.VN_Play.adapters import (
+    GenerationModerationAdapter,
+    ScriptedVNGenerationAdapter,
+    VNGenerationAdapterError,
+    VNGenerationCallRequest,
+)
+from tldw_Server_API.app.core.VN_Play.generated_outputs import (
+    VNGenerationOutputParseError,
+    parse_vn_generation_output,
 )
 from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety_definition
 from tldw_Server_API.app.core.VN_Play.models import SceneState, TurnResult
@@ -260,10 +273,14 @@ class VNPlayService:
         repo: VNPlayRepository,
         owner_user_id: int,
         adapter: VNPlayTurnAdapter | None = None,
+        generation_adapter: Any | None = None,
+        moderation_adapter: Any | None = None,
     ) -> None:
         self.repo = repo
         self.owner_user_id = owner_user_id
         self.adapter = adapter or DeterministicVNPlayTurnAdapter()
+        self.generation_adapter = generation_adapter or ScriptedVNGenerationAdapter()
+        self.generation_moderation_adapter = moderation_adapter or GenerationModerationAdapter()
         self._manifest_cache: dict[int, dict[str, Any]] = {}
 
     def create_session(
@@ -1483,6 +1500,371 @@ class VNPlayService:
             }
         )
         return state
+
+    async def execute_script_generation_call(
+        self,
+        *,
+        session_id: int,
+        client_scene_version: int,
+        idempotency_key: str,
+        generation_point_key: str,
+        output_schema: str,
+        generation_profile_key: str,
+        generation_profile_snapshot_id: int,
+        profile_snapshot: Mapping[str, Any],
+        messages: Sequence[Mapping[str, Any]],
+        request_kind: str = "automatic",
+        opcode_snapshot: Mapping[str, Any] | None = None,
+        prompt_fingerprint: str | None = None,
+        provider_lease_seconds: int = 300,
+    ) -> dict[str, Any]:
+        """Run one recoverable scripted generation provider call."""
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+
+        request_payload_hash = self._generation_call_payload_hash(
+            action_kind="execute",
+            client_scene_version=client_scene_version,
+            generation_point_key=generation_point_key,
+            output_schema=output_schema,
+            generation_profile_key=generation_profile_key,
+            generation_profile_snapshot_id=generation_profile_snapshot_id,
+            request_kind=request_kind,
+            opcode_snapshot=opcode_snapshot,
+            prompt_fingerprint=prompt_fingerprint,
+            messages=messages,
+        )
+        action = self.repo.get_generation_action_by_key(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if action is not None:
+            if (
+                action.get("action_kind") != "execute"
+                or action.get("request_payload_hash") != request_payload_hash
+            ):
+                raise VNPlayConflictError(ERROR_IDEMPOTENCY_KEY_CONFLICT)
+            if action.get("status") == "completed":
+                return self._completed_generation_action_response(action)
+            if action.get("status") in {"failed", "abandoned"}:
+                raise VNPlayConflictError(
+                    str(action.get("public_error_code") or ERROR_GENERATION_REQUEST_IN_PROGRESS)
+                )
+            request = self._generation_request_for_action(action)
+            self._raise_or_abandon_in_progress_generation(
+                action=action,
+                request=request,
+            )
+        if session.scene_version != client_scene_version:
+            raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
+
+        generation = self.repo.get_or_create_generation(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            generation_point_key=generation_point_key,
+            output_schema=output_schema,
+            generation_profile_key=generation_profile_key,
+            generation_profile_snapshot_id=generation_profile_snapshot_id,
+            script_id=session.script_id,
+            script_version_id=session.script_version_id,
+            status="in_progress",
+        )
+        if action is not None:
+            if int(action.get("generation_id") or 0) != int(generation["id"]):
+                raise VNPlayConflictError(ERROR_IDEMPOTENCY_KEY_CONFLICT)
+        else:
+            request = self.repo.create_generation_request(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                generation_id=int(generation["id"]),
+                request_kind=request_kind,
+                client_scene_version=client_scene_version,
+                status="in_progress",
+                opcode_snapshot=opcode_snapshot,
+                prompt_fingerprint=prompt_fingerprint,
+            )
+            action = self.repo.create_generation_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_kind="execute",
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                generation_id=int(generation["id"]),
+                generation_request_id=int(request["id"]),
+                status="in_progress",
+            )
+            updated_request = self.repo.update_generation_request(
+                int(request["id"]),
+                {"execute_action_id": int(action["id"])},
+                owner_user_id=self.owner_user_id,
+            )
+            if updated_request is not None:
+                request = updated_request
+
+        provider_started_at = _utc_now_iso()
+        lease_expires_at = _utc_now_plus_iso(provider_lease_seconds)
+        request = self.repo.update_generation_request(
+            int(request["id"]),
+            {
+                "status": "in_progress",
+                "provider_call_started_at": provider_started_at,
+                "lease_expires_at": lease_expires_at,
+            },
+            owner_user_id=self.owner_user_id,
+        ) or request
+        action = self.repo.update_generation_action(
+            int(action["id"]),
+            {"status": "in_progress"},
+            owner_user_id=self.owner_user_id,
+        ) or action
+
+        usage_context = {
+            "vn_session_id": session_id,
+            "script_id": session.script_id,
+            "script_version_id": session.script_version_id,
+            "generation_id": int(generation["id"]),
+            "generation_request_id": int(request["id"]),
+            "generation_profile_key": generation_profile_key,
+            "generation_profile_snapshot_id": generation_profile_snapshot_id,
+            "generation_point_key": generation_point_key,
+        }
+        try:
+            provider_result = await self.generation_adapter.generate(
+                VNGenerationCallRequest(
+                    profile_snapshot=profile_snapshot,
+                    messages=messages,
+                    output_schema=output_schema,
+                    usage_context=usage_context,
+                )
+            )
+            parsed = parse_vn_generation_output(
+                provider_result.raw_content,
+                output_schema=output_schema,
+            )
+            moderation = await self.generation_moderation_adapter.moderate_output(
+                _generation_public_text(parsed.public_payload),
+                profile_snapshot=profile_snapshot,
+                context=usage_context,
+            )
+            if not moderation.allowed:
+                raise VNPlayTurnError(moderation.public_error_code or "moderation_blocked")
+        except VNGenerationAdapterError as exc:
+            self._mark_generation_call_failed(
+                session_id=session_id,
+                request_id=int(request["id"]),
+                action_id=int(action["id"]),
+                error_code=exc.public_error_code,
+                debug_metadata=exc.debug_metadata,
+                output_schema=output_schema,
+            )
+            raise VNPlayTurnError(exc.public_error_code) from exc
+        except VNGenerationOutputParseError as exc:
+            self._mark_generation_call_failed(
+                session_id=session_id,
+                request_id=int(request["id"]),
+                action_id=int(action["id"]),
+                error_code=str(exc) or "invalid_generation_output",
+                output_schema=output_schema,
+            )
+            raise VNPlayTurnError(str(exc) or "invalid_generation_output") from exc
+        except VNPlayTurnError as exc:
+            self._mark_generation_call_failed(
+                session_id=session_id,
+                request_id=int(request["id"]),
+                action_id=int(action["id"]),
+                error_code=str(exc) or ERROR_INTERNAL_ERROR,
+                output_schema=output_schema,
+            )
+            raise
+
+        revision = self.repo.create_generation_revision(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            generation_id=int(generation["id"]),
+            generation_request_id=int(request["id"]),
+            status="succeeded",
+            output_schema=output_schema,
+            public_output=parsed.public_payload,
+            model_metadata=provider_result.response_metadata,
+            usage_metadata=provider_result.usage_metadata,
+            moderation_diagnostics=moderation.audit_metadata,
+            source="model",
+        )
+        self.repo.set_active_generation_revision(
+            generation_id=int(generation["id"]),
+            owner_user_id=self.owner_user_id,
+            revision_id=int(revision["id"]),
+        )
+        self.repo.update_generation_request(
+            int(request["id"]),
+            {
+                "status": "completed",
+                "provider_call_completed_at": _utc_now_iso(),
+                "public_error_code": None,
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        response = {
+            "status": "completed",
+            "replayed": False,
+            "generation_id": int(generation["id"]),
+            "generation_request_id": int(request["id"]),
+            "generation_action_id": int(action["id"]),
+            "generation_revision_id": int(revision["id"]),
+            "generation_point_key": generation_point_key,
+            "output_schema": output_schema,
+            "public_output": parsed.public_payload,
+        }
+        self.repo.update_generation_action(
+            int(action["id"]),
+            {
+                "status": "completed",
+                "generation_revision_id": int(revision["id"]),
+                "completed_action_response": response,
+                "public_error_code": None,
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        return response
+
+    def _generation_call_payload_hash(
+        self,
+        *,
+        action_kind: str,
+        client_scene_version: int,
+        generation_point_key: str,
+        output_schema: str,
+        generation_profile_key: str,
+        generation_profile_snapshot_id: int,
+        request_kind: str,
+        opcode_snapshot: Mapping[str, Any] | None,
+        prompt_fingerprint: str | None,
+        messages: Sequence[Mapping[str, Any]] | None,
+    ) -> str:
+        """Return the idempotency hash for one generation action request."""
+        return _payload_hash(
+            {
+                "action_kind": action_kind,
+                "client_scene_version": client_scene_version,
+                "generation_point_key": generation_point_key,
+                "output_schema": output_schema,
+                "generation_profile_key": generation_profile_key,
+                "generation_profile_snapshot_id": generation_profile_snapshot_id,
+                "request_kind": request_kind,
+                "opcode_snapshot": dict(opcode_snapshot or {}),
+                "prompt_fingerprint": prompt_fingerprint,
+                "messages": [dict(message) for message in messages or []],
+            }
+        )
+
+    def _completed_generation_action_response(self, action: Mapping[str, Any]) -> dict[str, Any]:
+        response_payload = action.get("completed_action_response")
+        if not isinstance(response_payload, Mapping):
+            raise VNPlayConflictError(ERROR_GENERATION_REQUEST_IN_PROGRESS)
+        replayed = dict(response_payload)
+        replayed["replayed"] = True
+        return replayed
+
+    def _generation_request_for_action(self, action: Mapping[str, Any]) -> dict[str, Any]:
+        request_id = action.get("generation_request_id")
+        if request_id is None:
+            raise VNPlayConflictError(ERROR_GENERATION_REQUEST_IN_PROGRESS)
+        request = self.repo.get_generation_request(
+            int(request_id),
+            owner_user_id=self.owner_user_id,
+        )
+        if request is None:
+            raise VNPlayConflictError(ERROR_GENERATION_REQUEST_IN_PROGRESS)
+        return request
+
+    def _raise_or_abandon_in_progress_generation(
+        self,
+        *,
+        action: Mapping[str, Any],
+        request: Mapping[str, Any],
+    ) -> None:
+        provider_started_at = request.get("provider_call_started_at")
+        if not provider_started_at:
+            return
+        lease_expires_at = _parse_datetime(request.get("lease_expires_at"))
+        if lease_expires_at is not None and lease_expires_at <= datetime.now(timezone.utc):
+            self._abandon_generation_call(
+                request_id=int(request["id"]),
+                action_id=int(action["id"]),
+                error_code=ERROR_GENERATION_ATTEMPT_ABANDONED,
+            )
+            raise VNPlayConflictError(ERROR_GENERATION_ATTEMPT_ABANDONED)
+        raise VNPlayConflictError(ERROR_GENERATION_REQUEST_IN_PROGRESS)
+
+    def _abandon_generation_call(
+        self,
+        *,
+        request_id: int,
+        action_id: int,
+        error_code: str,
+    ) -> None:
+        self.repo.update_generation_request(
+            request_id,
+            {
+                "status": "abandoned",
+                "public_error_code": error_code,
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        self.repo.update_generation_action(
+            action_id,
+            {
+                "status": "abandoned",
+                "public_error_code": error_code,
+            },
+            owner_user_id=self.owner_user_id,
+        )
+
+    def _mark_generation_call_failed(
+        self,
+        *,
+        session_id: int,
+        request_id: int,
+        action_id: int,
+        error_code: str,
+        output_schema: str,
+        debug_metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        request = self.repo.get_generation_request(request_id, owner_user_id=self.owner_user_id)
+        if request is not None:
+            self.repo.create_generation_revision(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                generation_id=int(request["generation_id"]),
+                generation_request_id=request_id,
+                status="failed",
+                output_schema=output_schema,
+                public_error_code=error_code,
+                raw_output_debug=debug_metadata,
+                source="model",
+            )
+        self.repo.update_generation_request(
+            request_id,
+            {
+                "status": "failed",
+                "provider_call_completed_at": _utc_now_iso(),
+                "public_error_code": error_code,
+            },
+            owner_user_id=self.owner_user_id,
+        )
+        self.repo.update_generation_action(
+            action_id,
+            {
+                "status": "failed",
+                "public_error_code": error_code,
+            },
+            owner_user_id=self.owner_user_id,
+        )
 
     def _run_script_action(
         self,
@@ -3250,6 +3632,52 @@ def _append_enrichment_warning(state: dict[str, Any], exc: Exception) -> None:
 def _payload_hash(payload: Mapping[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded, usedforsecurity=False).hexdigest()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _utc_now_plus_iso(seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(1, seconds))).isoformat()
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _generation_public_text(payload: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    for line in _list_of_dicts(payload.get("narrative")):
+        if line.get("text"):
+            parts.append(str(line["text"]))
+    for line in _list_of_dicts(payload.get("dialogue")):
+        if line.get("text"):
+            parts.append(str(line["text"]))
+    for choice in _list_of_dicts(payload.get("choices")):
+        if choice.get("text"):
+            parts.append(str(choice["text"]))
+    lead_in = payload.get("lead_in")
+    if lead_in:
+        parts.append(str(lead_in))
+    return "\n".join(parts)
 
 
 def _scene_state_payload(state: SceneState) -> dict[str, Any]:
