@@ -4994,17 +4994,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Common/ChatQueuePanel.tsx:Blocked",
-    "path": "src/components/Common/ChatQueuePanel.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Blocked",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Blocked\" state label in src/components/Common/ChatQueuePanel.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Common/PromptSelect.tsx:Loading",
     "path": "src/components/Common/PromptSelect.tsx",
     "rule": "canonical-state-label",
