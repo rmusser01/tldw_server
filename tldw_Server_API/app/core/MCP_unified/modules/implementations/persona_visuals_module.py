@@ -41,6 +41,8 @@ _PERSONA_VISUALS_NONCRITICAL_EXCEPTIONS = (
     ValueError,
 )
 
+_MAX_LIBRARY_ITEMS_OFFSET = 1_000_000
+
 
 class PersonaVisualsModule(BaseModule):
     """Internal persona visual-pack tools for draft edits and runtime state triggers."""
@@ -76,7 +78,12 @@ class PersonaVisualsModule(BaseModule):
                 parameters={
                     "properties": {
                         "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
-                        "offset": {"type": "integer", "minimum": 0, "default": 0},
+                        "offset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": _MAX_LIBRARY_ITEMS_OFFSET,
+                            "default": 0,
+                        },
                     },
                 },
                 metadata={"category": "retrieval", "readOnlyHint": True, "auth_required": True},
@@ -136,7 +143,7 @@ class PersonaVisualsModule(BaseModule):
                 parameters={
                     "properties": {
                         "item_id": {"type": "string", "minLength": 1},
-                        "target_persona_id": {"type": "string"},
+                        "target_persona_id": {"type": "string", "minLength": 1},
                         "title": {"type": "string", "minLength": 1, "maxLength": 200},
                     },
                     "required": ["item_id"],
@@ -197,8 +204,8 @@ class PersonaVisualsModule(BaseModule):
                 limit = int(arguments["limit"])
                 if limit < 1 or limit > 500:
                     raise ValueError("limit must be between 1 and 500")
-            if arguments.get("offset") is not None and int(arguments["offset"]) < 0:
-                raise ValueError("offset must be non-negative")
+            if arguments.get("offset") is not None:
+                self._library_items_offset(arguments["offset"])
             return
         if tool_name == "persona_visuals.trigger_state":
             self._validate_optional_string(arguments, "persona_id")
@@ -237,7 +244,10 @@ class PersonaVisualsModule(BaseModule):
             item_id = str(arguments.get("item_id") or "").strip()
             if not item_id:
                 raise ValueError("item_id is required")
-            self._validate_optional_string(arguments, "target_persona_id")
+            if arguments.get("target_persona_id") is not None:
+                self._validate_optional_string(arguments, "target_persona_id")
+                if not str(arguments.get("target_persona_id") or "").strip():
+                    raise ValueError("target_persona_id cannot be empty")
             title = arguments.get("title")
             if title is not None:
                 if not isinstance(title, str):
@@ -291,7 +301,7 @@ class PersonaVisualsModule(BaseModule):
     def _library_items_sync(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
         user_id = self._resolve_user_id(context)
         limit = self._bounded_int(args.get("limit"), default=100, minimum=1, maximum=500)
-        offset = self._bounded_int(args.get("offset"), default=0, minimum=0, maximum=1_000_000)
+        offset = self._library_items_offset(args.get("offset"))
         db = self._open_db(context)
         try:
             items = db.list_persona_visual_library_items(
@@ -538,8 +548,13 @@ class PersonaVisualsModule(BaseModule):
         return None
 
     def _resolve_target_persona_id(self, args: dict[str, Any], context: Any | None) -> str:
+        if args.get("target_persona_id") is not None:
+            explicit = str(args.get("target_persona_id") or "").strip()
+            if not explicit:
+                raise ValueError("target_persona_id cannot be empty")
+            return explicit
         try:
-            return self._resolve_persona_id({"persona_id": args.get("target_persona_id")}, context)
+            return self._resolve_persona_id({}, context)
         except ValueError as exc:
             raise ValueError("Missing target persona context for persona visuals library reuse") from exc
 
@@ -625,6 +640,18 @@ class PersonaVisualsModule(BaseModule):
         except (TypeError, ValueError):
             parsed = default
         return max(minimum, min(maximum, parsed))
+
+    @staticmethod
+    def _library_items_offset(value: Any) -> int:
+        if value is None:
+            return 0
+        try:
+            offset = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("offset must be an integer between 0 and 1000000") from None
+        if offset < 0 or offset > _MAX_LIBRARY_ITEMS_OFFSET:
+            raise ValueError("offset must be between 0 and 1000000")
+        return offset
 
     @staticmethod
     def _validate_optional_string(arguments: dict[str, Any], key: str) -> None:

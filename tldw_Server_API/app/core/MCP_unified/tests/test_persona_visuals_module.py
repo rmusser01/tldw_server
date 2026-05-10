@@ -202,6 +202,19 @@ async def test_library_items_lists_reference_backed_personal_library_entries(cha
 
 
 @pytest.mark.asyncio
+async def test_library_items_rejects_out_of_range_offset(chacha_db) -> None:
+    _db, db_path = chacha_db
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
+        await module.execute_tool(
+            "persona_visuals.library_items",
+            {"offset": 1_000_001},
+            context=_context(db_path),
+        )
+
+
+@pytest.mark.asyncio
 async def test_trigger_state_requires_context_rejects_unknown_states_and_clamps_duration(chacha_db) -> None:
     db, db_path = chacha_db
     persona_id = _create_persona(db)
@@ -346,6 +359,13 @@ async def test_use_library_item_rejects_missing_target_and_unavailable_sources(c
             "persona_visuals.use_library_item",
             {"item_id": item["id"]},
             context=_context(db_path),
+        )
+
+    with pytest.raises(ValueError, match="target_persona_id cannot be empty"):
+        await module.execute_tool(
+            "persona_visuals.use_library_item",
+            {"item_id": item["id"], "target_persona_id": "   "},
+            context=_context(db_path, target_persona_id),
         )
 
     db.soft_delete_persona_visual_pack_with_assets(

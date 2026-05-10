@@ -59,6 +59,10 @@ Implement GitHub issue #1496: extend the existing internal persona_visuals MCP/t
   - `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py -q`
   - `git diff --check`
   - `python -m bandit -r tldw_Server_API/app/core/MCP_unified/modules/implementations/persona_visuals_module.py -f json -o /tmp/bandit_persona_mcp_reuse.json`
+- Reopened for PR #1499 review fixes:
+  - CodeRabbit: reject out-of-range `persona_visuals.library_items` offsets instead of silently capping.
+  - Qodo: reject provided-but-blank `target_persona_id` instead of falling back to persona scope.
+- Review fixes added targeted regression coverage and were verified with focused pytest, `git diff --check`, and Bandit.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
