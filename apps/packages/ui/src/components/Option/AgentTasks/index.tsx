@@ -27,8 +27,13 @@ import {
   Plus,
   Trash2,
   ChevronRight,
+  Search,
+  ExternalLink,
 } from "lucide-react"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { buildACPAuthHeaders } from "@/services/acp/connection"
+import { buildACPSetupIssues, normalizeACPHealthStatus, type ACPSetupIssue } from "@/services/acp/readiness"
+import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 
 // Types matching the backend orchestration API
 type ProjectSummary = {
@@ -68,6 +73,45 @@ type RunItem = {
   error?: string
   started_at: string
   completed_at?: string
+  session?: {
+    session_id: string
+    available?: boolean
+    links?: Record<string, string>
+  } | null
+  history?: {
+    event_count?: number
+    audit_event_count?: number
+    artifact_count?: number
+    diagnostic_count?: number
+    tool_call_count?: number
+    stop_reason?: string | null
+    result?: {
+      preview?: string
+    } | null
+  }
+  failure_context?: {
+    reason_code?: string | null
+    message?: string | null
+    source?: string | null
+    diagnostic_uri?: string | null
+  } | null
+  review_decision?: {
+    available?: boolean
+    approved?: boolean
+    reviewer?: string | null
+    feedback_preview?: string | null
+  } | null
+}
+
+type ReviewItem = {
+  reviewer?: string | null
+  approved?: boolean
+  feedback?: string | null
+  created_at?: string | null
+}
+
+type TaskDetailItem = TaskItem & {
+  reviews?: ReviewItem[]
 }
 
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE = "Agent orchestration unavailable"
@@ -75,6 +119,7 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION =
   "This server does not expose agent orchestration endpoints."
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE = "AGENT_ORCHESTRATION_UNSUPPORTED"
 const AGENT_ORCHESTRATION_PROJECTS_PATH = "/api/v1/agent-orchestration/projects"
+const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
 
 const STATUS_COLORS: Record<string, string> = {
   todo: "default",
@@ -90,6 +135,13 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   review: <AlertTriangle className="h-3.5 w-3.5" />,
   complete: <CheckCircle className="h-3.5 w-3.5" />,
   triage: <XCircle className="h-3.5 w-3.5" />,
+}
+
+const navigateOptionRoute = (path: string) => {
+  if (typeof window === "undefined") {
+    return
+  }
+  window.location.hash = path
 }
 
 const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
@@ -144,6 +196,10 @@ export const AgentTasksPage: React.FC = () => {
   const [tasksLoading, setTasksLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isUnsupported, setIsUnsupported] = useState(false)
+  const [setupIssues, setSetupIssues] = useState<ACPSetupIssue[]>([])
+  const [setupLoading, setSetupLoading] = useState(false)
+  const [taskDetail, setTaskDetail] = useState<TaskDetailItem | null>(null)
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false)
 
   // Modal states
   const [showProjectModal, setShowProjectModal] = useState(false)
@@ -153,27 +209,23 @@ export const AgentTasksPage: React.FC = () => {
   const orchestrationSupportRef = React.useRef<boolean | null>(null)
 
   const getHeaders = useCallback(async () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
-    if (!connectionConfig) {
-      return headers
-    }
-    if (connectionConfig.authMode === "single-user" && connectionConfig.apiKey) {
-      headers["X-API-KEY"] = connectionConfig.apiKey
-    } else if (connectionConfig.authMode === "multi-user" && connectionConfig.accessToken) {
-      headers.Authorization = `Bearer ${connectionConfig.accessToken}`
-    }
-    if (typeof connectionConfig.orgId === "number") {
-      headers["X-TLDW-Org-Id"] = String(connectionConfig.orgId)
-    }
-    return headers
+    return buildACPAuthHeaders(connectionConfig, { includeContentType: true })
   }, [connectionConfig])
 
-  const apiBase = useMemo(
-    () =>
-      connectionConfig
-        ? `${connectionConfig.serverUrl}/api/v1/agent-orchestration`
-        : null,
+  const buildRequestUrl = useCallback(
+    (path: string) => {
+      if (!connectionConfig) return null
+      return resolveBrowserRequestTransport({
+        config: connectionConfig,
+        path
+      }).url
+    },
     [connectionConfig]
+  )
+
+  const apiBase = useMemo(
+    () => buildRequestUrl(AGENT_ORCHESTRATION_BASE_PATH),
+    [buildRequestUrl]
   )
 
   React.useEffect(() => {
@@ -194,7 +246,11 @@ export const AgentTasksPage: React.FC = () => {
       return orchestrationSupportRef.current
     }
     try {
-      const res = await fetch(`${connectionConfig.serverUrl}/openapi.json`)
+      const openApiUrl = buildRequestUrl("/openapi.json")
+      if (!openApiUrl) {
+        return true
+      }
+      const res = await fetch(openApiUrl)
       if (!res.ok) {
         return true
       }
@@ -211,7 +267,38 @@ export const AgentTasksPage: React.FC = () => {
     } catch {
       return true
     }
-  }, [connectionConfig])
+  }, [buildRequestUrl, connectionConfig])
+
+  const fetchACPReadiness = useCallback(async () => {
+    if (!connectionConfig) {
+      setSetupIssues([])
+      return
+    }
+    const healthUrl = buildRequestUrl("/api/v1/acp/health")
+    if (!healthUrl) {
+      return
+    }
+    setSetupLoading(true)
+    try {
+      const res = await fetch(healthUrl, {
+        headers: buildACPAuthHeaders(connectionConfig)
+      })
+      if (!res.ok) {
+        setSetupIssues(buildACPSetupIssues(null, `ACP health returned HTTP ${res.status}`))
+        return
+      }
+      setSetupIssues(buildACPSetupIssues(normalizeACPHealthStatus(await res.json())))
+    } catch (err) {
+      setSetupIssues(
+        buildACPSetupIssues(
+          null,
+          err instanceof Error ? err.message : "Failed to reach ACP health"
+        )
+      )
+    } finally {
+      setSetupLoading(false)
+    }
+  }, [buildRequestUrl, connectionConfig])
 
   const fetchProjects = useCallback(async () => {
     if (!apiBase) return
@@ -268,6 +355,11 @@ export const AgentTasksPage: React.FC = () => {
     if (!connectionConfig) return
     void fetchProjects()
   }, [connectionConfig, fetchProjects])
+
+  useEffect(() => {
+    if (!connectionConfig) return
+    void fetchACPReadiness()
+  }, [connectionConfig, fetchACPReadiness])
 
   useEffect(() => {
     if (connectionConfig && selectedProjectId !== null) {
@@ -379,6 +471,27 @@ export const AgentTasksPage: React.FC = () => {
     }
   }
 
+  const handleInspectTask = async (taskId: number) => {
+    if (!apiBase) return
+    setTaskDetailLoading(true)
+    setError(null)
+    try {
+      const headers = await getHeaders()
+      const res = await fetch(`${apiBase}/tasks/${taskId}`, { headers })
+      await ensureOrchestrationResponse(res)
+      const data = await res.json()
+      setTaskDetail(data as TaskDetailItem)
+    } catch (err) {
+      if (isUnsupportedError(err)) {
+        markUnsupported()
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load task diagnostics")
+      }
+    } finally {
+      setTaskDetailLoading(false)
+    }
+  }
+
   const handleDeleteProject = async (projectId: number) => {
     try {
       const headers = await getHeaders()
@@ -407,13 +520,41 @@ export const AgentTasksPage: React.FC = () => {
       {isUnsupported && (
         <Alert
           type="warning"
-          title={AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE}
-          description={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
+          message={AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE}
+          description={
+            <AgentTasksSetupDescription
+              body={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
+              issues={[
+                {
+                  code: "orchestration_routes_missing",
+                  title: "Agent task routes are missing",
+                  description: "Upgrade or enable the agent orchestration API before creating tasks."
+                }
+              ]}
+            />
+          }
+          showIcon
+        />
+      )}
+      {!isUnsupported && setupIssues.length > 0 && (
+        <Alert
+          type="warning"
+          message="ACP setup needs attention"
+          description={
+            <AgentTasksSetupDescription
+              body={
+                setupLoading
+                  ? "Checking ACP setup state..."
+                  : "Resolve these ACP setup items before dispatching production task runs."
+              }
+              issues={setupIssues}
+            />
+          }
           showIcon
         />
       )}
       {error && (
-        <Alert type="error" title={error} closable onClose={() => setError(null)} />
+        <Alert type="error" message={error} closable onClose={() => setError(null)} />
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -559,6 +700,7 @@ export const AgentTasksPage: React.FC = () => {
                   allTasks={tasks}
                   onDispatchRun={handleDispatchRun}
                   onReview={handleSubmitReview}
+                  onInspectTask={handleInspectTask}
                 />
               ))}
             </div>
@@ -641,6 +783,207 @@ export const AgentTasksPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="Task diagnostics"
+        open={Boolean(taskDetail) || taskDetailLoading}
+        onCancel={() => setTaskDetail(null)}
+        footer={null}
+        width={820}
+      >
+        {taskDetailLoading ? (
+          <div className="flex justify-center py-8">
+            <Spin />
+          </div>
+        ) : taskDetail ? (
+          <TaskDiagnostics task={taskDetail} />
+        ) : null}
+      </Modal>
+    </div>
+  )
+}
+
+const AgentTasksSetupDescription: React.FC<{
+  body: string
+  issues: ACPSetupIssue[]
+}> = ({ body, issues }) => (
+  <div className="space-y-3">
+    <div>{body}</div>
+    <ul className="m-0 space-y-2 pl-4">
+      {issues.map((issue) => (
+        <li key={issue.code}>
+          <div className="font-medium">{issue.title}</div>
+          <div className="text-sm">{issue.description}</div>
+        </li>
+      ))}
+    </ul>
+    <div className="flex flex-wrap gap-2">
+      <Button
+        size="small"
+        icon={<ExternalLink className="h-3 w-3" />}
+        onClick={() => navigateOptionRoute("/agents")}
+      >
+        Open Agent Registry
+      </Button>
+      <Button
+        size="small"
+        icon={<ExternalLink className="h-3 w-3" />}
+        onClick={() => navigateOptionRoute("/acp-playground")}
+      >
+        Open ACP Playground
+      </Button>
+    </div>
+  </div>
+)
+
+const TaskDiagnostics: React.FC<{ task: TaskDetailItem }> = ({ task }) => {
+  const runs = task.runs ?? []
+  const reviews = task.reviews ?? []
+  const runReviewFeedback = new Set(
+    runs
+      .map((run) => run.review_decision?.feedback_preview)
+      .filter((feedback): feedback is string => Boolean(feedback))
+  )
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">Task</div>
+        <div className="text-base font-medium">{task.title}</div>
+        <div className="mt-1 flex flex-wrap gap-2">
+          <Tag color={STATUS_COLORS[task.status] ?? "default"}>{task.status}</Tag>
+          <Tag>#{task.id}</Tag>
+          <Tag>
+            Reviews: {task.review_count}/{task.max_review_attempts}
+          </Tag>
+        </div>
+      </div>
+
+      {runs.length === 0 ? (
+        <Empty description="No runs recorded for this task" />
+      ) : (
+        <div className="space-y-3">
+          {runs.map((run) => (
+            <RunDiagnostics key={run.id} run={run} />
+          ))}
+        </div>
+      )}
+
+      {reviews.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Reviews</div>
+          {reviews.map((review, index) => (
+            <div key={`${review.reviewer || "review"}-${index}`} className="rounded border border-border p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Tag color={review.approved ? "success" : "error"}>
+                  {review.approved ? "Approved" : "Rejected"}
+                </Tag>
+                {review.reviewer && <span>{review.reviewer}</span>}
+              </div>
+              {review.feedback && !runReviewFeedback.has(review.feedback) && (
+                <div className="mt-2 text-muted-foreground">{review.feedback}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const openRunSessionRoute = (run: RunItem, view?: string) => {
+  const sessionId = run.session?.session_id || run.session_id
+  if (!sessionId) return
+  const params = new URLSearchParams({ session: sessionId })
+  if (view) params.set("view", view)
+  navigateOptionRoute(`/acp-playground?${params.toString()}`)
+}
+
+const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
+  const sessionId = run.session?.session_id || run.session_id
+  const failureContext = run.failure_context
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">Run #{run.id}</span>
+          <Tag color={run.status === "completed" ? "success" : run.status === "failed" ? "error" : "processing"}>
+            {run.status}
+          </Tag>
+          {run.agent_type && <Tag>{run.agent_type}</Tag>}
+        </div>
+        {sessionId && <span className="text-xs text-muted-foreground">{sessionId}</span>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+        <span>{run.history?.event_count ?? 0} events</span>
+        <span>{run.history?.audit_event_count ?? 0} audit</span>
+        <span>{run.history?.artifact_count ?? 0} artifacts</span>
+        <span>{run.history?.diagnostic_count ?? 0} diagnostics</span>
+      </div>
+
+      {failureContext && (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+          {failureContext.reason_code && (
+            <div className="font-medium">{failureContext.reason_code}</div>
+          )}
+          {failureContext.message && <div>{failureContext.message}</div>}
+        </div>
+      )}
+
+      {!failureContext?.message && run.error && (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+          {run.error}
+        </div>
+      )}
+
+      {run.result_summary && (
+        <div className="mt-3 text-sm">{run.result_summary}</div>
+      )}
+      {run.history?.result?.preview && (
+        <div className="mt-3 text-sm text-muted-foreground">{run.history.result.preview}</div>
+      )}
+      {run.review_decision?.feedback_preview && (
+        <div className="mt-3 text-sm">{run.review_decision.feedback_preview}</div>
+      )}
+
+      {sessionId && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="small"
+            icon={<ExternalLink className="h-3 w-3" />}
+            onClick={() => openRunSessionRoute(run)}
+          >
+            Open session
+          </Button>
+          {run.session?.links?.diagnostics && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => openRunSessionRoute(run, "diagnostics")}
+            >
+              Open diagnostics
+            </Button>
+          )}
+          {run.session?.links?.artifacts && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => openRunSessionRoute(run, "artifacts")}
+            >
+              Open artifacts
+            </Button>
+          )}
+          {run.session?.links?.audit && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => openRunSessionRoute(run, "audit")}
+            >
+              Open audit
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -650,7 +993,8 @@ const TaskCard: React.FC<{
   allTasks: TaskItem[]
   onDispatchRun: (taskId: number) => Promise<void>
   onReview: (taskId: number, approved: boolean) => Promise<void>
-}> = ({ task, allTasks, onDispatchRun, onReview }) => {
+  onInspectTask: (taskId: number) => Promise<void>
+}> = ({ task, allTasks, onDispatchRun, onReview, onInspectTask }) => {
   const depTask = task.dependency_id
     ? allTasks.find((t) => t.id === task.dependency_id)
     : null
@@ -687,6 +1031,13 @@ const TaskCard: React.FC<{
       </div>
 
       <div className="flex items-center gap-2">
+        <Button
+          size="small"
+          icon={<Search className="h-3 w-3" />}
+          onClick={() => void onInspectTask(task.id)}
+        >
+          Inspect
+        </Button>
         {task.status === "todo" && (
           <Button
             size="small"

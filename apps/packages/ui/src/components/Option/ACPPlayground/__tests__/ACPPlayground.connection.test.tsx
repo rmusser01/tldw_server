@@ -1,5 +1,6 @@
 import React from "react"
 import { render, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ACPPlayground } from "../index"
@@ -120,6 +121,21 @@ vi.mock("../ACPWorkspacePanel", () => ({
 }))
 
 describe("ACPPlayground canonical connection config", () => {
+  const renderPlayground = () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ACPPlayground />
+      </QueryClientProvider>
+    )
+  }
+
   beforeEach(() => {
     useACPSessionsStore.getState().reset()
     vi.clearAllMocks()
@@ -148,7 +164,7 @@ describe("ACPPlayground canonical connection config", () => {
   })
 
   it("hydrates ACP sessions with the canonical web config instead of stale legacy storage values", async () => {
-    render(<ACPPlayground />)
+    renderPlayground()
 
     await waitFor(async () => {
       expect(acpMocks.constructedConfigs[0]?.serverUrl).toBe("http://127.0.0.1:8000")

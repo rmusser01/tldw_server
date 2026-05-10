@@ -243,7 +243,15 @@ class _WFRecurringScheduler:
         offset = 0
         schedules: list[WorkflowSchedule] = []
         while True:
-            page = db.list_all_schedules(user_id=None, limit=page_size, offset=offset)
+            if hasattr(db, "list_all_schedules"):
+                page = db.list_all_schedules(user_id=None, limit=page_size, offset=offset)
+            else:
+                page = db.list_schedules(
+                    tenant_id="default",
+                    user_id=None,
+                    limit=page_size,
+                    offset=offset,
+                )
             schedules.extend(page)
             if len(page) < page_size:
                 return schedules
@@ -461,7 +469,13 @@ class _WFRecurringScheduler:
 
         db = self._get_db(user_id)
         s = db.get_schedule(schedule_id)
-        if not s or not s.enabled:
+        if not s:
+            return
+        if not s.enabled:
+            try:
+                db.set_history(schedule_id, last_status="skipped_disabled")
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: failed to set skipped status for ACP schedule {schedule_id}: {e}")
             return
 
         # Record last_run_at and pending status

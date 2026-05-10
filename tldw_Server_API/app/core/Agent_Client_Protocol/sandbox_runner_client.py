@@ -451,6 +451,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
         workspace_id: str | None = None,
         workspace_group_id: str | None = None,
         scope_snapshot_id: str | None = None,
+        session_env: dict[str, str] | None = None,
     ) -> str:
         if not self.config.enabled:
             raise ACPResponseError("ACP sandbox mode is not enabled")
@@ -529,11 +530,15 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
                 ssh_key_priv, ssh_key_pub = self._generate_ssh_keypair()
                 ssh_port = await self._allocate_ssh_port()
 
+            merged_agent_env = {
+                **dict(self.config.agent_env or {}),
+                **dict(session_env or {}),
+            }
             env = {
                 "ACP_SSH_USER": self.config.ssh_user,
                 "ACP_AGENT_COMMAND": self.config.agent_command,
                 "ACP_AGENT_ARGS_JSON": json.dumps(self.config.agent_args),
-                "ACP_AGENT_ENV_JSON": json.dumps(self.config.agent_env),
+                "ACP_AGENT_ENV_JSON": json.dumps(merged_agent_env),
                 "ACP_WORKSPACE_ROOT": "/workspace",
                 "ACP_RUNTIME_HOME": "/workspace/.acp-home",
             }
@@ -634,6 +639,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
                     "cwd": "/workspace",
                     "mcpServers": mcp_servers or [],
                     "agentType": agent_type,
+                    **({"env": dict(session_env)} if session_env else {}),
                 },
             )
             session_id = (session_new.result or {}).get("sessionId")

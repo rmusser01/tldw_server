@@ -572,12 +572,15 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         mcp_servers: list[dict[str, Any]] | None = None,
         agent_type: str | None = None,
         user_id: int | None = None,
+        session_env: dict[str, str] | None = None,
     ) -> str:
         params: dict[str, Any] = {"cwd": cwd}
         if mcp_servers:
             params["mcpServers"] = mcp_servers
         if agent_type:
             params["agentType"] = agent_type
+        if session_env:
+            params["env"] = dict(session_env)
         response = await self._client.call("session/new", params)
         result = response.result or {}
         session_id = result.get("sessionId")
