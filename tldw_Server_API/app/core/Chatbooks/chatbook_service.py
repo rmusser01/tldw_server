@@ -81,6 +81,10 @@ from .import_adapters.openwebui import (
     load_openwebui_export,
     preview_openwebui_export,
 )
+from .import_adapters.openwebui_db import (
+    extract_openwebui_db_user,
+    preview_openwebui_db as build_openwebui_db_preview,
+)
 
 _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ArchiveError,
@@ -1816,6 +1820,7 @@ class ChatbookService:
         async_mode: bool = False,
         request_id: str | None = None,
         source_format: str = "chatbook",
+        selected_openwebui_user_id: str | None = None,
     ) -> tuple[bool, str, str | dict[str, Any] | None]:
         """
         Import a chatbook.
@@ -1828,6 +1833,7 @@ class ChatbookService:
             import_media: Import media files (not supported yet)
             import_embeddings: Import embeddings (not supported yet)
             async_mode: Run as background job
+            selected_openwebui_user_id: Selected OpenWebUI source user id for DB imports
 
         Returns:
             Tuple of (success, message, result) where result is:
@@ -1869,14 +1875,16 @@ class ChatbookService:
             ), None
 
         source_format_value = getattr(source_format, "value", str(source_format or "chatbook")).strip().lower()
-        if source_format_value not in {"chatbook", "openwebui_json"}:
+        if source_format_value not in {"chatbook", "openwebui_json", "openwebui_db"}:
             return False, f"Unsupported import source format: {source_format}", None
 
-        if source_format_value == "openwebui_json":
+        if source_format_value in {"openwebui_json", "openwebui_db"}:
             if content_selections:
-                return False, "OpenWebUI JSON imports do not support content selections; all valid chats are imported.", None
+                return False, "OpenWebUI imports do not support content selections; all valid chats are imported.", None
             if import_media or import_embeddings:
-                return False, "OpenWebUI JSON imports do not support media or embedding import options.", None
+                return False, "OpenWebUI imports do not support media or embedding import options.", None
+        if source_format_value == "openwebui_db" and not (selected_openwebui_user_id or "").strip():
+            return False, "selected_openwebui_user_id is required for OpenWebUI DB imports", None
 
         # Reject explicit requests for unsupported content types
         if content_selections:
@@ -1899,7 +1907,7 @@ class ChatbookService:
                 ), None
 
         try:
-            if source_format_value == "openwebui_json":
+            if source_format_value in {"openwebui_json", "openwebui_db"}:
                 resolved_path = self._resolve_import_upload_path(file_path)
             else:
                 resolved_path = self._resolve_import_archive_path(file_path)
@@ -1924,6 +1932,7 @@ class ChatbookService:
                     "path": file_token,
                     "file_token": file_token,
                     "source_format": source_format_value,
+                    "selected_openwebui_user_id": selected_openwebui_user_id,
                     "import_media": import_media,
                     "import_embeddings": import_embeddings,
                     "conflict_resolution": str(conflict_resolution.value if hasattr(conflict_resolution, 'value') else conflict_resolution),
@@ -1960,6 +1969,7 @@ class ChatbookService:
                         "chatbooks_job_id": job_id,
                         "file_token": file_token,
                         "source_format": source_format_value,
+                        "selected_openwebui_user_id": selected_openwebui_user_id,
                         "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in (content_selections or {}).items()},
                         "conflict_resolution": conflict_resolution.value if hasattr(conflict_resolution, 'value') else str(conflict_resolution),
                         "prefix_imported": bool(prefix_imported),
@@ -2006,6 +2016,14 @@ class ChatbookService:
                     str(resolved_path),
                     conflict_resolution,
                     prefix_imported,
+                )
+            if source_format_value == "openwebui_db":
+                return await asyncio.to_thread(
+                    self.import_openwebui_db,
+                    str(resolved_path),
+                    selected_user_id=str(selected_openwebui_user_id),
+                    conflict_resolution=conflict_resolution,
+                    prefix_imported=prefix_imported,
                 )
             # Run synchronously (wrapped in executor for async compatibility)
             # Return (success, message, structured sync import result)
@@ -2359,6 +2377,21 @@ class ChatbookService:
             logger.warning(f"OpenWebUI preview rejected file path: {exc}")
             return None, "Invalid or potentially malicious import file"
 
+    def preview_openwebui_db(self, file_path: str) -> tuple[dict[str, Any] | None, str | None]:
+        """Preview an OpenWebUI SQLite database file without writing to the database."""
+        try:
+            resolved_path = self._resolve_import_upload_path(file_path)
+            preview = build_openwebui_db_preview(
+                resolved_path,
+                duplicate_lookup=self._openwebui_duplicate_exists,
+            )
+            return preview.to_dict(), None
+        except ValueError as exc:
+            return None, str(exc)
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(f"OpenWebUI DB preview rejected file path: {exc}")
+            return None, "Invalid or potentially malicious import file"
+
     @staticmethod
     def _openwebui_timestamp_to_iso(value: Any) -> tuple[str, str | None]:
         """Convert OpenWebUI timestamps to UTC ISO strings."""
@@ -2642,6 +2675,185 @@ class ChatbookService:
             result["failed_chats"] += parsed.malformed_chat_count
 
         return True, "OpenWebUI import completed", result
+
+    def import_openwebui_db(
+        self,
+        file_path: str,
+        *,
+        selected_user_id: str,
+        conflict_resolution: ConflictResolution | str | None = None,
+        prefix_imported: bool = False,
+    ) -> tuple[bool, str, dict[str, Any] | None]:
+        """Synchronously import one selected user from an OpenWebUI SQLite database."""
+        if isinstance(conflict_resolution, str):
+            try:
+                conflict_resolution = ConflictResolution(conflict_resolution)
+            except (ValueError, KeyError):
+                conflict_resolution = ConflictResolution.SKIP
+        elif conflict_resolution is None:
+            conflict_resolution = ConflictResolution.SKIP
+
+        if conflict_resolution not in {ConflictResolution.SKIP, ConflictResolution.RENAME}:
+            return False, "OpenWebUI imports support only skip or rename conflict handling.", None
+        if not (selected_user_id or "").strip():
+            return False, "selected_user_id is required for OpenWebUI database imports.", None
+
+        fallback_character_id = self._get_fallback_character_id()
+        if fallback_character_id is None:
+            return False, "OpenWebUI import requires at least one fallback character.", None
+
+        try:
+            resolved_path = self._resolve_import_upload_path(file_path)
+            extracted = extract_openwebui_db_user(
+                resolved_path,
+                selected_user_id=selected_user_id,
+            )
+        except ValueError as exc:
+            return False, str(exc), None
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(f"OpenWebUI DB import rejected file path: {exc}")
+            return False, "Invalid or potentially malicious import file", None
+
+        result = {
+            "selected_user_id": extracted.selected_user_id,
+            "selected_user_label": extracted.selected_user_label,
+            "imported_chats": 0,
+            "skipped_chats": 0,
+            "failed_chats": 0,
+            "imported_messages": 0,
+            "skipped_messages": 0,
+            "duplicate_chats": 0,
+            "warnings": list(extracted.warnings),
+        }
+
+        for chat in extracted.chats:
+            import_external_ref = chat.external_ref
+            conversation_id: str | None = None
+            chat_imported_messages = 0
+            chat_skipped_messages = 0
+            chat_warnings: list[str] = []
+            try:
+                existing = self.db.get_conversation_by_source_ref(
+                    "openwebui",
+                    import_external_ref,
+                    client_id=getattr(self.db, "client_id", None),
+                )
+                if existing:
+                    result["duplicate_chats"] += 1
+                    if conflict_resolution == ConflictResolution.SKIP:
+                        result["skipped_chats"] += 1
+                        continue
+                    import_external_ref = f"{chat.external_ref}#copy:{uuid4().hex[:8]}"
+
+                conversation_title = f"[Imported] {chat.title}" if prefix_imported else chat.title
+                if existing and conflict_resolution == ConflictResolution.RENAME:
+                    conversation_title = self._generate_openwebui_copy_title(conversation_title)
+
+                ordered_messages, order_warnings = self._ordered_openwebui_messages(chat)
+                chat_warnings.extend(order_warnings)
+                importable_messages = [
+                    message
+                    for message in ordered_messages
+                    if (message.role or "").lower() in {"user", "assistant"} and message.content.strip()
+                ]
+                skipped_for_role = len(ordered_messages) - len(importable_messages)
+                if skipped_for_role:
+                    chat_skipped_messages += skipped_for_role
+                    chat_warnings.append(
+                        f"OpenWebUI chat {chat.external_ref} skipped {skipped_for_role} unsupported or empty messages."
+                    )
+                if not importable_messages:
+                    result["failed_chats"] += 1
+                    result["skipped_messages"] += chat_skipped_messages
+                    result["warnings"].extend(chat_warnings)
+                    result["warnings"].append(f"OpenWebUI chat {chat.external_ref} has no importable messages.")
+                    continue
+
+                conversation_id = self.db.add_conversation(
+                    {
+                        "title": conversation_title,
+                        "character_id": fallback_character_id,
+                        "source": "openwebui",
+                        "external_ref": import_external_ref,
+                        "client_id": getattr(self.db, "client_id", None),
+                    }
+                )
+                if not conversation_id:
+                    result["failed_chats"] += 1
+                    result["skipped_messages"] += chat_skipped_messages
+                    result["warnings"].extend(chat_warnings)
+                    result["warnings"].append(f"OpenWebUI chat {chat.external_ref} could not create a conversation.")
+                    continue
+
+                if not self._store_openwebui_conversation_settings(conversation_id, chat, import_external_ref):
+                    raise DatabaseError(
+                        f"OpenWebUI chat {chat.external_ref} conversation metadata was not stored."
+                    )
+
+                message_id_map: dict[str, str] = {}
+                namespace = f"tldw-openwebui:{import_external_ref}"
+                for message in importable_messages:
+                    parent_message_id = None
+                    if message.parent_source_id:
+                        parent_message_id = message_id_map.get(message.parent_source_id)
+                        if parent_message_id is None:
+                            chat_warnings.append(
+                                f"OpenWebUI message {message.source_id} imported as root because its parent was not imported."
+                            )
+                    timestamp, timestamp_warning = self._openwebui_timestamp_to_iso(message.timestamp)
+                    if timestamp_warning:
+                        chat_warnings.append(f"{timestamp_warning} source_message_id={message.source_id}")
+                    message_id = str(uuid5(NAMESPACE_URL, f"{namespace}:{message.source_id}"))
+                    inserted_message_id = self.db.add_message(
+                        {
+                            "id": message_id,
+                            "conversation_id": conversation_id,
+                            "parent_message_id": parent_message_id,
+                            "sender": (message.role or "user").lower(),
+                            "content": message.content,
+                            "timestamp": timestamp,
+                            "client_id": getattr(self.db, "client_id", None),
+                        }
+                    )
+                    if not inserted_message_id:
+                        raise DatabaseError(
+                            f"OpenWebUI message {message.source_id} could not be stored."
+                        )
+                    stored_message_id = str(inserted_message_id)
+                    message_id_map[message.source_id] = stored_message_id
+                    chat_imported_messages += 1
+                    if not self.db.set_message_metadata_extra(
+                        stored_message_id,
+                        self._openwebui_message_metadata(message),
+                        merge=True,
+                    ):
+                        raise DatabaseError(
+                            f"OpenWebUI message {message.source_id} metadata was not stored."
+                        )
+
+                if chat_imported_messages == 0:
+                    self._rollback_openwebui_conversation(conversation_id, chat.external_ref, chat_warnings)
+                    result["failed_chats"] += 1
+                    result["skipped_messages"] += chat_skipped_messages
+                    result["warnings"].extend(chat_warnings)
+                    result["warnings"].append(
+                        f"OpenWebUI chat {chat.external_ref} imported no messages and was rolled back."
+                    )
+                    continue
+
+                result["imported_messages"] += chat_imported_messages
+                result["skipped_messages"] += chat_skipped_messages
+                result["warnings"].extend(chat_warnings)
+                result["imported_chats"] += 1
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                if conversation_id:
+                    self._rollback_openwebui_conversation(conversation_id, chat.external_ref, chat_warnings)
+                result["failed_chats"] += 1
+                result["skipped_messages"] += chat_skipped_messages
+                result["warnings"].extend(chat_warnings)
+                result["warnings"].append(f"OpenWebUI chat {chat.external_ref} failed to import: {exc}")
+
+        return True, "OpenWebUI database import completed", result
 
     def _openwebui_conversation_title_exists(self, title: str) -> bool:
         """Return whether an exact conversation title already exists for the current client."""

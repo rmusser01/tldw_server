@@ -45,6 +45,7 @@ class ChatbookImportSourceFormat(str, Enum):
     """Supported source formats for Chatbooks import surfaces."""
     CHATBOOK = "chatbook"
     OPENWEBUI_JSON = "openwebui_json"
+    OPENWEBUI_DB = "openwebui_db"
 
 
 class MediaQuality(str, Enum):
@@ -150,6 +151,10 @@ class ImportChatbookRequest(BaseModel):
     import_media: bool = Field(False, description="Import media files (not supported yet)")
     import_embeddings: bool = Field(False, description="Import embeddings (not supported yet)")
     async_mode: bool = Field(False, description="Run as background job")
+    selected_openwebui_user_id: Optional[str] = Field(
+        None,
+        description="Selected OpenWebUI source user id for database imports"
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -291,6 +296,30 @@ class OpenWebUIImportPreview(BaseModel):
     items: list[OpenWebUIPreviewChatItem] = Field(default_factory=list)
 
 
+class OpenWebUIDatabaseUserPreview(BaseModel):
+    """OpenWebUI database preview counts for one source user."""
+    source_user_id: str
+    display_label: str
+    email: Optional[str] = None
+    chat_count: int = Field(default=0, ge=0)
+    folder_count: int = Field(default=0, ge=0)
+    message_count: int = Field(default=0, ge=0)
+    branched_chat_count: int = Field(default=0, ge=0)
+    duplicate_chat_count: int = Field(default=0, ge=0)
+    archived_chat_count: int = Field(default=0, ge=0)
+    pinned_chat_count: int = Field(default=0, ge=0)
+    attachment_reference_count: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIDatabasePreview(BaseModel):
+    """OpenWebUI database import preview grouped by source user."""
+    user_count: int = Field(default=0, ge=0)
+    users: list[OpenWebUIDatabaseUserPreview] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class OpenWebUIImportResult(BaseModel):
     """OpenWebUI import result counts."""
     imported_chats: int = Field(default=0, ge=0)
@@ -300,6 +329,12 @@ class OpenWebUIImportResult(BaseModel):
     skipped_messages: int = Field(default=0, ge=0)
     duplicate_chats: int = Field(default=0, ge=0)
     warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIDatabaseImportResult(OpenWebUIImportResult):
+    """OpenWebUI database import result for a selected source user."""
+    selected_user_id: str
+    selected_user_label: str
 
 
 class CreateChatbookResponse(BaseModel):
@@ -324,6 +359,10 @@ class ImportChatbookResponse(BaseModel):
         None,
         description="Structured import result for OpenWebUI JSON sources"
     )
+    openwebui_db_result: Optional[OpenWebUIDatabaseImportResult] = Field(
+        None,
+        description="Structured import result for OpenWebUI database sources"
+    )
     warnings: Optional[list[str]] = Field(
         None,
         description="Validator and import warnings (sync imports only)"
@@ -335,6 +374,7 @@ class PreviewChatbookResponse(BaseModel):
     source_format: ChatbookImportSourceFormat = ChatbookImportSourceFormat.CHATBOOK
     manifest: Optional[ChatbookManifestResponse] = None
     openwebui_preview: Optional[OpenWebUIImportPreview] = None
+    openwebui_db_preview: Optional[OpenWebUIDatabasePreview] = None
     error: Optional[str] = None
 
 

@@ -204,7 +204,7 @@ git commit -m "Add OpenWebUI database import adapter"
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_chatbooks_openwebui_db_api.py`, existing Chatbooks API tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 2.1: Add failing schema/API tests
 
@@ -212,14 +212,14 @@ git commit -m "Add OpenWebUI database import adapter"
 - Create: `tldw_Server_API/tests/Chatbooks/test_chatbooks_openwebui_db_api.py`
 - Modify: `tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py` if existing validation coverage is a better fit.
 
-- [ ] Add endpoint tests:
+- [x] Add endpoint tests:
   - `/api/v1/chatbooks/preview` with `source_format=openwebui_db` accepts `.db` and does not call ZIP validation.
   - preview response includes `source_format="openwebui_db"` and `openwebui_db_preview`.
   - `/api/v1/chatbooks/import` with DB source and no `selected_openwebui_user_id` returns 400.
   - import passes selected user id, conflict strategy, prefix flag, and async flag to the service.
   - `.json` still maps only to `openwebui_json`; `.db` is rejected for `openwebui_json`.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -234,40 +234,40 @@ Expected: FAIL because schemas/endpoints do not know `openwebui_db`.
 - Modify: `tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
 
-- [ ] Add enum value `OPENWEBUI_DB = "openwebui_db"`.
-- [ ] Add `selected_openwebui_user_id: Optional[str]` to `ImportChatbookRequest`.
-- [ ] Add DB preview models:
+- [x] Add enum value `OPENWEBUI_DB = "openwebui_db"`.
+- [x] Add `selected_openwebui_user_id: Optional[str]` to `ImportChatbookRequest`.
+- [x] Add DB preview models:
   - `OpenWebUIDatabaseUserPreview`
   - `OpenWebUIDatabasePreview`
   - `OpenWebUIDatabaseImportResult`
-- [ ] Add `openwebui_db_preview` to `PreviewChatbookResponse`.
-- [ ] Add `openwebui_db_result` to `ImportChatbookResponse`.
-- [ ] Add `selected_openwebui_user_id: str | None = Form(None)` to `import_chatbook`.
-- [ ] Branch filename validation:
+- [x] Add `openwebui_db_preview` to `PreviewChatbookResponse`.
+- [x] Add `openwebui_db_result` to `ImportChatbookResponse`.
+- [x] Add `selected_openwebui_user_id: str | None = Form(None)` to `import_chatbook`.
+- [x] Branch filename validation:
   - chatbook -> `validate_filename`
   - JSON -> `validate_json_filename`
   - DB -> `validate_sqlite_filename`
-- [ ] For DB preview, save to temp, call `service.preview_openwebui_db`, always cleanup preview temp file.
-- [ ] For DB import, require selected user id before calling `service.import_chatbook`.
+- [x] For DB preview, save to temp, call `service.preview_openwebui_db`, always cleanup preview temp file.
+- [x] For DB import, require selected user id before calling `service.import_chatbook`.
 
 ### Task 2.3: Extend service dispatch
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
 
-- [ ] Add `selected_openwebui_user_id: str | None = None` parameter to `import_chatbook`.
-- [ ] Accept source formats `{"chatbook", "openwebui_json", "openwebui_db"}`.
-- [ ] For DB source:
+- [x] Add `selected_openwebui_user_id: str | None = None` parameter to `import_chatbook`.
+- [x] Accept source formats `{"chatbook", "openwebui_json", "openwebui_db"}`.
+- [x] For DB source:
   - reject content selections.
   - reject media/embedding import.
   - require selected user id.
   - resolve file using `_resolve_import_upload_path`, not archive path.
   - sync dispatch to `import_openwebui_db`.
   - async payload includes selected user id.
-- [ ] Add `preview_openwebui_db(file_path)` service method that resolves upload path and calls the adapter.
-- [ ] Add placeholder `import_openwebui_db(...)` if Stage 3 has not implemented import yet; tests in this stage can monkeypatch it.
+- [x] Add `preview_openwebui_db(file_path)` service method that resolves upload path and calls the adapter.
+- [x] Add `import_openwebui_db(...)` service method for selected-user DB imports; folder mirroring remains Stage 3.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -280,8 +280,8 @@ Expected: PASS.
 
 ### Task 2.4: Commit API dispatch slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py \

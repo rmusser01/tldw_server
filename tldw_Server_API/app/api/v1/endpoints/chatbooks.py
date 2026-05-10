@@ -527,6 +527,7 @@ async def import_chatbook(
     import_embeddings: bool | None = Form(None),
     async_mode: bool | None = Form(None),
     content_selections: str | None = Form(None),
+    selected_openwebui_user_id: str | None = Form(None),
     service: ChatbookService = Depends(get_chatbook_service),
     user: User = Depends(get_request_user),
     audit_service=Depends(get_audit_service_for_user),
@@ -562,11 +563,22 @@ async def import_chatbook(
             import_request.import_embeddings = import_embeddings
         if async_mode is not None:
             import_request.async_mode = async_mode
+        if selected_openwebui_user_id is not None:
+            import_request.selected_openwebui_user_id = selected_openwebui_user_id
         parsed_content_selections = _parse_import_content_selections_field(content_selections)
         if parsed_content_selections is not None:
             import_request.content_selections = parsed_content_selections
         elif import_request.content_selections is not None:
             import_request.content_selections = _coerce_import_content_selections(import_request.content_selections)
+
+        if (
+            import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_DB
+            and not (import_request.selected_openwebui_user_id or "").strip()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="selected_openwebui_user_id is required for OpenWebUI DB imports",
+            )
 
         # Initialize quota manager (DB-backed)
         quota_manager = QuotaManager(str(user.id), getattr(user, "tier", "free"), db=service.db)
@@ -613,6 +625,8 @@ async def import_chatbook(
         # Validate and sanitize filename for the selected source format.
         if import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
             valid, error, safe_filename = ChatbookValidator.validate_json_filename(file.filename)
+        elif import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_DB:
+            valid, error, safe_filename = ChatbookValidator.validate_sqlite_filename(file.filename)
         else:
             valid, error, safe_filename = ChatbookValidator.validate_filename(file.filename)
         if not valid:
@@ -684,6 +698,7 @@ async def import_chatbook(
             async_mode=import_request.async_mode,
             request_id=rid,
             source_format=import_request.source_format.value,
+            selected_openwebui_user_id=import_request.selected_openwebui_user_id,
         )
 
         if success:
@@ -736,6 +751,14 @@ async def import_chatbook(
                         message=message,
                         source_format=import_request.source_format,
                         openwebui_result=result_data,
+                        warnings=result_data.get("warnings") or [],
+                    )
+                if import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_DB:
+                    return ImportChatbookResponse(
+                        success=True,
+                        message=message,
+                        source_format=import_request.source_format,
+                        openwebui_db_result=result_data,
                         warnings=result_data.get("warnings") or [],
                     )
                 return ImportChatbookResponse(
@@ -831,6 +854,8 @@ async def preview_chatbook(
         # Validate and sanitize filename for the selected source format.
         if source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
             valid, error, safe_filename = ChatbookValidator.validate_json_filename(file.filename)
+        elif source_format == ChatbookImportSourceFormat.OPENWEBUI_DB:
+            valid, error, safe_filename = ChatbookValidator.validate_sqlite_filename(file.filename)
         else:
             valid, error, safe_filename = ChatbookValidator.validate_filename(file.filename)
         if not valid:
@@ -904,6 +929,25 @@ async def preview_chatbook(
                 source_format=source_format,
                 manifest=None,
                 openwebui_preview=preview_data,
+            )
+
+        if source_format == ChatbookImportSourceFormat.OPENWEBUI_DB:
+            preview_data, error = await asyncio.to_thread(service.preview_openwebui_db, str(temp_file))
+            try:
+                temp_file.unlink()
+            except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
+                logger.warning(f"Cleanup of preview temp file failed: path={temp_file}, user={user.id}, error={e}")
+                _safe_increment_metric(
+                    "app_warning_events_total",
+                    labels={"component": "chatbooks", "event": "preview_cleanup_failed"},
+                    error_context="chatbooks preview_cleanup_failed",
+                )
+            if preview_data is None:
+                raise HTTPException(status_code=400, detail=error or "Invalid OpenWebUI SQLite database")
+            return PreviewChatbookResponse(
+                source_format=source_format,
+                manifest=None,
+                openwebui_db_preview=preview_data,
             )
 
         # Preview chatbook
