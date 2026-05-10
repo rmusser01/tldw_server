@@ -1,3 +1,5 @@
+import { getDesignSystemState } from "@/design-system"
+
 export type WorkspaceStatusStripProps = {
   backendAvailable: boolean
   streaming: boolean
@@ -6,6 +8,8 @@ export type WorkspaceStatusStripProps = {
 
 const statusPillClass =
   "inline-flex min-h-[24px] items-center rounded-md border border-border bg-surface px-2 text-xs font-medium text-text"
+
+const READY_STATE_LABEL = getDesignSystemState("ready").label
 
 export const WorkspaceStatusStrip = ({
   backendAvailable,
@@ -16,7 +20,7 @@ export const WorkspaceStatusStrip = ({
     ? "Server unavailable"
     : streaming
       ? "Streaming"
-      : "Ready"
+      : READY_STATE_LABEL
 
   return (
     <footer
