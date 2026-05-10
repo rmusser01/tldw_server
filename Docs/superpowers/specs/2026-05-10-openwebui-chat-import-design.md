@@ -173,6 +173,13 @@ The default stays `chatbook` to preserve existing behavior. The UI should send `
 
 Because the existing Chatbooks preview/import routes are multipart upload endpoints, `source_format` should be passed as a multipart form field alongside `file` and the existing import options.
 
+Implementation should add the same option to the frontend API helpers:
+
+- `previewChatbook(file, { source_format })`
+- `importChatbook(file, { source_format, ...existingOptions })`
+
+The current preview helper uploads only the file, so OpenWebUI preview support requires a small client update as well as the endpoint change.
+
 The backend may later add `auto`, but v1 should not depend on fragile inference. A clear source selector gives better errors and avoids accidental JSON uploads being interpreted as another format.
 
 OpenWebUI preview/import responses should be explicit extensions of the existing Chatbooks response models rather than overloading the Chatbook manifest. Add optional source-specific fields while preserving the current Chatbook fields for archive imports:
@@ -210,6 +217,33 @@ ImportChatbookResponse
 - `duplicate_chats`
 - `warnings`
 
+To preserve existing clients, new response fields should be optional and default to the Chatbook path:
+
+- `source_format` defaults to `chatbook`
+- `openwebui_preview` defaults to `null`
+- `openwebui_result` defaults to `null`
+
+Do not make existing archive-preview consumers depend on OpenWebUI-specific fields.
+
+### Endpoint Branching And Validation
+
+The current Chatbooks preview/import endpoints validate uploaded files as ZIP archives before calling the service. OpenWebUI JSON must branch by `source_format` before any ZIP-specific validation runs.
+
+For `source_format=chatbook`:
+
+- keep the existing Chatbook filename validation
+- keep the existing archive magic/integrity/manifest validation
+
+For `source_format=openwebui_json`:
+
+- preserve the existing path traversal and safe-temp-directory checks
+- require a `.json` filename after path normalization
+- do not call the current ZIP-only `ChatbookValidator.validate_filename()` path unless it is first made source-format aware, because the current validator only allows `.zip`/`.chatbook` and rewrites unsupported extensions to `.zip`
+- do not call `ChatbookValidator.validate_zip_file()`
+- validate JSON structure through the OpenWebUI adapter after saving to the per-user temp directory
+
+This should be called out in implementation planning because otherwise the new UI can send a valid `.json` upload and the existing endpoint will reject it before the adapter sees it.
+
 ### Preview Flow
 
 For `source_format=chatbook`, keep the existing preview path unchanged.
@@ -225,6 +259,8 @@ For `source_format=openwebui_json`:
 7. Query existing conversations for duplicate `source=openwebui` and `external_ref`.
 8. Return a preview summary with counts and warnings.
 9. Clean up temp files according to the existing preview cleanup behavior.
+
+Duplicate lookup should be exposed through a small ChaCha conversation-store helper, for example `get_conversation_by_source_ref(source, external_ref, client_id, include_deleted=False)`, rather than scattering ad hoc SQL through the adapter or endpoint. The schema already has an index on `(source, external_ref)`, so the helper should be straightforward and keeps the design aligned with the repository's DB abstraction rule.
 
 Preview should report:
 
@@ -269,6 +305,8 @@ OpenWebUI imports should use the same Chatbooks import job infrastructure:
 
 The Jobs payload should include `source_format=openwebui_json` so the worker dispatches to the correct import path.
 
+The core Jobs worker must branch on `source_format` before resolving the file as a Chatbook archive. For OpenWebUI JSON, it should resolve the file from the same allowed import/temp roots but skip archive-only path naming and ZIP integrity checks.
+
 ## Data Mapping
 
 ### Conversation Mapping
@@ -284,9 +322,30 @@ Map fields as follows:
 | source format | `conversations.source = "openwebui"` |
 | current user | `conversations.client_id` |
 | fallback assistant | `conversations.character_id` or assistant identity required by current DB rules |
-| created timestamp | conversation metadata if native created timestamp cannot be preserved by current API |
-| updated timestamp | conversation metadata if native last-modified timestamp cannot be preserved by current API |
-| models/options/meta/pinned/folder_id | message/conversation metadata or import warnings |
+| created timestamp | namespaced conversation settings metadata |
+| updated timestamp | namespaced conversation settings metadata |
+| models/options/meta/pinned/folder_id | namespaced conversation settings metadata or import warnings |
+
+The current `add_conversation()` path sets `created_at` and `last_modified` itself. V1 should not change conversation schema or mutate those columns after insert just to preserve OpenWebUI timestamps. Preserve source timestamps under a namespaced metadata object instead.
+
+Recommended conversation metadata location:
+
+```text
+conversation_settings.settings_json.openwebui_import = {
+  "source": "openwebui",
+  "external_ref": "...",
+  "created_at_unix": 1700000000,
+  "updated_at_unix": 1700000005,
+  "models": [...],
+  "options": {...},
+  "meta": {...},
+  "pinned": false,
+  "folder_id": null,
+  "history_current_id": "..."
+}
+```
+
+If `conversation_settings` persistence fails, the import should keep the conversation and add a warning rather than fail the whole chat.
 
 If the OpenWebUI export lacks a clear chat ID, derive a stable external ref from the chat index plus a hash of the normalized chat object. This keeps duplicate detection deterministic for the same file.
 
@@ -319,6 +378,8 @@ Map fields as follows:
 | `timestamp` | `messages.timestamp` |
 | `model`, `done`, `context`, source IDs, raw unsupported refs | message metadata |
 
+OpenWebUI timestamps are documented as Unix seconds. Convert valid Unix timestamps to UTC ISO-8601 strings before passing them to `add_message()`. Missing or invalid timestamps should fall back to import time with a warning count, not raw integers.
+
 Role handling:
 
 - `user` -> `user`
@@ -334,6 +395,25 @@ The import namespace prevents message ID collisions:
 - For `rename`, generate a new import-copy namespace after the new tldw conversation ID or a generated import-copy UUID is known.
 - Store the original OpenWebUI message ID in metadata for both cases.
 - Never reuse the same deterministic tldw message IDs for a duplicate-copy import.
+
+Use UUID-shaped deterministic IDs, such as UUIDv5 over `(namespace, source_message_id)`, rather than inserting raw OpenWebUI IDs directly. This keeps IDs compatible with existing tldw expectations while retaining stable parent mapping.
+
+Recommended message metadata location:
+
+```text
+message_metadata.extra.openwebui_import = {
+  "source_message_id": "...",
+  "source_parent_id": "...",
+  "source_children_ids": [...],
+  "model": "...",
+  "done": true,
+  "context": null,
+  "attachment_refs": [...],
+  "raw_unsupported_keys": [...]
+}
+```
+
+Do not store raw full message content redundantly in metadata.
 
 ### Branch Preservation
 
@@ -418,6 +498,7 @@ Hard failures:
 
 - invalid filename or unsafe path
 - non-JSON file for `openwebui_json`
+- JSON upload rejected by archive-only validation, which indicates an implementation bug rather than a user data problem
 - malformed JSON
 - top-level value is not an array
 - file exceeds configured upload limits
