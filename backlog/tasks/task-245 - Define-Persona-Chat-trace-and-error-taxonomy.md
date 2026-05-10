@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 21:03'
-updated_date: '2026-05-10 21:11'
+updated_date: '2026-05-10 21:16'
 labels:
   - persona
   - chat
@@ -15,6 +15,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
+  - 'https://github.com/rmusser01/tldw_server/issues/1391'
   - 'https://github.com/rmusser01/tldw_server/issues/1543'
   - 'https://github.com/rmusser01/tldw_server/issues/1546'
   - 'https://github.com/rmusser01/tldw_server/pull/1545'
@@ -30,7 +31,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Define Slice 1 for Stage 2 Persona Chat quality work from GitHub issue #1546. Produce a repo-grounded trace/error taxonomy artifact for ordinary persona-backed chat in the Buddy/Persona system. The artifact must document whether real traces are available or synthetic fixtures are the right first pass, define human-readable failure labels with trigger conditions and expected evidence, map labels to deterministic fixture checks, optional future judge candidates, or human-only review, and identify the minimum deterministic fixture set for the next PR-sized implementation slice. Keep Buddy/Live renderer, VN/CYOA, external benchmark adoption, and LLM-as-judge implementation out of scope.
+Define Slice 1 for Stage 2 Persona Chat quality work from GitHub issue #1546. Produce a repo-grounded trace/error taxonomy artifact for ordinary persona-backed chat in the Buddy/Persona system. The artifact must document whether real traces are available or synthetic fixtures are the right first pass, define human-readable failure labels with trigger conditions and expected evidence, map labels to deterministic fixture checks, optional future judge candidates, or human-only review, and identify the minimum deterministic fixture set for the next PR-sized implementation slice. Keep Buddy/Live renderer, VN/CYOA, external benchmark adoption, and LLM-as-judge implementation out of scope. Tracker ownership stays explicit: #1510 remains Buddy/Live reliability, while VN/CYOA work remains tracked under #1391.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -60,6 +61,12 @@ Created Docs/Reviews/PERSONA_CHAT_TRACE_ERROR_TAXONOMY_2026_05_10.md. Rechecked 
 Verification: taxonomy doc marker scan returned no matches and git diff --check passed. Runtime tests were not run because this slice changes docs/Backlog only. Bandit is not applicable because no Python files changed.
 
 GitHub packaging: opened PR #1551 for the trace/error taxonomy artifact, opened follow-up issue #1552 for deterministic Persona Chat quality fixtures, and linked both from parent tracker #1546.
+
+PR #1551 review-fix pass started: verify and address unresolved taxonomy comments for case-id casing, fixture label mismatch, undefined PC-UX-001 label, chat.py evidence line, and tracker-boundary wording.
+
+Review edits applied: canonicalized fixture case_id casing to PC-CASE-###, aligned the fixture example labels with PC-CASE-001, updated the prompt-reveal evidence line to chat.py:3375, defined PC-UX-001, and restated #1510/#1391 tracker boundaries in the taxonomy and task.
+
+Review verification: git diff --check passed; rg found no stale lowercase pc-case ids or chat.py:3387 evidence reference; label consistency script reported missing= with no undefined labels. Bandit remains skipped because this review pass changed docs and Backlog metadata only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -68,6 +75,8 @@ GitHub packaging: opened PR #1551 for the trace/error taxonomy artifact, opened 
 Defined the Persona Chat trace/error taxonomy for #1546 with synthetic-fixture rationale, 20 representative cases, failure labels, deterministic fixture surfaces, and the next deterministic fixture task.
 
 Packaged the taxonomy artifact in PR #1551 and opened follow-up issue #1552 for deterministic fixture coverage.
+
+PR #1551 review follow-up fixed the taxonomy comments by canonicalizing case-id casing, aligning example labels, defining PC-UX-001, correcting the chat.py evidence line, and restating #1510/#1391 tracker boundaries.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

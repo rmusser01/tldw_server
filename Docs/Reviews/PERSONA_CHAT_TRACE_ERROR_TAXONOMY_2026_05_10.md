@@ -4,7 +4,7 @@ Date checked: 2026-05-10
 
 ## Summary
 
-This artifact defines Slice 1 for Stage 2 Persona Chat quality work from [#1546](https://github.com/rmusser01/tldw_server/issues/1546). It covers ordinary persona-backed chat in the Buddy/Persona system, not Persona Live rendering, VN/CYOA runtime, external benchmark adoption, or LLM-as-judge implementation.
+This artifact defines Slice 1 for Stage 2 Persona Chat quality work from [#1546](https://github.com/rmusser01/tldw_server/issues/1546). It covers ordinary persona-backed chat in the Buddy/Persona system, not Persona Live rendering, VN/CYOA runtime, external benchmark adoption, or LLM-as-judge implementation. Tracker ownership stays explicit: Buddy/Live reliability remains under [#1510](https://github.com/rmusser01/tldw_server/issues/1510), while VN/CYOA work remains under [#1391](https://github.com/rmusser01/tldw_server/issues/1391).
 
 The current codebase has enough deterministic runtime seams to start fixture work, but it does not contain an anonymized corpus of real ordinary persona-chat traces suitable for review. The first implementation slice should therefore use synthetic fixture traces that are explicitly modeled on current contracts and existing tests. Real user-owned local databases should not be mined for this work without a separate privacy and consent path.
 
@@ -42,7 +42,7 @@ Synthetic fixture records should carry this minimum shape:
 
 ```json
 {
-  "case_id": "pc-case-001",
+  "case_id": "PC-CASE-001",
   "assistant_kind": "persona",
   "assistant_id": "garden-helper",
   "persona_memory_mode": "read_only",
@@ -59,9 +59,11 @@ Synthetic fixture records should carry this minimum shape:
     "selected_exemplar_ids": ["boundary-1", "style-1"],
     "rejected_exemplar_reasons": {}
   },
-  "labels": ["PC-BOUND-001"]
+  "labels": ["PC-ID-001", "PC-MEM-001"]
 }
 ```
+
+Case ids use the canonical uppercase `PC-CASE-###` format so fixture records can be matched case-sensitively against the representative case table.
 
 Do not store raw private memories, raw production prompts, API keys, secrets, or unredacted external context in fixture records.
 
@@ -79,7 +81,7 @@ These 20 cases are synthetic fixture candidates grounded in current source and t
 | PC-CASE-006 | Reopen a persona chat when persona profile lookup fails after metadata succeeds. | `useServerChatLoader.ts:775`, `:794` | `PC-REST-004`, `PC-UX-001` | Deterministic plus human review |
 | PC-CASE-007 | Run ordinary chat with persona profile while source character is deleted. | `test_persona_backed_chat_conversations.py:520` | `PC-ID-002` | Deterministic |
 | PC-CASE-008 | Prompt-reveal attempt with a matching boundary/style exemplar. | `test_persona_backed_chat_conversations.py:253` | `PC-BOUND-001`, `PC-EX-002` | Deterministic plus judge-candidate |
-| PC-CASE-009 | Prompt-reveal attempt with no enabled boundary exemplar. | `chat.py:3387` | `PC-EX-002`, `PC-BOUND-001` | Deterministic plus judge-candidate |
+| PC-CASE-009 | Prompt-reveal attempt with no enabled boundary exemplar. | `chat.py:3375` | `PC-EX-002`, `PC-BOUND-001` | Deterministic plus judge-candidate |
 | PC-CASE-010 | Style exemplar is selected but response copies exemplar wording too closely. | `exemplar_prompt_assembly.py:92` | `PC-EX-001` | Judge-candidate plus human review |
 | PC-CASE-011 | Wrong-persona or disabled exemplar is present in DB input. | `exemplar_retrieval.py:88`, `test_exemplar_retrieval.py:76` | `PC-EX-003`, `PC-EX-004` | Deterministic |
 | PC-CASE-012 | Multiple boundary exemplars match, only one should be selected. | `exemplar_retrieval.py:134`, `test_exemplar_retrieval.py:119` | `PC-EX-005` | Deterministic |
@@ -117,6 +119,7 @@ These 20 cases are synthetic fixture candidates grounded in current source and t
 | PC-REST-002 | Restore memory mode mismatch | Reopening or reusing a persona chat changes `persona_memory_mode`. | Server metadata, local state, and settings selector disagree. | Deterministic |
 | PC-REST-003 | Scope mismatch | Workspace-scoped persona chat is created, restored, or reused in the wrong scope. | Chat scope fields or create/get options do not match expected workspace/global scope. | Deterministic |
 | PC-REST-004 | Missing persona fallback opacity | Profile lookup fails on restore and UI falls back to generic Persona without surfacing enough diagnostic context. | Profile request failure plus fallback assistant presentation without clear user-facing state. | Human review with deterministic setup |
+| PC-UX-001 | Restore recovery guidance gap | Profile lookup fails after metadata succeeds and the user-facing state does not explain whether to retry, reselect the persona, or continue with a generic fallback. | Restore failure state, fallback copy, available action affordances, and any logged diagnostic reason. | Human review with deterministic setup |
 | PC-CTX-001 | Effective context opacity | User or reviewer cannot tell which of profile, exemplars, memory, chat history, RAG/media context, or no extra context shaped the reply. | No effective-context summary or trace ids for active context sources. | Human review first |
 | PC-RAG-001 | Persona versus grounding confusion | Factual/RAG grounding quality and persona-consistency quality cannot be separated in trace review. | Response blends persona tone and factual claims without source/context attribution. | Human review first |
 | PC-TEL-001 | Character-shaped telemetry | Persona-backed chat emits persona-style metrics without assistant-kind/id labels or collapses to `character_id=none`. | Metrics labels omit persona identity or aggregate persona chat into character-only buckets. | Deterministic |
