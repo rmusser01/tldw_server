@@ -156,6 +156,65 @@ async def test_capabilities_returns_active_and_draft_pack_summaries(chacha_db) -
 
 
 @pytest.mark.asyncio
+async def test_library_items_lists_reference_backed_personal_library_entries(chacha_db) -> None:
+    db, db_path = chacha_db
+    source_persona_id = _create_persona(db, name="Source Persona")
+    source_pack = db.create_persona_visual_pack(
+        persona_id=source_persona_id,
+        user_id="1",
+        title="Reusable Source Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+    item = db.upsert_persona_visual_library_item(
+        user_id="1",
+        source_persona_id=source_persona_id,
+        source_pack_id=source_pack["id"],
+        title="Reusable Library Item",
+        notes="Use this across personas",
+        tags=["Idle", "Reusable"],
+    )
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    result = await module.execute_tool(
+        "persona_visuals.library_items",
+        {},
+        context=_context(db_path),
+    )
+
+    assert result["count"] == 1
+    assert result["items"] == [
+        {
+            "id": item["id"],
+            "title": "Reusable Library Item",
+            "notes": "Use this across personas",
+            "tags": ["idle", "reusable"],
+            "source_persona_id": source_persona_id,
+            "source_pack_id": source_pack["id"],
+            "source_persona_name": "Source Persona",
+            "source_pack_title": "Reusable Source Pack",
+            "source_pack_version": source_pack["version"],
+            "source_current_version": source_pack["version"],
+            "source_available": True,
+            "source_changed": False,
+            "version": item["version"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_library_items_rejects_out_of_range_offset(chacha_db) -> None:
+    _db, db_path = chacha_db
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
+        await module.execute_tool(
+            "persona_visuals.library_items",
+            {"offset": 1_000_001},
+            context=_context(db_path),
+        )
+
+
+@pytest.mark.asyncio
 async def test_trigger_state_requires_context_rejects_unknown_states_and_clamps_duration(chacha_db) -> None:
     db, db_path = chacha_db
     persona_id = _create_persona(db)
@@ -240,6 +299,94 @@ async def test_draft_tools_mutate_drafts_without_activating(chacha_db) -> None:
     assert updated["pack"]["status"] == "draft"
     assert updated["pack"]["version"] == created["pack"]["version"] + 1
     assert db.get_active_persona_visual_pack(persona_id=persona_id, user_id="1") is None
+
+
+@pytest.mark.asyncio
+async def test_use_library_item_creates_target_draft_without_activation(chacha_db) -> None:
+    db, db_path = chacha_db
+    source_persona_id = _create_persona(db, name="Source Persona")
+    target_persona_id = _create_persona(db, name="Target Persona")
+    source_pack = db.create_persona_visual_pack(
+        persona_id=source_persona_id,
+        user_id="1",
+        title="Reusable Source Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+    item = db.upsert_persona_visual_library_item(
+        user_id="1",
+        source_persona_id=source_persona_id,
+        source_pack_id=source_pack["id"],
+        title="Reusable Library Item",
+    )
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    result = await module.execute_tool(
+        "persona_visuals.use_library_item",
+        {"item_id": item["id"], "target_persona_id": target_persona_id, "title": "Target Draft"},
+        context=_context(db_path),
+    )
+
+    assert result["library_item_id"] == item["id"]
+    assert result["review_required"] is True
+    assert result["pack"]["persona_id"] == target_persona_id
+    assert result["pack"]["title"] == "Target Draft"
+    assert result["pack"]["status"] == "draft"
+    assert result["pack"]["parent_pack_id"] == source_pack["id"]
+    assert db.get_active_persona_visual_pack(persona_id=target_persona_id, user_id="1") is None
+
+
+@pytest.mark.asyncio
+async def test_use_library_item_rejects_missing_target_and_unavailable_sources(chacha_db) -> None:
+    db, db_path = chacha_db
+    source_persona_id = _create_persona(db, name="Source Persona")
+    target_persona_id = _create_persona(db, name="Target Persona")
+    source_pack = db.create_persona_visual_pack(
+        persona_id=source_persona_id,
+        user_id="1",
+        title="Reusable Source Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+    item = db.upsert_persona_visual_library_item(
+        user_id="1",
+        source_persona_id=source_persona_id,
+        source_pack_id=source_pack["id"],
+        title="Reusable Library Item",
+    )
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    with pytest.raises(ValueError, match="Missing target persona context"):
+        await module.execute_tool(
+            "persona_visuals.use_library_item",
+            {"item_id": item["id"]},
+            context=_context(db_path),
+        )
+
+    with pytest.raises(ValueError, match="target_persona_id cannot be empty"):
+        await module.execute_tool(
+            "persona_visuals.use_library_item",
+            {"item_id": item["id"], "target_persona_id": "   "},
+            context=_context(db_path, target_persona_id),
+        )
+
+    db.soft_delete_persona_visual_pack_with_assets(
+        pack_id=source_pack["id"],
+        persona_id=source_persona_id,
+        user_id="1",
+    )
+
+    with pytest.raises(ValueError, match="Source Persona Visual pack is no longer available"):
+        await module.execute_tool(
+            "persona_visuals.use_library_item",
+            {"item_id": item["id"], "target_persona_id": target_persona_id},
+            context=_context(db_path),
+        )
+
+    with pytest.raises(ValueError, match="Persona Visual library item not found"):
+        await module.execute_tool(
+            "persona_visuals.use_library_item",
+            {"item_id": "missing-item", "target_persona_id": target_persona_id},
+            context=_context(db_path),
+        )
 
 
 @pytest.mark.asyncio

@@ -401,7 +401,7 @@ review items. They MUST NOT silently activate packs.
    - user id
    - source persona id and source pack id when still available
    - title, notes, and tags
-   - source persona and pack display snapshots
+   - live source persona and pack display names when source rows still resolve
    - source pack version and current source version
    - source available/source changed flags
    - version and timestamps
@@ -441,10 +441,12 @@ The internal `persona_visuals` MCP module is the V1 MCP integration point.
 Supported tool families:
 
 1. `persona_visuals.capabilities`
-2. `persona_visuals.trigger_state`
-3. `persona_visuals.create_draft_pack`
-4. `persona_visuals.update_manifest`
-5. `persona_visuals.enqueue_generation`
+2. `persona_visuals.library_items`
+3. `persona_visuals.trigger_state`
+4. `persona_visuals.create_draft_pack`
+5. `persona_visuals.update_manifest`
+6. `persona_visuals.use_library_item`
+7. `persona_visuals.enqueue_generation`
 
 Rules:
 
@@ -455,6 +457,9 @@ Rules:
    unauthorized persona/pack access.
 5. Tool outputs that affect runtime state should be visible in live status and
    audit metadata where existing infrastructure supports it.
+6. Personal-library MCP tools are user-scoped and reference-backed. Listing
+   derives source display names from live rows, and using a library item creates
+   an inactive target-persona draft through duplicate semantics.
 
 ---
 
@@ -483,9 +488,14 @@ Current and future portability/library work:
    source packs and creates target drafts through duplicate semantics (#1468).
 3. Import/export conflict choices support target title-match review and
    draft-only replacement (#1490).
-4. Future shared user libraries should be layered on top of the manifest-backed
+4. Persona Garden reusable affordances expose duplicate, personal library,
+   import, and draft creation paths without marketplace framing (#1493).
+5. MCP reusable-pack tools list personal library entries and create
+   target-persona drafts without snapshots, sharing, or automatic activation
+   (#1496).
+6. Future shared user libraries should be layered on top of the manifest-backed
    pack format rather than replacing it.
-5. Future cross-device sync, signed community packs, and external
+7. Future cross-device sync, signed community packs, and external
    MCP-compatible pack providers remain out of scope for V1.
 
 ---
@@ -552,9 +562,14 @@ baseline. The first reference-backed V1 slices are now covered:
    save/list/edit/remove/use in Persona Garden (#1468).
 3. Import/export conflict choices: complete for preview-backed target title
    conflicts, create-new draft commits, and reviewed draft replacement (#1490).
-4. Shared/cross-device libraries remain future work.
-5. External MCP-compatible visual providers remain future work.
-6. Live2D or other renderer adapter remains future work after the sprite/frame
+4. Persona Garden reusable affordances: complete for routing duplicate,
+   personal library, import, and draft creation flows without marketplace
+   framing (#1493).
+5. MCP reusable-pack semantics: complete for listing reference-backed personal
+   library entries and creating inactive target-persona drafts (#1496).
+6. Shared/cross-device libraries remain future work.
+7. External MCP-compatible visual providers remain future work.
+8. Live2D or other renderer adapter remains future work after the sprite/frame
    path is stable.
 
 ---
