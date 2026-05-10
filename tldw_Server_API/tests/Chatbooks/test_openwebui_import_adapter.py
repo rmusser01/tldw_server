@@ -128,3 +128,11 @@ def test_load_openwebui_export_rejects_non_array_root(tmp_path):
 
     with pytest.raises(ValueError, match="top-level JSON value must be an array"):
         load_openwebui_export(export_path)
+
+
+def test_load_openwebui_export_rejects_non_utf8_json(tmp_path):
+    export_path = tmp_path / "bad-encoding.json"
+    export_path.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(ValueError, match="Malformed OpenWebUI JSON export"):
+        load_openwebui_export(export_path)

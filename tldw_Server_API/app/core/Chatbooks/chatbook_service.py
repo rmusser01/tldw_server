@@ -2356,8 +2356,8 @@ class ChatbookService:
         except ValueError as exc:
             return None, str(exc)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"Error previewing OpenWebUI JSON import: {exc}")
-            raise
+            logger.warning(f"OpenWebUI preview rejected file path: {exc}")
+            return None, "Invalid or potentially malicious import file"
 
     @staticmethod
     def _openwebui_timestamp_to_iso(value: Any) -> tuple[str, str | None]:
@@ -2448,6 +2448,28 @@ class ChatbookService:
         }
         return bool(self.db.upsert_conversation_settings(conversation_id, merged))
 
+    def _rollback_openwebui_conversation(
+        self,
+        conversation_id: str,
+        external_ref: str,
+        warnings: list[str],
+    ) -> None:
+        """Remove a partially-created OpenWebUI conversation after a chat-level failure."""
+        try:
+            if not hasattr(self.db, "hard_delete_conversation"):
+                warnings.append(
+                    f"OpenWebUI chat {external_ref} failed after conversation creation; rollback is unavailable."
+                )
+                return
+            if not self.db.hard_delete_conversation(conversation_id):
+                warnings.append(
+                    f"OpenWebUI chat {external_ref} failed after conversation creation; partial conversation cleanup did not remove a row."
+                )
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+            warnings.append(
+                f"OpenWebUI chat {external_ref} failed after conversation creation; rollback failed: {exc}"
+            )
+
     def import_openwebui_json(
         self,
         file_path: str,
@@ -2491,6 +2513,10 @@ class ChatbookService:
 
         for chat in parsed.chats:
             import_external_ref = chat.external_ref
+            conversation_id: str | None = None
+            chat_imported_messages = 0
+            chat_skipped_messages = 0
+            chat_warnings: list[str] = []
             try:
                 existing = self.db.get_conversation_by_source_ref(
                     "openwebui",
@@ -2509,7 +2535,7 @@ class ChatbookService:
                     conversation_title = self._generate_openwebui_copy_title(conversation_title)
 
                 ordered_messages, order_warnings = self._ordered_openwebui_messages(chat)
-                result["warnings"].extend(order_warnings)
+                chat_warnings.extend(order_warnings)
                 importable_messages = [
                     message
                     for message in ordered_messages
@@ -2517,12 +2543,14 @@ class ChatbookService:
                 ]
                 skipped_for_role = len(ordered_messages) - len(importable_messages)
                 if skipped_for_role:
-                    result["skipped_messages"] += skipped_for_role
-                    result["warnings"].append(
+                    chat_skipped_messages += skipped_for_role
+                    chat_warnings.append(
                         f"OpenWebUI chat {chat.external_ref} skipped {skipped_for_role} unsupported or empty messages."
                     )
                 if not importable_messages:
                     result["failed_chats"] += 1
+                    result["skipped_messages"] += chat_skipped_messages
+                    result["warnings"].extend(chat_warnings)
                     result["warnings"].append(f"OpenWebUI chat {chat.external_ref} has no importable messages.")
                     continue
 
@@ -2537,27 +2565,31 @@ class ChatbookService:
                 )
                 if not conversation_id:
                     result["failed_chats"] += 1
+                    result["skipped_messages"] += chat_skipped_messages
+                    result["warnings"].extend(chat_warnings)
                     result["warnings"].append(f"OpenWebUI chat {chat.external_ref} could not create a conversation.")
                     continue
 
                 if not self._store_openwebui_conversation_settings(conversation_id, chat, import_external_ref):
-                    result["warnings"].append(
-                        f"OpenWebUI chat {chat.external_ref} imported but conversation metadata was not stored."
+                    raise DatabaseError(
+                        f"OpenWebUI chat {chat.external_ref} conversation metadata was not stored."
                     )
 
                 message_id_map: dict[str, str] = {}
                 namespace = f"tldw-openwebui:{import_external_ref}"
                 for message in importable_messages:
-                    parent_message_id = (
-                        message_id_map.get(message.parent_source_id)
-                        if message.parent_source_id
-                        else None
-                    )
+                    parent_message_id = None
+                    if message.parent_source_id:
+                        parent_message_id = message_id_map.get(message.parent_source_id)
+                        if parent_message_id is None:
+                            chat_warnings.append(
+                                f"OpenWebUI message {message.source_id} imported as root because its parent was not imported."
+                            )
                     timestamp, timestamp_warning = self._openwebui_timestamp_to_iso(message.timestamp)
                     if timestamp_warning:
-                        result["warnings"].append(f"{timestamp_warning} source_message_id={message.source_id}")
+                        chat_warnings.append(f"{timestamp_warning} source_message_id={message.source_id}")
                     message_id = str(uuid5(NAMESPACE_URL, f"{namespace}:{message.source_id}"))
-                    self.db.add_message(
+                    inserted_message_id = self.db.add_message(
                         {
                             "id": message_id,
                             "conversation_id": conversation_id,
@@ -2568,20 +2600,42 @@ class ChatbookService:
                             "client_id": getattr(self.db, "client_id", None),
                         }
                     )
-                    message_id_map[message.source_id] = message_id
-                    result["imported_messages"] += 1
+                    if not inserted_message_id:
+                        raise DatabaseError(
+                            f"OpenWebUI message {message.source_id} could not be stored."
+                        )
+                    stored_message_id = str(inserted_message_id)
+                    message_id_map[message.source_id] = stored_message_id
+                    chat_imported_messages += 1
                     if not self.db.set_message_metadata_extra(
-                        message_id,
+                        stored_message_id,
                         self._openwebui_message_metadata(message),
                         merge=True,
                     ):
-                        result["warnings"].append(
-                            f"OpenWebUI message {message.source_id} imported but metadata was not stored."
+                        raise DatabaseError(
+                            f"OpenWebUI message {message.source_id} metadata was not stored."
                         )
 
+                if chat_imported_messages == 0:
+                    self._rollback_openwebui_conversation(conversation_id, chat.external_ref, chat_warnings)
+                    result["failed_chats"] += 1
+                    result["skipped_messages"] += chat_skipped_messages
+                    result["warnings"].extend(chat_warnings)
+                    result["warnings"].append(
+                        f"OpenWebUI chat {chat.external_ref} imported no messages and was rolled back."
+                    )
+                    continue
+
+                result["imported_messages"] += chat_imported_messages
+                result["skipped_messages"] += chat_skipped_messages
+                result["warnings"].extend(chat_warnings)
                 result["imported_chats"] += 1
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                if conversation_id:
+                    self._rollback_openwebui_conversation(conversation_id, chat.external_ref, chat_warnings)
                 result["failed_chats"] += 1
+                result["skipped_messages"] += chat_skipped_messages
+                result["warnings"].extend(chat_warnings)
                 result["warnings"].append(f"OpenWebUI chat {chat.external_ref} failed to import: {exc}")
 
         if parsed.malformed_chat_count:
@@ -2591,20 +2645,16 @@ class ChatbookService:
 
     def _openwebui_conversation_title_exists(self, title: str) -> bool:
         """Return whether an exact conversation title already exists for the current client."""
-        if not hasattr(self.db, "execute_query"):
-            return bool(self._get_conversation_by_name(title))
-
-        query = "SELECT id FROM conversations WHERE title = ? AND deleted = 0"
-        params: list[Any] = [title]
-        client_id = getattr(self.db, "client_id", None)
-        if client_id is not None:
-            query += " AND client_id = ?"
-            params.append(client_id)
-        query += " LIMIT 1"
         try:
-            cursor = self.db.execute_query(query, tuple(params))
-            rows = self._fetch_results(cursor) if cursor is not None else []
-            return bool(rows)
+            if hasattr(self.db, "conversation_title_exists"):
+                return bool(
+                    self.db.conversation_title_exists(
+                        title,
+                        client_id=getattr(self.db, "client_id", None),
+                    )
+                )
+            conversation = self._get_conversation_by_name(title)
+            return bool(conversation and conversation.get("title") == title and not conversation.get("deleted"))
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"OpenWebUI import could not check existing conversation title: {exc}")
             return False

@@ -23673,6 +23673,7 @@ for _conversation_store_method in (
     "add_conversation",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
+    "conversation_title_exists",
     "get_conversations_for_character",
     "count_conversations_for_user",
     "count_conversations_for_user_by_character",

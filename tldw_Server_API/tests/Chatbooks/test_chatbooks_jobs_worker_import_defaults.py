@@ -148,3 +148,34 @@ async def test_handle_import_dispatches_openwebui_json_without_archive_import(tm
     assert service.archive_called is False
     assert service.import_job.status == ImportStatus.COMPLETED
     assert not json_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_handle_import_marks_claimed_validation_failure_as_failed():
+    class FakeService:
+        def __init__(self):
+            self.import_job = SimpleNamespace(
+                job_id="job-missing-file",
+                status=ImportStatus.PENDING,
+                completed_at=None,
+                error_message=None,
+            )
+
+        def _claim_import_job(self, _job_id: str) -> bool:
+            self.import_job.status = ImportStatus.IN_PROGRESS
+            return True
+
+        def _get_import_job(self, _job_id: str):
+            return self.import_job
+
+        def _save_import_job(self, ij):
+            self.import_job = ij
+
+    service = FakeService()
+
+    with pytest.raises(jobs_worker.ChatbooksJobError, match="Missing file reference"):
+        await jobs_worker._handle_import(service, payload={}, job_id="job-missing-file")
+
+    assert service.import_job.status == ImportStatus.FAILED
+    assert service.import_job.error_message == "Missing file reference for import job"
+    assert isinstance(service.import_job.completed_at, datetime)

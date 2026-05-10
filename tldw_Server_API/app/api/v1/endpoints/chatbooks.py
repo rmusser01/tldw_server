@@ -120,7 +120,34 @@ def _setup_secure_temp_directory(user_id: str) -> Path:
     return temp_dir
 
 
-def _parse_import_content_selections_field(value: str | None) -> dict | None:
+def _coerce_content_type_key(value: object) -> ContentType:
+    """Convert a raw API content type key into the core enum."""
+    raw_value = value.value if hasattr(value, "value") else value
+    if not isinstance(raw_value, str):
+        raise HTTPException(status_code=400, detail="content_selections keys must be content type strings")
+    try:
+        return ContentType(raw_value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported content type in content_selections: {raw_value}") from None
+
+
+def _coerce_import_content_selections(value: object | None) -> dict[ContentType, list[str]] | None:
+    """Validate content selections before passing them to import code."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="content_selections must be a JSON object")
+
+    coerced: dict[ContentType, list[str]] = {}
+    for raw_key, raw_ids in value.items():
+        content_type = _coerce_content_type_key(raw_key)
+        if not isinstance(raw_ids, list) or not all(isinstance(item, str) for item in raw_ids):
+            raise HTTPException(status_code=400, detail="content_selections values must be lists of strings")
+        coerced[content_type] = list(raw_ids)
+    return coerced
+
+
+def _parse_import_content_selections_field(value: str | None) -> dict[ContentType, list[str]] | None:
     """Parse multipart content_selections JSON, preserving omitted fields as None."""
     if value is None or value == "":
         return None
@@ -132,7 +159,7 @@ def _parse_import_content_selections_field(value: str | None) -> dict | None:
         return None
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=400, detail="content_selections must be a JSON object")
-    return parsed
+    return _coerce_import_content_selections(parsed)
 
 
 def _persist_completed_sync_export_job(
@@ -533,6 +560,8 @@ async def import_chatbook(
         parsed_content_selections = _parse_import_content_selections_field(content_selections)
         if parsed_content_selections is not None:
             import_request.content_selections = parsed_content_selections
+        elif import_request.content_selections is not None:
+            import_request.content_selections = _coerce_import_content_selections(import_request.content_selections)
 
         # Initialize quota manager (DB-backed)
         quota_manager = QuotaManager(str(user.id), getattr(user, "tier", "free"), db=service.db)
@@ -854,7 +883,7 @@ async def preview_chatbook(
                 raise HTTPException(status_code=400, detail=err or "Invalid archive")
 
         if source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
-            preview_data, error = service.preview_openwebui_json(str(temp_file))
+            preview_data, error = await asyncio.to_thread(service.preview_openwebui_json, str(temp_file))
             try:
                 temp_file.unlink()
             except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:

@@ -230,9 +230,12 @@ def load_openwebui_export(file_path: str | Path) -> OpenWebUIParsedExport:
     """Load and normalize an OpenWebUI chat export JSON file."""
     path = Path(file_path)
     try:
-        raw_data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        with path.open("r", encoding="utf-8") as handle:
+            raw_data = json.load(handle)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ValueError("Malformed OpenWebUI JSON export") from exc
+    except OSError as exc:
+        raise ValueError("Unable to read OpenWebUI JSON export") from exc
 
     if not isinstance(raw_data, list):
         raise ValueError("OpenWebUI export top-level JSON value must be an array")

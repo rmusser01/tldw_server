@@ -25,6 +25,31 @@ class ConversationStore:
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
 
+    @staticmethod
+    def _result_row_to_dict(row: Any, result: Any | None = None) -> dict[str, Any] | None:
+        """Convert mapping and tuple-style backend result rows into dictionaries."""
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return dict(row)
+        row_mapping = getattr(row, "_mapping", None)
+        if row_mapping is not None:
+            return dict(row_mapping)
+        try:
+            return dict(row)
+        except (TypeError, ValueError):
+            pass
+
+        keys_attr = getattr(result, "keys", None)
+        keys = list(keys_attr() if callable(keys_attr) else (keys_attr or []))
+        if not keys:
+            description = getattr(result, "description", None)
+            if description:
+                keys = [column[0] for column in description]
+        if not keys:
+            raise CharactersRAGDBError("Database result row did not expose column names.")
+        return dict(zip(keys, row, strict=False))
+
     def _ensure_conversation_settings_table(self) -> None:
         """Ensure the conversation_settings table exists for the active backend."""
         if self._db.backend_type == BackendType.SQLITE:
@@ -401,36 +426,130 @@ class ConversationStore:
 
         client_filter = self._db.client_id if client_id is None else client_id
         if self._db.backend_type == BackendType.POSTGRESQL:
-            clauses = ["source = %s", "external_ref = %s"]
-            params: list[Any] = [normalized_source, normalized_ref]
-            if client_filter is not None:
-                clauses.append("client_id = %s")
-                params.append(client_filter)
-            if not include_deleted:
-                clauses.append("deleted = FALSE")
-            query = f"SELECT * FROM conversations WHERE {' AND '.join(clauses)} ORDER BY last_modified DESC LIMIT 1"  # nosec B608
+            if client_filter is not None and not include_deleted:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s AND client_id = %s AND deleted = FALSE "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params: list[Any] = [normalized_source, normalized_ref, client_filter]
+            elif client_filter is not None:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s AND client_id = %s "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params = [normalized_source, normalized_ref, client_filter]
+            elif not include_deleted:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s AND deleted = FALSE "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params = [normalized_source, normalized_ref]
+            else:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params = [normalized_source, normalized_ref]
             try:
                 result = self._db.backend.execute(query, tuple(params))
-                row = result.fetchone()
-                return dict(row) if row else None
+                return self._result_row_to_dict(result.first, result)
             except CharactersRAGDBError as exc:
                 logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
                 raise
 
-        clauses = ["source = ?", "external_ref = ?"]
-        params = [normalized_source, normalized_ref]
-        if client_filter is not None:
-            clauses.append("client_id = ?")
-            params.append(client_filter)
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        query = f"SELECT * FROM conversations WHERE {' AND '.join(clauses)} ORDER BY last_modified DESC LIMIT 1"  # nosec B608
+        if client_filter is not None and not include_deleted:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? AND client_id = ? AND deleted = 0 "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref, client_filter]
+        elif client_filter is not None:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? AND client_id = ? "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref, client_filter]
+        elif not include_deleted:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? AND deleted = 0 "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref]
+        else:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref]
         try:
             cursor = self._db.execute_query(query, tuple(params))
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as exc:
             logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
+            raise
+
+    def conversation_title_exists(
+        self,
+        title: str,
+        client_id: str | None = None,
+        include_deleted: bool = False,
+    ) -> bool:
+        """Return whether an exact conversation title exists for the selected client."""
+        normalized_title = self._db._normalize_nullable_text(title)
+        if not normalized_title:
+            return False
+
+        client_filter = self._db.client_id if client_id is None else client_id
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            if client_filter is not None and not include_deleted:
+                query = (
+                    "SELECT id FROM conversations "
+                    "WHERE title = %s AND client_id = %s AND deleted = FALSE "
+                    "LIMIT 1"
+                )
+                params: list[Any] = [normalized_title, client_filter]
+            elif client_filter is not None:
+                query = "SELECT id FROM conversations WHERE title = %s AND client_id = %s LIMIT 1"
+                params = [normalized_title, client_filter]
+            elif not include_deleted:
+                query = "SELECT id FROM conversations WHERE title = %s AND deleted = FALSE LIMIT 1"
+                params = [normalized_title]
+            else:
+                query = "SELECT id FROM conversations WHERE title = %s LIMIT 1"
+                params = [normalized_title]
+            try:
+                result = self._db.backend.execute(query, tuple(params))
+                return bool(result.first)
+            except CharactersRAGDBError as exc:
+                logger.error(f"Database error checking conversation title {normalized_title}: {exc}")
+                raise
+
+        if client_filter is not None and not include_deleted:
+            query = "SELECT id FROM conversations WHERE title = ? AND client_id = ? AND deleted = 0 LIMIT 1"
+            params = [normalized_title, client_filter]
+        elif client_filter is not None:
+            query = "SELECT id FROM conversations WHERE title = ? AND client_id = ? LIMIT 1"
+            params = [normalized_title, client_filter]
+        elif not include_deleted:
+            query = "SELECT id FROM conversations WHERE title = ? AND deleted = 0 LIMIT 1"
+            params = [normalized_title]
+        else:
+            query = "SELECT id FROM conversations WHERE title = ? LIMIT 1"
+            params = [normalized_title]
+        try:
+            cursor = self._db.execute_query(query, tuple(params))
+            return cursor.fetchone() is not None
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error checking conversation title {normalized_title}: {exc}")
             raise
 
     def get_conversations_for_character(

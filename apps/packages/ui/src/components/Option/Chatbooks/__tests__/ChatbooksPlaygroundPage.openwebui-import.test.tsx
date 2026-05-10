@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { useQuery } from "@tanstack/react-query"
 import { ChatbooksPlaygroundPage } from "../ChatbooksPlaygroundPage"
@@ -117,6 +117,16 @@ vi.mock("@/components/Common/WorkspaceConnectionGate", () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 if (!(globalThis as any).ResizeObserver) {
   ;(globalThis as any).ResizeObserver = class ResizeObserver {
     observe() {}
@@ -185,5 +195,74 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     expect(screen.queryByText("Import media")).not.toBeInTheDocument()
     expect(screen.queryByText("Import embeddings")).not.toBeInTheDocument()
     expect(container.querySelector(".ant-upload-drag input[type=\"file\"]")).toHaveAttribute("accept", ".json")
+  })
+
+  it("ignores stale OpenWebUI preview responses when a newer file is selected", async () => {
+    const firstPreview = deferred<any>()
+    const secondPreview = deferred<any>()
+    tldwClientMock.previewChatbook
+      .mockImplementationOnce(() => firstPreview.promise)
+      .mockImplementationOnce(() => secondPreview.promise)
+
+    const { container } = render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+
+    const firstUploadInput = container.querySelector(".ant-upload-drag input[type=\"file\"]") as HTMLInputElement
+    fireEvent.change(firstUploadInput, {
+      target: {
+        files: [new File(["[]"], "first.json", { type: "application/json" })]
+      }
+    })
+
+    const secondUploadInput = container.querySelector(".ant-upload-drag input[type=\"file\"]") as HTMLInputElement
+    fireEvent.change(secondUploadInput, {
+      target: {
+        files: [new File(["[]"], "second.json", { type: "application/json" })]
+      }
+    })
+
+    await waitFor(() => {
+      expect(tldwClientMock.previewChatbook).toHaveBeenCalledTimes(2)
+    })
+
+    await act(async () => {
+      secondPreview.resolve({
+        openwebui_preview: {
+          chat_count: 22,
+          message_count: 44,
+          branched_chat_count: 0,
+          duplicate_chat_count: 0,
+          attachment_reference_count: 0,
+          malformed_chat_count: 0,
+          warnings: []
+        }
+      })
+      await secondPreview.promise
+    })
+
+    expect(screen.getByText("22")).toBeInTheDocument()
+
+    await act(async () => {
+      firstPreview.resolve({
+        openwebui_preview: {
+          chat_count: 11,
+          message_count: 22,
+          branched_chat_count: 0,
+          duplicate_chat_count: 0,
+          attachment_reference_count: 0,
+          malformed_chat_count: 0,
+          warnings: []
+        }
+      })
+      await firstPreview.promise
+    })
+
+    expect(screen.getByText("22")).toBeInTheDocument()
+    expect(screen.queryByText("11")).not.toBeInTheDocument()
   })
 })

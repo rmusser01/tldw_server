@@ -136,6 +136,21 @@ def _parse_conflict_resolution(raw: Any) -> ConflictResolution:
         return ConflictResolution.SKIP
 
 
+def _mark_import_job_failed(service: ChatbookService, job_id: str, message: str) -> None:
+    """Persist a claimed import job failure before raising a worker error."""
+    ij = service._get_import_job(job_id)
+    if ij and ij.status != ImportStatus.CANCELLED:
+        ij.status = ImportStatus.FAILED
+        ij.completed_at = datetime.now(timezone.utc)
+        ij.error_message = message
+        service._save_import_job(ij)
+
+
+def _raise_import_job_failed(service: ChatbookService, job_id: str, message: str) -> None:
+    _mark_import_job_failed(service, job_id, message)
+    raise ChatbooksJobError(message, retryable=False)
+
+
 async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
     if not service._claim_export_job(job_id):
         existing = service._get_export_job(job_id)
@@ -196,15 +211,16 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
     source_format = str(payload.get("source_format") or "chatbook").strip().lower()
     file_ref = payload.get("file_token") or payload.get("file_path")
     if not file_ref or not str(file_ref).strip():
-        raise ChatbooksJobError("Missing file reference for import job", retryable=False)
+        _raise_import_job_failed(service, job_id, "Missing file reference for import job")
     if source_format == "openwebui_json":
         try:
             resolved_path = service._resolve_import_upload_path(file_ref)
         except Exception as exc:
+            _mark_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
             raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False) from exc
         resolved_file_path = str(resolved_path or "").strip()
         if not resolved_file_path:
-            raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False)
+            _raise_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
         try:
             ok, msg, result = await asyncio.to_thread(
                 service.import_openwebui_json,
@@ -235,14 +251,15 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
         raise ChatbooksJobError(str(msg), retryable=False)
 
     if source_format != "chatbook":
-        raise ChatbooksJobError(f"Unsupported import source format: {source_format}", retryable=False)
+        _raise_import_job_failed(service, job_id, f"Unsupported import source format: {source_format}")
     try:
         resolved_path = service._resolve_import_archive_path(file_ref)
     except Exception as exc:
+        _mark_import_job_failed(service, job_id, "Invalid or potentially malicious archive file")
         raise ChatbooksJobError("Invalid or potentially malicious archive file", retryable=False) from exc
     resolved_file_path = str(resolved_path or "").strip()
     if not resolved_file_path:
-        raise ChatbooksJobError("Invalid or potentially malicious archive file", retryable=False)
+        _raise_import_job_failed(service, job_id, "Invalid or potentially malicious archive file")
     try:
         ok, msg, result = await asyncio.to_thread(
             service._import_chatbook_sync,

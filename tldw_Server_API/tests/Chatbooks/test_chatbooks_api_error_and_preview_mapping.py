@@ -124,7 +124,7 @@ class _OpenWebUIPreviewService:
     db = None
 
     def preview_openwebui_json(self, file_path: str):
-        assert file_path.endswith(".json")
+        self.preview_path = file_path
         return {
             "chat_count": 1,
             "message_count": 2,
@@ -154,7 +154,6 @@ class _OpenWebUIImportService:
 
     async def import_chatbook(self, **kwargs):
         self.called_kwargs = kwargs
-        assert kwargs["file_path"].endswith(".json")
         assert kwargs["source_format"] == "openwebui_json"
         return True, "ok", {
             "imported_chats": 1,
@@ -334,6 +333,39 @@ def test_import_openwebui_json_source_format_skips_archive_validation(monkeypatc
     assert body["source_format"] == "openwebui_json"
     assert body["openwebui_result"]["imported_chats"] == 1
     assert service.called_kwargs["source_format"] == "openwebui_json"
+
+
+@pytest.mark.parametrize(
+    ("content_selections", "expected_detail"),
+    [
+        (
+            json.dumps({"not_a_content_type": ["item-1"]}),
+            "Unsupported content type in content_selections: not_a_content_type",
+        ),
+        (
+            json.dumps({"conversation": ["conv-1", 42]}),
+            "content_selections values must be lists of strings",
+        ),
+    ],
+)
+def test_import_rejects_invalid_multipart_content_selections(content_selections, expected_detail):
+    service = _OpenWebUIImportService()
+    app = _make_app(service)
+    files = {"file": ("openwebui.json", b"[]", "application/json")}
+    data = {
+        "source_format": "openwebui_json",
+        "content_selections": content_selections,
+        "import_media": "false",
+        "import_embeddings": "false",
+        "async_mode": "false",
+    }
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/chatbooks/import", files=files, data=data)
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == expected_detail
+    assert service.called_kwargs is None
 
 
 def test_job_list_routes_include_canonical_pagination():

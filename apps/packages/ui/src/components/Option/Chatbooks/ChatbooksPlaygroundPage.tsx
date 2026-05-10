@@ -1058,15 +1058,18 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [jobsError, setJobsError] = React.useState<string | null>(null)
   const [pollIndex, setPollIndex] = React.useState(0)
   const lastSignatureRef = React.useRef<string>("")
+  const previewRequestIdRef = React.useRef(0)
 
   const canUseChatbooks = capabilities?.hasChatbooks !== false
   const isOpenWebUIImport = importSourceFormat === "openwebui_json"
 
   React.useEffect(() => {
+    previewRequestIdRef.current += 1
     setImportFile(null)
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
     setPreviewError(null)
+    setPreviewLoading(false)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
     if (importSourceFormat === "openwebui_json") {
@@ -1389,6 +1392,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   }
 
   const handlePreview = async (file: File) => {
+    const requestId = previewRequestIdRef.current + 1
+    previewRequestIdRef.current = requestId
+    const sourceFormat = importSourceFormat
+    const isCurrentRequest = () => previewRequestIdRef.current === requestId
+
     setPreviewLoading(true)
     setPreviewError(null)
     setPreviewManifest(null)
@@ -1399,19 +1407,24 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     try {
       await tldwClient.initialize().catch(() => null)
       const res = await tldwClient.previewChatbook(file, {
-        source_format: importSourceFormat
+        source_format: sourceFormat
       })
+      if (!isCurrentRequest()) return
       if (res?.error) {
         setPreviewError(res.error)
-      } else if (importSourceFormat === "openwebui_json") {
+      } else if (sourceFormat === "openwebui_json") {
         setOpenwebuiPreview(res?.openwebui_preview || null)
       } else {
         setPreviewManifest(res?.manifest || null)
       }
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : String(error))
+      if (isCurrentRequest()) {
+        setPreviewError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setPreviewLoading(false)
+      if (isCurrentRequest()) {
+        setPreviewLoading(false)
+      }
     }
   }
 
@@ -1731,7 +1744,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               void handlePreview(file as File)
               return false
             }}
-            disabled={!canUseChatbooks}
+            disabled={!canUseChatbooks || previewLoading || importSubmitting}
           >
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
