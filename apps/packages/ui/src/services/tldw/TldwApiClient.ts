@@ -5480,13 +5480,16 @@ export class TldwApiClientBase {
     })
   }
 
-  async previewChatbook(file: File): Promise<any> {
+  async previewChatbook(file: File, options?: { source_format?: string }): Promise<any> {
     const data = await file.arrayBuffer()
     const name = file.name || "chatbook.zip"
     const type = file.type || "application/zip"
+    const fields: Record<string, any> = {}
+    if (options?.source_format) fields.source_format = options.source_format
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/preview",
       method: "POST",
+      fields,
       file: { name, type, data }
     })
   }
@@ -5500,6 +5503,7 @@ export class TldwApiClientBase {
       import_embeddings?: boolean
       async_mode?: boolean
       content_selections?: Record<string, string[]>
+      source_format?: string
     }
   ): Promise<any> {
     const data = await file.arrayBuffer()
@@ -5508,7 +5512,13 @@ export class TldwApiClientBase {
     const normalized: Record<string, any> = {}
     for (const [k, v] of Object.entries(options || {})) {
       if (typeof v === "undefined" || v === null) continue
-      normalized[k] = typeof v === "boolean" ? (v ? "true" : "false") : v
+      if (typeof v === "boolean") {
+        normalized[k] = v ? "true" : "false"
+      } else if (typeof v === "object") {
+        normalized[k] = JSON.stringify(v)
+      } else {
+        normalized[k] = v
+      }
     }
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/import",

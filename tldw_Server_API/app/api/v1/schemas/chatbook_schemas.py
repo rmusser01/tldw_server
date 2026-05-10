@@ -41,6 +41,12 @@ class ConflictResolution(str, Enum):
     RENAME = "rename"      # Rename imported items
 
 
+class ChatbookImportSourceFormat(str, Enum):
+    """Supported source formats for Chatbooks import surfaces."""
+    CHATBOOK = "chatbook"
+    OPENWEBUI_JSON = "openwebui_json"
+
+
 class MediaQuality(str, Enum):
     """Media quality levels for export."""
     THUMBNAIL = "thumbnail"
@@ -125,6 +131,10 @@ class CreateChatbookRequest(BaseModel):
 
 class ImportChatbookRequest(BaseModel):
     """Request for importing a chatbook."""
+    source_format: ChatbookImportSourceFormat = Field(
+        ChatbookImportSourceFormat.CHATBOOK,
+        description="Uploaded source format"
+    )
     content_selections: Optional[dict[ContentType, list[str]]] = Field(
         None,
         description="Specific content to import, or None for all"
@@ -259,6 +269,39 @@ class ImportConflictResponse(BaseModel):
     new_title: Optional[str] = None
 
 
+class OpenWebUIPreviewChatItem(BaseModel):
+    """Lightweight preview row for one OpenWebUI chat."""
+    external_ref: str
+    title: str
+    message_count: int = Field(ge=0)
+    branched: bool = False
+    duplicate: bool = False
+    warning_count: int = Field(default=0, ge=0)
+
+
+class OpenWebUIImportPreview(BaseModel):
+    """OpenWebUI import preview counts."""
+    chat_count: int = Field(default=0, ge=0)
+    message_count: int = Field(default=0, ge=0)
+    branched_chat_count: int = Field(default=0, ge=0)
+    duplicate_chat_count: int = Field(default=0, ge=0)
+    attachment_reference_count: int = Field(default=0, ge=0)
+    malformed_chat_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+    items: list[OpenWebUIPreviewChatItem] = Field(default_factory=list)
+
+
+class OpenWebUIImportResult(BaseModel):
+    """OpenWebUI import result counts."""
+    imported_chats: int = Field(default=0, ge=0)
+    skipped_chats: int = Field(default=0, ge=0)
+    failed_chats: int = Field(default=0, ge=0)
+    imported_messages: int = Field(default=0, ge=0)
+    skipped_messages: int = Field(default=0, ge=0)
+    duplicate_chats: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CreateChatbookResponse(BaseModel):
     """Response for chatbook creation."""
     success: bool
@@ -271,10 +314,15 @@ class ImportChatbookResponse(BaseModel):
     """Response for chatbook import."""
     success: bool
     message: str
+    source_format: ChatbookImportSourceFormat = ChatbookImportSourceFormat.CHATBOOK
     job_id: Optional[str] = Field(None, description="Job ID if async mode")
     imported_items: Optional[dict[str, int]] = Field(
         None,
         description="Count of imported items by type"
+    )
+    openwebui_result: Optional[OpenWebUIImportResult] = Field(
+        None,
+        description="Structured import result for OpenWebUI JSON sources"
     )
     warnings: Optional[list[str]] = Field(
         None,
@@ -284,7 +332,9 @@ class ImportChatbookResponse(BaseModel):
 
 class PreviewChatbookResponse(BaseModel):
     """Response for chatbook preview."""
+    source_format: ChatbookImportSourceFormat = ChatbookImportSourceFormat.CHATBOOK
     manifest: Optional[ChatbookManifestResponse] = None
+    openwebui_preview: Optional[OpenWebUIImportPreview] = None
     error: Optional[str] = None
 
 

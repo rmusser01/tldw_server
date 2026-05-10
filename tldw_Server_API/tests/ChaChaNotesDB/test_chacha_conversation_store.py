@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 
 
 pytestmark = pytest.mark.unit
@@ -23,6 +24,8 @@ _DELEGATED_CONVERSATION_METHODS = {
     "_normalize_conversation_assistant_identity",
     "add_conversation",
     "get_conversation_by_id",
+    "get_conversation_by_source_ref",
+    "conversation_title_exists",
     "get_conversations_for_character",
     "count_conversations_for_user",
     "count_conversations_for_user_by_character",
@@ -126,6 +129,159 @@ def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
         scope_type="workspace",
         workspace_id="ws-store",
     ) == 1
+
+
+def test_conversation_store_get_conversation_by_source_ref_scopes_client_and_deleted(db):
+    conversation_id = db.add_conversation(
+        {
+            "character_id": 1,
+            "title": "OpenWebUI import",
+            "source": "openwebui",
+            "external_ref": "chat-1",
+            "client_id": db.client_id,
+        }
+    )
+    other_id = db.add_conversation(
+        {
+            "character_id": 1,
+            "title": "Other client import",
+            "source": "openwebui",
+            "external_ref": "chat-1",
+            "client_id": "other-client",
+        }
+    )
+
+    found = db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id=db.client_id,
+    )
+
+    assert found is not None
+    assert found["id"] == conversation_id
+    assert db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id="missing-client",
+    ) is None
+
+    created = db.get_conversation_by_id(conversation_id)
+    assert created is not None
+    assert db.soft_delete_conversation(conversation_id, expected_version=created["version"]) is True
+
+    assert db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id=db.client_id,
+    ) is None
+    deleted = db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id=db.client_id,
+        include_deleted=True,
+    )
+    assert deleted is not None
+    assert deleted["id"] == conversation_id
+
+    other = db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-1",
+        client_id="other-client",
+    )
+    assert other is not None
+    assert other["id"] == other_id
+
+
+def test_conversation_store_maps_tuple_style_result_rows():
+    class TupleResult:
+        def keys(self):
+            return ["id", "source", "external_ref", "deleted"]
+
+    row = ("conversation-1", "openwebui", "chat-1", False)
+
+    assert ConversationStore._result_row_to_dict(row, TupleResult()) == {
+        "id": "conversation-1",
+        "source": "openwebui",
+        "external_ref": "chat-1",
+        "deleted": False,
+    }
+
+
+def test_conversation_store_source_ref_maps_tuple_style_postgres_result():
+    class FakeResult:
+        first = ("conversation-1", "openwebui", "chat-1", False)
+
+        def keys(self):
+            return ["id", "source", "external_ref", "deleted"]
+
+    class FakeBackend:
+        query = None
+        params = None
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+            return FakeResult()
+
+    class FakeDB:
+        backend_type = BackendType.POSTGRESQL
+        client_id = "postgres-client"
+
+        def __init__(self):
+            self.backend = FakeBackend()
+
+        @staticmethod
+        def _normalize_nullable_text(value):
+            return str(value).strip() or None
+
+    fake_db = FakeDB()
+    store = ConversationStore(fake_db)
+
+    assert store.get_conversation_by_source_ref("openwebui", "chat-1") == {
+        "id": "conversation-1",
+        "source": "openwebui",
+        "external_ref": "chat-1",
+        "deleted": False,
+    }
+    assert "source = %s" in fake_db.backend.query
+    assert "external_ref = %s" in fake_db.backend.query
+    assert "client_id = %s" in fake_db.backend.query
+    assert fake_db.backend.params == ("openwebui", "chat-1", "postgres-client")
+
+
+def test_conversation_store_title_exists_uses_postgres_placeholders():
+    class FakeResult:
+        first = {"id": "conversation-1"}
+
+    class FakeBackend:
+        query = None
+        params = None
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+            return FakeResult()
+
+    class FakeDB:
+        backend_type = BackendType.POSTGRESQL
+        client_id = "postgres-client"
+
+        def __init__(self):
+            self.backend = FakeBackend()
+
+        @staticmethod
+        def _normalize_nullable_text(value):
+            return str(value).strip() or None
+
+    fake_db = FakeDB()
+    store = ConversationStore(fake_db)
+
+    assert store.conversation_title_exists("Existing title") is True
+    assert "title = %s" in fake_db.backend.query
+    assert "client_id = %s" in fake_db.backend.query
+    assert "deleted = FALSE" in fake_db.backend.query
+    assert "?" not in fake_db.backend.query
+    assert fake_db.backend.params == ("Existing title", "postgres-client")
 
 
 def test_conversation_store_preserves_assistant_identity_updates(db):

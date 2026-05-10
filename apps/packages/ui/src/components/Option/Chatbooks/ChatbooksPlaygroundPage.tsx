@@ -89,6 +89,7 @@ type FetchParams = {
 }
 
 type JobKind = "export" | "import"
+type ImportSourceFormat = "chatbook" | "openwebui_json"
 
 type ChatbookJob = {
   job_id: string
@@ -1033,7 +1034,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [exportSubmitting, setExportSubmitting] = React.useState(false)
 
   const [importFile, setImportFile] = React.useState<File | null>(null)
+  const [importSourceFormat, setImportSourceFormat] = React.useState<ImportSourceFormat>("chatbook")
   const [previewManifest, setPreviewManifest] = React.useState<any | null>(null)
+  const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
   const [previewError, setPreviewError] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [conflictResolution, setConflictResolution] = React.useState("skip")
@@ -1055,8 +1058,28 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [jobsError, setJobsError] = React.useState<string | null>(null)
   const [pollIndex, setPollIndex] = React.useState(0)
   const lastSignatureRef = React.useRef<string>("")
+  const previewRequestIdRef = React.useRef(0)
 
   const canUseChatbooks = capabilities?.hasChatbooks !== false
+  const isOpenWebUIImport = importSourceFormat === "openwebui_json"
+
+  React.useEffect(() => {
+    previewRequestIdRef.current += 1
+    setImportFile(null)
+    setPreviewManifest(null)
+    setOpenwebuiPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+    setImportSelections(buildSelectionState(() => [] as string[]))
+    setImportIncludeAll(buildSelectionState(() => true))
+    if (importSourceFormat === "openwebui_json") {
+      setImportMedia(false)
+      setImportEmbeddings(false)
+      setConflictResolution((current) =>
+        current === "rename" || current === "skip" ? current : "skip"
+      )
+    }
+  }, [importSourceFormat])
 
   React.useEffect(() => {
     clearFetchAllItemsCache()
@@ -1369,28 +1392,44 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   }
 
   const handlePreview = async (file: File) => {
+    const requestId = previewRequestIdRef.current + 1
+    previewRequestIdRef.current = requestId
+    const sourceFormat = importSourceFormat
+    const isCurrentRequest = () => previewRequestIdRef.current === requestId
+
     setPreviewLoading(true)
     setPreviewError(null)
     setPreviewManifest(null)
+    setOpenwebuiPreview(null)
     setImportFile(file)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
     try {
       await tldwClient.initialize().catch(() => null)
-      const res = await tldwClient.previewChatbook(file)
+      const res = await tldwClient.previewChatbook(file, {
+        source_format: sourceFormat
+      })
+      if (!isCurrentRequest()) return
       if (res?.error) {
         setPreviewError(res.error)
+      } else if (sourceFormat === "openwebui_json") {
+        setOpenwebuiPreview(res?.openwebui_preview || null)
       } else {
         setPreviewManifest(res?.manifest || null)
       }
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : String(error))
+      if (isCurrentRequest()) {
+        setPreviewError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setPreviewLoading(false)
+      if (isCurrentRequest()) {
+        setPreviewLoading(false)
+      }
     }
   }
 
   const resolveImportSelections = () => {
+    if (isOpenWebUIImport) return undefined
     const anySelective = previewTypes.some((key) => !importIncludeAll[key])
     if (!anySelective) return undefined
     const selections: Record<string, string[]> = {}
@@ -1435,7 +1474,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       await tldwClient.initialize().catch(() => null)
       const contentSelections = resolveImportSelections()
       const normalizedSelections =
-        contentSelections && Object.keys(contentSelections).length
+        !isOpenWebUIImport && contentSelections && Object.keys(contentSelections).length
           ? contentSelections
           : undefined
       if (normalizedSelections) {
@@ -1454,10 +1493,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         }
       }
       const res = await tldwClient.importChatbook(importFile, {
+        source_format: importSourceFormat,
         conflict_resolution: conflictResolution,
         prefix_imported: prefixImported,
-        import_media: importMedia,
-        import_embeddings: importEmbeddings,
+        import_media: isOpenWebUIImport ? false : importMedia,
+        import_embeddings: isOpenWebUIImport ? false : importEmbeddings,
         async_mode: importAsync,
         content_selections: normalizedSelections
       })
@@ -1676,21 +1716,43 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         }
       >
         <div className="flex flex-col gap-4">
+          <Space wrap>
+            <Text>{t("settings:chatbooksPlayground.importSource", "Source")}</Text>
+            <Select
+              value={importSourceFormat}
+              onChange={(value) => setImportSourceFormat(value as ImportSourceFormat)}
+              className="min-w-[220px]"
+              options={[
+                {
+                  value: "chatbook",
+                  label: t("settings:chatbooksPlayground.sourceChatbook", "Chatbook archive")
+                },
+                {
+                  value: "openwebui_json",
+                  label: t("settings:chatbooksPlayground.sourceOpenWebUI", "OpenWebUI JSON")
+                }
+              ]}
+              disabled={!canUseChatbooks || previewLoading || importSubmitting}
+            />
+          </Space>
+
           <Upload.Dragger
-            accept=".zip"
+            accept={isOpenWebUIImport ? ".json" : ".zip,.chatbook"}
             multiple={false}
             showUploadList={false}
             beforeUpload={(file) => {
               void handlePreview(file as File)
               return false
             }}
-            disabled={!canUseChatbooks}
+            disabled={!canUseChatbooks || previewLoading || importSubmitting}
           >
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
             <p className="ant-upload-text">
-              {t("settings:chatbooksPlayground.importDrop", "Drop a .zip chatbook or click to browse")}
+              {isOpenWebUIImport
+                ? t("settings:chatbooksPlayground.importDropOpenWebUI", "Drop an OpenWebUI .json export or click to browse")
+                : t("settings:chatbooksPlayground.importDrop", "Drop a .zip or .chatbook archive or click to browse")}
             </p>
             <p className="ant-upload-hint">
               {importFile?.name || t("settings:chatbooksPlayground.importHint", "Preview before import")}
@@ -1759,33 +1821,88 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             </Card>
           )}
 
+          {openwebuiPreview && (
+            <Card
+              size="small"
+              className="border-border"
+              title={t("settings:chatbooksPlayground.openwebuiPreviewSummary", "OpenWebUI preview")}
+            >
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiChats", "Chats")}</Text>
+                  <div>{openwebuiPreview.chat_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiMessages", "Messages")}</Text>
+                  <div>{openwebuiPreview.message_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiBranches", "Branched")}</Text>
+                  <div>{openwebuiPreview.branched_chat_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiDuplicates", "Duplicates")}</Text>
+                  <div>{openwebuiPreview.duplicate_chat_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiAttachments", "Attachment refs")}</Text>
+                  <div>{openwebuiPreview.attachment_reference_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiMalformed", "Malformed")}</Text>
+                  <div>{openwebuiPreview.malformed_chat_count ?? 0}</div>
+                </div>
+              </div>
+              {Boolean(openwebuiPreview.warnings?.length) && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="mt-3"
+                  title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
+                  description={openwebuiPreview.warnings.slice(0, 3).join("\n")}
+                />
+              )}
+            </Card>
+          )}
+
           <Divider />
 
           <Space wrap>
             <Select
               value={conflictResolution}
               onChange={setConflictResolution}
-              options={[
-                { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
-                { value: "overwrite", label: t("settings:chatbooksPlayground.conflictOverwrite", "Overwrite") },
-                { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") },
-                { value: "merge", label: t("settings:chatbooksPlayground.conflictMerge", "Merge") }
-              ]}
+              options={
+                isOpenWebUIImport
+                  ? [
+                      { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
+                      { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") }
+                    ]
+                  : [
+                      { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
+                      { value: "overwrite", label: t("settings:chatbooksPlayground.conflictOverwrite", "Overwrite") },
+                      { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") },
+                      { value: "merge", label: t("settings:chatbooksPlayground.conflictMerge", "Merge") }
+                    ]
+              }
               className="min-w-[160px]"
             />
             <Switch checked={prefixImported} onChange={setPrefixImported} />
             <Text>{t("settings:chatbooksPlayground.prefixImported", "Prefix imported")}</Text>
           </Space>
 
-          <Space wrap>
-            <Switch checked={importMedia} onChange={setImportMedia} />
-            <Text>{t("settings:chatbooksPlayground.importMedia", "Import media")}</Text>
-          </Space>
+          {!isOpenWebUIImport && (
+            <>
+              <Space wrap>
+                <Switch checked={importMedia} onChange={setImportMedia} />
+                <Text>{t("settings:chatbooksPlayground.importMedia", "Import media")}</Text>
+              </Space>
 
-          <Space wrap>
-            <Switch checked={importEmbeddings} onChange={setImportEmbeddings} />
-            <Text>{t("settings:chatbooksPlayground.importEmbeddings", "Import embeddings")}</Text>
-          </Space>
+              <Space wrap>
+                <Switch checked={importEmbeddings} onChange={setImportEmbeddings} />
+                <Text>{t("settings:chatbooksPlayground.importEmbeddings", "Import embeddings")}</Text>
+              </Space>
+            </>
+          )}
 
           <Space wrap>
             <Switch checked={importAsync} onChange={setImportAsync} />
@@ -1794,7 +1911,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
       </Card>
 
-      {previewManifest && previewTypes.length > 0 && (
+      {!isOpenWebUIImport && previewManifest && previewTypes.length > 0 && (
         <div className="flex flex-col gap-4">
           {previewTypes.map((key) => (
             <ContentTypePicker
@@ -1826,7 +1943,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
       )}
 
-      {previewManifest && previewTypes.length === 0 && (
+      {!isOpenWebUIImport && previewManifest && previewTypes.length === 0 && (
         <Alert
           type="info"
           showIcon
@@ -1842,7 +1959,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           type="primary"
           onClick={handleImport}
           loading={importSubmitting}
-          disabled={!canUseChatbooks}
+          disabled={!canUseChatbooks || !importFile || previewLoading}
         >
           {t("settings:chatbooksPlayground.importCta", "Import chatbook")}
         </Button>
