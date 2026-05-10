@@ -160,6 +160,33 @@ async def test_session_eviction(session_store):
 
 
 @pytest.mark.asyncio
+async def test_retention_maintenance_purges_expired_sessions_and_audit_events(session_store, tmp_path):
+    """Store-level retention maintenance enforces session and audit retention."""
+    from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import ACPAuditDB
+
+    session_store.configure_retention(session_retention_days=0, audit_retention_days=0)
+    await session_store.register_session("s1", user_id=1, name="Session 1")
+    await session_store.record_prompt(
+        "s1",
+        [{"role": "user", "content": "secret prompt"}],
+        {"content": "secret response", "usage": {}},
+    )
+    await session_store.close_session("s1")
+
+    audit_db = ACPAuditDB(db_path=str(tmp_path / "audit.db"), retention_days=0)
+    audit_db.record_event(action="session_close", user_id=1, session_id="s1")
+    audit_db.flush()
+
+    result = await session_store.run_retention_maintenance(audit_db=audit_db)
+
+    assert result["sessions_evicted"] == 0
+    assert result["sessions_purged"] == 1
+    assert result["audit_events_purged"] == 1
+    assert await session_store.get_session("s1") is None
+    assert audit_db.query_events(session_id="s1") == []
+
+
+@pytest.mark.asyncio
 async def test_quota_status(session_store):
     """Quota status returns current usage."""
     session_store.configure_quotas(max_concurrent_per_user=5, max_tokens_per_session=1000)

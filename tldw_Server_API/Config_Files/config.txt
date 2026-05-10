@@ -154,6 +154,12 @@ agent_command =
 agent_args = []
 # JSON or comma-separated key=value env
 agent_env = {}
+# Active-session close windows and hard-delete retention. Retention deletes only
+# closed/error sessions; messages are removed by cascade.
+session_ttl_seconds = 86400
+max_session_duration_seconds = 14400
+session_retention_days = 30
+audit_retention_days = 30
 
 [Audit]
 # Auto-switch audit exports to streaming when max_rows exceeds this threshold to avoid large in-memory buffers.

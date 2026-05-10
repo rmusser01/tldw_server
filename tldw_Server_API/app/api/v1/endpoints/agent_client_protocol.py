@@ -416,6 +416,87 @@ def _sanitize_diagnostic_message(message: Any) -> str:
     return text
 
 
+_ACP_REDACTED_VALUE = "[redacted]"
+_ACP_REDACTION_SENSITIVE_KEYS = _ACP_AUDIT_SENSITIVE_KEYS | {
+    "access_token",
+    "api-token",
+    "artifact_path",
+    "auth",
+    "content",
+    "file_path",
+    "openai_api_key",
+    "password",
+    "path",
+    "payload",
+    "raw_data",
+    "raw_prompt",
+    "raw_result",
+    "refresh_token",
+    "secret",
+    "secrets",
+    "text",
+    "tool_arguments",
+}
+_ACP_REDACTION_MARKERS = _ACP_AUDIT_SENSITIVE_MARKERS + (
+    "api-key",
+    "password=",
+    "secret=",
+    "token=",
+)
+
+
+def _redact_acp_string(value: str) -> str:
+    """Return a support-safe representation of one ACP string value."""
+    text = str(value)
+    lowered = text.lower()
+    if any(marker in lowered for marker in _ACP_REDACTION_MARKERS):
+        return _ACP_REDACTED_VALUE
+    if text.startswith("/") or text.startswith("~") or ":\\" in text:
+        return _ACP_REDACTED_VALUE
+    if len(text) > 300:
+        return f"{text[:300]}..."
+    return text
+
+
+def _redact_acp_value(value: Any, *, key: str = "") -> Any:
+    """Recursively redact sensitive ACP payload data while preserving shape."""
+    key_l = str(key).strip().lower()
+    if key_l in _ACP_REDACTION_SENSITIVE_KEYS:
+        return _ACP_REDACTED_VALUE
+    if isinstance(value, dict):
+        return {
+            str(child_key): _redact_acp_value(child_value, key=str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_acp_value(item, key=key_l) for item in value]
+    if isinstance(value, str):
+        return _redact_acp_string(value)
+    return value
+
+
+def _redact_acp_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Redact transcript-level prompt/result payloads for support-safe views."""
+    redacted: dict[str, Any] = {
+        "role": message.get("role"),
+        "content": _ACP_REDACTED_VALUE if message.get("content") is not None else None,
+        "timestamp": message.get("timestamp"),
+    }
+    for raw_key in ("raw_prompt", "raw_result", "raw_data"):
+        if raw_key in message:
+            redacted[raw_key] = _ACP_REDACTED_VALUE
+    return redacted
+
+
+def _redact_acp_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return redacted copies of ACP transcript messages."""
+    return [
+        _redact_acp_message(msg)
+        for msg in messages
+        if isinstance(msg, dict)
+    ]
+
+
 def _normalize_reason_code(raw_reason: Any, raw_message: Any) -> str:
     candidate = str(raw_reason or "").strip().lower()
     if candidate in _ACP_DIAGNOSTIC_REASON_MAP:
@@ -2503,6 +2584,10 @@ async def acp_list_sessions(
 )
 async def acp_session_detail(
     session_id: str,
+    redacted: bool = Query(
+        default=False,
+        description="Return a support-safe redacted transcript view",
+    ),
     user: User = Depends(get_request_user),
 ) -> ACPSessionDetailResponse:
     """Get detailed information about an ACP session."""
@@ -2514,10 +2599,14 @@ async def acp_session_detail(
     if not rec:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
     fork_lineage = await store.get_fork_lineage(session_id)
-    return ACPSessionDetailResponse(**rec.to_detail_dict(
+    detail = rec.to_detail_dict(
         has_websocket=client.has_websocket_connections(session_id),
         fork_lineage=fork_lineage,
-    ))
+    )
+    if redacted:
+        detail["messages"] = _redact_acp_messages(detail.get("messages") or [])
+        detail["cwd"] = _ACP_REDACTED_VALUE if detail.get("cwd") else detail.get("cwd")
+    return ACPSessionDetailResponse(**detail)
 
 
 @router.get(
@@ -2566,6 +2655,10 @@ async def acp_session_events(
     session_id: str,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    redacted: bool = Query(
+        default=False,
+        description="Return support-safe redacted event payloads",
+    ),
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Query persisted ACP session events/messages."""
@@ -2582,7 +2675,11 @@ async def acp_session_events(
         if not isinstance(msg, dict):
             continue
         content = msg.get("content")
-        raw_reason = content.get("reason_code") if isinstance(content, dict) else None
+        raw_reason = (
+            content.get("reason_code") or content.get("error_type") or content.get("status")
+            if isinstance(content, dict)
+            else None
+        )
         raw_error = (
             content.get("error") if isinstance(content, dict) else None
         ) or (
@@ -2593,7 +2690,7 @@ async def acp_session_events(
             "event_type": "message",
             "role": msg.get("role"),
             "timestamp": msg.get("timestamp"),
-            "data": content,
+            "data": _redact_acp_value(content, key="data") if redacted else content,
             "reason_code": _normalize_reason_code(raw_reason, raw_error),
         }
         events.append(event)
@@ -2707,6 +2804,10 @@ async def acp_session_events_stream(
 )
 async def acp_session_artifacts(
     session_id: str,
+    redacted: bool = Query(
+        default=False,
+        description="Return support-safe redacted artifact payloads",
+    ),
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Query artifacts emitted in ACP session messages."""
@@ -2729,10 +2830,20 @@ async def acp_session_artifacts(
         if isinstance(listed, list):
             for artifact in listed:
                 if isinstance(artifact, dict):
-                    artifacts.append(dict(artifact))
+                    artifact_payload = dict(artifact)
+                    artifacts.append(
+                        _redact_acp_value(artifact_payload, key="artifact")
+                        if redacted
+                        else artifact_payload
+                    )
         single = content.get("artifact")
         if isinstance(single, dict):
-            artifacts.append(dict(single))
+            single_payload = dict(single)
+            artifacts.append(
+                _redact_acp_value(single_payload, key="artifact")
+                if redacted
+                else single_payload
+            )
 
     _acp_record_audit_event(
         action="artifacts_query",

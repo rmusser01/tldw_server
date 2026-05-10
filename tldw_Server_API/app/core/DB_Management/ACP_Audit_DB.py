@@ -195,11 +195,13 @@ class ACPAuditDB:
             ]
         return [dict(e) for e in self._hot_cache]
 
-    def purge_old_events(self) -> int:
+    def purge_old_events(self, *, now: float | None = None) -> int:
         """Remove events older than retention_days. Returns count deleted."""
         self._ensure_schema()
         conn = self._get_conn()
-        cutoff = time.time() - (self._retention_days * 86400)
+        cutoff = (time.time() if now is None else float(now)) - (
+            self._retention_days * 86400
+        )
         cursor = conn.execute(
             "DELETE FROM acp_audit_events WHERE created_at < ?",
             (cutoff,),
@@ -229,9 +231,25 @@ _audit_db: ACPAuditDB | None = None
 _audit_db_lock = threading.Lock()
 
 
+def _default_audit_retention_days() -> int:
+    """Resolve ACP audit retention from config with a safe default."""
+    raw = os.getenv("ACP_AUDIT_RETENTION_DAYS")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            return 30
+    try:
+        from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
+
+        return int(load_acp_sandbox_config().audit_retention_days)
+    except Exception:
+        return 30
+
+
 def get_acp_audit_db(
     db_path: str | None = None,
-    retention_days: int = 30,
+    retention_days: int | None = None,
 ) -> ACPAuditDB:
     """Get or create the module-level ACPAuditDB singleton."""
     global _audit_db
@@ -240,6 +258,8 @@ def get_acp_audit_db(
             if _audit_db is None:
                 _audit_db = ACPAuditDB(
                     db_path=db_path,
-                    retention_days=retention_days,
+                    retention_days=_default_audit_retention_days()
+                    if retention_days is None
+                    else retention_days,
                 )
     return _audit_db

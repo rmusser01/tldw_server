@@ -91,8 +91,29 @@ class _StubSessionRecord:
                 "content": {
                     "error_type": "acp_governance_blocked",
                     "message": "access_token should never leak",
+                    "tool_arguments": {"command": "echo safe"},
                 },
                 "timestamp": "2026-02-26T00:00:02+00:00",
+                "raw_result": {
+                    "content": "assistant payload with sk-live-secret",
+                    "env": {"OPENAI_API_KEY": "sk-env-secret"},
+                },
+            },
+            {
+                "role": "assistant",
+                "content": {
+                    "artifact": {
+                        "id": "artifact-secret",
+                        "type": "summary",
+                        "path": "/Users/example/private/report.md",
+                        "content": "artifact body contains api_key=sk-artifact-secret",
+                        "metadata": {
+                            "title": "Safe artifact title",
+                            "api_key": "sk-metadata-secret",
+                        },
+                    }
+                },
+                "timestamp": "2026-02-26T00:00:03+00:00",
             },
         ]
         self.usage = _StubUsage(prompt_tokens=10, completion_tokens=20)
@@ -115,6 +136,18 @@ class _StubSessionRecord:
             "workspace_group_id": self.workspace_group_id,
             "scope_snapshot_id": self.scope_snapshot_id,
         }
+
+    def to_detail_dict(
+        self,
+        *,
+        has_websocket: bool = False,
+        fork_lineage: list[str] | None = None,
+    ) -> dict:
+        detail = self.to_info_dict(has_websocket=has_websocket)
+        detail["messages"] = list(self.messages)
+        detail["cwd"] = self.cwd
+        detail["fork_lineage"] = fork_lineage or []
+        return detail
 
 
 class _StubSessionStore:
@@ -142,6 +175,9 @@ class _StubSessionStore:
         if user_id is not None and int(user_id) != 1:
             return [], 0
         return [self.record], 1
+
+    async def get_fork_lineage(self, session_id: str, *, max_depth: int = 50) -> list[str]:
+        return []
 
 
 class _StubRunnerClient:
@@ -211,6 +247,54 @@ def test_acp_diagnostics_normalization(client_user_only, stub_acp_hardening):
     assert "timed_out" in reason_codes
     assert "blocked" in reason_codes
     assert any(item["message"] == "Diagnostic message redacted (sensitive content)" for item in payload["diagnostics"])
+
+
+def test_acp_detail_redacted_mode_hides_transcript_payloads(client_user_only, stub_acp_hardening):
+    response = client_user_only.get("/api/v1/acp/sessions/session-123/detail?redacted=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = str(payload).lower()
+    assert "access_token" not in serialized
+    assert "sk-live-secret" not in serialized
+    assert "sk-env-secret" not in serialized
+    assert payload["messages"][0]["role"] == "assistant"
+    assert payload["messages"][0]["content"] == "[redacted]"
+    assert payload["messages"][1]["raw_result"] == "[redacted]"
+
+
+def test_acp_events_redacted_mode_preserves_reason_code_and_hides_data(client_user_only, stub_acp_hardening):
+    response = client_user_only.get("/api/v1/acp/sessions/session-123/events?redacted=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = str(payload).lower()
+    assert "access_token" not in serialized
+    assert "sk-live-secret" not in serialized
+    assert payload["events"][1]["reason_code"] == "blocked"
+    assert payload["events"][1]["data"]["message"] == "[redacted]"
+    assert payload["events"][1]["data"]["tool_arguments"] == "[redacted]"
+
+
+def test_acp_artifacts_redacted_mode_scrubs_payloads_but_keeps_operational_context(
+    client_user_only,
+    stub_acp_hardening,
+):
+    response = client_user_only.get("/api/v1/acp/sessions/session-123/artifacts?redacted=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    artifact = payload["artifacts"][0]
+    serialized = str(payload).lower()
+    assert "sk-artifact-secret" not in serialized
+    assert "sk-metadata-secret" not in serialized
+    assert "/users/example/private" not in serialized
+    assert artifact["id"] == "artifact-secret"
+    assert artifact["type"] == "summary"
+    assert artifact["metadata"]["title"] == "Safe artifact title"
+    assert artifact["metadata"]["api_key"] == "[redacted]"
+    assert artifact["path"] == "[redacted]"
+    assert artifact["content"] == "[redacted]"
 
 
 def test_acp_audit_records_control_actions(client_user_only, stub_acp_hardening):

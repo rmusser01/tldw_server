@@ -10,7 +10,7 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
@@ -1488,6 +1488,47 @@ class ACPSessionsDB:
         conn.commit()
         logger.info("Evicted {} expired ACP sessions", len(expired_ids))
         return len(expired_ids)
+
+    def purge_retained_sessions(
+        self,
+        *,
+        retention_days: int,
+        now: datetime | None = None,
+    ) -> int:
+        """Hard-delete closed/error sessions older than the retention window.
+
+        Session messages are deleted through the session table's cascade
+        relationship. Active sessions are never hard-deleted by retention; TTL
+        eviction must close them first.
+        """
+        try:
+            retention_days_int = int(retention_days)
+        except (TypeError, ValueError):
+            retention_days_int = 30
+        if retention_days_int < 0:
+            return 0
+
+        now_dt = now or datetime.now(timezone.utc)
+        cutoff = now_dt - timedelta(days=retention_days_int)
+        cutoff_iso = cutoff.isoformat()
+        conn = self._get_conn()
+        cursor = conn.execute(
+            """
+            DELETE FROM sessions
+            WHERE status IN ('closed', 'error')
+              AND COALESCE(last_activity_at, created_at) < ?
+            """,
+            (cutoff_iso,),
+        )
+        conn.commit()
+        deleted = cursor.rowcount
+        if deleted:
+            logger.info(
+                "Purged {} retained ACP sessions (retention={}d)",
+                deleted,
+                retention_days_int,
+            )
+        return deleted
 
     # ------------------------------------------------------------------
     # Agent Registry CRUD
