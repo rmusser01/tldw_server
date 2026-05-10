@@ -14,6 +14,8 @@ for the ACP module.
   [ACP_Production_Readiness.md](ACP_Production_Readiness.md)
 - Downstream-agent compatibility matrix and certification contract:
   [ACP_Compatibility_Matrix.md](ACP_Compatibility_Matrix.md)
+- Downstream-agent certification checklist and smoke manifest:
+  [ACP_Certification_Checklist.md](ACP_Certification_Checklist.md)
 - Governance, RBAC, approval, and audit details:
   [ACP_Governance_Audit.md](ACP_Governance_Audit.md)
 
@@ -704,6 +706,22 @@ python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.
 cd tools/tldw-agent
 ./scripts/verify-local-build.sh
 ```
+
+### Certification Smoke Manifest
+
+Use the certification helper when updating downstream-agent compatibility
+claims. The `stub-smoke` profile reuses the in-repo backend, runner, and mocked
+browser gates; the `live-e2e` profile documents the operator-supplied runtime
+state needed before claiming support for a named downstream agent.
+
+```bash
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile stub-smoke --format json
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --format json
+```
+
+Follow [ACP_Certification_Checklist.md](ACP_Certification_Checklist.md) before
+changing support states in
+[ACP_Compatibility_Matrix.md](ACP_Compatibility_Matrix.md).
 
 ## Behavior Summary
 

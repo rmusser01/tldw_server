@@ -9,6 +9,9 @@ The matrix is intentionally documentation-first. Updating support status should
 not require code changes unless a surface needs to display a newly documented
 field.
 
+For the reproducible certification workflow and command manifest, see
+`ACP_Certification_Checklist.md`.
+
 ## Scope
 
 This matrix covers downstream ACP-compatible agents launched by `tldw-agent`
@@ -122,6 +125,12 @@ Follow-up issue:
 ```
 
 ## Minimum Certification Checklists
+
+Use `Helper_Scripts/Testing-related/acp_certification_smoke.py` to emit the
+current command manifest for `stub-smoke` and `live-e2e` evidence. The helper
+reuses the existing backend ACP suites, mocked browser flow, and Go runner
+verification rather than defining a parallel test harness. The detailed operator
+checklist lives in `ACP_Certification_Checklist.md`.
 
 ### Documented Only
 
