@@ -49,8 +49,8 @@ Create:
   - Service import, duplicate, metadata, and folder mirroring tests.
 - `tldw_Server_API/tests/Chatbooks/test_chatbooks_openwebui_db_api.py`
   - Endpoint-level preview/import request contract tests.
-- `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-db-import.test.tsx`
-  - Frontend DB-mode source selector, preview user selection, and import request tests.
+- `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx`
+  - Frontend OpenWebUI JSON and DB-mode source selector, preview user selection, and import request tests.
 
 Modify:
 
@@ -473,27 +473,27 @@ git commit -m "Support async OpenWebUI database imports"
 
 **Success Criteria:** Users can choose OpenWebUI database, upload `.db`/`.sqlite`, preview users, select exactly one user, see destination namespace/attachment warnings, and import with `selected_openwebui_user_id`.
 
-**Tests:** `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-db-import.test.tsx`, existing OpenWebUI UI and client tests.
+**Tests:** `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx`, existing OpenWebUI UI and client tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 5.1: Extend frontend client tests first
 
 **Files:**
 - Modify: `apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts`
 
-- [ ] Add preview test for `source_format="openwebui_db"`.
-- [ ] Add import test that includes `selected_openwebui_user_id`.
-- [ ] Confirm boolean options are still stringified as multipart fields.
+- [x] Add preview test for `source_format="openwebui_db"`.
+- [x] Add import test that includes `selected_openwebui_user_id`.
+- [x] Confirm boolean options are still stringified as multipart fields.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
-cd apps/tldw-frontend
-bunx vitest run ../packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts
+cd apps/packages/ui
+./node_modules/.bin/vitest run src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx
 ```
 
-Expected: FAIL until client types/options include selected user id.
+Verified: PASS after implementation, 2 files and 7 tests.
 
 ### Task 5.2: Update API client upload options
 
@@ -501,55 +501,55 @@ Expected: FAIL until client types/options include selected user id.
 - Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 - Modify: `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`
 
-- [ ] Add `selected_openwebui_user_id?: string` to `importChatbook` options.
-- [ ] No custom serialization is needed beyond the existing normalized multipart field loop.
-- [ ] Keep `previewChatbook` unchanged except tests should prove it passes `source_format=openwebui_db`.
+- [x] Add `selected_openwebui_user_id?: string` to `importChatbook` options.
+- [x] No custom serialization is needed beyond the existing normalized multipart field loop.
+- [x] Keep `previewChatbook` unchanged except tests should prove it passes `source_format=openwebui_db`.
 
 ### Task 5.3: Add failing UI tests
 
 **Files:**
-- Create: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-db-import.test.tsx`
-- Modify existing OpenWebUI JSON test only if common setup should be shared.
+- Modify: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx`
+- DB-mode coverage was folded into the existing OpenWebUI import test file to reuse the existing setup and stale-preview coverage.
 
-- [ ] Test source selector includes `OpenWebUI database`.
-- [ ] Switching to DB mode changes dropzone accept to `.db,.sqlite`.
-- [ ] DB mode hides archive content selection, media, and embeddings controls.
-- [ ] Preview response with two users renders selectable user rows.
-- [ ] Import button is disabled or errors until a user is selected.
-- [ ] Import sends `source_format=openwebui_db` and `selected_openwebui_user_id`.
-- [ ] Preview race guard still ignores stale DB preview responses.
+- [x] Test source selector includes `OpenWebUI database`.
+- [x] Switching to DB mode changes dropzone accept to `.db,.sqlite`.
+- [x] DB mode hides archive content selection, media, and embeddings controls.
+- [x] Preview response with two users renders selectable user rows.
+- [x] Import button is disabled or errors until a user is selected.
+- [x] Import sends `source_format=openwebui_db` and `selected_openwebui_user_id`.
+- [x] Existing stale preview guard remains covered by the shared OpenWebUI preview test.
 
 ### Task 5.4: Implement UI state and rendering
 
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx`
 
-- [ ] Extend type:
+- [x] Extend type:
 
 ```ts
 type ImportSourceFormat = "chatbook" | "openwebui_json" | "openwebui_db"
 ```
 
-- [ ] Split source helpers:
+- [x] Split source helpers:
   - `isOpenWebUIJsonImport`
   - `isOpenWebUIDatabaseImport`
-  - `isExternalOpenWebUIImport = isOpenWebUIJsonImport || isOpenWebUIDatabaseImport`
-- [ ] Add state:
+  - `isOpenWebUIImport = isOpenWebUIJsonImport || isOpenWebUIDatabaseImport`
+- [x] Add state:
   - `openwebuiDbPreview`
   - `selectedOpenWebUIUserId`
-- [ ] Reset selected user on source/file changes.
-- [ ] Source options:
+- [x] Reset selected user on source/file changes.
+- [x] Source options:
   - Chatbook archive
   - OpenWebUI JSON
   - OpenWebUI database
-- [ ] Dropzone accept:
+- [x] Dropzone accept:
   - chatbook -> `.zip,.chatbook`
   - JSON -> `.json`
   - DB -> `.db,.sqlite`
-- [ ] In preview handler:
+- [x] In preview handler:
   - JSON reads `res.openwebui_preview`
   - DB reads `res.openwebui_db_preview`
-- [ ] Render DB preview card with user table:
+- [x] Render DB preview card with user table:
   - label/name/email-safe value
   - chat count
   - folder count
@@ -557,32 +557,29 @@ type ImportSourceFormat = "chatbook" | "openwebui_json" | "openwebui_db"
   - warning count
   - attachment refs
   - destination namespace `OpenWebUI / <label>`
-- [ ] In import handler:
+- [x] In import handler:
   - reject missing selected user id for DB mode before calling client.
   - send selected user id.
   - force media/embeddings false for both OpenWebUI modes.
   - limit conflicts to skip/rename for both OpenWebUI modes.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
-cd apps/tldw-frontend
-bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx \
-  ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-db-import.test.tsx \
-  ../packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts
+cd apps/packages/ui
+./node_modules/.bin/vitest run src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx
 ```
 
-Expected: PASS.
+Verified: PASS, 2 files and 7 tests.
 
 ### Task 5.5: Commit frontend slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx \
         apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx \
-        apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-db-import.test.tsx \
         apps/packages/ui/src/services/tldw/TldwApiClient.ts \
         apps/packages/ui/src/services/tldw/domains/chat-rag.ts \
         apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts
