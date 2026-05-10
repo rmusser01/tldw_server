@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import (
     VNPolicyProfileStore,
     VNPolicyRepository,
     ensure_vn_policy_tables,
+    _question_mark_to_dollar,
 )
 
 
@@ -47,6 +48,55 @@ def test_initialized_creates_policy_tables_and_builtin_profiles(chacha_db: Chara
         {profile["profile_id"] for profile in policy_profiles}
     )
     assert "story_default" in {profile["profile_id"] for profile in generation_profiles}
+
+
+def test_sqlite_builtin_profiles_are_seeded_as_builtin_in_initial_transaction(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    VNPolicyRepository.initialized(chacha_db)
+
+    policy_cursor = chacha_db.execute_query(
+        "SELECT builtin FROM vn_policy_profiles WHERE profile_id = ?",
+        ("local_default",),
+    )
+    generation_cursor = chacha_db.execute_query(
+        "SELECT builtin FROM vn_generation_profiles WHERE profile_id = ?",
+        ("story_default",),
+    )
+
+    assert bool(policy_cursor.fetchone()["builtin"]) is True
+    assert bool(generation_cursor.fetchone()["builtin"]) is True
+
+
+def test_question_mark_to_dollar_ignores_sql_string_literals() -> None:
+    query = (
+        "SELECT '?' AS literal, \"?\" AS ident, 'it''s ?' AS escaped "
+        "FROM vn_policy_profiles WHERE profile_id = ? AND display_name = ?"
+    )
+
+    converted = _question_mark_to_dollar(query)
+
+    assert converted == (
+        "SELECT '?' AS literal, \"?\" AS ident, 'it''s ?' AS escaped "
+        "FROM vn_policy_profiles WHERE profile_id = $1 AND display_name = $2"
+    )
+
+
+def test_policy_profile_store_backend_detection_uses_public_pool_property(tmp_path) -> None:
+    sqlite_pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{tmp_path / 'authnz.db'}")
+    )
+    postgres_pool = DatabasePool(
+        Settings(
+            AUTH_MODE="multi_user",
+            DATABASE_URL="postgresql://user:password@localhost:5432/tldw_test",
+        )
+    )
+
+    assert sqlite_pool.backend_type == "sqlite"
+    assert postgres_pool.backend_type == "postgres"
+    assert VNPolicyProfileStore(sqlite_pool)._is_postgres_backend() is False
+    assert VNPolicyProfileStore(postgres_pool)._is_postgres_backend() is True
 
 
 def test_policy_profile_crud_stores_version_history(chacha_db: CharactersRAGDB) -> None:
@@ -147,6 +197,7 @@ def test_profile_snapshot_is_immutable_after_profile_update(chacha_db: Character
     assert loaded["profile_version"] == profile["version"]
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_global_profile_create_rolls_back_when_version_history_insert_fails(monkeypatch, tmp_path) -> None:
     pool = DatabasePool(Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{tmp_path / 'authnz.db'}"))

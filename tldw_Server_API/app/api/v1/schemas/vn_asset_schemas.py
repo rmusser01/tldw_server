@@ -268,6 +268,7 @@ class VNPackExportRequest(BaseModel):
     include_full_provenance: StrictBool = False
     strict: StrictBool = False
     warn_for_sharing: StrictBool = True
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
     request_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
@@ -355,6 +356,7 @@ class VNPackImportCommitRequest(BaseModel):
     target_character_id: int | None = Field(default=None, ge=1)
     target_pack_id: int | None = Field(default=None, ge=1)
     conflict_decisions: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
     request_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 

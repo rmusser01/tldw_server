@@ -622,12 +622,10 @@ class VNPolicyProfileStore:
         db_pool = self.db_pool
         if db_pool is None:
             return False
-        if isinstance(db_pool, DatabasePool):
-            return getattr(db_pool, "pool", None) is not None
-        sqlite_hint = getattr(db_pool, "_is_sqlite", None)
-        if isinstance(sqlite_hint, bool):
-            return not sqlite_hint
-        return getattr(db_pool, "pool", None) is not None
+        backend_type = getattr(db_pool, "backend_type", None)
+        if backend_type is not None:
+            return str(backend_type).lower() in {"postgres", "postgresql"}
+        return isinstance(db_pool, DatabasePool) and db_pool.backend_type == "postgres"
 
     async def _execute_tx(self, conn: Any, query: str, *args: Any) -> Any:
         sql = _question_mark_to_dollar(query) if self._is_postgres_backend() else query
@@ -1168,32 +1166,28 @@ class VNPolicyRepository:
     def _seed_builtin_profiles(self) -> None:
         for profile_id, display_name, description, definition in BUILTIN_POLICY_PROFILES:
             if self.get_policy_profile(profile_id, include_disabled=True) is None:
-                self.create_policy_profile(
+                self._create_profile(
+                    table_name="vn_policy_profiles",
+                    version_table_name="vn_policy_profile_versions",
                     profile_id=profile_id,
                     display_name=display_name,
                     description=description,
                     definition=definition,
                     created_by_user_id=None,
+                    builtin=True,
                 )
-                with self.db.transaction() as conn:
-                    conn.execute(
-                        "UPDATE vn_policy_profiles SET builtin = 1 WHERE profile_id = ?",
-                        (profile_id,),
-                    )
         for profile_id, display_name, description, definition in BUILTIN_GENERATION_PROFILES:
             if self.get_generation_profile(profile_id, include_disabled=True) is None:
-                self.create_generation_profile(
+                self._create_profile(
+                    table_name="vn_generation_profiles",
+                    version_table_name="vn_generation_profile_versions",
                     profile_id=profile_id,
                     display_name=display_name,
                     description=description,
                     definition=definition,
                     created_by_user_id=None,
+                    builtin=True,
                 )
-                with self.db.transaction() as conn:
-                    conn.execute(
-                        "UPDATE vn_generation_profiles SET builtin = 1 WHERE profile_id = ?",
-                        (profile_id,),
-                    )
 
     def _list_profiles(
         self,
@@ -1249,6 +1243,7 @@ class VNPolicyRepository:
         description: str | None,
         definition: Mapping[str, Any],
         created_by_user_id: int | None,
+        builtin: bool = False,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         _validate_table_name(table_name)
@@ -1262,16 +1257,18 @@ class VNPolicyRepository:
                     description,
                     definition_json,
                     version,
+                    builtin,
                     created_by_user_id,
                     updated_by_user_id
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?)
                 """,  # nosec B608
                 (
                     profile_id,
                     display_name,
                     description,
                     _json_dump(dict(definition)),
+                    bool(builtin),
                     created_by_user_id,
                     created_by_user_id,
                 ),
@@ -1569,12 +1566,38 @@ def _affected_rows(result: Any) -> int:
 def _question_mark_to_dollar(query: str) -> str:
     index = 0
     parts: list[str] = []
-    for char in query:
+    in_single_quote = False
+    in_double_quote = False
+    position = 0
+    while position < len(query):
+        char = query[position]
+        if char == "'" and not in_double_quote:
+            parts.append(char)
+            if in_single_quote and position + 1 < len(query) and query[position + 1] == "'":
+                parts.append(query[position + 1])
+                position += 2
+                continue
+            in_single_quote = not in_single_quote
+            position += 1
+            continue
+        if char == '"' and not in_single_quote:
+            parts.append(char)
+            if in_double_quote and position + 1 < len(query) and query[position + 1] == '"':
+                parts.append(query[position + 1])
+                position += 2
+                continue
+            in_double_quote = not in_double_quote
+            position += 1
+            continue
         if char == "?":
-            index += 1
-            parts.append(f"${index}")
+            if in_single_quote or in_double_quote:
+                parts.append(char)
+            else:
+                index += 1
+                parts.append(f"${index}")
         else:
             parts.append(char)
+        position += 1
     return "".join(parts)
 
 

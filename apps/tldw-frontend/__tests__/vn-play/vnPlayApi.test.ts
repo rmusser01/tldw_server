@@ -90,7 +90,11 @@ describe('vnPlay api client', () => {
     await listVNPlayEvents(1);
     await createVNPlayCheckpoint(1, { label: 'Before choice' });
     await listVNPlayCheckpoints(1);
-    await restoreVNPlaySession(1, { checkpoint_id: 5, idempotency_key: 'restore-1' });
+    await restoreVNPlaySession(1, {
+      checkpoint_id: 5,
+      client_scene_version: 2,
+      idempotency_key: 'restore-1',
+    });
     await listVNPlayBranches(1);
 
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions');
@@ -108,6 +112,7 @@ describe('vnPlay api client', () => {
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/checkpoints');
     expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/restore', {
       checkpoint_id: 5,
+      client_scene_version: 2,
       idempotency_key: 'restore-1',
     });
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branches');

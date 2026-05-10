@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_ACTION_REQUEST_ABANDONED,
     ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_STALE_SCENE_VERSION,
+    ERROR_TURN_IN_PROGRESS,
     SESSION_ACTION_STATUS_PENDING,
     TURN_STATUS_ABANDONED,
     TURN_STATUS_COMPLETED,
@@ -101,7 +102,7 @@ async def test_stale_turn_request_is_persisted_as_abandoned_before_execution(
 
 
 @pytest.mark.asyncio
-async def test_duplicate_in_flight_turn_key_replays_active_status(
+async def test_duplicate_in_flight_turn_key_replays_conflict(
     service: VNPlayService,
 ) -> None:
     session = _ready_session(service)
@@ -120,20 +121,17 @@ async def test_duplicate_in_flight_turn_key_replays_active_status(
         owner_user_id=42,
     )
 
-    response = await service.submit_turn(
-        session.id,
-        input_text="Hello",
-        client_scene_version=0,
-        idempotency_key="in-flight",
-    )
-
-    assert response.turn_request_id == int(turn_request["id"])
-    assert response.status == TURN_STATUS_MODEL_CALLING
-    assert response.scene_version == 0
+    with pytest.raises(VNPlayConflictError, match=ERROR_TURN_IN_PROGRESS):
+        await service.submit_turn(
+            session.id,
+            input_text="Hello",
+            client_scene_version=0,
+            idempotency_key="in-flight",
+        )
 
 
 @pytest.mark.asyncio
-async def test_abandoned_turn_request_replays_stable_error_payload(
+async def test_abandoned_turn_request_replays_stable_error(
     service: VNPlayService,
 ) -> None:
     session = _ready_session(service)
@@ -154,15 +152,13 @@ async def test_abandoned_turn_request_replays_stable_error_payload(
         owner_user_id=42,
     )
 
-    response = await service.submit_turn(
-        session.id,
-        input_text="Hello",
-        client_scene_version=0,
-        idempotency_key="abandoned",
-    )
-
-    assert response.status == TURN_STATUS_ABANDONED
-    assert response.error_code == ERROR_ACTION_REQUEST_ABANDONED
+    with pytest.raises(VNPlayTurnError, match=ERROR_ACTION_REQUEST_ABANDONED):
+        await service.submit_turn(
+            session.id,
+            input_text="Hello",
+            client_scene_version=0,
+            idempotency_key="abandoned",
+        )
 
 
 @pytest.mark.asyncio
@@ -191,7 +187,7 @@ async def test_completed_turn_request_replays_stored_response(
 
 
 @pytest.mark.asyncio
-async def test_failed_turn_request_replays_stable_failure_payload(
+async def test_failed_turn_request_replays_stable_failure_error(
     failing_service: VNPlayService,
 ) -> None:
     session = _ready_session(failing_service)
@@ -204,16 +200,13 @@ async def test_failed_turn_request_replays_stable_failure_payload(
             idempotency_key="failed",
         )
 
-    response = await failing_service.submit_turn(
-        session.id,
-        input_text="Break",
-        client_scene_version=0,
-        idempotency_key="failed",
-    )
-
-    assert response.status == TURN_STATUS_MODEL_FAILED
-    assert response.error_code == TURN_STATUS_MODEL_FAILED
-    assert response.error_message == "provider unavailable"
+    with pytest.raises(VNPlayTurnError, match=TURN_STATUS_MODEL_FAILED):
+        await failing_service.submit_turn(
+            session.id,
+            input_text="Break",
+            client_scene_version=0,
+            idempotency_key="failed",
+        )
 
 
 def test_duplicate_active_session_action_key_does_not_abandon_original(

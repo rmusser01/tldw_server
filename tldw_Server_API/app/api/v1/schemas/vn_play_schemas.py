@@ -73,8 +73,8 @@ class VNPlaySessionCreate(BaseModel):
     linked_chat_mode: VNPlayLinkedChatMode = LINKED_CHAT_MODE_READ_ONLY_CONTEXT
     seed: StrictStr | None = Field(default=None, min_length=1)
     settings: dict[str, Any] = Field(default_factory=dict)
-    script_id: int | None = Field(default=None, ge=1)
-    script_version_id: int | None = Field(default=None, ge=1)
+    script_id: StrictInt | None = Field(default=None, ge=1)
+    script_version_id: StrictInt | None = Field(default=None, ge=1)
     acknowledgements: list[StrictStr] = Field(default_factory=list)
 
 
@@ -431,6 +431,27 @@ class VNPlayScriptStateResponse(BaseModel):
     ended: StrictBool = False
 
 
+class VNPlayScriptDebugStateResponse(BaseModel):
+    """Owner-visible scripted-story debug state with pinned script metadata."""
+
+    session_id: StrictInt
+    scene_version: StrictInt = Field(..., ge=0)
+    position: dict[str, Any] = Field(default_factory=dict)
+    variables: dict[str, Any] = Field(default_factory=dict)
+    waiting_choice: dict[str, Any] | None = None
+    ended: StrictBool = False
+    script_id: StrictInt | None = None
+    script_version_id: StrictInt | None = None
+    script_manifest_snapshot_id: StrictInt | None = None
+    script_policy_snapshot_id: StrictInt | None = None
+    script_generation_profile_snapshot_id: StrictInt | None = None
+    version_number: StrictInt | None = None
+    version_label: StrictStr | None = None
+    program: dict[str, Any] = Field(default_factory=dict)
+    script_defaults: dict[str, Any] = Field(default_factory=dict)
+    validation: Any | None = None
+
+
 class VNPlayScriptActionResponse(BaseModel):
     """Response for scripted-story runtime actions."""
 
@@ -450,6 +471,7 @@ class VNPlayRestoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     checkpoint_id: StrictInt = Field(..., ge=1)
+    client_scene_version: StrictInt = Field(..., ge=0)
     idempotency_key: StrictStr = Field(..., min_length=1, max_length=200)
 
 

@@ -243,8 +243,7 @@ async def publish_script(
 ) -> VNScriptPublishResponse:
     """Validate and publish an immutable script version."""
     try:
-        existing = service.repo.get_publish_request_by_key(
-            owner_user_id=service.owner_user_id,
+        existing = service.get_publish_request_by_key(
             script_id=script_id,
             idempotency_key=request.idempotency_key,
         )

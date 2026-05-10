@@ -30,8 +30,10 @@ Use these keys:
 
 - JSON `idempotency_key`: `/packs/{pack_id}/generate`, `/packs/{pack_id}/slots/{slot_id}/retry`, `/packs/{pack_id}/items/{item_id}/regenerate`, `/packs/{pack_id}/cleanup` when `dry_run=false`.
 - Multipart form `idempotency_key`: `/packs/{pack_id}/items/upload`.
-- JSON `request_id`: `/packs/{pack_id}/export` and `/import/commit`.
-- Multipart form `request_id`: `/import/previews`.
+- JSON `idempotency_key`: `/packs/{pack_id}/export` and `/import/commit`.
+- Multipart form `idempotency_key`: `/import/previews`.
+
+The older `request_id` field remains a compatibility alias for export/import portability requests, but new clients should send `idempotency_key`.
 
 Dry-run cleanup requests are intentionally not persisted as idempotent mutations.
 
@@ -332,7 +334,8 @@ Example approved cleanup request:
   "dry_run": false,
   "statuses": ["approved"],
   "include_approved": true,
-  "confirmation_text": "DELETE APPROVED VN ASSETS"
+  "confirmation_text": "DELETE APPROVED VN ASSETS",
+  "idempotency_key": "cleanup-approved-pack-1"
 }
 ```
 

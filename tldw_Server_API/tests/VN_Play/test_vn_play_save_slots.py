@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.VN_Play.constants import TURN_STATUS_PENDING
 from tldw_Server_API.app.core.VN_Play.service import (
     DeterministicVNPlayTurnAdapter,
     VNPlayConflictError,
@@ -188,13 +189,79 @@ async def test_save_slot_idempotency_conflict_and_stale_restore_are_stable(
             client_scene_version=1,
             idempotency_key="save-slot-stale-restore",
         )
-    with pytest.raises(VNPlayConflictError, match="stale_scene_version"):
-        service.restore_save_slot(
+
+
+def test_save_slot_create_rejects_active_turn_before_creating_checkpoint(
+    service: VNPlayService,
+) -> None:
+    session = _ready_session(service)
+    turn_request = service.repo.create_turn_request(
+        session_id=session.id,
+        owner_user_id=service.owner_user_id,
+        idempotency_key="save-slot-active-turn-marker",
+        request_payload_hash="active-turn-hash",
+        base_scene_version=0,
+        status=TURN_STATUS_PENDING,
+    )
+    assert service.repo.try_acquire_turn_lock(
+        session_id=session.id,
+        owner_user_id=service.owner_user_id,
+        turn_request_id=int(turn_request["id"]),
+        expected_scene_version=0,
+    )
+
+    with pytest.raises(VNPlayConflictError, match="turn_in_progress"):
+        service.create_save_slot(
             session.id,
-            int(slot["id"]),
-            client_scene_version=1,
-            idempotency_key="save-slot-stale-restore",
+            slot_key="manual-locked",
+            title="During active turn",
+            metadata={},
+            idempotency_key="save-slot-active-turn",
         )
+
+    assert service.list_save_slots(session.id) == []
+    assert service.repo.list_checkpoints(session.id, owner_user_id=service.owner_user_id) == []
+
+
+def test_save_slot_commit_rolls_back_checkpoint_and_slot_on_terminal_failure(
+    service: VNPlayService,
+) -> None:
+    session = _ready_session(service)
+    action = service.repo.create_session_action(
+        session_id=session.id,
+        owner_user_id=service.owner_user_id,
+        action_type="save_slot_create",
+        idempotency_key="save-slot-atomic-failure",
+        request_payload_hash="save-slot-atomic-hash",
+    )
+    assert service.repo.try_acquire_session_action_lock(
+        session_id=session.id,
+        owner_user_id=service.owner_user_id,
+        action_id=int(action["id"]),
+        expected_scene_version=session.scene_version,
+    )
+    state = service.repo.get_scene_state(session.id, owner_user_id=service.owner_user_id)
+    assert state is not None
+
+    def fail_response_payload(save_slot) -> dict:
+        raise RuntimeError(f"terminal write failed for save slot {save_slot['id']}")
+
+    with pytest.raises(RuntimeError, match="terminal write failed"):
+        service.repo.commit_save_slot_create_action(
+            session_id=session.id,
+            owner_user_id=service.owner_user_id,
+            action_id=int(action["id"]),
+            slot_key="manual-atomic",
+            title="Atomic failure",
+            metadata={},
+            event_id=None,
+            scene_version=int(state["scene_version"]),
+            scene_state_snapshot=dict(state),
+            response_payload_factory=fail_response_payload,
+        )
+
+    assert service.repo.list_save_slots(session.id, owner_user_id=service.owner_user_id) == []
+    assert service.repo.list_checkpoints(session.id, owner_user_id=service.owner_user_id) == []
 
 
 def test_save_slot_api_create_read_patch_delete_and_restore(

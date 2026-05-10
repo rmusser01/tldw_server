@@ -129,7 +129,7 @@ export function previewVNAssetPrompt(
 
 export function exportVNAssetPack(
   packId: number,
-  request: VNPackExportRequest = {}
+  request: VNPackExportRequest
 ): Promise<VNPackExportResponse> {
   return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/export`, request);
 }
@@ -138,9 +138,13 @@ export function getVNPackExportJob(jobId: string): Promise<VNPackPortabilityJob>
   return apiClient.get(`${VN_ASSETS_BASE}/portability/exports/${jobId}`);
 }
 
-export function createVNPackImportPreview(archive: File): Promise<VNPackImportPreviewStartResponse> {
+export function createVNPackImportPreview(
+  archive: File,
+  idempotencyKey: string
+): Promise<VNPackImportPreviewStartResponse> {
   const formData = new FormData();
   formData.append('archive', archive);
+  formData.append('idempotency_key', idempotencyKey);
   return apiClient.post(`${VN_ASSETS_BASE}/import/previews`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

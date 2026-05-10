@@ -44,7 +44,9 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert body["features"]["asset_generation"] is True
     assert body["features"]["asset_portability"] is True
     assert body["features"]["scripted_story"] is True
+    assert body["features"]["tts_jobs"] is False
     assert body["features"]["realtime_image_generation"] is False
+    assert "suggestive" in body["supported_content_ratings"]
     assert body["route_migration"]["canonical"] == "/api/v1/vn/vn-*"
     assert body["route_migration"]["supersedes"] == ["/api/v1/vn-assets", "/api/v1/vn-play"]
     assert "visible_policy_profiles" in body

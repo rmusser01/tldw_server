@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
@@ -183,6 +184,7 @@ CREATE TABLE IF NOT EXISTS vn_asset_idempotency_records (
     resource_id TEXT NOT NULL DEFAULT '',
     idempotency_key TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed',
     response_json TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -313,27 +315,193 @@ class VNAssetPacksRepository:
         """Persist a completed idempotent VN asset API response."""
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
-            conn.execute(
+            existing = conn.execute(
                 """
-                INSERT INTO vn_asset_idempotency_records (
-                    owner_user_id,
-                    scope,
-                    resource_id,
-                    idempotency_key,
-                    payload_hash,
-                    response_json
+                SELECT * FROM vn_asset_idempotency_records
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
+                """,
+                (owner_user_id, scope, resource_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["payload_hash"]) != payload_hash:
+                    raise ValueError("idempotency_key_conflict")
+                conn.execute(
+                    """
+                    UPDATE vn_asset_idempotency_records
+                    SET status = 'completed',
+                        response_json = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE owner_user_id = ?
+                      AND scope = ?
+                      AND resource_id = ?
+                      AND idempotency_key = ?
+                    """,
+                    (
+                        _json_dump(dict(response)),
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO vn_asset_idempotency_records (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        status,
+                        response_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, 'completed', ?)
+                    """,
+                    (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        _json_dump(dict(response)),
+                    ),
+                )
+            row = conn.execute(
+                """
+                SELECT * FROM vn_asset_idempotency_records
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
+                """,
+                (owner_user_id, scope, resource_id, idempotency_key),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("created_idempotency_record_not_found")
+        return dict(row)
+
+    def claim_idempotency_record(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically claim an idempotency key before side effects run.
+
+        Returns the record and True when this caller created the in-progress
+        claim. Returns the existing record and False for replay/in-progress
+        cases. Raises ValueError when the same key was used for a different
+        payload.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO vn_asset_idempotency_records (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        status,
+                        response_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, 'in_progress', '{}')
+                    """,
+                    (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                    ),
+                )
+                claimed = True
+            except sqlite3.IntegrityError:
+                claimed = False
+            cursor = conn.execute(
+                """
+                SELECT * FROM vn_asset_idempotency_records
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
+                """,
+                (owner_user_id, scope, resource_id, idempotency_key),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise RuntimeError("idempotency_record_not_found")
+            record = dict(row)
+            if str(record["payload_hash"]) != payload_hash:
+                raise ValueError("idempotency_key_conflict")
+            return record, claimed
+
+    def complete_idempotency_record(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+        response: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Store the terminal response for a claimed idempotency key."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE vn_asset_idempotency_records
+                SET status = 'completed',
+                    payload_hash = ?,
+                    response_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
                 """,
                 (
+                    payload_hash,
+                    _json_dump(dict(response)),
                     owner_user_id,
                     scope,
                     resource_id,
                     idempotency_key,
-                    payload_hash,
-                    _json_dump(dict(response)),
                 ),
             )
+            if cursor.rowcount == 0:
+                conn.execute(
+                    """
+                    INSERT INTO vn_asset_idempotency_records (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        status,
+                        response_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, 'completed', ?)
+                    """,
+                    (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        _json_dump(dict(response)),
+                    ),
+                )
         record = self.get_idempotency_record(
             owner_user_id=owner_user_id,
             scope=scope,
@@ -341,8 +509,31 @@ class VNAssetPacksRepository:
             idempotency_key=idempotency_key,
         )
         if record is None:
-            raise RuntimeError("created_idempotency_record_not_found")
+            raise RuntimeError("completed_idempotency_record_not_found")
         return record
+
+    def release_idempotency_claim(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+    ) -> None:
+        """Remove an in-progress idempotency claim after a failed side effect."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                DELETE FROM vn_asset_idempotency_records
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
+                  AND status = 'in_progress'
+                """,
+                (owner_user_id, scope, resource_id, idempotency_key),
+            )
 
     def create_portability_job(
         self,
@@ -1854,3 +2045,13 @@ def _ensure_batch_fanout_columns(conn: Any) -> None:
     for column_name, statement in additions.items():
         if column_name not in columns:
             conn.execute(statement)
+
+    idempotency_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(vn_asset_idempotency_records)").fetchall()
+    }
+    if "status" not in idempotency_columns:
+        conn.execute(
+            "ALTER TABLE vn_asset_idempotency_records "
+            "ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
+        )

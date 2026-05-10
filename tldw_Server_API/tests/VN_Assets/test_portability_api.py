@@ -184,7 +184,11 @@ def test_start_export_creates_jobs_backed_portability_row(
 ) -> None:
     response = client.post(
         f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
-        json={"strict": True, "include_full_provenance": False},
+        json={
+            "strict": True,
+            "include_full_provenance": False,
+            "idempotency_key": "export-create-1",
+        },
     )
 
     assert response.status_code == 202
@@ -207,13 +211,13 @@ def test_start_export_replays_same_idempotency_key_and_conflicts_on_different_pa
     fake_jobs: FakeJobManager,
     pack: SimpleNamespace,
 ) -> None:
-    payload = {"request_id": "export-pack-1", "strict": True}
+    payload = {"idempotency_key": "export-pack-1", "strict": True}
 
     first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json=payload)
     replay = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json=payload)
     conflict = client.post(
         f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
-        json={"request_id": "export-pack-1", "strict": False},
+        json={"idempotency_key": "export-pack-1", "strict": False},
     )
 
     assert first.status_code == 202
@@ -222,6 +226,18 @@ def test_start_export_replays_same_idempotency_key_and_conflicts_on_different_pa
     assert len(fake_jobs.created) == 1
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_start_export_requires_idempotency_key(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    pack: SimpleNamespace,
+) -> None:
+    response = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
+    assert fake_jobs.created == []
 
 
 def test_start_export_rejects_non_owned_pack(
@@ -246,7 +262,10 @@ def test_export_status_composes_jobs_lifecycle_with_vn_stage(
     repo: VNAssetPacksRepository,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-status-1"},
+    )
     job_id = started.json()["job_id"]
     fake_jobs.jobs[int(job_id)]["status"] = "processing"
     repo.update_portability_job(
@@ -271,7 +290,10 @@ def test_export_status_reconciles_terminal_jobs_state(
     repo: VNAssetPacksRepository,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-status-2"},
+    )
     job_id = started.json()["job_id"]
     fake_jobs.jobs[int(job_id)]["status"] = "completed"
     repo.update_portability_job(
@@ -294,7 +316,10 @@ def test_export_download_rejects_incomplete_job(
     client: TestClient,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-download-1"},
+    )
     job_id = started.json()["job_id"]
 
     response = client.get(f"/api/v1/vn/vn-assets/portability/exports/{job_id}/download")
@@ -309,7 +334,10 @@ def test_export_cancel_routes_through_jobs_manager(
     repo: VNAssetPacksRepository,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-cancel-1"},
+    )
     job_id = started.json()["job_id"]
 
     response = client.post(f"/api/v1/vn/vn-assets/portability/exports/{job_id}/cancel")
@@ -333,6 +361,7 @@ def test_start_import_preview_creates_jobs_backed_preview_row(
     with archive_path.open("rb") as archive_file:
         response = client.post(
             "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-create-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
 
@@ -370,19 +399,19 @@ def test_start_import_preview_replays_same_idempotency_key_and_conflicts_on_diff
     with archive_path.open("rb") as archive_file:
         first = client.post(
             "/api/v1/vn/vn-assets/import/previews",
-            data={"request_id": "preview-upload-1"},
+            data={"idempotency_key": "preview-upload-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     with archive_path.open("rb") as archive_file:
         replay = client.post(
             "/api/v1/vn/vn-assets/import/previews",
-            data={"request_id": "preview-upload-1"},
+            data={"idempotency_key": "preview-upload-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     with conflict_archive_path.open("rb") as archive_file:
         conflict = client.post(
             "/api/v1/vn/vn-assets/import/previews",
-            data={"request_id": "preview-upload-1"},
+            data={"idempotency_key": "preview-upload-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
 
@@ -392,6 +421,24 @@ def test_start_import_preview_replays_same_idempotency_key_and_conflicts_on_diff
     assert len(fake_jobs.created) == 1
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_start_import_preview_requires_idempotency_key(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "preview-missing-key.tldw-vnpack")
+
+    with archive_path.open("rb") as archive_file:
+        response = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
+    assert fake_jobs.created == []
 
 
 def test_get_import_preview_composes_preview_and_jobs_status(
@@ -404,6 +451,7 @@ def test_get_import_preview_composes_preview_and_jobs_status(
     with archive_path.open("rb") as archive_file:
         started = client.post(
             "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-status-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
@@ -450,6 +498,7 @@ def test_import_preview_cancel_routes_through_jobs_manager(
     with archive_path.open("rb") as archive_file:
         started = client.post(
             "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-cancel-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
@@ -475,6 +524,7 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     with archive_path.open("rb") as archive_file:
         started = client.post(
             "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-delete-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
@@ -520,6 +570,7 @@ def test_start_import_commit_creates_jobs_backed_journal_row(
             "target_mode": "create_new",
             "character_action": "link_existing_character",
             "target_character_id": character_id,
+            "idempotency_key": "commit-create-1",
         },
     )
 
@@ -567,7 +618,7 @@ def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_diffe
         "target_mode": "create_new",
         "character_action": "link_existing_character",
         "target_character_id": character_id,
-        "request_id": "commit-1",
+        "idempotency_key": "commit-1",
     }
 
     first = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
@@ -583,6 +634,89 @@ def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_diffe
     assert len(fake_jobs.created) == 1
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_start_import_commit_releases_idempotency_claim_on_enqueue_failure(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    repo: VNAssetPacksRepository,
+    character_id: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "commit-enqueue-failure.tldw-vnpack")
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="preview-job-1",
+        status="completed",
+        archive_path=str(archive_path),
+        archive_sha256="a" * 64,
+        canonical_payload_fingerprint="b" * 64,
+        schema_version=VNPACK_SCHEMA_VERSION,
+    )
+    payload = {
+        "preview_id": preview["id"],
+        "trust_mode": "trusted_restore",
+        "target_mode": "create_new",
+        "character_action": "link_existing_character",
+        "target_character_id": character_id,
+        "idempotency_key": "commit-enqueue-failure",
+    }
+
+    def fail_create_job(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("job enqueue failed")
+
+    monkeypatch.setattr(fake_jobs, "create_job", fail_create_job)
+    with pytest.raises(RuntimeError, match="job enqueue failed"):
+        client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+
+    record = repo.get_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_import_commit",
+        resource_id=f"preview:{preview['id']}",
+        idempotency_key="commit-enqueue-failure",
+    )
+    assert record is None
+
+    monkeypatch.undo()
+    retry = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+
+    assert retry.status_code == 202
+    assert retry.json()["operation"] == "import_commit"
+
+
+def test_start_import_commit_requires_idempotency_key(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    repo: VNAssetPacksRepository,
+    character_id: int,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "commit-missing-key.tldw-vnpack")
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="preview-job-1",
+        status="completed",
+        archive_path=str(archive_path),
+        archive_sha256="a" * 64,
+        canonical_payload_fingerprint="b" * 64,
+        schema_version=VNPACK_SCHEMA_VERSION,
+    )
+
+    response = client.post(
+        "/api/v1/vn/vn-assets/import/commit",
+        json={
+            "preview_id": preview["id"],
+            "trust_mode": "trusted_restore",
+            "target_mode": "create_new",
+            "character_action": "link_existing_character",
+            "target_character_id": character_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
+    assert fake_jobs.created == []
 
 
 def test_import_commit_status_composes_jobs_lifecycle_with_journal(
@@ -610,6 +744,7 @@ def test_import_commit_status_composes_jobs_lifecycle_with_journal(
             "target_mode": "create_new",
             "character_action": "link_existing_character",
             "target_character_id": character_id,
+            "idempotency_key": "commit-status-1",
         },
     )
     job_id = started.json()["job_id"]
@@ -661,6 +796,7 @@ def test_import_commit_cancel_routes_through_jobs_manager(
             "target_mode": "create_new",
             "character_action": "link_existing_character",
             "target_character_id": character_id,
+            "idempotency_key": "commit-cancel-1",
         },
     )
     job_id = started.json()["job_id"]

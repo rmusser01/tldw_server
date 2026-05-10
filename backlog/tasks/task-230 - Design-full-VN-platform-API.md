@@ -1,5 +1,5 @@
 ---
-id: TASK-211
+id: TASK-230
 title: Design full VN platform API
 status: Done
 assignee: []
@@ -31,7 +31,7 @@ Write the approved full VN platform API design spec for the character/persona CY
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Spec documents the canonical /api/v1/vn/vn-* namespace, auth, versioning, route migration, response/error conventions, idempotency, pagination, jobs, content endpoint rules, and ownership boundaries.
+- [x] #1 Spec documents the canonical `/api/v1/vn/vn-*` namespace, auth, versioning, route migration, response/error conventions, idempotency, pagination, jobs, content endpoint rules, and ownership boundaries.
 - [x] #2 Spec defines V1 endpoint inventories and representative request/response/error examples for vn-capabilities, vn-assets, vn-scripts, vn-play, vn-policy, and vn-audio.
 - [x] #3 Spec captures authored script V1 semantics: mutable drafts with optimistic revisions, validation and diagnostics, immutable published versions, single primary asset pack with pinned manifest snapshot, canonical JSON opcodes, typed variables, structured conditions, seeded random replay, model generation persistence/regeneration, and vNext DSL/patch/collaboration boundaries.
 - [x] #4 Spec captures runtime V1 semantics: freeform, story, and scripted_story; Story start; Freeform/model Story turns; script-specific advance/choice/regenerate/state/debug endpoints; checkpoints; per-session save slots; branch navigation/restore; synchronous runtime model calls with persisted failure state.
@@ -52,7 +52,7 @@ Write the approved full VN platform API design spec for the character/persona CY
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Created Docs/superpowers/specs/2026-05-10-vn-platform-api-design.md with the canonical /api/v1/vn/vn-* API design. Self-review fix: changed end-to-end flow shorthand to canonical /api/v1/vn/vn-* paths and made model expansion from any authored scene explicit. Verification so far: referenced docs exist; git diff --check exits 0. Bandit is not applicable because the change is markdown/task metadata only.
+Created Docs/superpowers/specs/2026-05-10-vn-platform-api-design.md with the canonical `/api/v1/vn/vn-*` API design. Self-review fix: changed end-to-end flow shorthand to canonical `/api/v1/vn/vn-*` paths and made model expansion from any authored scene explicit. Verification so far: referenced docs exist; git diff --check exits 0. Bandit is not applicable because the change is markdown/task metadata only.
 
 Self-review follow-up: hardened route migration wording so deprecated aliases are not part of the V1 target API, and required VN image/archive uploads to pass through existing upload validation, storage registration, and generated-file tracking.
 <!-- SECTION:NOTES:END -->
@@ -60,7 +60,7 @@ Self-review follow-up: hardened route migration wording so deprecated aliases ar
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Wrote Docs/superpowers/specs/2026-05-10-vn-platform-api-design.md as the full backend-owned VN platform API design under /api/v1/vn/vn-*. The spec covers capabilities, assets, scripts, play/runtime, policy, VN audio, idempotency, ownership, Jobs linkage, content endpoints, route migration, examples, verification, vNext boundaries, and explicit risks. Verification: referenced documentation paths exist; git diff --check passed. Bandit was skipped because the touched scope is markdown and Backlog task metadata only.
+Wrote Docs/superpowers/specs/2026-05-10-vn-platform-api-design.md as the full backend-owned VN platform API design under `/api/v1/vn/vn-*`. The spec covers capabilities, assets, scripts, play/runtime, policy, VN audio, idempotency, ownership, Jobs linkage, content endpoints, route migration, examples, verification, vNext boundaries, and explicit risks. Verification: referenced documentation paths exist; git diff --check passed. Bandit was skipped because the touched scope is markdown and Backlog task metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

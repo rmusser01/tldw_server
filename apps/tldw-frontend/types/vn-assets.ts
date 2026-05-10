@@ -174,6 +174,7 @@ export interface VNPackExportRequest {
   include_full_provenance?: boolean;
   strict?: boolean;
   warn_for_sharing?: boolean;
+  idempotency_key: string;
   request_id?: string | null;
 }
 
@@ -248,6 +249,7 @@ export interface VNPackImportCommitRequest {
   target_character_id?: number | null;
   target_pack_id?: number | null;
   conflict_decisions?: Record<string, unknown>;
+  idempotency_key: string;
   request_id?: string | null;
 }
 

@@ -258,6 +258,20 @@ class VNScriptService:
         )
         return dict(published["response"])
 
+    def get_publish_request_by_key(
+        self,
+        script_id: int,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return an existing publish request for endpoint idempotency checks."""
+        self._require_script(script_id)
+        return self.repo.get_publish_request_by_key(
+            owner_user_id=self.owner_user_id,
+            script_id=script_id,
+            idempotency_key=idempotency_key,
+        )
+
     def list_versions(self, script_id: int, *, limit: int = 50, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
         """List published versions for an owned script."""
         self._require_script(script_id)
@@ -593,4 +607,3 @@ def _required_acknowledgement_codes(policy_decision: Mapping[str, Any]) -> set[s
         for reason in reasons
         if isinstance(reason, Mapping) and reason.get("requires_acknowledgement") and reason.get("code")
     }
-

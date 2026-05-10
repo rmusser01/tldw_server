@@ -875,8 +875,16 @@ def test_generation_api_enqueues_parent_job(
         app.dependency_overrides[job_manager_dep] = override_job_manager
 
     client = TestClient(app)
-    generate_response = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json={})
+    missing_key_response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/generate",
+        json={},
+    )
+    generate_response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/generate",
+        json={"idempotency_key": "api-generate-parent-job"},
+    )
 
+    assert missing_key_response.status_code in {400, 422}
     assert generate_response.status_code == 202
     assert generate_response.json()["status"] == "queued"
     assert len(fake_jobs.created) == 1

@@ -266,7 +266,7 @@ stored asset bytes subject to ownership, policy, and generated-file checks.
 | Scripts | `/api/v1/vn/vn-scripts` | Authored VN scripts, drafts, validation, immutable published versions. |
 | Play | `/api/v1/vn/vn-play` | Freeform, Story, and Scripted Story runtime sessions. |
 | Policy | `/api/v1/vn/vn-policy` | Policy preflight, policy profiles, generation profiles. |
-| Audio | `/api/v1/vn/vn-audio` | VN-scoped TTS jobs and output content. |
+| Audio | `/api/v1/vn/vn-audio` | Reserved VN-scoped TTS jobs and output content; deferred until the VN audio router is implemented. |
 
 ## VN Capabilities API
 
@@ -301,12 +301,19 @@ Example:
     "policy": "/api/v1/vn/vn-policy",
     "audio": "/api/v1/vn/vn-audio"
   },
+  "enabled_modules": {
+    "assets": true,
+    "scripts": true,
+    "play": true,
+    "policy": true,
+    "audio": false
+  },
   "features": {
     "asset_generation": true,
     "asset_portability": true,
     "scripted_story": true,
     "story_start": true,
-    "tts_jobs": true,
+    "tts_jobs": false,
     "realtime_image_generation": false,
     "subscriptions": false
   },
@@ -868,8 +875,14 @@ Scripts reference named generation profile IDs, not raw provider/model strings.
 
 Canonical prefix: `/api/v1/vn/vn-audio`.
 
-V1 is TTS-only. BGM and SFX cues reference existing media/generated-file IDs from
-script opcodes and do not need a VN audio manager.
+V1 reserves this namespace for VN-scoped TTS, but the current implementation does
+not register the VN audio router. Capabilities discovery must report
+`enabled_modules.audio=false` and `features.tts_jobs=false` until these endpoints
+exist. Clients must not call `/api/v1/vn/vn-audio` unless capabilities reports it
+enabled; they should use the existing `/api/v1/audio` endpoints for generic TTS.
+
+When implemented, this namespace is TTS-only. BGM and SFX cues reference existing
+media/generated-file IDs from script opcodes and do not need a VN audio manager.
 
 ### Endpoint Inventory
 
@@ -964,7 +977,9 @@ the owning metadata is deleted according to the feature's retention policy.
 2. Client replaces draft with canonical JSON.
 3. Client validates and reads diagnostics.
 4. Client publishes version, pinning manifest snapshot.
-5. Client optionally pre-generates TTS lines through `/api/v1/vn/vn-audio`.
+5. If `GET /api/v1/vn/vn-capabilities` reports `features.tts_jobs=true`, the
+   client optionally pre-generates TTS lines through `/api/v1/vn/vn-audio`;
+   otherwise it skips VN-scoped TTS and may use generic `/api/v1/audio`.
 6. Client creates `scripted_story` session with `script_version_id`.
 7. Client advances script runtime until choices/end.
 8. Client selects choices through script-specific endpoints.

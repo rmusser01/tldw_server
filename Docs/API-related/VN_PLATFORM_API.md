@@ -2,6 +2,52 @@
 
 This document covers cross-cutting VN platform endpoints under `/api/v1/vn`.
 
+## Capabilities
+
+`GET /api/v1/vn/vn-capabilities` returns a route-aware discovery payload for custom frontends. Clients should use it before enabling optional VN modules instead of assuming every planned route is installed.
+
+Important fields:
+
+- `resources`: canonical VN namespace paths.
+- `enabled_modules`: booleans derived from registered FastAPI routes.
+- `features`: route-derived feature flags such as `asset_generation`, `scripted_story`, `story_start`, and `tts_jobs`.
+- `limits`: pack, slot, choice, and runtime timeout bounds.
+- `route_migration`: the canonical `/api/v1/vn/vn-*` namespace and legacy paths it supersedes.
+
+Example:
+
+```json
+{
+  "schema_version": "vn_capabilities.v1",
+  "base_path": "/api/v1/vn",
+  "resources": {
+    "assets": "/api/v1/vn/vn-assets",
+    "scripts": "/api/v1/vn/vn-scripts",
+    "play": "/api/v1/vn/vn-play",
+    "policy": "/api/v1/vn/vn-policy",
+    "audio": "/api/v1/vn/vn-audio"
+  },
+  "enabled_modules": {
+    "assets": true,
+    "scripts": true,
+    "play": true,
+    "policy": true,
+    "audio": false
+  },
+  "features": {
+    "asset_generation": true,
+    "asset_portability": true,
+    "scripted_story": true,
+    "story_start": true,
+    "tts_jobs": false,
+    "realtime_image_generation": false,
+    "subscriptions": false
+  }
+}
+```
+
+`/api/v1/vn/vn-audio` is reserved for a future VN-scoped TTS module. Current clients must only call VN audio routes when both `enabled_modules.audio` and `features.tts_jobs` are `true`; otherwise use the existing `/api/v1/audio` APIs directly.
+
 ## Policy Profiles
 
 VN policy definitions are global server configuration stored in the AuthNZ database. This lets admins create one profile that is visible to all API clients and custom frontends. Per-resource effective policy snapshots remain in the owning user's ChaChaNotes database so script/session/asset history preserves the exact settings used at creation time.

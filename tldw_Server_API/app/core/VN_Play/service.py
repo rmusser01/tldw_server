@@ -73,6 +73,15 @@ from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, coerce_tur
 from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
 from tldw_Server_API.app.core.VN_Scripts.service import _character_safety_status
 
+MAX_SCRIPT_EXECUTION_STEPS = 500
+SCRIPT_GENERATION_SOURCE_LITERAL = "script_literal"
+_CONFLICT_REPLAY_ERROR_CODES = {
+    ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_RESTORE_ACTION_IN_PROGRESS,
+    ERROR_STALE_SCENE_VERSION,
+    ERROR_TURN_IN_PROGRESS,
+}
+
 
 class VNPlayError(Exception):
     """Base error raised by VN Play runtime services."""
@@ -343,15 +352,34 @@ class VNPlayService:
         if script_id is None or script_version_id is None:
             raise ValueError("script_version_required")
 
-        version = VNScriptsRepository.initialized(self.repo.db).get_version(
+        script_repo = VNScriptsRepository.initialized(self.repo.db)
+        script = script_repo.get_script(
+            int(script_id),
+            owner_user_id=self.owner_user_id,
+        )
+        if script is None:
+            raise ValueError("script_not_found")
+        version = script_repo.get_version(
             int(script_id),
             int(script_version_id),
             owner_user_id=self.owner_user_id,
         )
         if version is None:
             raise ValueError("script_version_not_found")
+        if int(script["primary_asset_pack_id"]) != int(version["asset_pack_id"]):
+            raise ValueError("script_asset_pack_mismatch")
         if int(version["asset_pack_id"]) != int(vn_asset_pack_id):
             raise ValueError("script_asset_pack_mismatch")
+        pack = VNAssetPackService(
+            self.repo.db,
+            owner_user_id=self.owner_user_id,
+        ).get_pack(int(version["asset_pack_id"]))
+        script_primary_character_id = int(pack.primary_character_id)
+        script_content_rating = str(script.get("content_rating") or pack.content_rating or "general")
+        if script_primary_character_id != int(primary_character_id):
+            raise ValueError("script_primary_character_mismatch")
+        if script_content_rating != str(content_rating):
+            raise ValueError("script_content_rating_mismatch")
 
         policy_snapshot = VNProfileSnapshotRepository.initialized(
             self.repo.db
@@ -365,8 +393,8 @@ class VNPlayService:
         policy_decision = evaluate_character_safety_definition(
             profile_definition=policy_snapshot["definition"],
             policy_profile_id=str(policy_snapshot["profile_id"]),
-            content_rating=content_rating,
-            metadata_status=self._character_safety_status(primary_character_id),
+            content_rating=script_content_rating,
+            metadata_status=self._character_safety_status(script_primary_character_id),
         )
         if policy_decision.get("blocked"):
             raise ValueError("script_session_policy_blocked")
@@ -390,6 +418,8 @@ class VNPlayService:
                 version["generation_profile_snapshot_id"]
             ),
             "script_position": _initial_script_position(program),
+            "primary_character_id": script_primary_character_id,
+            "content_rating": script_content_rating,
         }
 
     def _character_safety_status(self, character_id: int) -> str:
@@ -1014,6 +1044,7 @@ class VNPlayService:
         session_id: int,
         checkpoint_id: int,
         *,
+        client_scene_version: int,
         idempotency_key: str,
     ) -> dict[str, Any]:
         """Restore a checkpoint through the shared idempotent restore pipeline.
@@ -1041,6 +1072,7 @@ class VNPlayService:
             {
                 "action_type": "checkpoint_restore",
                 "checkpoint_id": checkpoint_id,
+                "client_scene_version": client_scene_version,
             }
         )
         action = self._create_or_replay_session_action(
@@ -1056,7 +1088,7 @@ class VNPlayService:
         self._validate_restore_can_start(
             session_id=session_id,
             action_id=int(action["id"]),
-            expected_scene_version=session.scene_version,
+            expected_scene_version=client_scene_version,
         )
 
         snapshot = dict(checkpoint["scene_state_snapshot"])
@@ -1135,7 +1167,7 @@ class VNPlayService:
     ) -> dict[str, Any]:
         if not idempotency_key:
             raise VNPlayTurnError("idempotency_key_required")
-        self.get_session(session_id)
+        session = self.get_session(session_id)
         normalized_metadata = dict(metadata or {})
         request_payload_hash = _payload_hash(
             {
@@ -1158,24 +1190,52 @@ class VNPlayService:
         if response_payload is not None:
             raise VNPlayConflictError(ERROR_RESTORE_ACTION_IN_PROGRESS)
 
-        checkpoint = self.create_checkpoint(session_id, label=title)
-        slot = self.repo.upsert_save_slot(
+        self._validate_restore_can_start(
             session_id=session_id,
-            owner_user_id=self.owner_user_id,
-            slot_key=slot_key,
-            title=title,
-            checkpoint_id=int(checkpoint["id"]),
-            metadata=normalized_metadata,
-        )
-        response = _save_slot_response(slot, replayed=False)
-        self.repo.mark_session_action_terminal(
-            session_id=session_id,
-            owner_user_id=self.owner_user_id,
             action_id=int(action["id"]),
-            status=SESSION_ACTION_STATUS_COMPLETED,
-            response_payload=response,
+            expected_scene_version=session.scene_version,
         )
-        return response
+
+        try:
+            events = self.repo.list_events(session_id)
+            state = self.repo.get_scene_state(session_id, owner_user_id=self.owner_user_id)
+            if state is None:
+                raise VNPlayNotFoundError("scene_state_not_found")
+            scene_state_snapshot = dict(state)
+            if session.mode == MODE_SCRIPTED_STORY:
+                scene_state_snapshot["script_position"] = dict(session.script_position)
+            last_event_id = int(events[-1]["id"]) if events else None
+            response = self.repo.commit_save_slot_create_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                slot_key=slot_key,
+                title=title,
+                metadata=normalized_metadata,
+                event_id=last_event_id,
+                scene_version=int(state["scene_version"]),
+                scene_state_snapshot=scene_state_snapshot,
+                response_payload_factory=lambda save_slot: _save_slot_response(
+                    save_slot,
+                    replayed=False,
+                ),
+            )
+            return response
+        except VNPlayConflictError as exc:
+            self._abandon_session_action(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=str(exc),
+            )
+            raise
+        except Exception as exc:
+            self._mark_session_action_failed(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                error_code=ERROR_INTERNAL_ERROR,
+                error_type=exc.__class__.__name__,
+            )
+            raise
 
     def list_save_slots(
         self,
@@ -2024,21 +2084,25 @@ class VNPlayService:
         ):
             return VNPlayTurnResponse.from_payload(response_payload)
 
+        status = str(turn_request.get("status") or "")
         error = turn_request.get("error")
         error_code = None
-        error_message = None
         if isinstance(error, Mapping):
             if error.get("code") is not None:
                 error_code = str(error["code"])
-            if error.get("message") is not None:
-                error_message = str(error["message"])
-        return VNPlayTurnResponse(
-            turn_request_id=int(turn_request["id"]),
-            status=str(turn_request["status"]),
-            scene_version=int(turn_request["base_scene_version"]),
-            error_code=error_code,
-            error_message=error_message,
-        )
+        if status in {TURN_STATUS_MODEL_FAILED, TURN_STATUS_PARSE_FAILED}:
+            raise VNPlayTurnError(error_code or status)
+        if status == TURN_STATUS_ABANDONED and error_code:
+            if error_code in _CONFLICT_REPLAY_ERROR_CODES:
+                raise VNPlayConflictError(error_code)
+            raise VNPlayTurnError(error_code)
+        if status in {TURN_STATUS_PENDING, TURN_STATUS_MODEL_CALLING}:
+            raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
+        if error_code is not None:
+            if error_code in _CONFLICT_REPLAY_ERROR_CODES:
+                raise VNPlayConflictError(error_code)
+            raise VNPlayTurnError(error_code)
+        raise VNPlayConflictError(ERROR_TURN_IN_PROGRESS)
 
     def _abandon_conflicting_turn(
         self,
@@ -2498,7 +2562,7 @@ def _execute_script_program(
     generation_results: list[dict[str, Any]] = []
     ended = False
 
-    for _ in range(500):
+    for _ in range(MAX_SCRIPT_EXECUTION_STEPS):
         ops = labels.get(label)
         if not isinstance(ops, list):
             raise VNPlayTurnError("script_label_missing")
@@ -2724,19 +2788,26 @@ def _script_generation_result(
 ) -> dict[str, Any]:
     generation_id = str(opcode.get("id") or f"{label}:{index}")
     prompt = str(opcode.get("prompt") or opcode.get("text") or generation_id)
-    narrative_text = str(
-        opcode.get("narrative_text")
-        or opcode.get("text")
-        or f"Generated: {prompt}"
-    )
+    narrative_text = str(opcode.get("narrative_text") or opcode.get("text") or "")
+    if not narrative_text:
+        raise VNPlayTurnError("script_generation_unavailable")
     speaker = str(opcode.get("speaker") or "Narrator")
+    regeneration_text = str(
+        opcode.get("regeneration_text")
+        or opcode.get("regenerate_text")
+        or ""
+    )
     return {
         "id": generation_id,
         "label": label,
         "index": index,
         "prompt_hash": _payload_hash({"seed": seed or "", "prompt": prompt})[:16],
+        "source": SCRIPT_GENERATION_SOURCE_LITERAL,
+        "model_invoked": False,
         "narrative_text": narrative_text,
         "dialogue": [{"speaker": speaker, "text": narrative_text}],
+        "regeneration_text": regeneration_text or None,
+        "regeneration_supported": bool(regeneration_text),
         "regenerated": False,
     }
 
@@ -2746,12 +2817,9 @@ def _script_regeneration_result(
     *,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    narrative_text = str(generation.get("narrative_text") or "")
-    regenerated_text = (
-        narrative_text
-        if narrative_text.endswith(" [regenerated]")
-        else f"{narrative_text} [regenerated]"
-    )
+    regenerated_text = str(generation.get("regeneration_text") or "")
+    if not regenerated_text:
+        raise VNPlayConflictError("script_regenerate_unavailable")
     return {
         **dict(generation),
         "regenerated": True,

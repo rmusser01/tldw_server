@@ -450,6 +450,46 @@ class VNScriptsRepository:
         row = cursor.fetchone()
         return _decode_manifest_snapshot(row) if row is not None else None
 
+    def find_asset_cleanup_blockers(
+        self,
+        *,
+        owner_user_id: int,
+        asset_pack_id: int,
+        generated_file_ids: set[int],
+    ) -> dict[int, list[dict[str, str]]]:
+        """Find generated files referenced by published script manifest snapshots."""
+        self._ensure_schema_initialized()
+        if not generated_file_ids:
+            return {}
+        cursor = self.db.execute_query(
+            """
+            SELECT id, manifest_json
+            FROM vn_script_manifest_snapshots
+            WHERE owner_user_id = ?
+              AND asset_pack_id = ?
+              AND version_id IS NOT NULL
+            """,
+            (owner_user_id, asset_pack_id),
+        )
+        blockers: dict[int, list[dict[str, str]]] = {}
+        for row in cursor.fetchall():
+            manifest = _json_load(row["manifest_json"], {})
+            referenced_file_ids = _collect_int_values(
+                manifest,
+                {"generated_file_id", "file_id"},
+            )
+            for file_id in generated_file_ids.intersection(referenced_file_ids):
+                blockers.setdefault(file_id, []).append(
+                    {
+                        "code": "published_script_manifest",
+                        "message": (
+                            "File is referenced by a published VN script manifest "
+                            f"snapshot {int(row['id'])}."
+                        ),
+                    }
+                )
+        return blockers
+
     def create_version(
         self,
         *,
@@ -1022,6 +1062,22 @@ def _decode_manifest_snapshot(row: Any) -> dict[str, Any]:
         "manifest_hash": row["manifest_hash"],
         "created_at": row["created_at"],
     }
+
+
+def _collect_int_values(value: Any, keys: set[str]) -> set[int]:
+    found: set[int] = set()
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if key in keys:
+                try:
+                    found.add(int(nested))
+                except (TypeError, ValueError):
+                    pass
+            found.update(_collect_int_values(nested, keys))
+    elif isinstance(value, list):
+        for nested in value:
+            found.update(_collect_int_values(nested, keys))
+    return found
 
 
 def _decode_version(row: Any) -> dict[str, Any]:

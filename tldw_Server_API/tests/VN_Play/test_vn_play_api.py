@@ -328,6 +328,28 @@ def test_create_session_defaults_linked_chat_to_read_only() -> None:
     assert request.linked_chat_mode == "read_only_context"
 
 
+def test_create_session_rejects_coerced_script_ids() -> None:
+    with pytest.raises(ValidationError):
+        VNPlaySessionCreate(
+            mode="scripted_story",
+            title="Test",
+            primary_character_id=1,
+            vn_asset_pack_id=2,
+            script_id="1",
+            script_version_id=1,
+        )
+
+    with pytest.raises(ValidationError):
+        VNPlaySessionCreate(
+            mode="scripted_story",
+            title="Test",
+            primary_character_id=1,
+            vn_asset_pack_id=2,
+            script_id=1,
+            script_version_id="1",
+        )
+
+
 def test_create_session_endpoint_returns_scene_state(
     client: TestClient,
     ready_pack_id: int,
@@ -434,7 +456,7 @@ def test_story_unknown_choice_returns_invalid_choice_id(
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "invalid_choice_id"
+    assert response.json()["detail"]["code"] == "invalid_choice_id"
 
 
 def test_story_retry_completed_turn_returns_not_failed(
@@ -467,7 +489,7 @@ def test_story_retry_completed_turn_returns_not_failed(
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "retry_last_turn_not_failed"
+    assert response.json()["detail"]["code"] == "retry_last_turn_not_failed"
 
 
 def test_branch_list_keeps_branch_path_list_shape(
@@ -778,7 +800,7 @@ def test_branch_restore_stale_scene_version_returns_conflict(
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "stale_scene_version"
+    assert response.json()["detail"]["code"] == "stale_scene_version"
 
 
 def test_branch_restore_missing_branch_returns_branch_not_found(
@@ -802,7 +824,7 @@ def test_branch_restore_missing_branch_returns_branch_not_found(
     )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "branch_not_found"
+    assert response.json()["detail"]["code"] == "branch_not_found"
 
 
 def test_checkpoint_restore_passes_idempotency_key_and_replays(
@@ -834,6 +856,7 @@ def test_checkpoint_restore_passes_idempotency_key_and_replays(
     assert second_turn.status_code == 200
     restore_payload = {
         "checkpoint_id": checkpoint.json()["id"],
+        "client_scene_version": second_turn.json()["scene_version"],
         "idempotency_key": "api-checkpoint-restore",
     }
 
@@ -863,6 +886,47 @@ def test_checkpoint_restore_passes_idempotency_key_and_replays(
 
     assert second_restore.status_code == 200
     assert second_restore.json() == first_restore_body
+
+
+def test_checkpoint_restore_rejects_stale_client_scene_version(
+    client: TestClient,
+    session_id: int,
+) -> None:
+    first_turn = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/turn",
+        json={
+            "input_text": "First",
+            "client_scene_version": 0,
+            "idempotency_key": "api-checkpoint-stale-first-turn",
+        },
+    )
+    assert first_turn.status_code == 200
+    checkpoint = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/checkpoint",
+        json={"label": "First"},
+    )
+    assert checkpoint.status_code == 200
+    second_turn = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/turn",
+        json={
+            "input_text": "Second",
+            "client_scene_version": 1,
+            "idempotency_key": "api-checkpoint-stale-second-turn",
+        },
+    )
+    assert second_turn.status_code == 200
+
+    stale_restore = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/restore",
+        json={
+            "checkpoint_id": checkpoint.json()["id"],
+            "client_scene_version": 1,
+            "idempotency_key": "api-checkpoint-stale-restore",
+        },
+    )
+
+    assert stale_restore.status_code == 409
+    assert stale_restore.json()["detail"]["code"] == "stale_scene_version"
 
 
 @pytest.mark.asyncio
@@ -1012,7 +1076,7 @@ def test_scripted_story_session_pins_script_version_snapshots_and_policy_ack(
     blocked = client.post("/api/v1/vn-play/sessions", json=request_body)
 
     assert blocked.status_code == 400
-    assert blocked.json()["detail"] == "script_session_acknowledgement_required"
+    assert blocked.json()["detail"]["code"] == "script_session_acknowledgement_required"
 
     response = client.post(
         "/api/v1/vn-play/sessions",
@@ -1031,6 +1095,47 @@ def test_scripted_story_session_pins_script_version_snapshots_and_policy_ack(
     ]
     assert "progress_token" in body["script_position"]
     assert "label" not in body["script_position"]
+
+
+def test_scripted_story_session_rejects_request_metadata_mismatch(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    pack_id = _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+    published = _publish_script_version(
+        chacha_db,
+        owner_user_id=42,
+        pack_id=pack_id,
+    )
+    other_character_id = _add_character(chacha_db, name="Other Mira")
+    base_body = {
+        "mode": "scripted_story",
+        "title": "Scripted archive door",
+        "primary_character_id": character_id,
+        "vn_asset_pack_id": pack_id,
+        "script_id": published["script_id"],
+        "script_version_id": published["version_id"],
+        "acknowledgements": ["character_safety_missing"],
+    }
+
+    character_mismatch = client.post(
+        "/api/v1/vn-play/sessions",
+        json={**base_body, "primary_character_id": other_character_id},
+    )
+    rating_mismatch = client.post(
+        "/api/v1/vn-play/sessions",
+        json={**base_body, "content_rating": "mature"},
+    )
+
+    assert character_mismatch.status_code == 400
+    assert character_mismatch.json()["detail"]["code"] == "script_primary_character_mismatch"
+    assert rating_mismatch.status_code == 400
+    assert rating_mismatch.json()["detail"]["code"] == "script_content_rating_mismatch"
 
 
 def test_scripted_story_runtime_starts_and_advances_visible_choice(
@@ -1107,7 +1212,7 @@ def test_scripted_story_runtime_starts_and_advances_visible_choice(
         },
     )
     assert turn_bypass.status_code == 400
-    assert turn_bypass.json()["detail"] == "scripted_story_turn_not_allowed"
+    assert turn_bypass.json()["detail"]["code"] == "scripted_story_turn_not_allowed"
 
     alias_session_response = client.post(
         "/api/v1/vn-play/sessions",
@@ -1168,6 +1273,11 @@ def test_scripted_story_runtime_starts_and_advances_visible_choice(
     assert debug_body["position"]["label"] == "start"
     assert debug_body["position"]["index"] == 4
     assert debug_body["program"]["entry_label"] == "start"
+    openapi = client.get("/openapi.json").json()
+    debug_schema = openapi["paths"][
+        "/api/v1/vn-play/sessions/{session_id}/script/debug-state"
+    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert debug_schema["$ref"].endswith("/VNPlayScriptDebugStateResponse")
 
     replay = client.post(
         f"/api/v1/vn-play/sessions/{session_id}/story/start",
@@ -1185,7 +1295,7 @@ def test_scripted_story_runtime_starts_and_advances_visible_choice(
         json={"client_scene_version": 1, "idempotency_key": "blocked-at-choice"},
     )
     assert blocked_advance.status_code == 409
-    assert blocked_advance.json()["detail"] == "script_advance_blocked"
+    assert blocked_advance.json()["detail"]["code"] == "script_advance_blocked"
 
     choice = client.post(
         f"/api/v1/vn-play/sessions/{session_id}/script/choices/open",
@@ -1205,7 +1315,7 @@ def test_scripted_story_runtime_starts_and_advances_visible_choice(
         json={"client_scene_version": 2, "idempotency_key": "blocked-at-end"},
     )
     assert ended_advance.status_code == 409
-    assert ended_advance.json()["detail"] == "script_ended"
+    assert ended_advance.json()["detail"]["code"] == "script_ended"
 
 
 def test_scripted_story_save_slot_restore_restores_script_cursor(
@@ -1318,6 +1428,7 @@ def test_scripted_story_generate_and_regenerate_persist_replayable_events(
                     "id": "intro-beat",
                     "prompt": "Introduce the archive door",
                     "text": "The generated archive beat appears.",
+                    "regeneration_text": "The archive beat is regenerated from an explicit script variant.",
                 },
                 {"op": "end"},
             ]
@@ -1355,6 +1466,8 @@ def test_scripted_story_generate_and_regenerate_persist_replayable_events(
     generation_results = generation_event["event_payload"]["generation_results"]
     assert generation_results[0]["id"] == "intro-beat"
     assert generation_results[0]["regenerated"] is False
+    assert generation_results[0]["model_invoked"] is False
+    assert generation_results[0]["source"] == "script_literal"
 
     replayed = client.post(
         f"/api/v1/vn-play/sessions/{session_id}/script/advance",
@@ -1375,6 +1488,61 @@ def test_scripted_story_generate_and_regenerate_persist_replayable_events(
     assert regenerated_event["event_payload"]["generation_results"][0]["id"] == "intro-beat"
     assert regenerated_event["event_payload"]["generation_results"][0]["regenerated"] is True
     assert regenerated.json()["scene_version"] == 2
+
+
+def test_scripted_story_generate_without_literal_text_is_rejected(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    pack_id = _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+    program = {
+        "schema_version": "vn_script_program.v1",
+        "entry_label": "start",
+        "primary_asset_pack_id": pack_id,
+        "variables": {},
+        "labels": {
+            "start": [
+                {
+                    "op": "generate",
+                    "id": "intro-beat",
+                    "prompt": "Introduce the archive door",
+                }
+            ]
+        },
+    }
+    published = _publish_script_version(
+        chacha_db,
+        owner_user_id=42,
+        pack_id=pack_id,
+        program=program,
+    )
+    session_response = client.post(
+        "/api/v1/vn-play/sessions",
+        json={
+            "mode": "scripted_story",
+            "title": "Scripted generation",
+            "primary_character_id": character_id,
+            "vn_asset_pack_id": pack_id,
+            "script_id": published["script_id"],
+            "script_version_id": published["version_id"],
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+    assert session_response.status_code == 201
+    session_id = int(session_response.json()["id"])
+
+    generated = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/advance",
+        json={"client_scene_version": 0, "idempotency_key": "generate-intro-no-literal"},
+    )
+
+    assert generated.status_code == 400
+    assert generated.json()["detail"]["code"] == "script_generation_unavailable"
 
 
 def test_setup_options_uses_lightweight_character_selector_queries(
@@ -1814,7 +1982,14 @@ def test_turn_endpoint_rejects_stale_scene_version(
         json={"input_text": "Again", "client_scene_version": 0, "idempotency_key": "b"},
     )
     assert stale.status_code == 409
-    assert stale.json()["detail"] == "stale_scene_version"
+    assert stale.json()["detail"]["code"] == "stale_scene_version"
+
+    stale_retry = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/turn",
+        json={"input_text": "Again", "client_scene_version": 0, "idempotency_key": "b"},
+    )
+    assert stale_retry.status_code == 409
+    assert stale_retry.json()["detail"]["code"] == "stale_scene_version"
 
 
 def test_delete_session_endpoint_soft_deletes(

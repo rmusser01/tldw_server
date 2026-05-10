@@ -61,6 +61,7 @@ from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.storage import (
     VN_ASSET_CONTENT_NOT_FOUND,
     generated_file_matches_vn_asset,
@@ -121,8 +122,10 @@ async def _storage_service() -> Any:
     return await get_storage_service()
 
 
-def _cleanup_blocker_provider() -> Any | None:
-    return None
+def _cleanup_blocker_provider(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> VNAssetCleanupBlockerProvider:
+    return VNAssetCleanupBlockerProvider(db)
 
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
@@ -149,7 +152,26 @@ def _idempotency_conflict(
     )
 
 
-def _idempotency_replay(
+def _require_idempotency_key(idempotency_key: str | None) -> str:
+    if idempotency_key:
+        return idempotency_key
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=vn_error_detail(
+            "idempotency_key_required",
+            "idempotency_key is required for this mutating VN operation.",
+        ),
+    )
+
+
+def _operation_idempotency_key(
+    idempotency_key: str | None,
+    legacy_request_id: str | None = None,
+) -> str:
+    return _require_idempotency_key(idempotency_key or legacy_request_id)
+
+
+def _claim_or_replay_idempotency(
     service: VNAssetPackService,
     *,
     owner_user_id: int,
@@ -161,16 +183,29 @@ def _idempotency_replay(
 ) -> BaseModel | None:
     if not idempotency_key:
         return None
-    record = service.repo.get_idempotency_record(
-        owner_user_id=owner_user_id,
-        scope=scope,
-        resource_id=resource_id,
-        idempotency_key=idempotency_key,
-    )
-    if record is None:
+    try:
+        record, claimed = service.repo.claim_idempotency_record(
+            owner_user_id=owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+        )
+    except ValueError as exc:
+        if str(exc) == "idempotency_key_conflict":
+            raise _idempotency_conflict(scope=scope, resource_id=resource_id) from exc
+        raise
+    if claimed:
         return None
-    if str(record["payload_hash"]) != payload_hash:
-        raise _idempotency_conflict(scope=scope, resource_id=resource_id)
+    if str(record.get("status") or "completed") != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=vn_error_detail(
+                "idempotency_key_in_progress",
+                "An identical VN operation is already in progress.",
+                retryable=True,
+            ),
+        )
     return response_model.model_validate(json.loads(str(record["response_json"])))
 
 
@@ -186,13 +221,31 @@ def _record_idempotency_response(
 ) -> None:
     if not idempotency_key:
         return
-    service.repo.create_idempotency_record(
+    service.repo.complete_idempotency_record(
         owner_user_id=owner_user_id,
         scope=scope,
         resource_id=resource_id,
         idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response.model_dump(mode="json"),
+    )
+
+
+def _release_idempotency_claim(
+    service: VNAssetPackService,
+    *,
+    owner_user_id: int,
+    scope: str,
+    resource_id: str,
+    idempotency_key: str | None,
+) -> None:
+    if not idempotency_key:
+        return
+    service.repo.release_idempotency_claim(
+        owner_user_id=owner_user_id,
+        scope=scope,
+        resource_id=resource_id,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -537,6 +590,18 @@ def _content_not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=VN_ASSET_CONTENT_NOT_FOUND)
 
 
+def _validated_item_file_mime_type(mime_type: str, *, require_image: bool) -> str:
+    normalized = mime_type.split(";", 1)[0].strip().lower()
+    if not normalized:
+        raise ValueError("vn_asset_content_missing_mime_type")
+    if normalized.startswith("image/"):
+        image_format_from_mime_type(normalized)
+        return mime_type
+    if not require_image and normalized == "application/octet-stream":
+        return mime_type
+    raise ValueError("vn_asset_content_disallowed_mime_type")
+
+
 async def _touch_generated_file(files_repo: Any, file_id: int) -> None:
     update_accessed_at = getattr(files_repo, "update_accessed_at", None)
     if not callable(update_accessed_at):
@@ -576,6 +641,7 @@ async def _item_file_response(
     service: VNAssetPackService,
     current_user: User,
     files_repo: AuthnzGeneratedFilesRepo,
+    require_image: bool = True,
 ) -> FileResponse:
     try:
         item = service.get_item_for_pack(pack_id, item_id)
@@ -592,7 +658,7 @@ async def _item_file_response(
 
     mime_type = str(file_record.get("mime_type") or item.mime_type or "")
     try:
-        image_format_from_mime_type(mime_type)
+        media_type = _validated_item_file_mime_type(mime_type, require_image=require_image)
     except ValueError as exc:
         raise _content_not_found() from exc
 
@@ -615,7 +681,7 @@ async def _item_file_response(
 
     raw_filename = file_record.get("original_filename") or file_record.get("filename") or f"vn_asset_item_{item_id}"
     filename = Path(str(raw_filename)).name
-    return FileResponse(path=str(full_path), filename=filename, media_type=mime_type)
+    return FileResponse(path=str(full_path), filename=filename, media_type=media_type)
 
 
 @router.post(
@@ -684,6 +750,9 @@ async def cleanup_pack(
     storage_service: Any = Depends(_storage_service),
     blocker_provider: Any | None = Depends(_cleanup_blocker_provider),
 ) -> VNAssetCleanupResponse:
+    idempotency_key = None
+    if not request.dry_run:
+        idempotency_key = _require_idempotency_key(request.idempotency_key)
     payload_hash = canonical_payload_hash(
         {
             "pack_id": pack_id,
@@ -692,12 +761,12 @@ async def cleanup_pack(
     )
     replay = None
     if not request.dry_run:
-        replay = _idempotency_replay(
+        replay = _claim_or_replay_idempotency(
             service,
             owner_user_id=service.owner_user_id,
             scope="vn_asset_cleanup",
             resource_id=f"pack:{pack_id}",
-            idempotency_key=request.idempotency_key,
+            idempotency_key=idempotency_key,
             payload_hash=payload_hash,
             response_model=VNAssetCleanupResponse,
         )
@@ -712,14 +781,32 @@ async def cleanup_pack(
             blocker_provider=blocker_provider,
         )
     except ValueError as exc:
+        if not request.dry_run:
+            _release_idempotency_claim(
+                service,
+                owner_user_id=service.owner_user_id,
+                scope="vn_asset_cleanup",
+                resource_id=f"pack:{pack_id}",
+                idempotency_key=idempotency_key,
+            )
         raise _handle_value_error(exc) from exc
+    except Exception:
+        if not request.dry_run:
+            _release_idempotency_claim(
+                service,
+                owner_user_id=service.owner_user_id,
+                scope="vn_asset_cleanup",
+                resource_id=f"pack:{pack_id}",
+                idempotency_key=idempotency_key,
+            )
+        raise
     if not request.dry_run:
         _record_idempotency_response(
             service,
             owner_user_id=service.owner_user_id,
             scope="vn_asset_cleanup",
             resource_id=f"pack:{pack_id}",
-            idempotency_key=request.idempotency_key,
+            idempotency_key=idempotency_key,
             payload_hash=payload_hash,
             response=response,
         )
@@ -746,61 +833,75 @@ async def start_pack_export(
 
     owner_user_id = _current_user_id(current_user)
     export_request = request or VNPackExportRequest()
-    request_id = export_request.request_id or uuid.uuid4().hex
-    options = export_request.model_dump(exclude={"request_id"})
+    idempotency_key = _operation_idempotency_key(
+        export_request.idempotency_key,
+        export_request.request_id,
+    )
+    request_id = export_request.request_id or idempotency_key
+    options = export_request.model_dump(exclude={"idempotency_key", "request_id"})
     payload_hash = canonical_payload_hash({"pack_id": pack_id, "options": options})
-    replay = _idempotency_replay(
+    replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_export",
         resource_id=f"pack:{pack_id}",
-        idempotency_key=export_request.request_id,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response_model=VNPackExportResponse,
     )
     if replay is not None:
         return replay
-    job = create_pack_export_job(
-        jobs_manager,
-        pack_id=pack_id,
-        portability_job_id=0,
-        request_id=request_id,
-        user_id=owner_user_id,
-        options=options,
-    )
-    job_id = str(job["id"])
-    portability_job = service.repo.get_portability_job_by_job_id(job_id, owner_user_id=owner_user_id)
-    if portability_job is None:
-        portability_job = service.repo.create_portability_job(
-            owner_user_id=owner_user_id,
-            job_id=job_id,
-            operation="export",
-            status=str(job.get("status") or "queued"),
-            stage="queued",
+    try:
+        job = create_pack_export_job(
+            jobs_manager,
             pack_id=pack_id,
-            progress={"request_id": request_id},
+            portability_job_id=0,
+            request_id=request_id,
+            user_id=owner_user_id,
+            options=options,
         )
-    response = _compose_portability_response(
-        service,
-        portability_job=portability_job,
-        job=job,
-        owner_user_id=owner_user_id,
-    )
-    queued_response = VNPackExportResponse(
-        job_id=response.job_id,
-        portability_job_id=response.portability_job_id,
-        operation=response.operation,
-        pack_id=response.pack_id,
-        status=response.status,
-        stage=response.stage,
-        download_url=response.download_url,
-    )
+        job_id = str(job["id"])
+        portability_job = service.repo.get_portability_job_by_job_id(job_id, owner_user_id=owner_user_id)
+        if portability_job is None:
+            portability_job = service.repo.create_portability_job(
+                owner_user_id=owner_user_id,
+                job_id=job_id,
+                operation="export",
+                status=str(job.get("status") or "queued"),
+                stage="queued",
+                pack_id=pack_id,
+                progress={"request_id": request_id},
+            )
+        response = _compose_portability_response(
+            service,
+            portability_job=portability_job,
+            job=job,
+            owner_user_id=owner_user_id,
+        )
+        queued_response = VNPackExportResponse(
+            job_id=response.job_id,
+            portability_job_id=response.portability_job_id,
+            operation=response.operation,
+            pack_id=response.pack_id,
+            status=response.status,
+            stage=response.stage,
+            download_url=response.download_url,
+        )
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_export",
+            resource_id=f"pack:{pack_id}",
+            idempotency_key=idempotency_key,
+        )
+        raise
     _record_idempotency_response(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_export",
         resource_id=f"pack:{pack_id}",
-        idempotency_key=export_request.request_id,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=queued_response,
     )
@@ -906,31 +1007,34 @@ async def cancel_pack_export(
 )
 async def start_pack_import_preview(
     archive: UploadFile = File(...),
+    idempotency_key: str | None = Form(None, min_length=1, max_length=160),
     request_id: str | None = Form(None, min_length=1, max_length=160),
     service: VNAssetPackService = Depends(_service),
     current_user: User = Depends(get_request_user),
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VNPackImportPreviewStartResponse:
     owner_user_id = _current_user_id(current_user)
-    operation_request_id = request_id or uuid.uuid4().hex
+    operation_idempotency_key = _operation_idempotency_key(idempotency_key, request_id)
+    operation_request_id = request_id or operation_idempotency_key
     archive_token = uuid.uuid4().hex
     archive_root = _vn_pack_import_preview_staging_root(owner_user_id)
     archive_path = archive_root / f"{archive_token}{VNPACK_EXTENSION}"
     uploaded_bytes = await _save_import_preview_archive(archive, archive_path)
     archive_sha256 = await _file_sha256(archive_path)
     payload_hash = canonical_multipart_payload_hash(
-        {"request_id": request_id},
+        {},
         file_sha256=archive_sha256,
+        file_size=uploaded_bytes,
         filename=archive.filename,
         content_type=archive.content_type,
     )
     try:
-        replay = _idempotency_replay(
+        replay = _claim_or_replay_idempotency(
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_import_preview",
             resource_id="import_preview",
-            idempotency_key=request_id,
+            idempotency_key=operation_idempotency_key,
             payload_hash=payload_hash,
             response_model=VNPackImportPreviewStartResponse,
         )
@@ -941,50 +1045,61 @@ async def start_pack_import_preview(
         await _remove_file_if_exists(archive_path)
         return replay
 
-    preview = service.repo.create_import_preview(
-        owner_user_id=owner_user_id,
-        job_id=f"pending:{operation_request_id}",
-        status="queued",
-        archive_path=str(archive_path),
-    )
-    job = create_pack_import_preview_job(
-        jobs_manager,
-        preview_id=int(preview["id"]),
-        archive_path=str(archive_path),
-        request_id=operation_request_id,
-        user_id=owner_user_id,
-    )
-    job_id = str(job["id"])
-    preview = service.repo.update_import_preview(
-        int(preview["id"]),
-        {"job_id": job_id, "status": str(job.get("status") or "queued")},
-        owner_user_id=owner_user_id,
-    ) or preview
-    portability_job = service.repo.create_portability_job(
-        owner_user_id=owner_user_id,
-        job_id=job_id,
-        operation="import_preview",
-        status=str(job.get("status") or "queued"),
-        stage="queued",
-        preview_id=int(preview["id"]),
-        archive_path=str(archive_path),
-        progress={"request_id": operation_request_id, "uploaded_bytes": uploaded_bytes},
-    )
+    try:
+        preview = service.repo.create_import_preview(
+            owner_user_id=owner_user_id,
+            job_id=f"pending:{operation_request_id}",
+            status="queued",
+            archive_path=str(archive_path),
+        )
+        job = create_pack_import_preview_job(
+            jobs_manager,
+            preview_id=int(preview["id"]),
+            archive_path=str(archive_path),
+            request_id=operation_request_id,
+            user_id=owner_user_id,
+        )
+        job_id = str(job["id"])
+        preview = service.repo.update_import_preview(
+            int(preview["id"]),
+            {"job_id": job_id, "status": str(job.get("status") or "queued")},
+            owner_user_id=owner_user_id,
+        ) or preview
+        portability_job = service.repo.create_portability_job(
+            owner_user_id=owner_user_id,
+            job_id=job_id,
+            operation="import_preview",
+            status=str(job.get("status") or "queued"),
+            stage="queued",
+            preview_id=int(preview["id"]),
+            archive_path=str(archive_path),
+            progress={"request_id": operation_request_id, "uploaded_bytes": uploaded_bytes},
+        )
 
-    queued_response = VNPackImportPreviewStartResponse(
-        job_id=job_id,
-        portability_job_id=int(portability_job["id"]),
-        operation=str(portability_job["operation"]),
-        preview_id=int(preview["id"]),
-        status=str(job.get("status") or portability_job["status"]),
-        stage=str(portability_job["stage"]),
-    )
+        queued_response = VNPackImportPreviewStartResponse(
+            job_id=job_id,
+            portability_job_id=int(portability_job["id"]),
+            operation=str(portability_job["operation"]),
+            preview_id=int(preview["id"]),
+            status=str(job.get("status") or portability_job["status"]),
+            stage=str(portability_job["stage"]),
+        )
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_import_preview",
+            resource_id="import_preview",
+            idempotency_key=operation_idempotency_key,
+        )
+        await _remove_file_if_exists(archive_path)
+        raise
     _record_idempotency_response(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_import_preview",
         resource_id="import_preview",
-        idempotency_key=request_id,
+        idempotency_key=operation_idempotency_key,
         payload_hash=payload_hash,
         response=queued_response,
     )
@@ -1138,37 +1253,41 @@ async def start_pack_import_commit(
     if str(preview["status"]) != "completed":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_not_completed")
 
-    request_id = request.request_id or uuid.uuid4().hex
+    idempotency_key = _operation_idempotency_key(request.idempotency_key, request.request_id)
+    request_id = request.request_id or idempotency_key
     payload_hash = canonical_payload_hash(
         {
             "preview_id": request.preview_id,
-            "request": request.model_dump(mode="json", exclude={"request_id"}),
+            "request": request.model_dump(
+                mode="json",
+                exclude={"idempotency_key", "request_id"},
+            ),
         }
     )
-    replay = _idempotency_replay(
+    replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_import_commit",
         resource_id=f"preview:{request.preview_id}",
-        idempotency_key=request.request_id,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response_model=VNPackImportCommitStartResponse,
     )
     if replay is not None:
         return replay
-    journal = service.repo.create_import_journal(
-        owner_user_id=owner_user_id,
-        preview_id=int(preview["id"]),
-        job_id=f"pending:{request_id}",
-        status="queued",
-        stage="queued",
-        trust_mode=request.trust_mode,
-        target_mode=request.target_mode,
-        archive_path=preview.get("archive_path"),
-        archive_sha256=preview.get("archive_sha256"),
-        canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
-    )
     try:
+        journal = service.repo.create_import_journal(
+            owner_user_id=owner_user_id,
+            preview_id=int(preview["id"]),
+            job_id=f"pending:{request_id}",
+            status="queued",
+            stage="queued",
+            trust_mode=request.trust_mode,
+            target_mode=request.target_mode,
+            archive_path=preview.get("archive_path"),
+            archive_sha256=preview.get("archive_sha256"),
+            canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+        )
         job = create_pack_import_commit_job(
             jobs_manager,
             import_id=int(journal["id"]),
@@ -1182,54 +1301,61 @@ async def start_pack_import_commit(
             target_pack_id=request.target_pack_id,
             conflict_decisions=request.conflict_decisions,
         )
-    except Exception as exc:
-        service.repo.update_import_journal(
+        job_id = str(job["id"])
+        journal = service.repo.update_import_journal(
             int(journal["id"]),
-            {
-                "status": "failed",
-                "stage": "failed",
-                "error_code": "import_job_create_failed",
-                "error_message": str(exc),
-            },
+            {"job_id": job_id, "status": str(job.get("status") or "queued")},
             owner_user_id=owner_user_id,
+        ) or journal
+        portability_job = service.repo.create_portability_job(
+            owner_user_id=owner_user_id,
+            job_id=job_id,
+            operation="import_commit",
+            status=str(job.get("status") or "queued"),
+            stage="queued",
+            preview_id=int(preview["id"]),
+            import_id=int(journal["id"]),
+            archive_path=preview.get("archive_path"),
+            archive_sha256=preview.get("archive_sha256"),
+            canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+            progress={"request_id": request_id},
+        )
+
+        queued_response = VNPackImportCommitStartResponse(
+            job_id=job_id,
+            portability_job_id=int(portability_job["id"]),
+            operation=str(portability_job["operation"]),
+            preview_id=int(preview["id"]),
+            import_id=int(journal["id"]),
+            status=str(job.get("status") or portability_job["status"]),
+            stage=str(portability_job["stage"]),
+        )
+    except Exception as exc:
+        if "journal" in locals():
+            service.repo.update_import_journal(
+                int(journal["id"]),
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error_code": "import_job_create_failed",
+                    "error_message": str(exc),
+                },
+                owner_user_id=owner_user_id,
+            )
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_import_commit",
+            resource_id=f"preview:{request.preview_id}",
+            idempotency_key=idempotency_key,
         )
         raise
-
-    job_id = str(job["id"])
-    journal = service.repo.update_import_journal(
-        int(journal["id"]),
-        {"job_id": job_id, "status": str(job.get("status") or "queued")},
-        owner_user_id=owner_user_id,
-    ) or journal
-    portability_job = service.repo.create_portability_job(
-        owner_user_id=owner_user_id,
-        job_id=job_id,
-        operation="import_commit",
-        status=str(job.get("status") or "queued"),
-        stage="queued",
-        preview_id=int(preview["id"]),
-        import_id=int(journal["id"]),
-        archive_path=preview.get("archive_path"),
-        archive_sha256=preview.get("archive_sha256"),
-        canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
-        progress={"request_id": request_id},
-    )
-
-    queued_response = VNPackImportCommitStartResponse(
-        job_id=job_id,
-        portability_job_id=int(portability_job["id"]),
-        operation=str(portability_job["operation"]),
-        preview_id=int(preview["id"]),
-        import_id=int(journal["id"]),
-        status=str(job.get("status") or portability_job["status"]),
-        stage=str(portability_job["stage"]),
-    )
     _record_idempotency_response(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_import_commit",
         resource_id=f"preview:{request.preview_id}",
-        idempotency_key=request.request_id,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=queued_response,
     )
@@ -1476,6 +1602,7 @@ async def get_item_content(
         service=service,
         current_user=current_user,
         files_repo=files_repo,
+        require_image=False,
     )
 
 
@@ -1506,6 +1633,7 @@ async def get_item_preview(
         service=service,
         current_user=current_user,
         files_repo=files_repo,
+        require_image=True,
     )
 
 
@@ -1536,6 +1664,7 @@ async def upload_item(
     service: VNAssetPackService = Depends(_service),
 ) -> VNAssetItemResponse:
     try:
+        idempotency_key = _require_idempotency_key(idempotency_key)
         mime_type = file.content_type or "application/octet-stream"
         image_format_from_mime_type(mime_type)
         image_bytes = await _read_upload_file_with_limit(
@@ -1544,27 +1673,33 @@ async def upload_item(
             empty_detail="vn_asset_upload_empty",
             too_large_detail="vn_asset_upload_too_large",
         )
-        payload_hash = canonical_multipart_payload_hash(
-            {
-                "pack_id": pack_id,
-                "slot_id": slot_id,
-                "variant_index": variant_index,
-            },
-            file_sha256=hashlib.sha256(image_bytes).hexdigest(),
-            filename=file.filename,
-            content_type=mime_type,
-        )
-        replay = _idempotency_replay(
-            service,
-            owner_user_id=service.owner_user_id,
-            scope="vn_asset_item_upload",
-            resource_id=f"pack:{pack_id}:slot:{slot_id}",
-            idempotency_key=idempotency_key,
-            payload_hash=payload_hash,
-            response_model=VNAssetItemResponse,
-        )
-        if replay is not None:
-            return replay
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+    payload_hash = canonical_multipart_payload_hash(
+        {
+            "pack_id": pack_id,
+            "slot_id": slot_id,
+            "variant_index": variant_index,
+        },
+        file_sha256=hashlib.sha256(image_bytes).hexdigest(),
+        file_size=len(image_bytes),
+        filename=file.filename,
+        content_type=mime_type,
+    )
+    replay = _claim_or_replay_idempotency(
+        service,
+        owner_user_id=service.owner_user_id,
+        scope="vn_asset_item_upload",
+        resource_id=f"pack:{pack_id}:slot:{slot_id}",
+        idempotency_key=idempotency_key,
+        payload_hash=payload_hash,
+        response_model=VNAssetItemResponse,
+    )
+    if replay is not None:
+        return replay
+
+    try:
         response = await service.upload_item(
             pack_id,
             slot_id=slot_id,
@@ -1572,18 +1707,35 @@ async def upload_item(
             mime_type=mime_type,
             variant_index=variant_index,
         )
-        _record_idempotency_response(
+    except ValueError as exc:
+        _release_idempotency_claim(
             service,
             owner_user_id=service.owner_user_id,
             scope="vn_asset_item_upload",
             resource_id=f"pack:{pack_id}:slot:{slot_id}",
             idempotency_key=idempotency_key,
-            payload_hash=payload_hash,
-            response=response,
         )
-        return response
-    except ValueError as exc:
         raise _handle_value_error(exc) from exc
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=service.owner_user_id,
+            scope="vn_asset_item_upload",
+            resource_id=f"pack:{pack_id}:slot:{slot_id}",
+            idempotency_key=idempotency_key,
+        )
+        raise
+
+    _record_idempotency_response(
+        service,
+        owner_user_id=service.owner_user_id,
+        scope="vn_asset_item_upload",
+        resource_id=f"pack:{pack_id}:slot:{slot_id}",
+        idempotency_key=idempotency_key,
+        payload_hash=payload_hash,
+        response=response,
+    )
+    return response
 
 
 @router.post("/packs/{pack_id}/items/{item_id}/preferred", response_model=VNAssetItemResponse)
@@ -1646,6 +1798,7 @@ async def start_generation(
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VNAssetGenerationStatusResponse:
     generation_request = request or VNAssetGenerationRequest()
+    idempotency_key = _require_idempotency_key(generation_request.idempotency_key)
     owner_user_id = _current_user_id(current_user)
     payload_hash = canonical_payload_hash(
         {
@@ -1653,12 +1806,12 @@ async def start_generation(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
-    replay = _idempotency_replay(
+    replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_generate",
         resource_id=f"pack:{pack_id}",
-        idempotency_key=generation_request.idempotency_key,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response_model=VNAssetGenerationStatusResponse,
     )
@@ -1672,13 +1825,29 @@ async def start_generation(
             jobs_manager=jobs_manager,
         )
     except ValueError as exc:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_generate",
+            resource_id=f"pack:{pack_id}",
+            idempotency_key=idempotency_key,
+        )
         raise _handle_value_error(exc) from exc
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_generate",
+            resource_id=f"pack:{pack_id}",
+            idempotency_key=idempotency_key,
+        )
+        raise
     _record_idempotency_response(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_generate",
         resource_id=f"pack:{pack_id}",
-        idempotency_key=generation_request.idempotency_key,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response,
     )
@@ -1722,6 +1891,7 @@ async def retry_slot_generation(
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VNAssetGenerationStatusResponse:
     generation_request = request or VNAssetGenerationRequest()
+    idempotency_key = _require_idempotency_key(generation_request.idempotency_key)
     owner_user_id = _current_user_id(current_user)
     payload_hash = canonical_payload_hash(
         {
@@ -1730,12 +1900,12 @@ async def retry_slot_generation(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
-    replay = _idempotency_replay(
+    replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_slot_retry",
         resource_id=f"pack:{pack_id}:slot:{slot_id}",
-        idempotency_key=generation_request.idempotency_key,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response_model=VNAssetGenerationStatusResponse,
     )
@@ -1750,13 +1920,29 @@ async def retry_slot_generation(
             jobs_manager=jobs_manager,
         )
     except ValueError as exc:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_slot_retry",
+            resource_id=f"pack:{pack_id}:slot:{slot_id}",
+            idempotency_key=idempotency_key,
+        )
         raise _handle_value_error(exc) from exc
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_slot_retry",
+            resource_id=f"pack:{pack_id}:slot:{slot_id}",
+            idempotency_key=idempotency_key,
+        )
+        raise
     _record_idempotency_response(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_slot_retry",
         resource_id=f"pack:{pack_id}:slot:{slot_id}",
-        idempotency_key=generation_request.idempotency_key,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response,
     )
@@ -1777,6 +1963,7 @@ async def regenerate_item(
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VNAssetGenerationStatusResponse:
     generation_request = request or VNAssetGenerationRequest()
+    idempotency_key = _require_idempotency_key(generation_request.idempotency_key)
     owner_user_id = _current_user_id(current_user)
     payload_hash = canonical_payload_hash(
         {
@@ -1785,12 +1972,12 @@ async def regenerate_item(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
-    replay = _idempotency_replay(
+    replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_item_regenerate",
         resource_id=f"pack:{pack_id}:item:{item_id}",
-        idempotency_key=generation_request.idempotency_key,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response_model=VNAssetGenerationStatusResponse,
     )
@@ -1805,13 +1992,29 @@ async def regenerate_item(
             jobs_manager=jobs_manager,
         )
     except ValueError as exc:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_item_regenerate",
+            resource_id=f"pack:{pack_id}:item:{item_id}",
+            idempotency_key=idempotency_key,
+        )
         raise _handle_value_error(exc) from exc
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_item_regenerate",
+            resource_id=f"pack:{pack_id}:item:{item_id}",
+            idempotency_key=idempotency_key,
+        )
+        raise
     _record_idempotency_response(
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_item_regenerate",
         resource_id=f"pack:{pack_id}:item:{item_id}",
-        idempotency_key=generation_request.idempotency_key,
+        idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response,
     )

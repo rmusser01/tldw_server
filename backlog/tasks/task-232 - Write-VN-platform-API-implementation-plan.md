@@ -1,5 +1,5 @@
 ---
-id: TASK-213
+id: TASK-232
 title: Write VN platform API implementation plan
 status: Done
 assignee: []
@@ -23,7 +23,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create a phased implementation plan from the reviewed VN platform API design spec. Scope is documentation/task metadata only. The plan should be suitable for future subagent-driven execution and should decompose the full backend-owned /api/v1/vn/vn-* API into independently reviewable slices with exact files, test strategy, verification commands, and sequencing.
+Create a phased implementation plan from the reviewed VN platform API design spec. Scope is documentation/task metadata only. The plan should be suitable for future subagent-driven execution and should decompose the full backend-owned `/api/v1/vn/vn-*` API into independently reviewable slices with exact files, test strategy, verification commands, and sequencing.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

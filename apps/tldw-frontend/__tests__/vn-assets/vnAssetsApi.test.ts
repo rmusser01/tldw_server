@@ -126,10 +126,10 @@ describe('vnAssets api client', () => {
       include_full_provenance: true,
       strict: true,
       warn_for_sharing: true,
-      request_id: 'export-1',
+      idempotency_key: 'export-1',
     });
     await getVNPackExportJob('job-export');
-    await createVNPackImportPreview(archive);
+    await createVNPackImportPreview(archive, 'preview-1');
     await getVNPackImportPreview(33);
     await commitVNPackImport({
       preview_id: 33,
@@ -139,7 +139,7 @@ describe('vnAssets api client', () => {
       target_character_id: 42,
       target_pack_id: 9,
       conflict_decisions: { confirm_all_risky_diffs: true },
-      request_id: 'commit-1',
+      idempotency_key: 'commit-1',
     });
     await getVNPackImportJob('job-import');
 
@@ -149,7 +149,7 @@ describe('vnAssets api client', () => {
       include_full_provenance: true,
       strict: true,
       warn_for_sharing: true,
-      request_id: 'export-1',
+      idempotency_key: 'export-1',
     });
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/exports/job-export');
     expect(mocks.apiClient.post).toHaveBeenCalledWith(
@@ -161,6 +161,7 @@ describe('vnAssets api client', () => {
       ([url]) => url === '/vn/vn-assets/import/previews'
     )?.[1] as FormData;
     expect(formData.get('archive')).toBe(archive);
+    expect(formData.get('idempotency_key')).toBe('preview-1');
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/import/previews/33');
     expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/import/commit', {
       preview_id: 33,
@@ -170,7 +171,7 @@ describe('vnAssets api client', () => {
       target_character_id: 42,
       target_pack_id: 9,
       conflict_decisions: { confirm_all_risky_diffs: true },
-      request_id: 'commit-1',
+      idempotency_key: 'commit-1',
     });
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/imports/job-import');
   });

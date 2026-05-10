@@ -52,7 +52,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "max_choices_per_scene": 8,
             "runtime_model_timeout_seconds": 120,
         },
-        "supported_content_ratings": ["general", "teen", "mature"],
+        "supported_content_ratings": ["general", "teen", "suggestive", "mature"],
         "visible_policy_profiles": [
             {"id": "local_default", "name": "Local Default", "visible": True},
             {"id": "strict_hosted", "name": "Strict Hosted", "visible": True},

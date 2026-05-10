@@ -25,6 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlaySceneStateResponse,
     VNPlayScriptActionRequest,
     VNPlayScriptActionResponse,
+    VNPlayScriptDebugStateResponse,
     VNPlayScriptStateResponse,
     VNPlayMode,
     VNPlaySessionCreate,
@@ -62,6 +63,7 @@ from tldw_Server_API.app.core.VN_Play.service import (
     VNPlayTurnError,
     VNPlayTurnResponse as ServiceTurnResponse,
 )
+from tldw_Server_API.app.core.VN_Platform.errors import vn_error_detail
 
 
 router = APIRouter(prefix="/vn-play", tags=["vn-play"])
@@ -140,7 +142,8 @@ def create_session(
     try:
         session = service.create_session(**request.model_dump())
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        detail = str(exc) or "invalid_request"
+        raise _vn_play_http_error(status.HTTP_400_BAD_REQUEST, detail) from exc
     return _session_response(service, session)
 
 
@@ -451,6 +454,7 @@ def restore_checkpoint(
         restore_response = service.restore_checkpoint(
             session_id,
             request.checkpoint_id,
+            client_scene_version=request.client_scene_version,
             idempotency_key=request.idempotency_key,
         )
         return _checkpoint_restore_session_response(restore_response)
@@ -571,13 +575,18 @@ def get_scripted_story_state(
         raise _http_error_for_service_exception(exc) from exc
 
 
-@router.get("/sessions/{session_id}/script/debug-state")
+@router.get(
+    "/sessions/{session_id}/script/debug-state",
+    response_model=VNPlayScriptDebugStateResponse,
+)
 def get_scripted_story_debug_state(
     session_id: int,
     service: VNPlayService = Depends(_service),
-) -> dict[str, Any]:
+) -> VNPlayScriptDebugStateResponse:
     try:
-        return service.get_script_debug_state(session_id)
+        return VNPlayScriptDebugStateResponse.model_validate(
+            service.get_script_debug_state(session_id)
+        )
     except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
         raise _http_error_for_service_exception(exc) from exc
 
@@ -649,14 +658,26 @@ def _http_error_for_service_exception(exc: Exception) -> HTTPException:
     detail = str(exc) or exc.__class__.__name__
     if isinstance(exc, VNPlayNotFoundError):
         if detail == ERROR_BRANCH_NOT_FOUND:
-            return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+            return _vn_play_http_error(status.HTTP_404_NOT_FOUND, detail)
+        return _vn_play_http_error(status.HTTP_404_NOT_FOUND, "not_found")
     if isinstance(exc, VNPlayConflictError) or detail in CONFLICT_ERROR_CODES:
         if detail in BAD_REQUEST_ERROR_CODES:
-            return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+            return _vn_play_http_error(status.HTTP_400_BAD_REQUEST, detail)
+        return _vn_play_http_error(status.HTTP_409_CONFLICT, detail)
     if detail in {TURN_STATUS_MODEL_FAILED, TURN_STATUS_PARSE_FAILED}:
-        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+        return _vn_play_http_error(status.HTTP_502_BAD_GATEWAY, detail, retryable=True)
     if detail in BAD_REQUEST_ERROR_CODES:
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+        return _vn_play_http_error(status.HTTP_400_BAD_REQUEST, detail)
+    return _vn_play_http_error(status.HTTP_400_BAD_REQUEST, detail)
+
+
+def _vn_play_http_error(
+    status_code: int,
+    code: str,
+    *,
+    retryable: bool = False,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail=vn_error_detail(code, code, retryable=retryable),
+    )

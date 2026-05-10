@@ -34,6 +34,7 @@ def canonical_multipart_payload_hash(
     fields: Mapping[str, Any],
     *,
     file_sha256: str,
+    file_size: int | None = None,
     filename: str | None = None,
     content_type: str | None = None,
 ) -> str:
@@ -43,6 +44,7 @@ def canonical_multipart_payload_hash(
             "fields": dict(fields),
             "file": {
                 "sha256": file_sha256,
+                "size": file_size,
                 "filename": filename,
                 "content_type": content_type,
             },
