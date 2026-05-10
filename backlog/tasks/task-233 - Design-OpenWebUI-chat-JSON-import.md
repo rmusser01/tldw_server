@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 16:15'
-updated_date: '2026-05-10 16:24'
+updated_date: '2026-05-10 16:29'
 labels:
   - chatbooks
   - chat
@@ -36,7 +36,8 @@ Create the approved design spec for importing OpenWebUI chat JSON exports into t
 1. Write the approved OpenWebUI chat JSON import design spec under Docs/superpowers/specs/2026-05-10-openwebui-chat-import-design.md.
 2. Capture architecture, data mapping, user flow, error handling, testing, and v1 exclusions exactly as approved in brainstorming.
 3. Run a spec review loop with a focused reviewer prompt and patch the spec if actionable issues are found.
-4. Verify the non-code change with git diff/checks, record Bandit as not applicable for design-only work, and commit only the spec plus TASK-233 tracking file.
+4. Perform the user-requested design self-review against current Chatbooks/ChaCha code paths and patch concrete implementation-planning gaps.
+5. Verify the non-code change with content hygiene and git diff checks, record Bandit as not applicable for design-only work, and commit only the spec plus TASK-233 tracking file.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -47,12 +48,16 @@ Wrote design spec at Docs/superpowers/specs/2026-05-10-openwebui-chat-import-des
 Spec review iteration 1 found message ID collision risk for rename imports and an underspecified OpenWebUI preview/import response contract. Patched the spec to add import-copy namespacing, explicit optional OpenWebUI preview/result response fields, canonical derived external refs, and stricter v1 role handling.
 
 Spec review iteration 2 approved. Applied advisory cleanup to specify source_format as a multipart form field and align response wording with existing success/message/job_id fields.
+
+Reopened for user-requested design self-review before implementation planning. Found additional planning gaps to patch: OpenWebUI JSON must branch before ZIP validation, JSON filename handling cannot reuse the ZIP-only filename validator unchanged, source metadata should use explicit namespaced storage, and OpenWebUI Unix timestamps need explicit normalization.
+
+Design self-review patch added explicit endpoint/source-format branching before ZIP validation, JSON filename validation constraints, frontend helper changes for source_format, duplicate lookup helper guidance, namespaced conversation/message metadata, UUID-shaped deterministic message IDs, and Unix-second timestamp normalization.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a user-approved and reviewer-approved design spec for importing OpenWebUI chat JSON exports through the existing Chatbooks import workflow. The spec defines the v1 scope as JSON export import only, preserves full OpenWebUI message trees via parent_message_id, pins duplicate handling to source=openwebui plus external_ref, and excludes direct database import plus attachment hydration from v1. Verification included placeholder scan, full spec review, and two spec-review iterations; Bandit is not applicable because this task changed only documentation and Backlog tracking metadata.
+Added and then self-reviewed the user-approved OpenWebUI chat JSON import design spec. The spec now defines OpenWebUI JSON import through the existing Chatbooks import surface, preserves message trees through parent_message_id, pins duplicate handling to source=openwebui plus external_ref, excludes direct database import and attachment hydration from v1, and hardens implementation planning around source_format branching, JSON-safe validation, frontend helper updates, duplicate lookup helpers, namespaced metadata, UUID-shaped deterministic message IDs, and Unix timestamp normalization. Verification included content-hygiene scans, full spec review, two spec-review iterations, and a follow-up self-review against current Chatbooks/ChaCha code paths; Bandit is not applicable because this task changed only documentation and Backlog tracking metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
