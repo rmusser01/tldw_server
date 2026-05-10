@@ -15,7 +15,7 @@
 
 ### What is a Chatbook?
 
-A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files into tldw conversations.
+A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files and uploaded OpenWebUI `webui.db` databases into tldw conversations.
 
 ### Why Use Chatbooks?
 
@@ -38,7 +38,7 @@ Chatbooks can contain:
 - 🎨 **Media**: Images, audio, and video files (optional)
 - 🔢 **Embeddings**: Vector representations for search (optional)
 
-OpenWebUI JSON imports are handled as conversation imports: each valid OpenWebUI chat becomes a tldw conversation with message branches, timestamps, models, file references, and source metadata preserved where available.
+OpenWebUI imports are handled as conversation imports: each valid OpenWebUI chat becomes a tldw conversation with message branches, timestamps, models, file references, folder metadata, and source metadata preserved where available. Database imports also mirror source folders into tldw folders under `OpenWebUI / <selected user>`.
 
 ## Getting Started
 
@@ -165,7 +165,12 @@ For more control over what to export:
 
 ### OpenWebUI Chat Import
 
-The same import tab can also import normal OpenWebUI "Export Chats" JSON files:
+The same import tab can also import OpenWebUI chats from two sources:
+
+- **OpenWebUI JSON**: the normal JSON file produced by OpenWebUI's "Export Chats" action.
+- **OpenWebUI database**: an uploaded `webui.db` or `.sqlite` database copied from an OpenWebUI instance.
+
+#### Importing OpenWebUI JSON
 
 1. Click "Import Chatbook"
 2. Select "OpenWebUI JSON" as the source
@@ -176,7 +181,22 @@ The same import tab can also import normal OpenWebUI "Export Chats" JSON files:
 
 OpenWebUI import creates one tldw conversation for each valid OpenWebUI chat. It preserves all valid message branches as parent-linked message trees, not only the currently selected branch. Duplicate detection uses the OpenWebUI source reference stored on imported conversations, so repeated imports default to skipping previously imported chats.
 
-OpenWebUI v1 import supports standard exported chat JSON files only. It does not import directly from `webui.db`, OpenWebUI admin exports, or a live OpenWebUI server. File, image, and artifact references found in the export are preserved as message metadata only; the referenced attachment binaries are not hydrated in v1.
+#### Importing an OpenWebUI Database
+
+Use database import when you have local access to the OpenWebUI SQLite database and want to preserve source folder organization:
+
+1. Click "Import Chatbook"
+2. Select "OpenWebUI database" as the source
+3. Select the copied `webui.db`, `.db`, or `.sqlite` file
+4. Preview the database and review the detected users, chat counts, message counts, folder counts, and attachment-reference counts
+5. Select exactly one selected OpenWebUI user to import
+6. Confirm the destination namespace shown in preview, such as `OpenWebUI / <selected user> / source folders`
+7. Choose `skip` to avoid reimporting existing chats, or `rename` to intentionally create a second copy
+8. Click "Import"
+
+Database import reads chats only for the selected source user. It does not import every user from the database by default. Folder paths are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`; if the same folder name is already used elsewhere, tldw keeps the displayed path but safely disambiguates the backing collection name.
+
+Files, images, and artifacts import as metadata references only; binaries are not copied from the OpenWebUI attachment store. OpenWebUI v1 import does not connect to a live OpenWebUI server, import admin exports, hydrate attachments, import media binaries, import embeddings, or apply content selections.
 
 ### Conflict Resolution Strategies
 
@@ -191,7 +211,7 @@ When importing content that already exists:
 - **Behavior**: Replaces existing items with imported versions
 - **Use When**: Imported version is more recent or authoritative
 - **Example**: Restoring from a backup after data corruption
-- **OpenWebUI**: Not available for OpenWebUI JSON imports in v1
+- **OpenWebUI**: Not available for OpenWebUI JSON or database imports in v1
 
 #### Rename
 - **Behavior**: Adds imported items with modified names
@@ -213,12 +233,12 @@ When importing content that already exists:
 - **Import Media**: Not supported yet
   - Default: false
   - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON imports preserve only attachment references
+  - OpenWebUI JSON and database imports preserve only attachment references
 
 - **Import Embeddings**: Not supported yet
   - Default: false
   - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON imports do not import embeddings
+  - OpenWebUI JSON and database imports do not import embeddings
 
 ### Preview Before Import
 
@@ -229,6 +249,7 @@ Always preview a chatbook or OpenWebUI export before importing:
 3. Review:
    - Total items by type
    - OpenWebUI chat/message/branch counts when importing JSON
+   - OpenWebUI database users, folder counts, and selected-user destination namespace when importing `webui.db`
    - Duplicate and malformed-chat counts
    - Creation date
    - Author information
@@ -446,13 +467,13 @@ A: Not currently. You need to start a new export job.
 ### Import Questions
 
 **Q: Will importing duplicate my content?**
-A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSON import defaults to `skip` and detects existing imported chats by `source=openwebui` plus the OpenWebUI external reference.
+A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSON and database imports default to `skip` and detect existing imported chats by `source=openwebui` plus the OpenWebUI external reference. Use `rename` only when you want a second copy.
 
 **Q: Can I preview what will be imported?**
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON import preserves file, image, and artifact references as metadata only.
+A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON and database imports preserve file, image, and artifact references as metadata only.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.
