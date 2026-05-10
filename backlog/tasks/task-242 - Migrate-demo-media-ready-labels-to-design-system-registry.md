@@ -4,7 +4,7 @@ title: Migrate demo media ready labels to design-system registry
 status: Done
 assignee: []
 created_date: '2026-05-10 19:39'
-updated_date: '2026-05-10 19:56'
+updated_date: '2026-05-10 20:10'
 labels:
   - design-system
   - frontend
@@ -45,6 +45,10 @@ Verification: bunx vitest run src/utils/__tests__/demo-content.design-system.tes
 PR review fix: Qodo flagged that widening DemoMediaPreview.status to string made ReviewPage styling depend on display-label comparison. Added typed statusKey ('ready' | 'processing') plus statusLabel display text, updated ReviewPage to branch on statusKey, and updated the ReviewPage demo-content mock.
 
 Review-fix verification: bunx vitest run src/utils/__tests__/demo-content.design-system.test.ts --reporter=dot passed 1 test; bunx vitest run src/components/Review/__tests__/ReviewPage.connection.test.tsx --reporter=dot passed 3 tests; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 52 tests; bun run verify:design-system-state exited 0; git diff --check exited 0. Broad bunx tsc --noEmit --pretty false still exits 2 with the existing 239-line repo baseline and no touched-scope matches for demo-content, ReviewPage, ReviewPage.connection, baseline, task-242, statusKey/statusLabel, getDemoMediaItems, or getDesignSystemState.
+
+PR review follow-up: Gemini requested a more concise structural assertion in the focused demo-content test. Updated the test to assert each demo media item's id, typed status key, display status label, and title in one expected structure while preserving the same behavior coverage.
+
+Follow-up verification: bunx vitest run src/utils/__tests__/demo-content.design-system.test.ts --reporter=dot passed 1 test; git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

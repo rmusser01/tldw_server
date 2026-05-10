@@ -31,25 +31,32 @@ describe("getDemoMediaItems", () => {
   it("uses the design-system ready label while preserving demo media order", () => {
     const items = getDemoMediaItems(t)
 
-    expect(items.map((item) => item.id)).toEqual([
-      "demo-media-1",
-      "demo-media-2",
-      "demo-media-3"
-    ])
-    expect(items.map((item) => item.statusKey)).toEqual([
-      "ready",
-      "processing",
-      "ready"
-    ])
-    expect(items.map((item) => item.statusLabel)).toEqual([
-      "Ready via registry",
-      "Processing",
-      "Ready via registry"
-    ])
-    expect(items.map((item) => item.title)).toEqual([
-      "Demo media: Team call recording",
-      "Demo media: Product walkthrough",
-      "Demo media: Research article PDF"
+    expect(
+      items.map(({ id, statusKey, statusLabel, title }) => ({
+        id,
+        statusKey,
+        statusLabel,
+        title
+      }))
+    ).toEqual([
+      {
+        id: "demo-media-1",
+        statusKey: "ready",
+        statusLabel: "Ready via registry",
+        title: "Demo media: Team call recording"
+      },
+      {
+        id: "demo-media-2",
+        statusKey: "processing",
+        statusLabel: "Processing",
+        title: "Demo media: Product walkthrough"
+      },
+      {
+        id: "demo-media-3",
+        statusKey: "ready",
+        statusLabel: "Ready via registry",
+        title: "Demo media: Research article PDF"
+      }
     ])
   })
 })
