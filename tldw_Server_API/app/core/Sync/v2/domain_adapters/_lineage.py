@@ -79,10 +79,11 @@ def _dependency_references_head(dependency: dict[str, Any], head: SyncEnvelope) 
 def _dependency_matches_entity(dependency: dict[str, Any], head: SyncEnvelope) -> bool:
     entity_id = dependency.get("entity_id")
     stable_key = dependency.get("stable_key")
-    return (
-        (entity_id is None or _same_token(entity_id, head.entity_id))
-        and (stable_key is None or _same_token(stable_key, head.stable_key))
-    )
+    if entity_id is not None and not _same_token(entity_id, head.entity_id):
+        return False
+    if stable_key is not None and not _same_token(stable_key, head.stable_key):
+        return False
+    return entity_id is not None or stable_key is not None
 
 
 def _same_token(left: object, right: object) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Sync v2 domain adapter for encrypted notes envelopes."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,17 +54,12 @@ class NotesDomainAdapter:
         if delete_conflict is not None:
             return delete_conflict
         if _is_content_bearing(envelope) and not incoming_references_head(
-            envelope, current_head(prior)
+            envelope, _current_content_head(prior)
         ):
-            conflicting = next(
-                (
-                    item
-                    for item in prior
-                    if _is_content_bearing(item)
-                    and item.operation == "upsert"
-                    and item.payload_hash != envelope.payload_hash
-                ),
-                None,
+            conflicting = _current_content_head(
+                item
+                for item in prior
+                if item.operation == "upsert" and item.payload_hash != envelope.payload_hash
             )
             if conflicting is not None:
                 return AdapterConflict(
@@ -105,6 +101,10 @@ def _is_content_bearing(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
         "encrypted_fields"
     )
     return bool(_CONTENT_FIELD_NAMES.intersection(_string_set(content_fields)))
+
+
+def _current_content_head(prior: Iterable[SyncEnvelope]) -> SyncEnvelope | None:
+    return current_head(item for item in prior if _is_content_bearing(item))
 
 
 def _metadata_string(envelope: SyncEnvelope | SyncEnvelopeCreate, key: str) -> str | None:

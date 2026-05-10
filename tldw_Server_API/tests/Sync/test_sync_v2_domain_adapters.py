@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterRegistry,
 )
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.chat import ChatDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters._lineage import incoming_references_head
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaCompatibilityAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
@@ -186,6 +187,83 @@ def test_notes_adapter_accepts_linear_encrypted_content_edit_against_current_hea
     assert outcome == AdapterAccepted(client_envelope_id="note-content-b")
 
 
+def test_notes_adapter_accepts_content_edit_based_on_latest_content_head_after_metadata_head():
+    content_v1 = _stored(
+        _envelope(
+            client_envelope_id="note-content-a",
+            routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+            payload_clear={"entity_kind": "note"},
+            payload_hash="sha256:content-a",
+            entity_version="note-content-v1",
+        ),
+        sequence=1,
+    )
+    metadata_v2 = _stored(
+        _envelope(
+            client_envelope_id="note-tags-b",
+            payload_clear={"entity_kind": "note", "tag_ids": ["tag-2"], "status": "active"},
+            payload_hash="sha256:tags-b",
+            entity_version="note-metadata-v2",
+        ),
+        sequence=2,
+    )
+    incoming = _envelope(
+        client_envelope_id="note-content-c",
+        routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+        payload_clear={"entity_kind": "note"},
+        payload_hash="sha256:content-c",
+        base_version="note-content-v1",
+        entity_version="note-content-v2",
+    )
+
+    outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(content_v1, metadata_v2),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id="note-content-c")
+
+
+def test_notes_adapter_conflicts_content_edit_not_based_on_content_head_after_metadata_head():
+    content_v1 = _stored(
+        _envelope(
+            client_envelope_id="note-content-a",
+            routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+            payload_clear={"entity_kind": "note"},
+            payload_hash="sha256:content-a",
+            entity_version="note-content-v1",
+        ),
+        sequence=1,
+    )
+    metadata_v2 = _stored(
+        _envelope(
+            client_envelope_id="note-tags-b",
+            payload_clear={"entity_kind": "note", "tag_ids": ["tag-2"], "status": "active"},
+            payload_hash="sha256:tags-b",
+            entity_version="note-metadata-v2",
+        ),
+        sequence=2,
+    )
+    incoming = _envelope(
+        client_envelope_id="note-content-c",
+        routing_metadata={"entity_kind": "note", "update_kind": "note_content"},
+        payload_clear={"entity_kind": "note"},
+        payload_hash="sha256:content-c",
+        base_version="note-root",
+        entity_version="note-content-v2",
+    )
+
+    outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(content_v1, metadata_v2),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.conflict_type == "encrypted_content_edit"
+
+
 def test_notes_adapter_conflicts_stale_encrypted_content_edit():
     prior = _stored(
         _envelope(
@@ -265,6 +343,63 @@ def test_notes_adapter_conflicts_delete_vs_update():
 
     assert isinstance(outcome, AdapterConflict)
     assert outcome.conflict_type == "delete_update_conflict"
+
+
+def test_lineage_version_dependency_requires_matching_entity_identity():
+    head = _stored(
+        _envelope(
+            client_envelope_id="note-head",
+            entity_id="note-1",
+            stable_key="note:note-1",
+            entity_version="note-v2",
+        ),
+        sequence=7,
+    )
+
+    assert not incoming_references_head(
+        _envelope(
+            client_envelope_id="note-child",
+            dependencies=[{"version": "note-v2"}],
+        ),
+        head,
+    )
+    assert incoming_references_head(
+        _envelope(
+            client_envelope_id="note-child",
+            dependencies=[{"entity_id": "note-1", "version": "note-v2"}],
+        ),
+        head,
+    )
+    assert incoming_references_head(
+        _envelope(
+            client_envelope_id="note-child",
+            dependencies=[{"stable_key": "note:note-1", "entity_version": "note-v2"}],
+        ),
+        head,
+    )
+
+
+def test_lineage_direct_dependency_identifiers_reference_head_without_entity_identity():
+    head = _stored(
+        _envelope(
+            client_envelope_id="note-head",
+            entity_id="note-1",
+            stable_key="note:note-1",
+            entity_version="note-v2",
+        ),
+        sequence=7,
+    )
+
+    for dependency in (
+        {"client_envelope_id": "note-head"},
+        {"envelope_id": "note-head"},
+        {"base_envelope_id": "note-head"},
+        {"server_sequence": 7},
+    ):
+        assert incoming_references_head(
+            _envelope(client_envelope_id="note-child", dependencies=[dependency]),
+            head,
+        )
 
 
 @pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache"])
