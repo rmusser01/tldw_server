@@ -746,8 +746,8 @@ def test_vz_linux_session_reuse_generation_mismatch_recreates_vm(monkeypatch, tm
     ],
 )
 def test_vz_linux_session_reuse_metadata_mismatch_recreates_vm(
-    monkeypatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     metadata: HelperVMMetadata,
     case_name: str,
 ) -> None:
@@ -773,7 +773,7 @@ def test_vz_linux_session_reuse_metadata_mismatch_recreates_vm(
             deleted.append(session_id)
             return True
 
-        def put_vz_session_control(self, **kwargs) -> None:
+        def put_vz_session_control(self, **kwargs: object) -> None:
             stored.append(dict(kwargs))
 
     class _FakeHelper:
