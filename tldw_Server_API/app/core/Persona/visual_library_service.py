@@ -1,4 +1,10 @@
-"""Service layer for user-scoped Persona Visual pack library operations."""
+"""Service layer for user-scoped Persona Visual pack library operations.
+
+The personal library stores editable metadata that references existing same-user
+Persona Visual packs. This module validates library metadata, maps persistence
+and visual-pack failures to stable service errors, and applies saved entries by
+duplicating their source pack as an inactive draft for a target persona.
+"""
 
 from __future__ import annotations
 
