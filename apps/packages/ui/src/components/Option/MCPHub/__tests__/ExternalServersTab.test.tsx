@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { Modal } from "antd"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
+  invalidateQueries: vi.fn(),
   listExternalServers: vi.fn(),
   setExternalServerSecret: vi.fn(),
   setExternalServerSlotSecret: vi.fn(),
@@ -14,13 +16,26 @@ const mocks = vi.hoisted(() => ({
   createExternalServer: vi.fn(),
   updateExternalServer: vi.fn(),
   deleteExternalServer: vi.fn(),
+  refreshExternalServerDiscovery: vi.fn(),
   createExternalServerCredentialSlot: vi.fn(),
   updateExternalServerCredentialSlot: vi.fn(),
   deleteExternalServerCredentialSlot: vi.fn()
 }))
 
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({
+    invalidateQueries: mocks.invalidateQueries
+  })
+}))
+
 vi.mock("@/services/tldw/mcp-hub", () => ({
   listExternalServers: (...args: unknown[]) => mocks.listExternalServers(...args),
+  describeExternalServerDiscoveryRefreshFailure: (result: { message?: string | null; errors?: Record<string, string> }) => {
+    const errorText = Object.entries(result.errors ?? {})
+      .map(([serverId, reason]) => `${serverId}: ${reason}`)
+      .join("; ")
+    return [result.message, errorText].filter(Boolean).join(" - ") || "Discovery refresh failed"
+  },
   setExternalServerSecret: (...args: unknown[]) => mocks.setExternalServerSecret(...args),
   setExternalServerSlotSecret: (...args: unknown[]) => mocks.setExternalServerSlotSecret(...args),
   clearExternalServerSlotSecret: (...args: unknown[]) => mocks.clearExternalServerSlotSecret(...args),
@@ -30,6 +45,7 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
   createExternalServer: (...args: unknown[]) => mocks.createExternalServer(...args),
   updateExternalServer: (...args: unknown[]) => mocks.updateExternalServer(...args),
   deleteExternalServer: (...args: unknown[]) => mocks.deleteExternalServer(...args),
+  refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args),
   createExternalServerCredentialSlot: (...args: unknown[]) => mocks.createExternalServerCredentialSlot(...args),
   updateExternalServerCredentialSlot: (...args: unknown[]) => mocks.updateExternalServerCredentialSlot(...args),
   deleteExternalServerCredentialSlot: (...args: unknown[]) => mocks.deleteExternalServerCredentialSlot(...args)
@@ -40,6 +56,7 @@ import { ExternalServersTab } from "../ExternalServersTab"
 describe("ExternalServersTab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.invalidateQueries.mockResolvedValue(undefined)
     mocks.listExternalServers.mockResolvedValue([
       {
         id: "docs-managed",
@@ -180,6 +197,10 @@ describe("ExternalServersTab", () => {
         }
       ]
     })
+    mocks.refreshExternalServerDiscovery.mockResolvedValue({
+      ok: true,
+      status: "refreshed"
+    })
     mocks.createExternalServerCredentialSlot.mockResolvedValue({
       server_id: "docs-managed",
       slot_name: "token_write",
@@ -201,6 +222,10 @@ describe("ExternalServersTab", () => {
     mocks.deleteExternalServerCredentialSlot.mockResolvedValue({ ok: true })
     mocks.deleteExternalServer.mockResolvedValue({ ok: true })
     vi.stubGlobal("confirm", vi.fn(() => true))
+  })
+
+  afterEach(() => {
+    Modal.destroyAll()
   })
 
   it("renders managed and legacy servers, supports import, and still saves managed secrets", async () => {
@@ -359,7 +384,7 @@ describe("ExternalServersTab", () => {
     await user.click(screen.getByRole("button", { name: /new managed server/i }))
     await user.type(screen.getByLabelText(/server id/i), "new-managed")
     await user.type(screen.getByLabelText(/^name$/i), "New Managed")
-    await user.selectOptions(screen.getByLabelText(/transport/i), "websocket")
+    await user.selectOptions(screen.getByRole("combobox", { name: /^transport$/i }), "websocket")
     await user.click(screen.getByRole("button", { name: /save server/i }))
 
     expect(mocks.createExternalServer).toHaveBeenCalledWith({
@@ -389,6 +414,109 @@ describe("ExternalServersTab", () => {
     await user.click(screen.getByRole("button", { name: /^Delete$/i }))
     expect(mocks.deleteExternalServer).toHaveBeenCalledWith("docs-managed")
   }, 15000)
+
+  it("refreshes external discovery and MCP tool queries after managed server mutations", async () => {
+    const user = userEvent.setup()
+    render(<ExternalServersTab />)
+
+    await screen.findByText("Docs Legacy")
+
+    await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.type(screen.getByLabelText(/server id/i), "new-managed")
+    await user.type(screen.getByLabelText(/^name$/i), "New Managed")
+    await user.selectOptions(screen.getByRole("combobox", { name: /^transport$/i }), "websocket")
+    await user.click(screen.getByRole("button", { name: /save server/i }))
+
+    await waitFor(() => {
+      expect(mocks.createExternalServer).toHaveBeenCalled()
+    })
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith("new-managed")
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
+    expect(await screen.findByText(/server created and tools refreshed/i)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: /edit docs managed/i }))
+    const nameInput = screen.getByLabelText(/^name$/i)
+    await user.clear(nameInput)
+    await user.type(nameInput, "Docs Managed Updated")
+    await user.click(screen.getByRole("button", { name: /update server/i }))
+
+    await waitFor(() => {
+      expect(mocks.updateExternalServer).toHaveBeenCalledWith(
+        "docs-managed",
+        expect.objectContaining({ enabled: true })
+      )
+    })
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith("docs-managed")
+    expect(await screen.findByText(/server updated and tools refreshed/i)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: /edit docs managed/i }))
+    await user.click(screen.getByRole("checkbox", { name: /enabled/i }))
+    await user.click(screen.getByRole("button", { name: /update server/i }))
+
+    await waitFor(() => {
+      expect(mocks.updateExternalServer).toHaveBeenLastCalledWith(
+        "docs-managed",
+        expect.objectContaining({ enabled: false })
+      )
+    })
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith()
+
+    await user.click(screen.getByRole("button", { name: /import to mcp hub/i }))
+    await waitFor(() => {
+      expect(mocks.importExternalServer).toHaveBeenCalledWith("search-legacy")
+    })
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith("search-legacy")
+    expect(await screen.findByText(/legacy server imported and tools refreshed/i)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: /delete docs managed/i }))
+    await user.click(await screen.findByRole("button", { name: /^delete$/i }))
+
+    await waitFor(() => {
+      expect(mocks.deleteExternalServer).toHaveBeenCalledWith("docs-managed")
+    })
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith()
+    expect(await screen.findByText(/server deleted and tools refreshed/i)).toBeTruthy()
+  }, 20000)
+
+  it("keeps persistence success visible when runtime discovery refresh fails", async () => {
+    const user = userEvent.setup()
+    mocks.refreshExternalServerDiscovery.mockRejectedValueOnce(new Error("runtime unavailable"))
+    render(<ExternalServersTab />)
+
+    expect((await screen.findAllByText("Docs Managed")).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.type(screen.getByLabelText(/server id/i), "new-managed")
+    await user.type(screen.getByLabelText(/^name$/i), "New Managed")
+    await user.click(screen.getByRole("button", { name: /save server/i }))
+
+    expect(await screen.findByText(/server created, but discovery refresh failed/i)).toBeTruthy()
+    expect(screen.getByText(/retry runtime refresh/i)).toBeTruthy()
+    expect(mocks.listExternalServers).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps persistence success visible when runtime discovery resolves with errors", async () => {
+    const user = userEvent.setup()
+    mocks.refreshExternalServerDiscovery.mockResolvedValueOnce({
+      ok: false,
+      message: "Discovery refreshed with errors",
+      errors: { "new-managed": "external_server_discovery_failed" }
+    })
+    render(<ExternalServersTab />)
+
+    expect((await screen.findAllByText("Docs Managed")).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.type(screen.getByLabelText(/server id/i), "new-managed")
+    await user.type(screen.getByLabelText(/^name$/i), "New Managed")
+    await user.click(screen.getByRole("button", { name: /save server/i }))
+
+    expect(await screen.findByText(/server created, but discovery refresh failed/i)).toBeTruthy()
+    expect(screen.getByText(/external_server_discovery_failed/i)).toBeTruthy()
+    expect(mocks.invalidateQueries).not.toHaveBeenCalled()
+    expect(mocks.listExternalServers).toHaveBeenCalledTimes(2)
+  })
 
   it("opens the managed server editor from a drill target", async () => {
     const onDrillHandled = vi.fn()

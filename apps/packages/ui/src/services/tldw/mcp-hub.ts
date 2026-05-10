@@ -1119,6 +1119,41 @@ export const deleteExternalServer = async (
   })
 }
 
+export type ExternalServerDiscoveryRefreshResult = {
+  ok: boolean
+  server_id?: string | null
+  reconciled_servers?: number
+  refreshed_servers?: number
+  total_servers?: number
+  virtual_tools?: number
+  errors?: Record<string, string>
+  requires_restart?: boolean
+  message?: string | null
+}
+
+export const describeExternalServerDiscoveryRefreshFailure = (
+  result: ExternalServerDiscoveryRefreshResult
+): string => {
+  const errorText = Object.entries(result.errors ?? {})
+    .map(([serverId, reason]) => `${serverId}: ${reason}`)
+    .join("; ")
+  return [result.message, errorText].filter(Boolean).join(" - ") || "Discovery refresh failed"
+}
+
+export const refreshExternalServerDiscovery = async (
+  serverId?: string
+): Promise<ExternalServerDiscoveryRefreshResult> => {
+  const result = await bgRequestClient<ExternalServerDiscoveryRefreshResult>({
+    path: "/api/v1/mcp/hub/external-servers/refresh-discovery",
+    method: "POST",
+    body: serverId ? { server_id: serverId } : undefined
+  })
+  if (!result.ok) {
+    throw new Error(describeExternalServerDiscoveryRefreshFailure(result))
+  }
+  return result
+}
+
 export const setExternalServerSecret = async (
   serverId: string,
   secret: string

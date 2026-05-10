@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react"
-import { Alert, Card, Empty, Space, Tag, Typography } from "antd"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd"
 
 import {
+  describeExternalServerDiscoveryRefreshFailure,
   getToolRegistrySummary,
+  refreshExternalServerDiscovery,
   type McpHubToolRegistryEntry,
   type McpHubToolRegistryModule
 } from "@/services/tldw/mcp-hub"
@@ -13,43 +15,59 @@ export const ToolCatalogsTab = () => {
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setErrorMessage(null)
-      try {
-        const summary = await getToolRegistrySummary()
-        if (!cancelled) {
-          setEntries(Array.isArray(summary?.entries) ? summary.entries : [])
-          setModules(Array.isArray(summary?.modules) ? summary.modules : [])
-        }
-      } catch {
-        if (!cancelled) {
-          setEntries([])
-          setModules([])
-          setErrorMessage("Failed to load tool registry metadata.")
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+  const loadRegistrySummary = useCallback(async (options: { clearOnError?: boolean } = {}) => {
+    const clearOnError = options.clearOnError !== false
+    setLoading(true)
+    setErrorMessage(null)
+    try {
+      const summary = await getToolRegistrySummary()
+      setEntries(Array.isArray(summary?.entries) ? summary.entries : [])
+      setModules(Array.isArray(summary?.modules) ? summary.modules : [])
+    } catch {
+      if (clearOnError) {
+        setEntries([])
+        setModules([])
       }
-    }
-    void load()
-    return () => {
-      cancelled = true
+      setErrorMessage("Failed to load tool registry metadata.")
+    } finally {
+      setLoading(false)
     }
   }, [])
 
+  useEffect(() => {
+    void loadRegistrySummary()
+  }, [loadRegistrySummary])
+
+  const handleRefreshTools = async () => {
+    setRefreshing(true)
+    setErrorMessage(null)
+    try {
+      const refreshResult = await refreshExternalServerDiscovery()
+      if (!refreshResult.ok) {
+        throw new Error(describeExternalServerDiscoveryRefreshFailure(refreshResult))
+      }
+      await loadRegistrySummary({ clearOnError: false })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(`Failed to refresh tool discovery: ${msg}`)
+    } finally {
+      setRefreshing(false)
+    }
+  }
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      <Typography.Text type="secondary">
-        Registry-backed tool metadata powers both the catalog view and the guided policy editor.
-      </Typography.Text>
+      <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
+        <Typography.Text type="secondary">
+          Registry-backed tool metadata powers both the catalog view and the guided policy editor.
+        </Typography.Text>
+        <Button onClick={handleRefreshTools} loading={refreshing}>
+          Refresh Tools
+        </Button>
+      </Space>
       {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
 
       {groupedModules.length > 0 ? (

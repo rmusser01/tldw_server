@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Alert, Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
 import { QuestionCircleOutlined } from "@ant-design/icons"
+import { useQueryClient } from "@tanstack/react-query"
 
 import {
   clearExternalServerSlotSecret,
@@ -11,6 +12,8 @@ import {
   getExternalServerAuthTemplate,
   importExternalServer,
   listExternalServers,
+  describeExternalServerDiscoveryRefreshFailure,
+  refreshExternalServerDiscovery,
   setExternalServerSecret,
   setExternalServerSlotSecret,
   type McpHubDrillTarget,
@@ -30,6 +33,12 @@ import {
 
 const DEFAULT_SLOT_SECRET_KIND = "bearer_token"
 const DEFAULT_SLOT_PRIVILEGE_CLASS = "read"
+const MCP_RUNTIME_QUERY_FAMILIES = [
+  ["mcp-tools"],
+  ["mcp-tool-catalogs"],
+  ["mcp-tool-modules"],
+  ["mcp-health"]
+] as const
 const AUTH_TEMPLATE_TARGET_BY_TRANSPORT: Record<string, "header" | "env"> = {
   websocket: "header",
   stdio: "env"
@@ -56,6 +65,7 @@ export const ExternalServersTab = ({
   drillTarget = null,
   onDrillHandled
 }: ExternalServersTabProps) => {
+  const queryClient = useQueryClient()
   const handledDrillRequestRef = useRef<number | null>(null)
   const [servers, setServers] = useState<McpHubExternalServer[]>([])
   const [serversLoaded, setServersLoaded] = useState(false)
@@ -75,6 +85,7 @@ export const ExternalServersTab = ({
   const [enabledValue, setEnabledValue] = useState(true)
   const [configText, setConfigText] = useState("{}")
   const [serverSaving, setServerSaving] = useState(false)
+  const [runtimeRefreshing, setRuntimeRefreshing] = useState(false)
   const [slotFormOpen, setSlotFormOpen] = useState(false)
   const [editingSlotName, setEditingSlotName] = useState<string | null>(null)
   const [slotNameValue, setSlotNameValue] = useState("")
@@ -152,6 +163,34 @@ export const ExternalServersTab = ({
     } finally {
       setLoading(false)
       setServersLoaded(true)
+    }
+  }
+
+  const refreshRuntimeDiscovery = async (
+    serverId?: string
+  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+    setRuntimeRefreshing(true)
+    try {
+      const refreshResult = serverId
+        ? await refreshExternalServerDiscovery(serverId)
+        : await refreshExternalServerDiscovery()
+      if (!refreshResult.ok) {
+        return {
+          ok: false,
+          message: describeExternalServerDiscoveryRefreshFailure(refreshResult)
+        }
+      }
+      await Promise.all(
+        MCP_RUNTIME_QUERY_FAMILIES.map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey })
+        )
+      )
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      return { ok: false, message: msg }
+    } finally {
+      setRuntimeRefreshing(false)
     }
   }
 
@@ -304,9 +343,14 @@ export const ExternalServersTab = ({
     setSuccessMessage(null)
     try {
       const imported = await importExternalServer(serverId)
+      const refreshResult = await refreshRuntimeDiscovery(imported.id)
       await loadServers()
       setActiveServerId(imported.id)
-      setSuccessMessage("Legacy server imported")
+      setSuccessMessage(
+        refreshResult.ok
+          ? "Legacy server imported and tools refreshed"
+          : `Legacy server imported, but discovery refresh failed. Retry runtime refresh. ${refreshResult.message}`
+      )
     } catch {
       setErrorMessage("Failed to import legacy external server.")
     } finally {
@@ -373,17 +417,26 @@ export const ExternalServersTab = ({
         owner_scope_type: ownerScopeType,
         enabled: enabledValue
       }
+      let refreshServerId: string | undefined
       if (editingServerId) {
         await updateExternalServer(editingServerId, payload)
+        refreshServerId = enabledValue ? editingServerId : undefined
       } else {
-        await createExternalServer({
+        const created = await createExternalServer({
           server_id: serverIdValue.trim(),
           ...payload
         })
+        refreshServerId = enabledValue ? created.id : undefined
       }
       resetServerForm()
+      const refreshResult = await refreshRuntimeDiscovery(refreshServerId)
       await loadServers()
-      setSuccessMessage(editingServerId ? "Server updated" : "Server created")
+      const action = editingServerId ? "updated" : "created"
+      setSuccessMessage(
+        refreshResult.ok
+          ? `Server ${action} and tools refreshed`
+          : `Server ${action}, but discovery refresh failed. Retry runtime refresh. ${refreshResult.message}`
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(editingServerId ? `Failed to update external server: ${msg}` : `Failed to create external server: ${msg}`)
@@ -404,8 +457,13 @@ export const ExternalServersTab = ({
         setSuccessMessage(null)
         try {
           await deleteExternalServer(server.id)
+          const refreshResult = await refreshRuntimeDiscovery()
           await loadServers()
-          setSuccessMessage("Server deleted")
+          setSuccessMessage(
+            refreshResult.ok
+              ? "Server deleted and tools refreshed"
+              : `Server deleted, but discovery refresh failed. Retry runtime refresh. ${refreshResult.message}`
+          )
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error"
           setErrorMessage(`Failed to delete external server: ${msg}`)
@@ -672,7 +730,7 @@ export const ExternalServersTab = ({
             </Checkbox>
 
             <Space>
-              <Button type="primary" onClick={handleSaveServer} loading={serverSaving}>
+              <Button type="primary" onClick={handleSaveServer} loading={serverSaving || runtimeRefreshing}>
                 {editingServerId ? "Update Server" : "Save Server"}
               </Button>
               <Button onClick={resetServerForm}>Cancel</Button>
@@ -1078,7 +1136,7 @@ export const ExternalServersTab = ({
                 <Button
                   size="small"
                   onClick={() => void handleImport(server.id)}
-                  loading={importingServerId === server.id}
+                  loading={importingServerId === server.id || (runtimeRefreshing && importingServerId === server.id)}
                 >
                   Import to MCP Hub
                 </Button>
