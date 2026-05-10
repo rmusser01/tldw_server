@@ -296,7 +296,7 @@ git commit -m "Add Backlog.md Python clone inventory scaffold"
 - Modify: `tools/backlog-py/README.md`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing manifest tests**
+- [x] **Step 1: Write failing manifest tests**
 
 Create `tools/backlog-py/tests/test_oracle_manifest.py`:
 
@@ -323,7 +323,7 @@ def test_manifest_marks_agent_critical_fixtures():
     assert "mcp:workflow-overview" in names
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -334,7 +334,7 @@ python -m pytest tools/backlog-py/tests/test_oracle_manifest.py -v
 
 Expected: FAIL with missing `backlog_py.oracle`.
 
-- [ ] **Step 3: Add pinned manifest fixture**
+- [x] **Step 3: Add pinned manifest fixture**
 
 Create `tools/backlog-py/tests/fixtures/oracle/manifest.yml`:
 
@@ -369,7 +369,7 @@ fixtures:
     classification: "browser-deferred"
 ```
 
-- [ ] **Step 4: Implement manifest loader**
+- [x] **Step 4: Implement manifest loader**
 
 Create `tools/backlog-py/src/backlog_py/oracle/manifest.py`:
 
@@ -424,7 +424,7 @@ def load_oracle_manifest(path: Path) -> OracleManifest:
     )
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -435,7 +435,7 @@ python -m pytest tools/backlog-py/tests/test_oracle_manifest.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
