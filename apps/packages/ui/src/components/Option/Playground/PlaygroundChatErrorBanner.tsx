@@ -1,7 +1,7 @@
 import React from "react"
-import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 
-import { Alert } from "@/components/ui/primitives"
+import { RecoveryCallout } from "@/components/ui/state"
 import {
   decodeChatErrorPayload,
   TLDW_ERROR_BUBBLE_PREFIX,
@@ -150,29 +150,32 @@ type PlaygroundChatErrorBannerProps = {
 export const PlaygroundChatErrorBanner: React.FC<
   PlaygroundChatErrorBannerProps
 > = ({ error, diagnosticsLabel, dismissLabel, onDismiss }) => {
+  const navigate = useNavigate()
+
   if (!error) {
     return null
   }
 
   return (
-    <Alert
-      variant="error"
+    <RecoveryCallout
+      state="error"
       data-testid="playground-chat-error-banner"
       title={error.summary}
-      dismissible
-      dismissLabel={dismissLabel}
-      onDismiss={() => onDismiss(error.key)}
+      message={error.hint}
+      role="alert"
       className="mb-2"
-    >
-      <div className="flex flex-col gap-2 text-xs text-text-muted sm:flex-row sm:items-center sm:justify-between">
-        <p>{error.hint}</p>
-        <Link
-          to="/settings/health"
-          className="shrink-0 font-medium text-danger underline hover:text-danger"
-        >
-          {diagnosticsLabel}
-        </Link>
-      </div>
-    </Alert>
+      primaryAction={{
+        label: diagnosticsLabel,
+        ariaLabel: diagnosticsLabel,
+        onClick: () => navigate("/settings/health")
+      }}
+      secondaryActions={[
+        {
+          label: dismissLabel,
+          ariaLabel: dismissLabel,
+          onClick: () => onDismiss(error.key)
+        }
+      ]}
+    />
   )
 }
