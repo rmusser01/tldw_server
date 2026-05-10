@@ -244,8 +244,8 @@
       "catalogContent": "Browse all registered tools here. Each tool shows its capabilities and risk level.",
       "credentialsTitle": "Servers & Credentials",
       "credentialsContent": "Connect external MCP servers here. Each server provides additional tools for your AI assistant.",
-      "profilesTitle": "Permission Profiles",
-      "profilesContent": "Create permission profiles to control which tools each user or persona can access.",
+      "profilesTitle": "Access Workflow",
+      "profilesContent": "Use Access to create profiles and assign which tools each user or persona can reach.",
       "auditTitle": "Governance Audit",
       "auditContent": "Review policy findings and configuration issues across all your MCP Hub settings."
     }
