@@ -26,6 +26,7 @@ verified production deployment on a specific host.
 | [#1474](https://github.com/rmusser01/tldw_server/issues/1474) | Schedules, triggers, and background runs | Proves unattended runs are controlled, observable, and recoverable. |
 | [#1473](https://github.com/rmusser01/tldw_server/issues/1473) | Agent Tasks, Playground, and Registry UX | Proves the production UI supports setup, execution, review, and troubleshooting. |
 | [#1480](https://github.com/rmusser01/tldw_server/issues/1480) | PRD and operational docs refresh | Brings design, operator, and user-facing docs in sync with the verified implementation. |
+| [#1539](https://github.com/rmusser01/tldw_server/issues/1539) | Downstream-agent compatibility matrix | Defines live-agent support states, certification levels, evidence fields, and caveat taxonomy for future release claims. |
 
 Recommended order: seed #1472, then complete #1479, #1478, #1476, #1475,
 #1477, #1474, #1473, #1480, and finally close #1472.
@@ -34,7 +35,7 @@ Recommended order: seed #1472, then complete #1479, #1478, #1476, #1475,
 
 | Surface | Owner modules | Required evidence | Verification commands | Pass/fail gate | Runtime caveats |
 | --- | --- | --- | --- | --- | --- |
-| ACP REST, WebSocket, SSE, and session lifecycle | `tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py`, `tldw_Server_API/app/core/Agent_Client_Protocol/` | Session create, prompt, cancel, close, reconnect, streaming, and error paths are covered. | `source .venv/bin/activate`; `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol -q` | Pass when focused ACP pytest suite is green and failures distinguish user errors from server faults. | Stub-agent tests are sufficient for base protocol; live downstream agents should be verified before release notes claim support. |
+| ACP REST, WebSocket, SSE, and session lifecycle | `tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py`, `tldw_Server_API/app/core/Agent_Client_Protocol/`, `Docs/Development/ACP_Compatibility_Matrix.md` | Session create, prompt, cancel, close, reconnect, streaming, and error paths are covered; named downstream-agent support claims use the compatibility matrix support states and evidence fields. | `source .venv/bin/activate`; `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol -q` | Pass when focused ACP pytest suite is green and failures distinguish user errors from server faults. | Stub-agent tests are sufficient for base protocol; live downstream agents should be verified through `ACP_Compatibility_Matrix.md` before release notes claim support. |
 | Agent orchestration tasks | `tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py`, `tldw_Server_API/app/core/Agent_Orchestration/`, orchestration DB helpers | Tasks persist status, attempts, outputs, completion reason, and retry/timeout state. | `source .venv/bin/activate`; `python -m pytest tldw_Server_API/tests/Agent_Orchestration -q` | Pass when task state transitions are durable and completion signals satisfy #1479. | Background-worker tests may need runtime feature flags if a local worker pool is not enabled by default. |
 | Structured completion and failure semantics | ACP schemas, orchestration service, run handlers, session store | Every run records terminal state, reason, timestamps, and retriable/non-retriable classification. | Focus the new/changed tests from #1479 plus `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_run_handler.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_service.py -q` | Pass when UI and API can consume the same terminal state without text parsing. | This is a blocker for reviewer loops, schedules, and production run history. |
 | Reviewer-agent loop and triage history | Orchestration service, task APIs, run/history DB tables | Review requests, reviewer responses, decisions, follow-up tasks, and overrides are durable. | Add #1478 focused pytest coverage, then include it in the orchestration suite. | Pass when a reviewer decision can be traced from task request to final run history. | Do not count manual GitHub comments as triage history unless they are linked from durable ACP state. |
@@ -136,7 +137,8 @@ python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_acp_<task>.jso
 - Live downstream agents need their own ACP stdio-compatible entrypoints, API
   keys, and workspace permissions. Stub-agent protocol tests are not a
   substitute for live-agent verification before release notes claim downstream
-  agent support.
+  agent support. Use `ACP_Compatibility_Matrix.md` for support states,
+  verification levels, caveat taxonomy, and evidence records.
 - Until #1504 records a real downstream-agent create/prompt/cancel run, release
   notes must describe ACP downstream-agent support as protocol/runner
   validation only. Binary presence for tools such as Claude Code or Codex is not

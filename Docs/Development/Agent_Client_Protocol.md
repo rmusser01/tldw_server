@@ -12,6 +12,8 @@ for the ACP module.
 - Operator and contributor guide: this document.
 - Release readiness and evidence checklist:
   [ACP_Production_Readiness.md](ACP_Production_Readiness.md)
+- Downstream-agent compatibility matrix and certification contract:
+  [ACP_Compatibility_Matrix.md](ACP_Compatibility_Matrix.md)
 - Governance, RBAC, approval, and audit details:
   [ACP_Governance_Audit.md](ACP_Governance_Audit.md)
 
@@ -21,6 +23,10 @@ for the ACP module.
 - **WebSocket endpoint** for real-time session streaming at `/api/v1/acp/sessions/{session_id}/stream`.
 - **Permission UI flow** - Permission requests are sent to connected WebSocket clients for approval.
 - ACP runner exists in `tools/tldw-agent` and proxies to a downstream ACP agent.
+- Downstream-agent support claims are governed by
+  [ACP_Compatibility_Matrix.md](ACP_Compatibility_Matrix.md). Stub-agent
+  protocol coverage is not the same as live Codex, Claude Code, OpenCode, or
+  custom-agent certification.
 - Session lifecycle is supported: `session/new`, `session/prompt`, `session/cancel`,
   and `_tldw/session/close`.
 - Downstream capabilities are reflected in `initialize`.
@@ -542,6 +548,21 @@ SANDBOX_DOCKER_BIND_WORKSPACE=1
 
 The runner launches the downstream ACP agent based on:
 `~/.tldw-agent/config.yaml` (or the HOME specified in runner_env)
+
+### Compatibility Status
+
+Configuration examples in this section document candidate downstream-agent
+profiles. They are not support claims by themselves. Before release notes,
+Agent Registry, or setup surfaces describe a named agent as supported, update
+`ACP_Compatibility_Matrix.md` with the agent version, host/runtime profile,
+support state, verification level, capability-check results, evidence command,
+caveats, and follow-up issue.
+
+Use `documented_unverified` for agents that have a documented command profile
+but no current live evidence. Use `unsupported` only when the agent is proven not
+to satisfy the ACP stdio/protocol contract; missing binaries, credentials,
+workspace allowlists, or host runtimes are setup caveats rather than protocol
+incompatibilities.
 
 ### Complete Configuration Example
 
