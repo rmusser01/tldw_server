@@ -166,6 +166,42 @@ async def test_managed_external_registry_service_reports_partial_invalid_rows() 
 
 
 @pytest.mark.asyncio
+async def test_managed_external_registry_service_reports_partial_invalid_rows_with_missing_ids() -> None:
+    from tldw_Server_API.app.services.mcp_hub_external_registry_service import (
+        McpHubExternalRegistryService,
+    )
+
+    repo = _RuntimeRowsRepo(
+        [
+            {
+                "id": "docs",
+                "name": "Docs",
+                "transport": "websocket",
+                "config": {"websocket": {"url": "wss://docs.example/ws"}},
+                "enabled": True,
+                "server_source": "managed",
+            },
+            {
+                "id": " ",
+                "name": "Broken",
+                "transport": "websocket",
+                "config": {},
+                "enabled": True,
+                "server_source": "managed",
+            },
+        ]
+    )
+    service = McpHubExternalRegistryService(repo=repo)  # type: ignore[arg-type]
+
+    with pytest.raises(ExternalServerRegistryPartialLoadError) as exc_info:
+        await service.list_runtime_servers()
+
+    exc = exc_info.value
+    assert [server.id for server in exc.servers] == ["docs"]
+    assert exc.errors == {"row_2": "external_server_config_invalid"}
+
+
+@pytest.mark.asyncio
 async def test_managed_external_registry_service_keeps_runtime_config_auth_neutral_and_skips_legacy(
     tmp_path,
     monkeypatch,

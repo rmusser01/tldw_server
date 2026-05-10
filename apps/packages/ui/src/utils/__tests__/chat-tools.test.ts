@@ -297,4 +297,32 @@ describe("chat tool request resolver", () => {
       }
     ])
   })
+
+  it("uses caller count overrides only for returned metadata", () => {
+    const resolved = resolveChatToolRequest({
+      tools: [executableTool],
+      toolChoice: "auto",
+      modelSupportsTools: true,
+      hasMcp: true,
+      mcpHealthState: "healthy",
+      counts: {
+        discovered: 0,
+        executable: 0,
+        disabled: 0,
+        colliding: 0,
+        chatEnabled: 0
+      }
+    })
+
+    expect(resolved.omittedReason).toBeUndefined()
+    expect(resolved.toolChoice).toBe("auto")
+    expect(resolved.tools).toHaveLength(1)
+    expect(resolved.counts).toEqual({
+      discovered: 0,
+      executable: 0,
+      disabled: 0,
+      colliding: 0,
+      chatEnabled: 0
+    })
+  })
 })

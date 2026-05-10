@@ -514,10 +514,15 @@ class BaseModule(ABC):
             name = str(tool_def.get("name") or "").lower()
             meta = tool_def.get("metadata") or {}
             category = (meta.get("category") or "").lower()
+            write_flags: list[bool] = []
             for flag_name in ("write_capable", "is_write", "mutates_state"):
                 flag_value = meta.get(flag_name)
                 if isinstance(flag_value, bool):
-                    return flag_value
+                    write_flags.append(flag_value)
+            if any(write_flags):
+                return True
+            if write_flags:
+                return False
             if category in {"ingestion", "management", "write", "mutation", "admin"}:
                 return True
             import re as _re

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +27,48 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
 }))
 
 import { ToolCatalogsTab } from "../ToolCatalogsTab"
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
+const registrySummary = (toolName: string, moduleName: string) => ({
+  entries: [
+    {
+      tool_name: toolName,
+      display_name: toolName,
+      module: moduleName,
+      category: "search",
+      risk_class: "low",
+      capabilities: ["network.read"],
+      mutates_state: false,
+      uses_filesystem: false,
+      uses_processes: false,
+      uses_network: true,
+      uses_credentials: false,
+      supports_arguments_preview: true,
+      path_boundable: false,
+      path_argument_hints: [],
+      metadata_source: "explicit",
+      metadata_warnings: []
+    }
+  ],
+  modules: [
+    {
+      module: moduleName,
+      display_name: moduleName,
+      tool_count: 1,
+      risk_summary: { low: 1, medium: 0, high: 0, unclassified: 0 },
+      metadata_warnings: []
+    }
+  ]
+})
 
 describe("ToolCatalogsTab", () => {
   beforeEach(() => {
@@ -169,5 +211,34 @@ describe("ToolCatalogsTab", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
     expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
+  })
+
+  it("ignores stale registry loads that resolve after a newer refresh", async () => {
+    const user = userEvent.setup()
+    const stale = deferred<ReturnType<typeof registrySummary>>()
+    const fresh = deferred<ReturnType<typeof registrySummary>>()
+    mocks.getToolRegistrySummary
+      .mockReturnValueOnce(stale.promise)
+      .mockReturnValueOnce(fresh.promise)
+
+    render(<ToolCatalogsTab />)
+
+    await user.click(screen.getByRole("button", { name: /refresh tools/i }))
+    await waitFor(() => {
+      expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
+    })
+
+    await act(async () => {
+      fresh.resolve(registrySummary("web.search", "External Web"))
+    })
+    expect(await screen.findByText("web.search")).toBeTruthy()
+
+    await act(async () => {
+      stale.resolve(registrySummary("stale.search", "Stale Module"))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("web.search")).toBeTruthy()
+    })
+    expect(screen.queryByText("stale.search")).toBeNull()
   })
 })

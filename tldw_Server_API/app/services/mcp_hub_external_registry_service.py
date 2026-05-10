@@ -27,7 +27,7 @@ class McpHubExternalRegistryService:
         rows = await self.repo.list_external_servers()
         runtime_servers: list[ExternalMCPServerConfig] = []
         errors: dict[str, str] = {}
-        for row in rows:
+        for index, row in enumerate(rows, start=1):
             try:
                 payload = await self._build_runtime_payload(row)
                 if payload is None:
@@ -36,8 +36,8 @@ class McpHubExternalRegistryService:
                 runtime_servers.extend(registry.servers)
             except Exception as exc:
                 server_id = str(row.get("id") or "").strip()
-                if server_id:
-                    errors[server_id] = _EXTERNAL_SERVER_CONFIG_INVALID
+                error_key = server_id or f"row_{index}"
+                errors[error_key] = _EXTERNAL_SERVER_CONFIG_INVALID
                 logger.warning(
                     "Skipping managed external server '{}' during runtime registry load: {}",
                     row.get("id"),

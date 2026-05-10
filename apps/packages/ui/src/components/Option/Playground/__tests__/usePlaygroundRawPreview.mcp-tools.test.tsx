@@ -91,6 +91,9 @@ describe("usePlaygroundRawPreview MCP tools", () => {
       }
     })
     expect(body.tool_choice).toBe("auto")
+    expect(body.extra_headers).toEqual({
+      "X-TLDW-Loop-Compat": "1"
+    })
     expect(body.tools).toEqual([
       {
         type: "function",
@@ -104,6 +107,36 @@ describe("usePlaygroundRawPreview MCP tools", () => {
         }
       }
     ])
+  })
+
+  it("preserves custom extra headers when adding loop compatibility for tool previews", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          currentChatModelSettings: {
+            apiProvider: "openai",
+            extraHeaders: JSON.stringify({ "X-Custom": "yes" })
+          },
+          mcpTools: [
+            {
+              name: "notes.search",
+              description: "Search notes",
+              canExecute: true
+            }
+          ]
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    const body = result.current.rawRequestSnapshot?.body as any
+    expect(body.extra_headers).toEqual({
+      "X-Custom": "yes",
+      "X-TLDW-Loop-Compat": "1"
+    })
   })
 
   it("omits tool fields when all candidate tools collide", async () => {

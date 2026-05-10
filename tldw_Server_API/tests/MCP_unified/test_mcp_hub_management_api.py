@@ -511,27 +511,46 @@ class _FakeExternalFederationModule:
 
 
 class _FakeModuleRegistry:
-    def __init__(self, module: Any | None) -> None:
+    def __init__(
+        self,
+        module: Any | None,
+        *,
+        raise_lookup: bool = False,
+        refresh_ok: bool = True,
+    ) -> None:
         self.module = module
+        self.raise_lookup = raise_lookup
+        self.refresh_ok = refresh_ok
         self.refresh_calls: list[str] = []
 
     async def get_module(self, module_id: str) -> Any | None:
+        if self.raise_lookup:
+            raise RuntimeError("registry unavailable")
         if module_id == "external_federation":
             return self.module
         return None
 
     async def get_all_modules(self) -> dict[str, Any]:
+        if self.raise_lookup:
+            raise RuntimeError("registry unavailable")
         return {"fallback": self.module} if self.module is not None else {}
 
-    async def refresh_module_registries(self, module_id: str) -> None:
+    async def refresh_module_registries(self, module_id: str) -> bool:
         self.refresh_calls.append(module_id)
+        return self.refresh_ok
 
 
 class _FakeMcpServer:
-    def __init__(self, module: Any | None, *, initialized: bool = True) -> None:
+    def __init__(
+        self,
+        module: Any | None,
+        *,
+        initialized: bool = True,
+        registry: _FakeModuleRegistry | None = None,
+    ) -> None:
         self.initialized = initialized
         self.initialize_calls = 0
-        self.module_registry = _FakeModuleRegistry(module)
+        self.module_registry = registry or _FakeModuleRegistry(module)
 
     async def initialize(self) -> None:
         self.initialize_calls += 1
@@ -649,6 +668,36 @@ async def test_refresh_external_server_discovery_accepts_query_server_id(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_refresh_external_server_discovery_normalizes_body_server_id_before_conflict_check(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery?server_id=docs",
+            json={"server_id": " docs "},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["server_id"] == "docs"
+    assert manager.calls == ["docs"]
+
+
+@pytest.mark.asyncio
 async def test_refresh_external_server_discovery_rejects_unknown_body_fields(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -751,6 +800,70 @@ async def test_refresh_external_server_discovery_returns_503_when_runtime_module
     payload = resp.json()
     assert payload["detail"]["requires_restart"] is True
     assert "external federation" in payload["detail"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_returns_503_when_module_registry_lookup_fails(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    registry = _FakeModuleRegistry(module, raise_lookup=True)
+    server = _FakeMcpServer(module=module, registry=registry)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery")
+
+    assert resp.status_code == 503
+    payload = resp.json()
+    assert payload["detail"]["requires_restart"] is True
+    assert "external federation" in payload["detail"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_surfaces_module_registry_refresh_failure(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    registry = _FakeModuleRegistry(module, refresh_ok=False)
+    server = _FakeMcpServer(module=module, registry=registry)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "docs"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["errors"] == {"module_registry": "module_registry_refresh_failed"}
+    assert registry.refresh_calls == ["external_federation"]
 
 
 @pytest.mark.asyncio

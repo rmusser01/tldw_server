@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 import time
@@ -123,6 +124,7 @@ class ExternalServerManager:
         self._discovery_errors: dict[str, str] = {}
         self._telemetry: dict[str, ExternalServerTelemetry] = {}
         self._initialized = False
+        self._runtime_lock = asyncio.Lock()
         self._credential_broker: Callable[..., Awaitable[BrokeredExternalCredential | None] | BrokeredExternalCredential | None] | None = None
 
     def with_server_loader(
@@ -176,51 +178,62 @@ class ExternalServerManager:
     async def shutdown(self) -> None:
         """Close all external transport adapters."""
 
-        for server_id, adapter in list(self._adapters.items()):
-            try:
-                await adapter.close()
-            except Exception as exc:
-                logger.warning(
-                    "External MCP adapter close failed for {}; error_type={}",
-                    server_id,
-                    type(exc).__name__,
-                )
-        self._adapters = {}
-        self._virtual_tools = {}
-        self._discovery_errors = {}
-        self._telemetry = {}
-        self._initialized = False
+        async with self._runtime_lock:
+            for server_id, adapter in list(self._adapters.items()):
+                try:
+                    await adapter.close()
+                except Exception as exc:
+                    logger.warning(
+                        "External MCP adapter close failed for {}; error_type={}",
+                        server_id,
+                        type(exc).__name__,
+                    )
+            self._adapters = {}
+            self._virtual_tools = {}
+            self._discovery_errors = {}
+            self._telemetry = {}
+            self._initialized = False
 
     async def refresh_discovery(self, server_id: Optional[str] = None) -> dict[str, Any]:
         """Refresh virtual tool cache for one server or all configured servers."""
 
-        target_ids = [server_id] if server_id else sorted(self._adapters.keys())
-        refreshed = 0
-        errors: dict[str, str] = {}
+        async with self._runtime_lock:
+            target_ids = [server_id] if server_id else sorted(self._adapters.keys())
+            refreshed = 0
+            errors: dict[str, str] = {}
 
-        for sid in target_ids:
-            if sid not in self._adapters:
-                errors[sid] = "unknown_server"
-                continue
-            try:
-                await self._refresh_server_tools(sid)
-                refreshed += 1
-                self._discovery_errors.pop(sid, None)
-            except Exception:
-                errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
-                self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
-                self._clear_server_tools(sid)
+            for sid in target_ids:
+                if sid not in self._adapters:
+                    errors[sid] = "unknown_server"
+                    continue
+                try:
+                    await self._refresh_server_tools(sid)
+                    refreshed += 1
+                    self._discovery_errors.pop(sid, None)
+                except Exception as exc:
+                    errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                    self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                    self._clear_server_tools(sid)
+                    logger.warning(
+                        "External MCP server discovery refresh failed for server '{}'",
+                        sid,
+                        error_type=type(exc).__name__,
+                    )
 
-        return {
-            "refreshed_servers": refreshed,
-            "total_servers": len(target_ids),
-            "virtual_tools": len(self._virtual_tools),
-            "errors": errors,
-        }
+            return {
+                "refreshed_servers": refreshed,
+                "total_servers": len(target_ids),
+                "virtual_tools": len(self._virtual_tools),
+                "errors": errors,
+            }
 
     async def reconcile_servers(self, server_id: Optional[str] = None) -> dict[str, Any]:
         """Reconcile runtime adapters with current external-server configuration."""
 
+        async with self._runtime_lock:
+            return await self._reconcile_servers_unlocked(server_id=server_id)
+
+    async def _reconcile_servers_unlocked(self, server_id: Optional[str] = None) -> dict[str, Any]:
         servers, load_errors = await self._load_configured_server_snapshot()
         configured_by_id = {server.id: server for server in servers}
         enabled_by_id = {
@@ -284,7 +297,8 @@ class ExternalServerManager:
                     if replacement_adapter is not None:
                         await self._close_adapter(sid, replacement_adapter)
                     logger.warning(
-                        "External MCP adapter replacement failed during reconcile",
+                        "External MCP adapter replacement failed during reconcile for server '{}'",
+                        sid,
                         error_type=type(exc).__name__,
                     )
                     continue
@@ -307,10 +321,15 @@ class ExternalServerManager:
                 await self._refresh_server_tools(sid)
                 refreshed += 1
                 self._discovery_errors.pop(sid, None)
-            except Exception:
+            except Exception as exc:
                 errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
                 self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
                 self._clear_server_tools(sid)
+                logger.warning(
+                    "External MCP server refresh failed during reconcile for server '{}'",
+                    sid,
+                    error_type=type(exc).__name__,
+                )
 
         return {
             "server_id": server_id,
@@ -373,6 +392,19 @@ class ExternalServerManager:
     ) -> dict[str, Any]:
         """Route a namespaced virtual tool execution to its external adapter."""
 
+        async with self._runtime_lock:
+            return await self._execute_virtual_tool_unlocked(
+                virtual_tool_name=virtual_tool_name,
+                arguments=arguments,
+                context=context,
+            )
+
+    async def _execute_virtual_tool_unlocked(
+        self,
+        virtual_tool_name: str,
+        arguments: dict[str, Any],
+        context: Optional[Any] = None,
+    ) -> dict[str, Any]:
         virtual_tool = self._virtual_tools.get(virtual_tool_name)
         if virtual_tool is None:
             raise ValueError(f"Unknown external virtual tool '{virtual_tool_name}'")

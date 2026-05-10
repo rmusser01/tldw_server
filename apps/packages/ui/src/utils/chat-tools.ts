@@ -252,12 +252,13 @@ export const resolveChatToolRequest = ({
   counts?: ChatToolFilterCounts
 }): ResolvedChatToolRequest => {
   const state = buildChatToolFilterState({ tools, disabledToolNames })
-  const counts = countsOverride ?? state.counts
+  const derivedCounts = state.counts
+  const returnedCounts = countsOverride ?? derivedCounts
   const omit = (
     omittedReason: ChatToolOmissionReason
   ): ResolvedChatToolRequest => ({
     omittedReason,
-    counts
+    counts: returnedCounts
   })
 
   if (toolChoice === "none") return omit("tool_choice_none")
@@ -266,10 +267,10 @@ export const resolveChatToolRequest = ({
   if (mcpHealthState === "unavailable") return omit("mcp_unavailable")
   if (mcpHealthState === "unhealthy") return omit("mcp_unhealthy")
 
-  if (state.chatTools.length === 0 || counts.chatEnabled === 0) {
+  if (state.chatTools.length === 0 || derivedCounts.chatEnabled === 0) {
     const rawToolCount = Array.isArray(tools) ? tools.length : 0
     return omit(
-      counts.discovered === 0 && rawToolCount > 0
+      derivedCounts.discovered === 0 && rawToolCount > 0
         ? "no_normalized_request_tools"
         : "no_enabled_executable_tools"
     )
@@ -284,6 +285,6 @@ export const resolveChatToolRequest = ({
   return {
     tools: requestTools,
     toolChoice: effectiveToolChoice,
-    counts
+    counts: returnedCounts
   }
 }

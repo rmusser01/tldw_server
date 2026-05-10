@@ -97,7 +97,7 @@ export const pageAssistModel = async ({
     toolChoice: resolvedToolChoice,
     modelSupportsTools,
     mcpHealthState,
-    hasMcp: true,
+    hasMcp: mcpHealthState !== "unavailable",
     counts: !tools && hasStoredFilterCounts ? toolCounts : undefined
   })
   const resolvedConversationId =

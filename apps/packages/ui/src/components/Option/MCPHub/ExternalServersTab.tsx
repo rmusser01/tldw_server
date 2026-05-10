@@ -56,6 +56,11 @@ type ExternalServersTabProps = {
   onDrillHandled?: (requestId: number) => void
 }
 
+type RuntimeRefreshResult = { ok: true } | { ok: false; message: string }
+
+const getRuntimeRefreshFailureMessage = (result: RuntimeRefreshResult) =>
+  "message" in result ? result.message : ""
+
 export const ExternalServersTab = ({
   drillTarget = null,
   onDrillHandled
@@ -80,7 +85,8 @@ export const ExternalServersTab = ({
   const [enabledValue, setEnabledValue] = useState(true)
   const [configText, setConfigText] = useState("{}")
   const [serverSaving, setServerSaving] = useState(false)
-  const [runtimeRefreshing, setRuntimeRefreshing] = useState(false)
+  const [runtimeRefreshCount, setRuntimeRefreshCount] = useState(0)
+  const runtimeRefreshing = runtimeRefreshCount > 0
   const [slotFormOpen, setSlotFormOpen] = useState(false)
   const [editingSlotName, setEditingSlotName] = useState<string | null>(null)
   const [slotNameValue, setSlotNameValue] = useState("")
@@ -163,8 +169,8 @@ export const ExternalServersTab = ({
 
   const refreshRuntimeDiscovery = async (
     serverId?: string
-  ): Promise<{ ok: true } | { ok: false; message: string }> => {
-    setRuntimeRefreshing(true)
+  ): Promise<RuntimeRefreshResult> => {
+    setRuntimeRefreshCount((count) => count + 1)
     try {
       const refreshResult = serverId
         ? await refreshExternalServerDiscovery(serverId)
@@ -181,7 +187,7 @@ export const ExternalServersTab = ({
       const msg = err instanceof Error ? err.message : "Unknown error"
       return { ok: false, message: msg }
     } finally {
-      setRuntimeRefreshing(false)
+      setRuntimeRefreshCount((count) => Math.max(0, count - 1))
     }
   }
 
@@ -337,11 +343,13 @@ export const ExternalServersTab = ({
       const refreshResult = await refreshRuntimeDiscovery(imported.id)
       await loadServers()
       setActiveServerId(imported.id)
-      setSuccessMessage(
-        refreshResult.ok
-          ? "Legacy server imported and tools refreshed"
-          : `Legacy server imported, but discovery refresh failed. Retry runtime refresh. ${refreshResult.message}`
-      )
+      if (refreshResult.ok) {
+        setSuccessMessage("Legacy server imported and tools refreshed")
+      } else {
+        setSuccessMessage(
+          `Legacy server imported, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+        )
+      }
     } catch {
       setErrorMessage("Failed to import legacy external server.")
     } finally {
@@ -423,11 +431,13 @@ export const ExternalServersTab = ({
       const refreshResult = await refreshRuntimeDiscovery(refreshServerId)
       await loadServers()
       const action = editingServerId ? "updated" : "created"
-      setSuccessMessage(
-        refreshResult.ok
-          ? `Server ${action} and tools refreshed`
-          : `Server ${action}, but discovery refresh failed. Retry runtime refresh. ${refreshResult.message}`
-      )
+      if (refreshResult.ok) {
+        setSuccessMessage(`Server ${action} and tools refreshed`)
+      } else {
+        setSuccessMessage(
+          `Server ${action}, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+        )
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(editingServerId ? `Failed to update external server: ${msg}` : `Failed to create external server: ${msg}`)
@@ -450,11 +460,13 @@ export const ExternalServersTab = ({
           await deleteExternalServer(server.id)
           const refreshResult = await refreshRuntimeDiscovery()
           await loadServers()
-          setSuccessMessage(
-            refreshResult.ok
-              ? "Server deleted and tools refreshed"
-              : `Server deleted, but discovery refresh failed. Retry runtime refresh. ${refreshResult.message}`
-          )
+          if (refreshResult.ok) {
+            setSuccessMessage("Server deleted and tools refreshed")
+          } else {
+            setSuccessMessage(
+              `Server deleted, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+            )
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error"
           setErrorMessage(`Failed to delete external server: ${msg}`)
@@ -1127,7 +1139,7 @@ export const ExternalServersTab = ({
                 <Button
                   size="small"
                   onClick={() => void handleImport(server.id)}
-                  loading={importingServerId === server.id || (runtimeRefreshing && importingServerId === server.id)}
+                  loading={importingServerId === server.id}
                 >
                   Import to MCP Hub
                 </Button>

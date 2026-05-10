@@ -319,14 +319,18 @@ async def _resolve_external_federation_runtime() -> tuple[Any, Any, str]:
     if registry is None:
         raise _runtime_unavailable("MCP module registry is unavailable")
 
-    module = await registry.get_module("external_federation")
-    if module is not None:
-        return module, registry, "external_federation"
+    try:
+        module = await registry.get_module("external_federation")
+        if module is not None:
+            return module, registry, "external_federation"
 
-    modules = await registry.get_all_modules()
-    for module_id, candidate in modules.items():
-        if candidate.__class__.__name__ == "ExternalFederationModule":
-            return candidate, registry, str(module_id)
+        modules = await registry.get_all_modules()
+        for module_id, candidate in modules.items():
+            if candidate.__class__.__name__ == "ExternalFederationModule":
+                return candidate, registry, str(module_id)
+    except Exception as exc:
+        logger.warning("MCP external federation module lookup failed: {}", type(exc).__name__)
+        raise _runtime_unavailable("External federation module is unavailable") from exc
 
     raise _runtime_unavailable("External federation module is unavailable")
 
@@ -354,13 +358,18 @@ async def _refresh_external_server_discovery_runtime(
             },
         ) from exc
 
+    errors = dict(result.get("errors") or {})
     if hasattr(module, "invalidate_capability_caches"):
         module.invalidate_capability_caches()
     refresh_registries = getattr(registry, "refresh_module_registries", None)
     if callable(refresh_registries):
-        await refresh_registries(module_id)
-
-    errors = dict(result.get("errors") or {})
+        try:
+            registry_refreshed = await refresh_registries(module_id)
+        except Exception as exc:
+            logger.warning("MCP external federation registry refresh failed: {}", type(exc).__name__)
+            registry_refreshed = False
+        if registry_refreshed is False:
+            errors["module_registry"] = "module_registry_refresh_failed"
     return ExternalServerDiscoveryRefreshResponse(
         ok=not errors,
         server_id=result.get("server_id") or server_id,
@@ -3592,7 +3601,7 @@ async def refresh_external_server_discovery(
 ) -> ExternalServerDiscoveryRefreshResponse:
     """Reconcile live MCP external federation discovery with managed storage."""
     _require_mutation_permission(principal)
-    body_server_id = payload.server_id if payload is not None else None
+    body_server_id = _normalize_refresh_server_id(payload.server_id if payload is not None else None)
     query_server_id = _normalize_refresh_server_id(server_id)
     if body_server_id is not None and query_server_id is not None and body_server_id != query_server_id:
         raise HTTPException(

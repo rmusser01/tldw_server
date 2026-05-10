@@ -241,6 +241,13 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         mcpHealthState,
         hasMcp
       })
+      const parsedExtraHeaders = parseJsonObject(currentChatModelSettings.extraHeaders)
+      const previewExtraHeaders = {
+        ...(parsedExtraHeaders ?? {})
+      }
+      if (toolRequest.tools) {
+        previewExtraHeaders["X-TLDW-Loop-Compat"] = "1"
+      }
       const request = omitUndefinedFields({
         messages: toPreviewHistoryMessages(normalizedModel, draftMessage, draftImage),
         model: normalizedModel,
@@ -271,7 +278,10 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         slash_command_injection_mode:
           currentChatModelSettings.slashCommandInjectionMode,
         api_provider: resolvedProvider || undefined,
-        extra_headers: parseJsonObject(currentChatModelSettings.extraHeaders),
+        extra_headers:
+          Object.keys(previewExtraHeaders).length > 0
+            ? previewExtraHeaders
+            : undefined,
         extra_body: parseJsonObject(currentChatModelSettings.extraBody),
         thinking_budget_tokens:
           currentChatModelSettings.llamaThinkingBudgetTokens,

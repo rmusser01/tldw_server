@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { pageAssistModel } from "../index"
-import { tldwModels } from "@/services/tldw"
+import { tldwModels, type ModelInfo } from "@/services/tldw"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption } from "@/store/option"
@@ -33,9 +33,17 @@ vi.mock("@/utils/resolve-api-provider", () => ({
 const buildResolvedTools = (tools: Record<string, unknown>[]) =>
   buildChatToolFilterState({ tools }).chatTools
 
+const modelInfo = (capabilities: string[] = ["tools"]): ModelInfo => ({
+  id: "tool-model",
+  name: "Tool Model",
+  provider: "openai",
+  type: "chat",
+  capabilities
+})
+
 describe("pageAssistModel MCP tools", () => {
   beforeEach(() => {
-    vi.mocked(tldwModels.getModel).mockResolvedValue({ capabilities: ["tools"] })
+    vi.mocked(tldwModels.getModel).mockResolvedValue(modelInfo(["tools"]))
     useStoreChatModelSettings.getState().reset()
     useStoreMessageOption.setState({
       toolChoice: "auto",
@@ -135,7 +143,7 @@ describe("pageAssistModel MCP tools", () => {
   })
 
   it("omits tools and loop compatibility when the selected model does not support tools", async () => {
-    vi.mocked(tldwModels.getModel).mockResolvedValueOnce({ capabilities: [] })
+    vi.mocked(tldwModels.getModel).mockResolvedValueOnce(modelInfo([]))
     useMcpToolsStore.setState({
       chatTools: buildResolvedTools([
         {
@@ -174,6 +182,26 @@ describe("pageAssistModel MCP tools", () => {
     expect(chat.tools).toBeUndefined()
     expect(chat.extraHeaders).toBeUndefined()
     expect(chat.chatDebugMetadata?.toolOmissionReason).toBe("mcp_unhealthy")
+  })
+
+  it("reports absent MCP when the MCP capability is unavailable", async () => {
+    useMcpToolsStore.setState({
+      healthState: "unavailable",
+      chatTools: buildResolvedTools([
+        {
+          name: "notes.search",
+          description: "Search notes",
+          canExecute: true
+        }
+      ])
+    })
+
+    const chat = await pageAssistModel({ model: "tool-model" })
+
+    expect(chat.toolChoice).toBeUndefined()
+    expect(chat.tools).toBeUndefined()
+    expect(chat.extraHeaders).toBeUndefined()
+    expect(chat.chatDebugMetadata?.toolOmissionReason).toBe("mcp_absent")
   })
 
   it("omits tools and loop compatibility when tool choice is none", async () => {

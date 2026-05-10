@@ -211,35 +211,54 @@ class ModuleRegistry:
             registration.error_message = str(e)
             raise
 
-    async def _update_registries(self, module_id: str, module: BaseModule):
-        """Update tool/resource/prompt registries"""
+    async def _build_registry_mappings(
+        self,
+        module_id: str,
+        module: BaseModule,
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+        """Build tool/resource/prompt mappings for a module without mutating cache."""
+        tool_registry: dict[str, str] = {}
+        resource_registry: dict[str, str] = {}
+        prompt_registry: dict[str, str] = {}
+
+        tools = await module.get_tools()
+        for tool in tools:
+            tool_name = tool.get("name")
+            if tool_name:
+                tool_registry[tool_name] = module_id
+
+        resources = await module.get_resources()
+        for resource in resources:
+            resource_uri = resource.get("uri")
+            if resource_uri:
+                resource_registry[resource_uri] = module_id
+
+        prompts = await module.get_prompts()
+        for prompt in prompts:
+            prompt_name = prompt.get("name")
+            if prompt_name:
+                prompt_registry[prompt_name] = module_id
+
+        return tool_registry, resource_registry, prompt_registry
+
+    async def _update_registries(self, module_id: str, module: BaseModule) -> bool:
+        """Update tool/resource/prompt registries."""
         try:
-            # Register tools
-            tools = await module.get_tools()
-            for tool in tools:
-                tool_name = tool.get("name")
-                if tool_name:
-                    self._tool_registry[tool_name] = module_id
-                    logger.debug(f"Registered tool {tool_name} -> {module_id}")
-
-            # Register resources
-            resources = await module.get_resources()
-            for resource in resources:
-                resource_uri = resource.get("uri")
-                if resource_uri:
-                    self._resource_registry[resource_uri] = module_id
-                    logger.debug(f"Registered resource {resource_uri} -> {module_id}")
-
-            # Register prompts
-            prompts = await module.get_prompts()
-            for prompt in prompts:
-                prompt_name = prompt.get("name")
-                if prompt_name:
-                    self._prompt_registry[prompt_name] = module_id
-                    logger.debug(f"Registered prompt {prompt_name} -> {module_id}")
+            tools, resources, prompts = await self._build_registry_mappings(module_id, module)
+            self._tool_registry.update(tools)
+            self._resource_registry.update(resources)
+            self._prompt_registry.update(prompts)
+            for tool_name in tools:
+                logger.debug(f"Registered tool {tool_name} -> {module_id}")
+            for resource_uri in resources:
+                logger.debug(f"Registered resource {resource_uri} -> {module_id}")
+            for prompt_name in prompts:
+                logger.debug(f"Registered prompt {prompt_name} -> {module_id}")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to update registries for {module_id} ({_exception_type_name(e)})")
+            return False
 
     async def unregister_module(self, module_id: str) -> None:
         """Unregister a module"""
@@ -325,11 +344,27 @@ class ModuleRegistry:
             module = registration.module_instance if registration and registration.is_operational() else None
             if module is None:
                 return False
+
+        try:
+            tools, resources, prompts = await self._build_registry_mappings(module_id, module)
+        except Exception as e:
+            logger.error(f"Failed to update registries for {module_id} ({_exception_type_name(e)})")
+            return False
+
+        async with self._lock:
+            current = self._modules.get(module_id)
+            if (
+                current is None
+                or not current.is_operational()
+                or current.module_instance is not module
+            ):
+                return False
             self._tool_registry = {k: v for k, v in self._tool_registry.items() if v != module_id}
             self._resource_registry = {k: v for k, v in self._resource_registry.items() if v != module_id}
             self._prompt_registry = {k: v for k, v in self._prompt_registry.items() if v != module_id}
-
-        await self._update_registries(module_id, module)
+            self._tool_registry.update(tools)
+            self._resource_registry.update(resources)
+            self._prompt_registry.update(prompts)
         return True
 
     async def find_module_for_resource(self, uri: str) -> Optional[BaseModule]:

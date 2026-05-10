@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,35 @@ class _FakeAdapter(ExternalMCPTransportAdapter):
             content={"ok": True, "tool": tool_name, "args": dict(arguments)},
             is_error=False,
             metadata={"adapter": "fake"},
+        )
+
+
+class _BlockingCallAdapter(_FakeAdapter):
+    def __init__(
+        self,
+        server_id: str,
+        tools: list[ExternalToolDefinition],
+        *,
+        entered: Any,
+        release: Any,
+    ) -> None:
+        super().__init__(server_id, tools)
+        self.entered = entered
+        self.release = release
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context=None,
+    ) -> ExternalToolCallResult:
+        self.calls.append((tool_name, dict(arguments)))
+        self.entered.set()
+        await self.release.wait()
+        return ExternalToolCallResult(
+            content={"ok": True, "tool": tool_name, "args": dict(arguments)},
+            is_error=False,
+            metadata={"adapter": "blocking"},
         )
 
 
@@ -494,6 +524,68 @@ async def test_reconcile_servers_replaces_materially_changed_server_adapter(monk
             f"Replacement adapter tools should reflect the new config: {tools!r}",
         )
     finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_servers_waits_for_inflight_tool_execution_before_closing_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payloads = [
+        {"servers": [_server_payload("docs", name="Docs", url="wss://old.example/ws")]},
+        {"servers": [_server_payload("docs", name="Docs", url="wss://new.example/ws")]},
+    ]
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    created: list[_FakeAdapter] = []
+
+    async def _loader():
+        payload = payloads.pop(0) if len(payloads) > 1 else payloads[0]
+        return list(parse_external_server_registry(payload).servers)
+
+    def _adapter_factory(server_cfg) -> _FakeAdapter:
+        if not created:
+            adapter = _BlockingCallAdapter(
+                server_id=server_cfg.id,
+                tools=[ExternalToolDefinition(name="docs.search", description="Search old")],
+                entered=entered,
+                release=release,
+            )
+        else:
+            adapter = _FakeAdapter(
+                server_id=server_cfg.id,
+                tools=[ExternalToolDefinition(name="docs.search", description="Search new")],
+            )
+        created.append(adapter)
+        return adapter
+
+    monkeypatch.setattr(manager_mod, "build_transport_adapter", _adapter_factory)
+    manager = ExternalServerManager().with_server_loader(_loader)
+    try:
+        await manager.initialize()
+        old_adapter = created[0]
+
+        execute_task = asyncio.create_task(
+            manager.execute_virtual_tool("ext.docs.docs.search", {"q": "active"})
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2.0)
+
+        reconcile_task = asyncio.create_task(manager.reconcile_servers(server_id="docs"))
+        await asyncio.sleep(0.05)
+
+        _ensure(old_adapter.close_count == 0, "Reconcile closed an adapter while a tool call was active")
+        _ensure(not reconcile_task.done(), "Reconcile should wait for active tool execution before swapping adapters")
+
+        release.set()
+        result = await asyncio.wait_for(execute_task, timeout=2.0)
+        refresh = await asyncio.wait_for(reconcile_task, timeout=2.0)
+
+        _ensure(result["is_error"] is False, f"Unexpected in-flight call result: {result!r}")
+        _ensure(refresh["errors"] == {}, f"Unexpected reconcile errors: {refresh!r}")
+        _ensure(old_adapter.close_count == 1, "Old adapter should close after active execution finishes")
+    finally:
+        if not release.is_set():
+            release.set()
         await manager.shutdown()
 
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -15,6 +15,7 @@ import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
 export const ToolCatalogsTab = () => {
   const queryClient = useQueryClient()
+  const latestLoadRequestId = useRef(0)
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
   const [loading, setLoading] = useState(false)
@@ -23,21 +24,26 @@ export const ToolCatalogsTab = () => {
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
 
   const loadRegistrySummary = useCallback(async (options: { clearOnError?: boolean } = {}) => {
+    const requestId = ++latestLoadRequestId.current
     const clearOnError = options.clearOnError !== false
     setLoading(true)
     setErrorMessage(null)
     try {
       const summary = await getToolRegistrySummary()
+      if (requestId !== latestLoadRequestId.current) return
       setEntries(Array.isArray(summary?.entries) ? summary.entries : [])
       setModules(Array.isArray(summary?.modules) ? summary.modules : [])
     } catch {
+      if (requestId !== latestLoadRequestId.current) return
       if (clearOnError) {
         setEntries([])
         setModules([])
       }
       setErrorMessage("Failed to load tool registry metadata.")
     } finally {
-      setLoading(false)
+      if (requestId === latestLoadRequestId.current) {
+        setLoading(false)
+      }
     }
   }, [])
 
