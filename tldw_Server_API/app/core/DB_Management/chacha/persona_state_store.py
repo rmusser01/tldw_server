@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -2520,12 +2521,27 @@ class PersonaStateStore:
         pack_id: str,
         persona_id: str,
         user_id: str,
+        expected_version: int | None = None,
+        allowed_statuses: Iterable[str] | None = None,
     ) -> bool:
-        """Soft-delete a persona visual pack and all of its asset rows."""
+        """Soft-delete a persona visual pack and its assets with optional guards."""
         now = self._get_current_utc_timestamp_iso()
         bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
         deleted_false = bool_cast(False)
         deleted_true = bool_cast(True)
+        allowed_status_values: tuple[str, ...] | None = None
+        if allowed_statuses is not None:
+            allowed_status_values = tuple(
+                self._normalize_persona_visual_enum(
+                    status,
+                    allowed=self._ALLOWED_PERSONA_VISUAL_PACK_STATUSES,
+                    field_name="pack status",
+                )
+                for status in allowed_statuses
+            )
+            if not allowed_status_values:
+                return False
+
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
             self._require_persona_visual_pack_owner(
@@ -2534,6 +2550,36 @@ class PersonaStateStore:
                 persona_id=persona_id,
                 user_id=user_id,
             )
+            pack_where_sql = "id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
+            pack_params: list[Any] = [
+                deleted_true,
+                now,
+                pack_id,
+                user_id,
+                persona_id,
+                deleted_false,
+            ]
+            if expected_version is not None:
+                pack_where_sql += " AND version = ?"
+                pack_params.append(int(expected_version))
+            if allowed_status_values is not None:
+                placeholders = ", ".join("?" for _ in allowed_status_values)
+                pack_where_sql += f" AND status IN ({placeholders})"
+                pack_params.extend(allowed_status_values)
+
+            pack_query = (
+                "UPDATE persona_visual_packs "
+                "SET deleted = ?, active_at = NULL, last_modified = ?, version = version + 1 "
+                f"WHERE {pack_where_sql}"  # nosec B608
+            )
+            prepared_pack_query, prepared_pack_params = self._prepare_backend_statement(
+                pack_query,
+                tuple(pack_params),
+            )
+            cursor = conn.execute(prepared_pack_query, prepared_pack_params or ())
+            if cursor.rowcount == 0:
+                return False
+
             asset_query = (
                 "UPDATE persona_visual_assets "
                 "SET deleted = ?, last_modified = ?, version = version + 1 "
@@ -2552,26 +2598,7 @@ class PersonaStateStore:
                 asset_params,
             )
             conn.execute(prepared_asset_query, prepared_asset_params or ())
-
-            pack_query = (
-                "UPDATE persona_visual_packs "
-                "SET deleted = ?, active_at = NULL, last_modified = ?, version = version + 1 "
-                "WHERE id = ? AND user_id = ? AND persona_id = ? AND deleted = ?"
-            )
-            pack_params = (
-                deleted_true,
-                now,
-                pack_id,
-                user_id,
-                persona_id,
-                deleted_false,
-            )
-            prepared_pack_query, prepared_pack_params = self._prepare_backend_statement(
-                pack_query,
-                pack_params,
-            )
-            cursor = conn.execute(prepared_pack_query, prepared_pack_params or ())
-            return cursor.rowcount > 0
+            return True
 
     def _load_persona_visual_library_source(
         self,

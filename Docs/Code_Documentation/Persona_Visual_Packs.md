@@ -95,11 +95,22 @@ Import is staged:
    persona.
 2. The preview reports bundle metadata, warnings, conflicts, and the proposed
    commit plan.
-3. Commit import creates a reviewed draft pack for the persona after the preview
-   succeeds.
+3. Commit import creates or replaces a reviewed draft pack for the persona
+   after the preview succeeds and the user has selected any required conflict
+   choice.
 
 Committed imports remain reviewable and do not automatically activate. Users
 still choose when a valid pack should become the active pack.
+
+V1 conflict detection is intentionally conservative. When the target persona
+already has a pack with the incoming title, preview records
+`target_pack_title_match` conflicts. Active conflicts only allow
+`create_new`; draft-like conflicts (`draft`, `review`, or `failed`) also allow
+`replace_draft`. Replace-draft commits are preview-backed: the request must
+name a reviewed replaceable pack id, the selected target pack must still belong
+to the same user and target persona, and the imported replacement is created as
+a fresh draft before the selected old draft is soft-deleted with its assets.
+Active packs are never replaced or activated by import commit.
 
 ## Generated Candidates And Review
 

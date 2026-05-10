@@ -1259,6 +1259,116 @@ def test_start_import_commit_creates_jobs_backed_portability_row(
     assert row["persona_id"] == persona_id
 
 
+def test_start_import_commit_requires_explicit_target_mode_for_conflicts(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Conflicted Import Commit Persona")
+        draft_pack = _create_visual_pack(client, persona_id, title="Existing Draft")
+        archive_path = tmp_path / "commit-conflict.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            conflicts=[
+                {
+                    "conflict_id": f"target_pack_title_match:{draft_pack['id']}",
+                    "type": "target_pack_title_match",
+                    "pack_id": draft_pack["id"],
+                    "pack_status": "draft",
+                    "allowed_choices": ["create_new", "replace_draft"],
+                }
+            ],
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import"},
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "import_conflict_choice_required"
+    assert manager.created == []
+
+
+def test_start_import_commit_allows_replace_draft_choice(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Replace Draft Import Commit Persona")
+        draft_pack = _create_visual_pack(client, persona_id, title="Existing Draft")
+        archive_path = tmp_path / "commit-replace-draft.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-1",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            conflicts=[
+                {
+                    "conflict_id": f"target_pack_title_match:{draft_pack['id']}",
+                    "type": "target_pack_title_match",
+                    "pack_id": draft_pack["id"],
+                    "pack_status": "draft",
+                    "allowed_choices": ["create_new", "replace_draft"],
+                }
+            ],
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={
+                "trust_mode": "untrusted_import",
+                "target_mode": "replace_draft",
+                "target_pack_id": draft_pack["id"],
+                "title": "Imported Replacement",
+            },
+        )
+
+    assert response.status_code == 202, response.text
+    assert manager.created[0]["job_type"] == PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE
+    assert manager.created[0]["payload"]["target_mode"] == "replace_draft"
+    assert manager.created[0]["payload"]["target_pack_id"] == draft_pack["id"]
+    assert manager.created[0]["payload"]["title"] == "Imported Replacement"
+    assert manager.created[0]["payload"]["conflict_choice_explicit"] is True
+    row = repo.get_portability_job_by_job_id("9001", owner_user_id="1")
+    assert row is not None
+    assert row["operation"] == "import_commit"
+    assert row["preview_id"] == preview["id"]
+    assert row["persona_id"] == persona_id
+
+
 def test_import_commit_status_is_scoped(persona_db: CharactersRAGDB, tmp_path: Path) -> None:
     from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
         PersonaVisualPortabilityRepository,

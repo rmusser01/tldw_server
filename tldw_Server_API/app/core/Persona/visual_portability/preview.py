@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,7 @@ class PersonaVisualPackImportPreviewer:
         archive_path: Path,
         owner_user_id: str,
         target_persona_id: str | None = None,
+        target_packs: Sequence[Mapping[str, Any]] | None = None,
         progress: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         archive_path = Path(archive_path)
@@ -88,9 +89,16 @@ class PersonaVisualPackImportPreviewer:
 
         validation_warnings = _validation_warnings(assets)
         source_persona_id = str(pack.get("source_persona_id") or "")
+        conflicts = _target_pack_conflicts(pack=pack, target_packs=target_packs)
+        replaceable_pack_ids = _replaceable_pack_ids(conflicts)
+        target_modes = ["create_new"]
+        if replaceable_pack_ids:
+            target_modes.append("replace_draft")
         required_choices = _required_choices(
             source_persona_id=source_persona_id,
             target_persona_id=target_persona_id,
+            conflicts=conflicts,
+            replaceable_pack_ids=replaceable_pack_ids,
         )
         preview_fingerprint = _preview_fingerprint(
             manifest=manifest,
@@ -99,14 +107,17 @@ class PersonaVisualPackImportPreviewer:
         )
         proposed_plan = {
             "target_mode": "create_new",
+            "target_modes": target_modes,
             "trust_modes": [
                 TRUST_MODE_TRUSTED_RESTORE,
                 TRUST_MODE_UNTRUSTED_IMPORT,
             ],
             "default_trust_mode": TRUST_MODE_UNTRUSTED_IMPORT,
+            "default_target_mode": "create_new",
             "review_before_commit": True,
             "default_target_persona_id": target_persona_id or source_persona_id or None,
             "missing_asset_policy": "import_metadata_only_until_bytes_supplied",
+            "replaceable_pack_ids": replaceable_pack_ids,
             "update_identity_rules": {
                 "assets": [
                     "source_asset_id",
@@ -135,7 +146,7 @@ class PersonaVisualPackImportPreviewer:
             "schema_version": PERSONA_VISUAL_PACK_SCHEMA_VERSION,
             "bundle_summary": bundle_summary,
             "validation_warnings": validation_warnings,
-            "conflicts": [],
+            "conflicts": conflicts,
             "proposed_plan": proposed_plan,
             "quota_estimate": quota_estimate,
             "required_choices": required_choices,
@@ -305,14 +316,88 @@ def _validation_warnings(assets: list[Mapping[str, Any]]) -> list[str]:
     return warnings
 
 
+_REPLACEABLE_TARGET_PACK_STATUSES = frozenset({"draft", "review", "failed"})
+
+
+def _target_pack_conflicts(
+    *,
+    pack: Mapping[str, Any],
+    target_packs: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Return title-match conflicts against the current target persona packs."""
+    incoming_title = str(pack.get("title") or "").strip()
+    if not incoming_title:
+        return []
+
+    conflicts: list[dict[str, Any]] = []
+    for target_pack in target_packs or []:
+        target_title = str(target_pack.get("title") or "").strip()
+        if target_title.casefold() != incoming_title.casefold():
+            continue
+        pack_id = str(target_pack.get("id") or "").strip()
+        if not pack_id:
+            continue
+        pack_status = str(target_pack.get("status") or "").strip() or "unknown"
+        allowed_choices = ["create_new"]
+        if pack_status in _REPLACEABLE_TARGET_PACK_STATUSES:
+            allowed_choices.append("replace_draft")
+        conflicts.append(
+            {
+                "conflict_id": f"target_pack_title_match:{pack_id}",
+                "type": "target_pack_title_match",
+                "severity": "warning",
+                "message": (
+                    f"Target persona already has a {pack_status} visual pack "
+                    f"named {incoming_title}."
+                ),
+                "pack_id": pack_id,
+                "pack_title": target_title,
+                "pack_status": pack_status,
+                "allowed_choices": allowed_choices,
+            }
+        )
+
+    return sorted(conflicts, key=lambda conflict: str(conflict["conflict_id"]))
+
+
+def _replaceable_pack_ids(conflicts: Sequence[Mapping[str, Any]]) -> list[str]:
+    """List conflict pack ids that can be selected for replace-draft import."""
+    replaceable: list[str] = []
+    for conflict in conflicts:
+        allowed = conflict.get("allowed_choices")
+        if not isinstance(allowed, (list, tuple, set)) or "replace_draft" not in allowed:
+            continue
+        pack_id = str(conflict.get("pack_id") or "").strip()
+        if pack_id:
+            replaceable.append(pack_id)
+    return replaceable
+
+
 def _required_choices(
     *,
     source_persona_id: str,
     target_persona_id: str | None,
+    conflicts: Sequence[Mapping[str, Any]],
+    replaceable_pack_ids: Sequence[str],
 ) -> list[dict[str, Any]]:
+    choices: list[dict[str, Any]] = []
     if target_persona_id:
-        return []
-    return [
+        if conflicts:
+            choices.append(
+                {
+                    "choice_id": "import_target_mode",
+                    "reason": "target_pack_conflicts",
+                    "default_target_mode": "create_new",
+                    "allowed_target_modes": (
+                        ["create_new", "replace_draft"]
+                        if replaceable_pack_ids
+                        else ["create_new"]
+                    ),
+                    "replaceable_pack_ids": list(replaceable_pack_ids),
+                }
+            )
+        return choices
+    choices.append(
         {
             "choice_id": "target_persona",
             "resource": "persona",
@@ -321,7 +406,8 @@ def _required_choices(
             "default_action": "import_to_source_persona",
             "required": True,
         }
-    ]
+    )
+    return choices
 
 
 def _target_warnings(

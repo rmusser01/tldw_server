@@ -235,18 +235,52 @@ def test_create_persona_visual_pack_import_commit_job_uses_preview_group() -> No
         request_id="request-1",
         target_persona_id="persona-2",
         trust_mode="untrusted_import",
-        target_mode="create_new",
+        target_mode="replace_draft",
+        target_pack_id="draft-pack-1",
+        title="Replacement Pack",
     )
 
     expected_key = visual_pack_import_commit_idempotency_key(
         user_id="user-1",
         preview_id="preview-1",
         request_id="request-1",
+        trust_mode="untrusted_import",
+        target_mode="replace_draft",
+        target_pack_id="draft-pack-1",
+        title="Replacement Pack",
+        conflict_choice_explicit=False,
     )
     assert job["queue"] == "default"
     assert job["job_type"] == PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE
     assert job["batch_group"] == "persona_visuals:user:user-1:portability:import-commit:preview-1:request-1"
     assert job["idempotency_key"] == expected_key
+    assert expected_key != visual_pack_import_commit_idempotency_key(
+        user_id="user-1",
+        preview_id="preview-1",
+        request_id="request-1",
+        trust_mode="untrusted_import",
+        target_mode="create_new",
+    )
+    assert expected_key != visual_pack_import_commit_idempotency_key(
+        user_id="user-1",
+        preview_id="preview-1",
+        request_id="request-1",
+        trust_mode="untrusted_import",
+        target_mode="replace_draft",
+        target_pack_id="draft-pack-2",
+        title="Replacement Pack",
+        conflict_choice_explicit=False,
+    )
+    assert expected_key != visual_pack_import_commit_idempotency_key(
+        user_id="user-1",
+        preview_id="preview-1",
+        request_id="request-1",
+        trust_mode="untrusted_import",
+        target_mode="replace_draft",
+        target_pack_id="draft-pack-1",
+        title="Replacement Pack",
+        conflict_choice_explicit=True,
+    )
     assert manager.created[0]["payload"] == {
         "user_id": "user-1",
         "preview_id": "preview-1",
@@ -254,7 +288,9 @@ def test_create_persona_visual_pack_import_commit_job_uses_preview_group() -> No
         "request_id": "request-1",
         "target_persona_id": "persona-2",
         "trust_mode": "untrusted_import",
-        "target_mode": "create_new",
+        "target_mode": "replace_draft",
+        "target_pack_id": "draft-pack-1",
+        "title": "Replacement Pack",
     }
 
 

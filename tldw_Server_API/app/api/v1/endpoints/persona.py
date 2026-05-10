@@ -2182,6 +2182,23 @@ def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> A
         return default
 
 
+def _persona_visual_replaceable_pack_ids(conflicts: Any) -> set[str]:
+    """Return target pack ids that preview conflicts allow replacing."""
+    if not isinstance(conflicts, list):
+        return set()
+    replaceable: set[str] = set()
+    for conflict in conflicts:
+        if not isinstance(conflict, dict):
+            continue
+        allowed_choices = conflict.get("allowed_choices")
+        if not isinstance(allowed_choices, list) or "replace_draft" not in allowed_choices:
+            continue
+        pack_id = str(conflict.get("pack_id") or "").strip()
+        if pack_id:
+            replaceable.add(pack_id)
+    return replaceable
+
+
 def _persona_visual_job_for_portability(jobs_manager: JobManager, job_id: str) -> dict[str, Any] | None:
     try:
         return jobs_manager.get_job(int(job_id))
@@ -5007,6 +5024,30 @@ async def start_persona_visual_pack_import_commit(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_completed",
             )
+        conflicts = _persona_visual_json_field(preview, "conflicts_json", [])
+        replaceable_pack_ids = _persona_visual_replaceable_pack_ids(conflicts)
+        explicit_target_mode = "target_mode" in getattr(payload, "model_fields_set", set())
+        if conflicts and not explicit_target_mode:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_conflict_choice_required",
+            )
+        if payload.target_mode == "replace_draft":
+            if not payload.target_pack_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_pack_id_required",
+                )
+            if payload.target_pack_id not in replaceable_pack_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="import_target_pack_not_replaceable",
+                )
+        elif payload.target_pack_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_pack_id_requires_replace_draft",
+            )
 
         request_id = str(payload.request_id or uuid.uuid4().hex)
         job = await _run_persona_db_call(
@@ -5019,6 +5060,9 @@ async def start_persona_visual_pack_import_commit(
             target_persona_id=persona_id,
             trust_mode=payload.trust_mode,
             target_mode=payload.target_mode,
+            target_pack_id=payload.target_pack_id,
+            title=payload.title,
+            conflict_choice_explicit=bool(conflicts and explicit_target_mode),
         )
         job_id = str(job.get("id") or "")
         portability_job = await _run_persona_db_call(
@@ -5037,6 +5081,9 @@ async def start_persona_visual_pack_import_commit(
                 "request_id": request_id,
                 "trust_mode": payload.trust_mode,
                 "target_mode": payload.target_mode,
+                "target_pack_id": payload.target_pack_id,
+                "title": payload.title,
+                "conflict_choice_explicit": bool(conflicts and explicit_target_mode),
             },
         )
         return PersonaVisualImportCommitStartResponse(

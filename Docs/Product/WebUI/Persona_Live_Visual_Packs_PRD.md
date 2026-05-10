@@ -84,7 +84,7 @@ providers, shared/cross-device libraries, and future renderer adapters.
 
 ## 5. Current Implementation Snapshot
 
-As of 2026-05-09:
+As of 2026-05-10:
 
 1. The durable implementation from PR #1393 is merged into `dev`.
 2. The closeout documentation and E2E verification from PR #1400 is merged into
@@ -133,6 +133,9 @@ Implemented foundations include:
     existing visual packs, listing available/source-changed/unavailable entries,
     editing/removing entries, and using an available entry to create a target
     persona draft through duplicate semantics.
+17. Import preview conflict choices for target title matches, including
+    create-new-draft and reviewed draft replacement while preserving separate
+    activation.
 
 ---
 
@@ -205,7 +208,7 @@ The Visuals tab should support:
 6. generated candidate review.
 7. export job queue, status refresh, and authenticated archive download.
 8. import-preview upload, status refresh, preview summary, conflicts, warnings,
-   proposed plan, and commit flow.
+   proposed plan, explicit conflict choices, and commit flow.
 9. explicit activation and deactivation.
 
 ### 8.3 Floating Buddy Runtime
@@ -463,8 +466,9 @@ The portability model should stay aligned with PR #1135:
 4. Import starts with a review-only preview.
 5. Preview reports summary, validation warnings, conflicts, proposed plan, quota
    estimate, required choices, and target warnings.
-6. Import commit is explicit and should create a draft pack unless a future
-   product decision allows direct replacement.
+6. Import commit is explicit. It creates a new draft by default, and may
+   replace a reviewed draft-like target pack when preview reported that pack as
+   replaceable.
 7. Activation remains separate from import commit.
 
 Current and future portability/library work:
@@ -472,9 +476,11 @@ Current and future portability/library work:
 1. Duplicate to another persona creates a same-user draft copy (#1450).
 2. Personal visual-pack library V1 stores user-scoped references to existing
    source packs and creates target drafts through duplicate semantics (#1468).
-3. Future shared user libraries should be layered on top of the manifest-backed
+3. Import/export conflict choices support target title-match review and
+   draft-only replacement (#1490).
+4. Future shared user libraries should be layered on top of the manifest-backed
    pack format rather than replacing it.
-4. Future cross-device sync, signed community packs, and external
+5. Future cross-device sync, signed community packs, and external
    MCP-compatible pack providers remain out of scope for V1.
 
 ---
@@ -539,7 +545,8 @@ baseline. The first reference-backed V1 slices are now covered:
    (#1450).
 2. Personal visual-pack library: complete for user-owned, reference-backed
    save/list/edit/remove/use in Persona Garden (#1468).
-3. Import/export polish and conflict choices remain future work.
+3. Import/export conflict choices: complete for preview-backed target title
+   conflicts, create-new draft commits, and reviewed draft replacement (#1490).
 4. Shared/cross-device libraries remain future work.
 5. External MCP-compatible visual providers remain future work.
 6. Live2D or other renderer adapter remains future work after the sprite/frame
@@ -640,3 +647,4 @@ E2E:
 9. Issue #1428: Completed Persona/Buddy visual-pack Product Hardening tracker.
 10. Issue #1450: Same-user Persona Visual pack duplicate-to-persona draft flow.
 11. Issue #1468: Personal Persona Visual pack library foundation.
+12. Issue #1490: Persona visual-pack import conflict choices.
