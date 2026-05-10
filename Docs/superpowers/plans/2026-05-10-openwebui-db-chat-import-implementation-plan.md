@@ -409,19 +409,20 @@ git commit -m "Mirror OpenWebUI database import folders"
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py`, `tldw_Server_API/tests/Chatbooks/test_chatbooks_import_cleanup.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 4.1: Add failing worker tests
 
 **Files:**
 - Modify: `tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py`
-- Modify: `tldw_Server_API/tests/Chatbooks/test_chatbooks_import_cleanup.py`
+- Existing cleanup regression: `tldw_Server_API/tests/Chatbooks/test_chatbooks_import_cleanup.py`
 
-- [ ] Add test that `_handle_import` dispatches `source_format=openwebui_db` to `service.import_openwebui_db`.
-- [ ] Assert `_resolve_import_upload_path` is used and `_resolve_import_archive_path` is not used.
-- [ ] Assert selected user id is required in worker payload.
-- [ ] Assert worker result wraps DB result under `openwebui_db_result`.
-- [ ] Assert temp uploaded DB is removed after worker completion.
+- [x] Add test that `_handle_import` dispatches `source_format=openwebui_db` to `service.import_openwebui_db`.
+- [x] Assert `_resolve_import_upload_path` is used and `_resolve_import_archive_path` is not used.
+- [x] Assert selected user id is required in worker payload.
+- [x] Assert worker result wraps DB result under `openwebui_db_result`.
+- [x] Assert temp uploaded DB is removed after worker completion on success and failure.
+- [x] Verify RED: focused worker tests failed because `openwebui_db` was still rejected as an unsupported source format.
 
 ### Task 4.2: Implement worker support
 
@@ -429,15 +430,15 @@ git commit -m "Mirror OpenWebUI database import folders"
 - Modify: `tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py`
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
 
-- [ ] Branch `source_format == "openwebui_db"` before archive handling.
-- [ ] Resolve upload path.
-- [ ] Validate selected user id in payload.
-- [ ] Call `service.import_openwebui_db`.
-- [ ] Return `{"openwebui_db_result": result or {}}`.
-- [ ] Preserve the existing cleanup `finally` behavior for resolved upload paths.
-- [ ] Include selected user id in both core Jobs and Prompt Studio fallback payloads if that path remains supported.
+- [x] Branch `source_format == "openwebui_db"` before archive handling.
+- [x] Resolve upload path.
+- [x] Validate selected user id in payload.
+- [x] Call `service.import_openwebui_db`.
+- [x] Return `{"openwebui_db_result": result or {}}`.
+- [x] Preserve the existing cleanup `finally` behavior for resolved upload paths.
+- [x] Include selected user id in core Jobs and Prompt Studio fallback payloads. This was already present from Stage 2 and remains covered by existing API/service tests.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -445,18 +446,24 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_impo
   tldw_Server_API/tests/Chatbooks/test_chatbooks_import_cleanup.py -q
 ```
 
-Expected: PASS.
+Result: PASS in the broader 35-test Chatbooks regression command.
 
 ### Task 4.3: Commit Jobs slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Run overlapping Chatbooks regression tests:
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py tldw_Server_API/tests/Chatbooks/test_chatbooks_import_cleanup.py tldw_Server_API/tests/Chatbooks/test_chatbooks_openwebui_db_api.py tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py -q`
+  - Result: PASS, 35 tests.
+- [x] Run Bandit on touched backend production file:
+  - `python -m bandit -r tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py -f json -o /private/tmp/bandit_openwebui_db_jobs.json`
+  - Result: 0 findings.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py \
-        tldw_Server_API/app/core/Chatbooks/chatbook_service.py \
         tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py \
-        tldw_Server_API/tests/Chatbooks/test_chatbooks_import_cleanup.py
+        backlog/tasks/task-233.9\ -\ Support-OpenWebUI-DB-async-Chatbooks-import-jobs.md \
+        Docs/superpowers/plans/2026-05-10-openwebui-db-chat-import-implementation-plan.md
 git commit -m "Support async OpenWebUI database imports"
 ```
 
