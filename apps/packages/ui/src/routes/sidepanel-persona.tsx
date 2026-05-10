@@ -1159,6 +1159,15 @@ const SidepanelPersona = ({
       visualRuntimeDiagnostics.sessionId === sessionId)
       ? visualRuntimeDiagnostics
       : null
+  const liveSessionLastEvent = error
+    ? `error: ${error}`
+    : connecting
+      ? "connecting"
+      : connected
+        ? "connected"
+        : sessionId
+          ? "disconnected"
+          : null
   const personaBuddyDiagnostics = buildPersonaBuddyDiagnostics({
     selectedPersona: {
       id: selectedPersonaId,
@@ -1173,7 +1182,8 @@ const SidepanelPersona = ({
       connected,
       connecting,
       sessionId,
-      error
+      error,
+      lastEvent: liveSessionLastEvent
     },
     liveVoice: {
       state: liveVoiceController.state,

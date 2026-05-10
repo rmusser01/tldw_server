@@ -530,6 +530,7 @@ describe("SidepanelPersona", () => {
 
     expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
     expect(diagnostics).toHaveTextContent("Visual pack did not load")
+    expect(diagnostics).toHaveTextContent("Pack ID: pack-1")
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
   })
 

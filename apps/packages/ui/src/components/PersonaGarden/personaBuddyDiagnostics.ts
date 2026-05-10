@@ -95,6 +95,12 @@ const titleCase = (value: string | null | undefined, fallback = "Unknown") => {
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+const joinDetails = (parts: Array<string | null | undefined>) =>
+  parts
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(" - ") || undefined
+
 const summarizeBuddy = (
   buddySummary: PersonaBuddyDiagnosticsInput["buddySummary"]
 ): PersonaBuddyDiagnosticRow => {
@@ -122,7 +128,7 @@ const summarizeBuddy = (
   return {
     label: "Buddy",
     value: "Dormant",
-    state: "degraded",
+    state: "healthy",
     detail: "No Buddy summary is attached to the selected persona."
   }
 }
@@ -131,6 +137,9 @@ const summarizeVisual = (
   visual: PersonaBuddyDiagnosticsInput["visual"]
 ): PersonaBuddyDiagnosticRow => {
   const diagnostic = visual?.diagnostic
+  const packId = String(visual?.packId || "").trim()
+  const packTitle = String(visual?.packTitle || "").trim()
+  const packIdDetail = packId ? `Pack ID: ${packId}` : undefined
   const renderState = visual?.visualState
     ? `Render state: ${titleCase(visual.visualState)}`
     : undefined
@@ -139,7 +148,7 @@ const summarizeVisual = (
       label: "Visual pack",
       value: "Default Buddy fallback",
       state: "healthy",
-      detail: [diagnostic.message, renderState].filter(Boolean).join(" - ")
+      detail: joinDetails([diagnostic.message, packIdDetail, renderState])
     }
   }
 
@@ -148,7 +157,7 @@ const summarizeVisual = (
       label: "Visual pack",
       value: diagnostic.title || titleCase(diagnostic.code),
       state: diagnostic.severity === "info" ? "healthy" : "degraded",
-      detail: [diagnostic.message, renderState].filter(Boolean).join(" - ")
+      detail: joinDetails([diagnostic.message, packIdDetail, renderState])
     }
   }
 
@@ -157,7 +166,7 @@ const summarizeVisual = (
       label: "Visual pack",
       value: "Loading",
       state: "recovering",
-      detail: renderState
+      detail: joinDetails([packIdDetail, renderState])
     }
   }
 
@@ -166,16 +175,21 @@ const summarizeVisual = (
       label: "Visual pack",
       value: "Load failed",
       state: "degraded",
-      detail: ["The active visual pack could not be loaded.", renderState]
-        .filter(Boolean)
-        .join(" - ")
+      detail: joinDetails([
+        "The active visual pack could not be loaded.",
+        packIdDetail,
+        renderState
+      ])
     }
   }
 
-  const activePack = visual?.packTitle || visual?.packId
+  const activePack =
+    packTitle && packId
+      ? `${packTitle} (${packId})`
+      : packTitle || packId || ""
   return {
     label: "Visual pack",
-    value: activePack ? String(activePack) : "Default Buddy fallback",
+    value: activePack || "Default Buddy fallback",
     state: "healthy",
     detail: renderState
   }
@@ -184,12 +198,21 @@ const summarizeVisual = (
 const summarizeLiveSession = (
   liveSession: PersonaBuddyDiagnosticsInput["liveSession"]
 ): PersonaBuddyDiagnosticRow => {
+  const sessionDetail = liveSession?.sessionId
+    ? `Session ${liveSession.sessionId}`
+    : undefined
+  const lastEvent = String(liveSession?.lastEvent || "").trim()
+  const lastEventDetail =
+    lastEvent && lastEvent !== liveSession?.error
+      ? `Last event: ${lastEvent}`
+      : undefined
+
   if (liveSession?.connecting) {
     return {
       label: "Live session",
       value: "Reconnecting",
       state: "recovering",
-      detail: liveSession.sessionId ? `Session ${liveSession.sessionId}` : undefined
+      detail: joinDetails([sessionDetail, lastEventDetail])
     }
   }
 
@@ -198,7 +221,7 @@ const summarizeLiveSession = (
       label: "Live session",
       value: "Connection issue",
       state: "degraded",
-      detail: liveSession.error
+      detail: joinDetails([liveSession.error, lastEventDetail])
     }
   }
 
@@ -207,14 +230,15 @@ const summarizeLiveSession = (
       label: "Live session",
       value: "Connected",
       state: "healthy",
-      detail: liveSession.sessionId ? `Session ${liveSession.sessionId}` : undefined
+      detail: joinDetails([sessionDetail, lastEventDetail])
     }
   }
 
   return {
     label: "Live session",
     value: "Ready to connect",
-    state: "healthy"
+    state: "healthy",
+    detail: lastEventDetail
   }
 }
 
@@ -303,7 +327,7 @@ const summarizeMcp = (
   return {
     label: "MCP persona_visuals",
     value: "Unknown",
-    state: "healthy",
+    state: "degraded",
     detail: "Server capability discovery has not reported MCP readiness."
   }
 }
@@ -375,7 +399,7 @@ export const buildPersonaBuddyDiagnostics = ({
     }
     rows.push(row)
     state = worseState(state, row.state || "healthy")
-  } else if (!capabilities || capabilities.hasPersona === false) {
+  } else if (!capabilities || capabilities.hasPersona !== true) {
     const row: PersonaBuddyDiagnosticRow = {
       label: "Server capability",
       value: "Persona unavailable",

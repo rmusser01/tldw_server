@@ -27,7 +27,7 @@ describe("buildPersonaBuddyDiagnostics", () => {
         expect.objectContaining({ label: "Persona", value: "Ada" }),
         expect.objectContaining({
           label: "Visual pack",
-          value: "Animated Pack",
+          value: "Animated Pack (pack-1)",
           detail: "Render state: Idle"
         }),
         expect.objectContaining({ label: "Live session", value: "Connected" })
@@ -146,6 +146,103 @@ describe("buildPersonaBuddyDiagnostics", () => {
       expect.arrayContaining([
         expect.objectContaining({ label: "Wake", state: "degraded" }),
         expect.objectContaining({ label: "MCP persona_visuals", state: "degraded" })
+      ])
+    )
+  })
+
+  it("does not mark intentionally dormant Buddy summaries as degraded", () => {
+    const diagnostics = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: null,
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: false, connecting: false, sessionId: null },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: { armed: false, detectorState: "idle" },
+      visual: { packLoadStatus: "idle", diagnostic: null }
+    })
+
+    expect(diagnostics.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Buddy",
+          value: "Dormant",
+          state: "healthy"
+        })
+      ])
+    )
+    expect(diagnostics.state).toBe("healthy")
+  })
+
+  it("treats unconfirmed MCP and Persona capability readiness as degraded or unavailable", () => {
+    const unknownMcp = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true },
+      liveSession: { connected: false, connecting: false, sessionId: null },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: { armed: false, detectorState: "idle" },
+      visual: { packLoadStatus: "idle", diagnostic: null }
+    })
+
+    expect(unknownMcp.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "MCP persona_visuals",
+          value: "Unknown",
+          state: "degraded"
+        })
+      ])
+    )
+    expect(unknownMcp.state).toBe("degraded")
+
+    const unknownPersonaCapability = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasMcp: true },
+      liveSession: { connected: false, connecting: false, sessionId: null },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: { armed: false, detectorState: "idle" },
+      visual: { packLoadStatus: "idle", diagnostic: null }
+    })
+
+    expect(unknownPersonaCapability.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Server capability",
+          value: "Persona unavailable",
+          state: "unavailable"
+        })
+      ])
+    )
+    expect(unknownPersonaCapability.state).toBe("unavailable")
+  })
+
+  it("surfaces live session last events in the session diagnostics row", () => {
+    const diagnostics = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loaded",
+      buddySummary: "Ready",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: {
+        connected: true,
+        connecting: false,
+        sessionId: "session-1",
+        lastEvent: "ws_open"
+      },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: { armed: false, detectorState: "idle" },
+      visual: { packLoadStatus: "idle", diagnostic: null }
+    })
+
+    expect(diagnostics.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Live session",
+          detail: "Session session-1 - Last event: ws_open"
+        })
       ])
     )
   })
