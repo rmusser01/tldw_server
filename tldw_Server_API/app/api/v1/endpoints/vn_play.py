@@ -314,12 +314,12 @@ def restore_checkpoint(
     service: VNPlayService = Depends(_service),
 ) -> VNPlaySessionResponse:
     try:
-        service.restore_checkpoint(
+        restore_response = service.restore_checkpoint(
             session_id,
             request.checkpoint_id,
             idempotency_key=request.idempotency_key,
         )
-        return _session_response(service, service.get_session(session_id))
+        return _checkpoint_restore_session_response(restore_response)
     except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
         raise _http_error_for_service_exception(exc) from exc
 
@@ -368,6 +368,19 @@ def _session_response(
     scene_state = _scene_state(service, session.id)
     payload["current_scene"] = scene_state
     payload["scene_state"] = scene_state
+    return VNPlaySessionResponse.model_validate(payload)
+
+
+def _checkpoint_restore_session_response(
+    restore_response: dict[str, Any],
+) -> VNPlaySessionResponse:
+    payload = dict(restore_response["session"])
+    payload["deleted"] = False
+    scene_state = restore_response.get("current_scene")
+    if scene_state is not None:
+        scene_state_payload = dict(scene_state)
+        payload["current_scene"] = scene_state_payload
+        payload["scene_state"] = scene_state_payload
     return VNPlaySessionResponse.model_validate(payload)
 
 

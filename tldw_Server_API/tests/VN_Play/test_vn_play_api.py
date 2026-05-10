@@ -770,15 +770,28 @@ def test_checkpoint_restore_passes_idempotency_key_and_replays(
         f"/api/v1/vn-play/sessions/{session_id}/restore",
         json=restore_payload,
     )
+    assert first_restore.status_code == 200
+    first_restore_body = first_restore.json()
+    assert first_restore_body["scene_version"] == 3
+
+    third_turn = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/turn",
+        json={
+            "input_text": "Third",
+            "client_scene_version": first_restore_body["scene_version"],
+            "idempotency_key": "api-checkpoint-third-turn",
+        },
+    )
+    assert third_turn.status_code == 200
+    assert third_turn.json()["scene_version"] == 4
+
     second_restore = client.post(
         f"/api/v1/vn-play/sessions/{session_id}/restore",
         json=restore_payload,
     )
 
-    assert first_restore.status_code == 200
     assert second_restore.status_code == 200
-    assert first_restore.json()["scene_version"] == 3
-    assert second_restore.json()["scene_version"] == 3
+    assert second_restore.json() == first_restore_body
 
 
 @pytest.mark.asyncio
