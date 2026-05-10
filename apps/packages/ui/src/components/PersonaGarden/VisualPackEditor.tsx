@@ -77,6 +77,7 @@ import {
   classifyPersonaVisualGenerationReadiness,
   type PersonaVisualGenerationReadinessView
 } from "./personaVisualGenerationReadiness"
+import { VisualPackReusePanel } from "./VisualPackReusePanel"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -582,6 +583,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
+  const draftTitleInputRef = React.useRef<HTMLInputElement | null>(null)
+  const duplicateTargetSelectRef = React.useRef<HTMLSelectElement | null>(null)
+  const libraryPanelRef = React.useRef<HTMLDivElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
   const libraryRequestIdRef = React.useRef(0)
@@ -896,6 +900,26 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     },
     []
   )
+
+  const focusDraftTitleInput = React.useCallback(() => {
+    draftTitleInputRef.current?.focus()
+  }, [])
+
+  const focusLibraryPanel = React.useCallback(() => {
+    libraryPanelRef.current?.scrollIntoView?.({ block: "start" })
+    libraryPanelRef.current?.focus()
+  }, [])
+
+  const openImportArchivePicker = React.useCallback(() => {
+    importPreviewInputRef.current?.scrollIntoView?.({ block: "center" })
+    importPreviewInputRef.current?.click()
+    importPreviewInputRef.current?.focus()
+  }, [])
+
+  const focusDuplicateControls = React.useCallback(() => {
+    duplicateTargetSelectRef.current?.scrollIntoView?.({ block: "center" })
+    duplicateTargetSelectRef.current?.focus()
+  }, [])
 
   const handleCreateDraft = async () => {
     const title = draftTitle.trim()
@@ -1897,6 +1921,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           <label className="text-xs text-text-muted">
             <span className="mb-1 block">New draft title</span>
             <input
+              ref={draftTitleInputRef}
               data-testid="persona-visual-pack-title-input"
               className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
               value={draftTitle}
@@ -1999,6 +2024,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         ) : null}
       </div>
 
+      <VisualPackReusePanel
+        selectedPersonaName={selectedPersonaName || selectedPersonaId}
+        hasSelectedPack={Boolean(selectedPack)}
+        canImport={Boolean(selectedPack)}
+        libraryItemCount={libraryItems.length}
+        hasDuplicateTargets={availableDuplicateTargets.length > 0}
+        duplicateTargetsLoading={duplicateTargetsLoading}
+        onCreateDraft={focusDraftTitleInput}
+        onOpenLibrary={focusLibraryPanel}
+        onOpenImport={openImportArchivePicker}
+        onOpenDuplicate={focusDuplicateControls}
+      />
+
       {error ? (
         <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
           {error}
@@ -2011,7 +2049,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       ) : null}
 
       <div
+        ref={libraryPanelRef}
         data-testid="persona-visual-library-panel"
+        tabIndex={-1}
         className="rounded-lg border border-border bg-surface p-3"
       >
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -2145,6 +2185,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   <label className="text-xs text-text-muted">
                     <span className="mb-1 block">Target persona</span>
                     <select
+                      ref={duplicateTargetSelectRef}
                       data-testid="persona-visual-duplicate-target-select"
                       className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
                       value={duplicateTargetId}

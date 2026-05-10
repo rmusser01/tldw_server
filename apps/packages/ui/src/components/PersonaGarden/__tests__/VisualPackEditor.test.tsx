@@ -386,6 +386,152 @@ describe("VisualPackEditor", () => {
     )
   })
 
+  it("surfaces reusable visual-pack routes through existing editor controls", async () => {
+    const clickFileInput = vi
+      .spyOn(HTMLInputElement.prototype, "click")
+      .mockImplementation(() => undefined)
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const libraryItem = {
+      id: "library-1",
+      user_id: "user-1",
+      source_persona_id: "persona-1",
+      source_pack_id: "pack-1",
+      title: "Saved animated pack",
+      notes: "Reusable idle and speaking poses.",
+      tags: ["idle"],
+      source_persona_name: "Source Persona",
+      source_pack_title: "Animated pack",
+      source_pack_version: 3,
+      source_current_version: 3,
+      source_available: true,
+      source_changed: false,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 2
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Research Buddy" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [libraryItem] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Source Persona"
+        isActive
+      />
+    )
+
+    const reusePanel = await screen.findByTestId("persona-visual-reuse-panel")
+    expect(reusePanel).toHaveTextContent("Reuse visual packs")
+    expect(reusePanel).toHaveTextContent("user-owned")
+    expect(reusePanel).not.toHaveTextContent(/marketplace/i)
+    expect(reusePanel).not.toHaveTextContent(/\bVN\b/)
+    expect(reusePanel).not.toHaveTextContent(/CYOA/i)
+
+    fireEvent.click(within(reusePanel).getByRole("button", { name: /create draft/i }))
+    expect(screen.getByTestId("persona-visual-pack-title-input")).toHaveFocus()
+
+    fireEvent.click(
+      within(reusePanel).getByRole("button", { name: /use personal library/i })
+    )
+    expect(screen.getByTestId("persona-visual-library-panel")).toHaveFocus()
+
+    await waitFor(() =>
+      expect(
+        within(reusePanel).getByRole("button", { name: /duplicate to persona/i })
+      ).toBeEnabled()
+    )
+    fireEvent.click(
+      within(reusePanel).getByRole("button", { name: /duplicate to persona/i })
+    )
+    expect(screen.getByTestId("persona-visual-duplicate-target-select")).toHaveFocus()
+
+    fireEvent.click(within(reusePanel).getByRole("button", { name: /import archive/i }))
+    expect(clickFileInput).toHaveBeenCalled()
+  })
+
+  it("keeps duplicate reuse unavailable until a pack and another persona exist", async () => {
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([])
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Solo Persona" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Solo Persona"
+        isActive
+      />
+    )
+
+    const reusePanel = await screen.findByTestId("persona-visual-reuse-panel")
+    expect(reusePanel).toHaveTextContent("No saved visual packs yet")
+    expect(reusePanel).toHaveTextContent("Save a pack here first")
+    expect(reusePanel).not.toHaveTextContent("Use one to create")
+    expect(reusePanel).toHaveTextContent("Select a pack before duplicating")
+    expect(
+      within(reusePanel).getByRole("button", { name: /duplicate to persona/i })
+    ).toBeDisabled()
+    expect(within(reusePanel).getByRole("button", { name: /import archive/i })).toBeDisabled()
+    expect(
+      within(reusePanel).getByRole("button", { name: /use personal library/i })
+    ).toBeEnabled()
+  })
+
   it("loads pack list, creates a draft pack, and uploads the selected asset role", async () => {
     let packs: any[] = []
     const uploadedAssets: any[] = []

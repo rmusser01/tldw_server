@@ -42,9 +42,10 @@ leaving the Persona workflow.
 The implementation now covers the core data model, renderer, API, editor, Jobs
 flow, MCP module, E2E runtime behavior, Buddy entry point, diagnostics, setup
 states, ownership/help copy, duplicate-to-persona drafts, and a reference-backed
-personal pack library. The remaining product gap is optional Phase 3
-externalization: richer import/export conflict choices, external visual
-providers, shared/cross-device libraries, and future renderer adapters.
+personal pack library, import conflict choices, and reusable Persona Garden
+affordances. The remaining product gap is optional Phase 3 externalization:
+external visual providers, shared/cross-device libraries, and future renderer
+adapters.
 
 ---
 
@@ -136,6 +137,10 @@ Implemented foundations include:
 17. Import preview conflict choices for target title matches, including
     create-new-draft and reviewed draft replacement while preserving separate
     activation.
+18. Persona Garden reusable visual-pack decision surface that routes create
+    draft, personal library, import archive preview, and duplicate-to-persona
+    actions into the existing controls while preserving draft/review-before-
+    activation semantics.
 
 ---
 
