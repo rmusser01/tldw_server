@@ -22,20 +22,6 @@ export type McpHubWorkflowDefinition = {
   defaultView: McpHubViewKey
 }
 
-export const MCP_HUB_VIEW_KEYS = [
-  "tool-catalogs",
-  "credentials",
-  "profiles",
-  "assignments",
-  "approvals",
-  "path-scopes",
-  "capability-mappings",
-  "workspace-sets",
-  "shared-workspaces",
-  "governance-packs",
-  "audit"
-] as const satisfies readonly McpHubViewKey[]
-
 export const MCP_HUB_VIEW_LABELS = {
   "tool-catalogs": "Tool Catalog",
   credentials: "Servers & Credentials",
@@ -49,6 +35,10 @@ export const MCP_HUB_VIEW_LABELS = {
   "governance-packs": "Governance Packs",
   audit: "Audit Findings"
 } as const satisfies Record<McpHubViewKey, string>
+
+export const MCP_HUB_VIEW_KEYS = Object.keys(
+  MCP_HUB_VIEW_LABELS
+) as McpHubViewKey[]
 
 export const MCP_HUB_WORKFLOWS = {
   setup: {
@@ -111,7 +101,7 @@ const viewToWorkflow = MCP_HUB_WORKFLOW_ORDER.reduce(
     }
     return mapping
   },
-  {} as Record<McpHubViewKey, McpHubWorkflowKey>
+  {} as Partial<Record<McpHubViewKey, McpHubWorkflowKey>>
 )
 
 export const isMcpHubWorkflowKey = (
@@ -124,7 +114,13 @@ export const isMcpHubViewKey = (
 
 export const workflowForMcpHubView = (
   view: McpHubViewKey
-): McpHubWorkflowKey => viewToWorkflow[view]
+): McpHubWorkflowKey => {
+  const workflow = viewToWorkflow[view]
+  if (!workflow) {
+    throw new Error(`MCP Hub view "${view}" is not assigned to a workflow.`)
+  }
+  return workflow
+}
 
 export const getDefaultMcpHubView = (
   workflow: McpHubWorkflowKey
@@ -149,10 +145,6 @@ export const resolveMcpHubRouteState = ({
       workflow,
       view: getDefaultMcpHubView(workflow)
     }
-  }
-
-  if (view) {
-    return DEFAULT_MCP_HUB_ROUTE_STATE
   }
 
   return DEFAULT_MCP_HUB_ROUTE_STATE

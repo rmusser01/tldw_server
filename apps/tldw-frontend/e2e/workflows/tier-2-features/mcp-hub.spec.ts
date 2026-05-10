@@ -73,19 +73,7 @@ test.describe("MCP Hub", () => {
         await mcpHub.expectWorkflowSelected(workflow)
       }
 
-      for (const view of [
-        "assignments",
-        "path-scopes",
-        "workspace-sets",
-        "shared-workspaces",
-        "audit",
-        "approvals",
-        "governance-packs",
-        "capability-mappings",
-        "tool-catalogs",
-        "credentials",
-        "profiles",
-      ] as const) {
+      for (const view of MCPHubPage.VIEW_KEYS) {
         await mcpHub.selectView(view)
         await mcpHub.expectViewSelected(view)
       }

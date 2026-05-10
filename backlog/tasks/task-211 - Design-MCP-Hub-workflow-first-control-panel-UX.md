@@ -3,7 +3,7 @@ id: TASK-211
 title: Design MCP Hub workflow-first control panel UX
 status: Done
 assignee:
-  - Codex
+  - '@Codex'
 created_date: '2026-05-10 02:39'
 updated_date: '2026-05-10 02:52'
 labels:

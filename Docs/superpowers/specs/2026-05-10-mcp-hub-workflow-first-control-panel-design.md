@@ -9,7 +9,7 @@ Backlog: TASK-211
 
 Redesign the MCP Hub control panel from an object-centric tab list into a workflow-first hub for WebUI and extension users.
 
-The current shared page in [McpHubPage.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx) exposes 11 peer tabs: Tool Catalog, Servers & Credentials, Profiles, Assignments, Approvals, Path Scopes, Capability Mappings, Workspace Sets, Shared Workspaces, Governance Packs, and Audit. Those are accurate backend concepts, but they ask users to already understand the MCP control plane before they can complete a basic task.
+The current shared page in [McpHubPage.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx) exposes 11 peer tabs: Tool Catalog, Servers & Credentials, Profiles, Assignments, Approvals, Path Scopes, Capability Mappings, Workspace Sets, Shared Workspaces, Governance Packs, and Audit. Those are accurate backend concepts, but they ask users to already understand the MCP control plane before they can complete a basic task.
 
 The approved direction is the heavier workflow-first redesign. The new page should organize the same underlying capabilities around the jobs users are trying to complete:
 
@@ -66,30 +66,30 @@ From a senior UX/HCI perspective, the core issue is a mismatch between the syste
 
 ### Shared route and page
 
-- [apps/tldw-frontend/pages/mcp-hub.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/mcp-hub.tsx) dynamically imports the shared route.
-- [apps/packages/ui/src/routes/option-mcp-hub.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/routes/option-mcp-hub.tsx) renders `McpHubPage` inside the option layout.
-- [apps/tldw-frontend/extension/routes/option-mcp-hub.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/extension/routes/option-mcp-hub.tsx) renders the same shared `McpHubPage` through the extension route.
-- [apps/packages/ui/src/routes/option-settings-mcp-hub.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/routes/option-settings-mcp-hub.tsx) redirects `/settings/mcp-hub` to `/mcp-hub`.
+- [apps/tldw-frontend/pages/mcp-hub.tsx](../../../apps/tldw-frontend/pages/mcp-hub.tsx) dynamically imports the shared route.
+- [apps/packages/ui/src/routes/option-mcp-hub.tsx](../../../apps/packages/ui/src/routes/option-mcp-hub.tsx) renders `McpHubPage` inside the option layout.
+- [apps/tldw-frontend/extension/routes/option-mcp-hub.tsx](../../../apps/tldw-frontend/extension/routes/option-mcp-hub.tsx) renders the same shared `McpHubPage` through the extension route.
+- [apps/packages/ui/src/routes/option-settings-mcp-hub.tsx](../../../apps/packages/ui/src/routes/option-settings-mcp-hub.tsx) redirects `/settings/mcp-hub` to `/mcp-hub`.
 
 ### Current MCP Hub component set
 
 The current components already map cleanly into workflow groups:
 
-- [ToolCatalogsTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx)
-- [ExternalServersTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx)
-- [PermissionProfilesTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/PermissionProfilesTab.tsx)
-- [PolicyAssignmentsTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/PolicyAssignmentsTab.tsx)
-- [PathScopesTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/PathScopesTab.tsx)
-- [WorkspaceSetsTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/WorkspaceSetsTab.tsx)
-- [SharedWorkspacesTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/SharedWorkspacesTab.tsx)
-- [ApprovalPoliciesTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/ApprovalPoliciesTab.tsx)
-- [GovernancePacksTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/GovernancePacksTab.tsx)
-- [CapabilityMappingsTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/CapabilityMappingsTab.tsx)
-- [GovernanceAuditTab.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/GovernanceAuditTab.tsx)
+- [ToolCatalogsTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx)
+- [ExternalServersTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx)
+- [PermissionProfilesTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/PermissionProfilesTab.tsx)
+- [PolicyAssignmentsTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/PolicyAssignmentsTab.tsx)
+- [PathScopesTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/PathScopesTab.tsx)
+- [WorkspaceSetsTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/WorkspaceSetsTab.tsx)
+- [SharedWorkspacesTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/SharedWorkspacesTab.tsx)
+- [ApprovalPoliciesTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/ApprovalPoliciesTab.tsx)
+- [GovernancePacksTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/GovernancePacksTab.tsx)
+- [CapabilityMappingsTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/CapabilityMappingsTab.tsx)
+- [GovernanceAuditTab.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/GovernanceAuditTab.tsx)
 
 ### Service contract
 
-[mcp-hub.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/mcp-hub.ts) already exposes typed client calls for:
+[mcp-hub.ts](../../../apps/packages/ui/src/services/tldw/mcp-hub.ts) already exposes typed client calls for:
 
 - tool registry summary
 - external servers and credential slots
@@ -488,9 +488,9 @@ Deliverables:
 
 Primary files:
 
-- [McpHubPage.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx)
-- new workflow config/component files under [MCPHub](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub)
-- [mcp-hub.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/mcp-hub.ts) for type reuse only
+- [McpHubPage.tsx](../../../apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx)
+- new workflow config/component files under [MCPHub](../../../apps/packages/ui/src/components/Option/MCPHub)
+- [mcp-hub.ts](../../../apps/packages/ui/src/services/tldw/mcp-hub.ts) for type reuse only
 
 ### Stage 2: Readiness summaries and first-use flow
 
@@ -532,7 +532,7 @@ These are intentionally outside the first shell slice.
 
 ### Unit and component tests
 
-Add or update focused tests under [apps/packages/ui/src/components/Option/MCPHub/__tests__](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/__tests__).
+Add or update focused tests under [apps/packages/ui/src/components/Option/MCPHub/__tests__](../../../apps/packages/ui/src/components/Option/MCPHub/__tests__).
 
 Stage 1 expectations:
 
@@ -561,7 +561,7 @@ Required checks:
 
 ### E2E
 
-Update [mcp-hub.spec.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts):
+Update [mcp-hub.spec.ts](../../../apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts):
 
 - page loads with MCP Hub heading and workflow navigation
 - page-object helpers move from tab-only `switchToTab` locators to workflow/view selection helpers

@@ -151,10 +151,12 @@ export class MCPHubPage extends BasePage {
 
   async selectWorkflow(workflow: MCPHubWorkflowKey): Promise<void> {
     await this.workflowButton(workflow).click()
+    await this.expectWorkflowSelected(workflow)
   }
 
   async selectView(view: MCPHubViewKey): Promise<void> {
     await this.selectWorkflow(VIEW_TO_WORKFLOW[view])
+    await expect(this.viewTabControl(view)).toBeVisible()
     await this.viewTab(view).click()
   }
 

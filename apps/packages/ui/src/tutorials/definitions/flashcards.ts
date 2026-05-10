@@ -12,14 +12,14 @@ const flashcardsBasics: TutorialDefinition = {
   labelFallback: "Flashcards Basics",
   descriptionKey: "tutorials:flashcards.basics.description",
   descriptionFallback:
-    "Use study, manage, and import / export flows to maintain spaced-repetition decks",
+    "Use study, manage, and transfer flows to maintain spaced-repetition decks",
   icon: Library,
   priority: 1,
   steps: [
     {
       target: '[data-testid="flashcards-tabs"]',
       titleKey: "tutorials:flashcards.basics.tabsTitle",
-      titleFallback: "Study, Manage, Import / Export",
+      titleFallback: "Study, Manage, Transfer",
       contentKey: "tutorials:flashcards.basics.tabsContent",
       contentFallback:
         "Switch tabs to study cards, manage deck contents, and import / export card data.",
@@ -46,11 +46,11 @@ const flashcardsBasics: TutorialDefinition = {
     },
     {
       target: '[data-testid="flashcards-import-format"], [data-testid="flashcards-import-help-accordion"]',
-      titleKey: "tutorials:flashcards.basics.importExportTitle",
-      titleFallback: "Import / Export Tab",
-      contentKey: "tutorials:flashcards.basics.importExportContent",
+      titleKey: "tutorials:flashcards.basics.transferTitle",
+      titleFallback: "Transfer Tab",
+      contentKey: "tutorials:flashcards.basics.transferContent",
       contentFallback:
-        "Use Import / Export for CSV/JSON/APKG import and export workflows.",
+        "Use Transfer for CSV/JSON/APKG import and export workflows.",
       placement: "left"
     },
     {
