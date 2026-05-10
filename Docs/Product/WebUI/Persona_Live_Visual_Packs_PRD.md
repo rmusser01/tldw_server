@@ -6,7 +6,7 @@ Feature: User-owned animated 2D visual packs for Persona Buddy and Persona Live
 Location: WebUI Persona Garden and shared Persona Buddy shell
 Status: Draft product record
 Owner: Product / WebUI / Persona
-Last Updated: 2026-05-09
+Last Updated: 2026-05-10
 
 ---
 
@@ -41,10 +41,10 @@ leaving the Persona workflow.
 
 The implementation now covers the core data model, renderer, API, editor, Jobs
 flow, MCP module, E2E runtime behavior, Buddy entry point, diagnostics, setup
-states, and ownership/help copy. The remaining product gap is optional Phase 3
-externalization: duplication between personas, personal libraries, richer
-import/export conflict choices, external visual providers, and future renderer
-adapters.
+states, ownership/help copy, duplicate-to-persona drafts, and a reference-backed
+personal pack library. The remaining product gap is optional Phase 3
+externalization: richer import/export conflict choices, external visual
+providers, shared/cross-device libraries, and future renderer adapters.
 
 ---
 
@@ -127,6 +127,12 @@ Implemented foundations include:
     user-owned assets, one-persona default attachment, manifest-backed packs,
     active versus available pack behavior, import preview/commit, export, and
     generated-candidate review.
+15. Same-user duplicate-to-persona flow for copying a pack to another persona
+    as a draft that still requires review and activation.
+16. Personal library foundation for saving user-scoped metadata references to
+    existing visual packs, listing available/source-changed/unavailable entries,
+    editing/removing entries, and using an available entry to create a target
+    persona draft through duplicate semantics.
 
 ---
 
@@ -292,13 +298,30 @@ by PR #1135 asset-pack portability:
 4. upload archives for review-only preview.
 5. require explicit commit/activation decisions.
 
-### FR-11: MCP Runtime State Control
+### FR-11: Personal Visual Pack Library
+
+Users SHOULD be able to save an existing same-user visual pack into a personal
+library as metadata, not as an immediate asset copy. V1 library entries are
+user-scoped references to a source persona and source pack with display
+snapshots so stale entries can still be shown and removed.
+
+Saving the same source pack SHOULD be idempotent. Using a library item SHOULD
+duplicate the referenced source pack to the chosen target persona as a draft and
+MUST NOT activate the target persona. Stale or deleted source entries SHOULD
+remain visible as unavailable, MUST be removable, and MUST NOT be usable.
+
+V1 is not a shared marketplace, public library, or cross-user sharing system.
+Future duplicate-to-another-persona, import/export, and shared-library features
+should reuse the manifest-backed pack format rather than changing the core
+asset model.
+
+### FR-12: MCP Runtime State Control
 
 The internal `persona_visuals` MCP module MAY trigger bounded runtime visual
 state overrides. Overrides MUST be named-state only, scoped to persona/session,
 duration-limited, and auditable.
 
-### FR-12: MCP Durable Changes
+### FR-13: MCP Durable Changes
 
 MCP durable actions MUST create drafts, manifest updates, generation jobs, or
 review items. They MUST NOT silently activate packs.
@@ -365,6 +388,16 @@ review items. They MUST NOT silently activate packs.
    - review status
    - warning/failure metadata
 
+4. `PersonaVisualLibraryItem`
+   - id
+   - user id
+   - source persona id and source pack id when still available
+   - title, notes, and tags
+   - source persona and pack display snapshots
+   - source pack version and current source version
+   - source available/source changed flags
+   - version and timestamps
+
 ### Current API Surface
 
 Current persona-scoped API routes include:
@@ -385,6 +418,11 @@ Current persona-scoped API routes include:
 14. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/import-previews`
 15. `GET /api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview_id}`
 16. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview_id}/commit`
+17. `GET /api/v1/persona/visual-library`
+18. `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/library`
+19. `PATCH /api/v1/persona/visual-library/{item_id}`
+20. `DELETE /api/v1/persona/visual-library/{item_id}`
+21. `POST /api/v1/persona/visual-library/{item_id}/use`
 
 ---
 
@@ -429,14 +467,15 @@ The portability model should stay aligned with PR #1135:
    product decision allows direct replacement.
 7. Activation remains separate from import commit.
 
-Future work may add:
+Current and future portability/library work:
 
-1. duplicate to another persona. First implementation target: same-user draft
-   duplication (#1450).
-2. shared user library.
-3. cross-device sync.
-4. signed community packs.
-5. external MCP-compatible pack providers.
+1. Duplicate to another persona creates a same-user draft copy (#1450).
+2. Personal visual-pack library V1 stores user-scoped references to existing
+   source packs and creates target drafts through duplicate semantics (#1468).
+3. Future shared user libraries should be layered on top of the manifest-backed
+   pack format rather than replacing it.
+4. Future cross-device sync, signed community packs, and external
+   MCP-compatible pack providers remain out of scope for V1.
 
 ---
 
@@ -493,15 +532,18 @@ Completed Product Hardening includes:
 
 ### Phase 3: Library and Externalization
 
-Phase 3 is optional future product work, not required for the current
-Persona/Buddy visual-pack baseline:
+Phase 3 is optional product work beyond the original Persona/Buddy visual-pack
+baseline. The first reference-backed V1 slices are now covered:
 
-1. Duplicate pack to another persona. First implementation target: same-user
-   draft duplication (#1450).
-2. Personal shared visual-pack library.
-3. Import/export polish and conflict choices.
-4. External MCP-compatible visual providers.
-5. Live2D or other renderer adapter after the sprite/frame path is stable.
+1. Duplicate pack to another persona: complete for same-user draft duplication
+   (#1450).
+2. Personal visual-pack library: complete for user-owned, reference-backed
+   save/list/edit/remove/use in Persona Garden (#1468).
+3. Import/export polish and conflict choices remain future work.
+4. Shared/cross-device libraries remain future work.
+5. External MCP-compatible visual providers remain future work.
+6. Live2D or other renderer adapter remains future work after the sprite/frame
+   path is stable.
 
 ---
 
@@ -575,7 +617,8 @@ E2E:
 4. Which image generation provider path should be the default first-run
    recommendation?
 5. Should users be able to mark packs as reusable templates before shared
-   libraries exist?
+   libraries exist, or does the personal reference-backed library cover that
+   near-term need?
 6. Which visual state names should become externally documented for future MCP
    providers?
 
@@ -596,3 +639,4 @@ E2E:
 8. PR #1447 / issue #1429: Persona visual pack ownership/help copy.
 9. Issue #1428: Completed Persona/Buddy visual-pack Product Hardening tracker.
 10. Issue #1450: Same-user Persona Visual pack duplicate-to-persona draft flow.
+11. Issue #1468: Personal Persona Visual pack library foundation.

@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Persona.visual_library_service import PersonaVisualLibraryServiceError
 
 
 pytestmark = pytest.mark.unit
@@ -266,8 +267,220 @@ def test_duplicate_visual_pack_rejects_other_user_target(persona_db: CharactersR
             json={"target_persona_id": other_persona_id},
         )
 
-        assert response.status_code == 404
-        assert response.json()["detail"]["code"] == "target_persona_not_found"
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "target_persona_not_found"
+
+
+def test_visual_library_save_list_update_and_delete(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Library Source Persona")
+        pack = _create_visual_pack(client, persona_id, title="Library Source Pack")
+
+        saved = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/library",
+            json={
+                "title": "Desk helper",
+                "notes": "Good for focused research.",
+                "tags": ["Research", "calm", "research"],
+            },
+        )
+        assert saved.status_code == 201, saved.text
+        item = saved.json()
+        assert item["source_persona_id"] == persona_id
+        assert item["source_pack_id"] == pack["id"]
+        assert item["source_available"] is True
+        assert item["tags"] == ["research", "calm"]
+        assert "source_persona_name_snapshot" not in item
+        assert "source_pack_title_snapshot" not in item
+
+        listed = client.get("/api/v1/persona/visual-library")
+        assert listed.status_code == 200, listed.text
+        assert [entry["id"] for entry in listed.json()["items"]] == [item["id"]]
+        assert "source_persona_name_snapshot" not in listed.json()["items"][0]
+        assert "source_pack_title_snapshot" not in listed.json()["items"][0]
+
+        updated = client.patch(
+            f"/api/v1/persona/visual-library/{item['id']}",
+            json={"title": "Updated helper", "notes": None, "tags": ["focus"]},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["title"] == "Updated helper"
+        assert updated.json()["notes"] is None
+        assert updated.json()["tags"] == ["focus"]
+
+        resaved = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/library",
+            json={},
+        )
+        assert resaved.status_code == 201, resaved.text
+        assert resaved.json()["id"] == item["id"]
+        assert resaved.json()["title"] == "Updated helper"
+        assert resaved.json()["notes"] is None
+        assert resaved.json()["tags"] == ["focus"]
+
+        deleted = client.delete(f"/api/v1/persona/visual-library/{item['id']}")
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json() == {"status": "deleted", "item_id": item["id"]}
+
+        listed_after_delete = client.get("/api/v1/persona/visual-library")
+        assert listed_after_delete.status_code == 200
+        assert listed_after_delete.json()["items"] == []
+
+
+def test_visual_library_use_creates_target_draft_without_activation(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        source_persona_id = _create_persona(client, name="Library Use Source")
+        target_persona_id = _create_persona(client, name="Library Use Target")
+        source_pack = _create_visual_pack(client, source_persona_id, title="Source Library Pack")
+        target_pack = _create_visual_pack(client, target_persona_id, title="Target Active Pack")
+        asset = _upload_png(client, source_persona_id, source_pack["id"])
+        target_asset = _upload_png(client, target_persona_id, target_pack["id"])
+        manifest_response = client.patch(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/manifest",
+            json={"manifest": _valid_manifest(asset["id"]), "expected_version": source_pack["version"]},
+        )
+        assert manifest_response.status_code == 200, manifest_response.text
+        source_pack = manifest_response.json()
+        target_manifest_response = client.patch(
+            f"/api/v1/persona/profiles/{target_persona_id}/visual-packs/{target_pack['id']}/manifest",
+            json={"manifest": _valid_manifest(target_asset["id"]), "expected_version": target_pack["version"]},
+        )
+        assert target_manifest_response.status_code == 200, target_manifest_response.text
+        target_pack = target_manifest_response.json()
+        source_active = client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/activate"
+        )
+        assert source_active.status_code == 200, source_active.text
+        target_active = client.post(
+            f"/api/v1/persona/profiles/{target_persona_id}/visual-packs/{target_pack['id']}/activate"
+        )
+        assert target_active.status_code == 200, target_active.text
+        saved = client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/library",
+            json={"title": "Reusable library pack"},
+        )
+        assert saved.status_code == 201, saved.text
+        item_id = saved.json()["id"]
+
+        used = client.post(
+            f"/api/v1/persona/visual-library/{item_id}/use",
+            json={"target_persona_id": target_persona_id, "title": "Target Draft From Library"},
+        )
+
+        assert used.status_code == 201, used.text
+        payload = used.json()
+        assert payload["title"] == "Target Draft From Library"
+        assert payload["persona_id"] == target_persona_id
+        assert payload["status"] == "draft"
+        assert payload["parent_pack_id"] == source_pack["id"]
+        assert len(payload["assets"]) == 1
+        assert payload["assets"][0]["id"] != asset["id"]
+        assert persona_db.get_active_persona_visual_pack(
+            persona_id=source_persona_id,
+            user_id="1",
+        )["id"] == source_pack["id"]
+        assert persona_db.get_active_persona_visual_pack(
+            persona_id=target_persona_id,
+            user_id="1",
+        )["id"] == target_pack["id"]
+
+
+def test_visual_library_stale_source_returns_409_but_delete_succeeds(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        source_persona_id = _create_persona(client, name="Stale Library Source")
+        target_persona_id = _create_persona(client, name="Stale Library Target")
+        source_pack = _create_visual_pack(client, source_persona_id, title="Soon Stale Pack")
+        saved = client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/library",
+            json={"title": "Reusable stale pack"},
+        )
+        assert saved.status_code == 201, saved.text
+        item_id = saved.json()["id"]
+        assert persona_db.soft_delete_persona_visual_pack_with_assets(
+            pack_id=source_pack["id"],
+            persona_id=source_persona_id,
+            user_id="1",
+        )
+
+        listed = client.get("/api/v1/persona/visual-library")
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["items"][0]["source_available"] is False
+
+        used = client.post(
+            f"/api/v1/persona/visual-library/{item_id}/use",
+            json={"target_persona_id": target_persona_id},
+        )
+        assert used.status_code == 409
+        assert used.json()["detail"]["code"] == "source_pack_unavailable"
+
+        deleted = client.delete(f"/api/v1/persona/visual-library/{item_id}")
+        assert deleted.status_code == 200, deleted.text
+
+
+def test_visual_library_rejects_cross_user_item_source_and_target(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(2, persona_db) as other_client:
+        other_persona_id = _create_persona(other_client, name="Other Library Target")
+    with _client_for_user(1, persona_db) as client:
+        source_persona_id = _create_persona(client, name="Owner Library Source")
+        source_pack = _create_visual_pack(client, source_persona_id, title="Owner Library Pack")
+        saved = client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/library",
+            json={"title": "Private library item"},
+        )
+        assert saved.status_code == 201, saved.text
+        item_id = saved.json()["id"]
+
+        other_target = client.post(
+            f"/api/v1/persona/visual-library/{item_id}/use",
+            json={"target_persona_id": other_persona_id},
+        )
+        assert other_target.status_code == 404
+        assert other_target.json()["detail"]["code"] == "target_persona_not_found"
+
+    with _client_for_user(2, persona_db) as other_client:
+        save_other_source = other_client.post(
+            f"/api/v1/persona/profiles/{source_persona_id}/visual-packs/{source_pack['id']}/library",
+            json={"title": "Not mine"},
+        )
+        assert save_other_source.status_code == 404
+        assert save_other_source.json()["detail"]["code"] == "source_pack_not_found"
+
+        listed = other_client.get("/api/v1/persona/visual-library")
+        assert listed.status_code == 200
+        assert listed.json()["items"] == []
+
+        update_other_item = other_client.patch(
+            f"/api/v1/persona/visual-library/{item_id}",
+            json={"title": "Not mine"},
+        )
+        assert update_other_item.status_code == 404
+        assert update_other_item.json()["detail"]["code"] == "library_item_not_found"
+
+        use_other_item = other_client.post(
+            f"/api/v1/persona/visual-library/{item_id}/use",
+            json={"target_persona_id": other_persona_id},
+        )
+        assert use_other_item.status_code == 404
+        assert use_other_item.json()["detail"]["code"] == "library_item_not_found"
+
+
+def test_visual_library_error_mapper_returns_403_for_forbidden() -> None:
+    exc = PersonaVisualLibraryServiceError(
+        "forbidden",
+        "Library item does not belong to the current user.",
+        details={"item_id": "library-1"},
+    )
+
+    http_exc = persona_ep._persona_visual_library_service_error_to_http(exc)
+
+    assert http_exc.status_code == 403
+    assert http_exc.detail == {
+        "code": "forbidden",
+        "message": "Library item does not belong to the current user.",
+        "details": {"item_id": "library-1"},
+    }
 
 
 def test_upload_rejects_unsupported_mime_type(persona_db: CharactersRAGDB) -> None:

@@ -90,6 +90,12 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualImportCommitStartResponse,
     PersonaVisualImportPreviewResponse,
     PersonaVisualImportPreviewStartResponse,
+    PersonaVisualLibraryDeleteResponse,
+    PersonaVisualLibraryItemResponse,
+    PersonaVisualLibraryListResponse,
+    PersonaVisualLibrarySaveRequest,
+    PersonaVisualLibraryUpdateRequest,
+    PersonaVisualLibraryUseRequest,
     PersonaVisualManifestUpdate,
     PersonaVisualPackExportRequest,
     PersonaVisualPackExportResponse,
@@ -163,6 +169,10 @@ from tldw_Server_API.app.core.Persona.visual_service import (
     MAX_VISUAL_UPLOAD_BYTES,
     PersonaVisualService,
     PersonaVisualServiceError,
+)
+from tldw_Server_API.app.core.Persona.visual_library_service import (
+    PersonaVisualLibraryService,
+    PersonaVisualLibraryServiceError,
 )
 from tldw_Server_API.app.core.Persona.connections import (
     PERSONA_CONNECTION_STATUS_FIELD,
@@ -1910,6 +1920,12 @@ def get_persona_visual_service(
     return PersonaVisualService(db)
 
 
+def get_persona_visual_library_service(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualLibraryService:
+    return PersonaVisualLibraryService(db)
+
+
 def _build_persona_visual_generation_readiness(
     *,
     backend: str | None,
@@ -2041,6 +2057,27 @@ def _persona_visual_pack_to_response(
     )
 
 
+def _persona_visual_library_item_to_response(item: dict[str, Any]) -> PersonaVisualLibraryItemResponse:
+    return PersonaVisualLibraryItemResponse(
+        id=str(item.get("id") or ""),
+        user_id=str(item.get("user_id") or ""),
+        source_persona_id=item.get("source_persona_id"),
+        source_pack_id=item.get("source_pack_id"),
+        title=str(item.get("title") or ""),
+        notes=item.get("notes"),
+        tags=[str(tag) for tag in list(item.get("tags") or [])],
+        source_persona_name=item.get("source_persona_name"),
+        source_pack_title=item.get("source_pack_title"),
+        source_pack_version=item.get("source_pack_version"),
+        source_current_version=item.get("source_current_version"),
+        source_available=bool(item.get("source_available")),
+        source_changed=bool(item.get("source_changed")),
+        created_at=str(item.get("created_at") or _utc_now_iso()),
+        last_modified=str(item.get("last_modified") or item.get("created_at") or _utc_now_iso()),
+        version=int(item.get("version") or 1),
+    )
+
+
 def _persona_visual_candidate_to_response(
     candidate: dict[str, Any],
     *,
@@ -2100,6 +2137,22 @@ def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTT
         status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
     elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch"}:
         status_code = status.HTTP_409_CONFLICT
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": str(exc), "details": exc.details},
+    )
+
+
+def _persona_visual_library_service_error_to_http(exc: PersonaVisualLibraryServiceError) -> HTTPException:
+    status_code = status.HTTP_400_BAD_REQUEST
+    if exc.code in {"library_item_not_found", "source_pack_not_found", "target_persona_not_found"}:
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"forbidden"}:
+        status_code = status.HTTP_403_FORBIDDEN
+    elif exc.code in {"source_pack_unavailable", "library_item_conflict"}:
+        status_code = status.HTTP_409_CONFLICT
+    elif exc.code in {"invalid_library_metadata"}:
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     return HTTPException(
         status_code=status_code,
         detail={"code": exc.code, "message": str(exc), "details": exc.details},
@@ -3574,6 +3627,201 @@ async def get_persona_buddy(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona buddy") from exc
+
+
+@router.get(
+    "/visual-library",
+    response_model=PersonaVisualLibraryListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_library_items(
+    include_deleted: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryListResponse:
+    """List the current user's personal Persona Visual pack library."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        items = await _run_persona_db_call(
+            library_service.list_items,
+            user_id=user_id,
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset,
+        )
+        return PersonaVisualLibraryListResponse(
+            items=[_persona_visual_library_item_to_response(item) for item in items]
+        )
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona visual library") from exc
+
+
+@router.patch(
+    "/visual-library/{item_id}",
+    response_model=PersonaVisualLibraryItemResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def update_persona_visual_library_item(
+    item_id: str,
+    payload: PersonaVisualLibraryUpdateRequest,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryItemResponse:
+    """Update display metadata for one personal Persona Visual library item."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    update_kwargs: dict[str, Any] = {}
+    if "title" in payload.model_fields_set:
+        update_kwargs["title"] = payload.title
+    if "notes" in payload.model_fields_set:
+        update_kwargs["notes"] = payload.notes
+    if "tags" in payload.model_fields_set:
+        update_kwargs["tags"] = payload.tags
+    if not update_kwargs:
+        raise HTTPException(status_code=400, detail="No library item fields provided for update")
+
+    user_id = _require_current_user_id(_current_user)
+    try:
+        item = await _run_persona_db_call(
+            library_service.update_item,
+            user_id=user_id,
+            item_id=item_id,
+            expected_version=payload.expected_version,
+            **update_kwargs,
+        )
+        return _persona_visual_library_item_to_response(item)
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="update persona visual library item") from exc
+
+
+@router.delete(
+    "/visual-library/{item_id}",
+    response_model=PersonaVisualLibraryDeleteResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def delete_persona_visual_library_item(
+    item_id: str,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryDeleteResponse:
+    """Soft-delete one personal Persona Visual library item."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        deleted = await _run_persona_db_call(
+            library_service.delete_item,
+            user_id=user_id,
+            item_id=item_id,
+        )
+        if not deleted:
+            raise PersonaVisualLibraryServiceError(
+                "library_item_not_found",
+                "Persona Visual library item not found for user.",
+                details={"item_id": item_id},
+            )
+        return PersonaVisualLibraryDeleteResponse(status="deleted", item_id=item_id)
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="delete persona visual library item") from exc
+
+
+@router.post(
+    "/visual-library/{item_id}/use",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def use_persona_visual_library_item(
+    item_id: str,
+    payload: PersonaVisualLibraryUseRequest,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualPackResponse:
+    """Use a personal library item by duplicating its source pack to a target persona as a draft."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        duplicated = await _run_persona_db_call(
+            library_service.use_item_for_persona,
+            user_id=user_id,
+            item_id=item_id,
+            target_persona_id=payload.target_persona_id,
+            title=payload.title,
+        )
+        return _persona_visual_pack_to_response(
+            duplicated,
+            assets=list(duplicated.get("assets") or []),
+        )
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="use persona visual library item") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/library",
+    response_model=PersonaVisualLibraryItemResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def save_persona_visual_pack_to_library(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualLibrarySaveRequest,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryItemResponse:
+    """Save a same-user Persona Visual pack as a reference-backed personal library item."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        existing_item = await _run_persona_db_call(
+            library_service.get_item_for_source,
+            user_id=user_id,
+            source_persona_id=persona_id,
+            source_pack_id=pack_id,
+        )
+        provided_fields = payload.model_fields_set
+        existing_title = existing_item.get("title") if existing_item else None
+        existing_notes = existing_item.get("notes") if existing_item else None
+        existing_tags = existing_item.get("tags") if existing_item else None
+        title = payload.title if "title" in provided_fields else existing_title
+        notes = payload.notes if "notes" in provided_fields else existing_notes
+        tags = payload.tags if "tags" in provided_fields else existing_tags
+        item = await _run_persona_db_call(
+            library_service.save_pack,
+            user_id=user_id,
+            source_persona_id=persona_id,
+            source_pack_id=pack_id,
+            title=title,
+            notes=notes,
+            tags=tags,
+        )
+        return _persona_visual_library_item_to_response(item)
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="save persona visual pack to library") from exc
 
 
 @router.get(

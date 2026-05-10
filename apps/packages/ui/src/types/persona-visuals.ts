@@ -136,6 +136,52 @@ export interface PersonaVisualDuplicateTarget {
   name?: string | null
 }
 
+export interface PersonaVisualLibraryItem {
+  id: string
+  user_id?: string
+  source_persona_id?: string | null
+  source_pack_id?: string | null
+  title: string
+  notes?: string | null
+  tags: string[]
+  source_persona_name?: string | null
+  source_pack_title?: string | null
+  source_pack_version?: number | null
+  source_current_version?: number | null
+  source_available: boolean
+  source_changed: boolean
+  created_at?: string
+  last_modified?: string
+  version?: number
+}
+
+export interface PersonaVisualLibrarySaveRequest {
+  title?: string | null
+  notes?: string | null
+  tags?: string[]
+}
+
+export interface PersonaVisualLibraryUpdateRequest {
+  title?: string | null
+  notes?: string | null
+  tags?: string[] | null
+  expected_version?: number | null
+}
+
+export interface PersonaVisualLibraryUseRequest {
+  target_persona_id: string
+  title?: string | null
+}
+
+export interface PersonaVisualLibraryListResponse {
+  items: PersonaVisualLibraryItem[]
+}
+
+export interface PersonaVisualLibraryDeleteResponse {
+  status: "deleted"
+  item_id: string
+}
+
 export interface PersonaVisualManifestUpdate {
   manifest: PersonaVisualManifest | Record<string, unknown>
   expected_version?: number | null

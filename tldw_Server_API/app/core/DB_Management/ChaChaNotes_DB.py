@@ -581,7 +581,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 45  # Schema v45 adds persona visual packs and generation candidates
+    _CURRENT_SCHEMA_VERSION = 46  # Schema v46 adds persona visual library items
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -5261,6 +5261,73 @@ UPDATE db_schema_version
    AND version < 45;
 """
 
+    _MIGRATION_SQL_V45_TO_V46 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 46 — Persona visual personal library (2026-05-09)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS persona_visual_library_items (
+  id                            TEXT PRIMARY KEY,
+  user_id                       TEXT NOT NULL,
+  source_persona_id             TEXT REFERENCES persona_profiles(id) ON DELETE SET NULL,
+  source_pack_id                TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  title                         TEXT NOT NULL,
+  notes                         TEXT,
+  tags_json                     TEXT NOT NULL DEFAULT '[]',
+  source_pack_version           INTEGER,
+  created_at                    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                       BOOLEAN NOT NULL DEFAULT 0,
+  version                       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_library_items_user_time
+  ON persona_visual_library_items(user_id, deleted, last_modified);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_library_items_live_source
+  ON persona_visual_library_items(user_id, source_persona_id, source_pack_id)
+  WHERE deleted = 0 AND source_persona_id IS NOT NULL AND source_pack_id IS NOT NULL;
+
+UPDATE db_schema_version
+   SET version = 46
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 46;
+"""
+
+    _MIGRATION_SQL_V45_TO_V46_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 46 — Persona visual personal library (2026-05-09) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS persona_visual_library_items (
+  id                            TEXT PRIMARY KEY,
+  user_id                       TEXT NOT NULL,
+  source_persona_id             TEXT REFERENCES persona_profiles(id) ON DELETE SET NULL,
+  source_pack_id                TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  title                         TEXT NOT NULL,
+  notes                         TEXT,
+  tags_json                     TEXT NOT NULL DEFAULT '[]',
+  source_pack_version           INTEGER,
+  created_at                    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                       BOOLEAN NOT NULL DEFAULT FALSE,
+  version                       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_library_items_user_time
+  ON persona_visual_library_items(user_id, deleted, last_modified);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_library_items_live_source
+  ON persona_visual_library_items(user_id, source_persona_id, source_pack_id)
+  WHERE deleted = FALSE AND source_persona_id IS NOT NULL AND source_pack_id IS NOT NULL;
+
+UPDATE db_schema_version
+   SET version = 46
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 46;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7343,6 +7410,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V44->V45: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V45 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v45_to_v46(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V45 to V46 (persona visual library items)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V45 to V46 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V45_TO_V46)
+            final_version = self._get_db_version(conn)
+            if final_version != 46:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V45->V46 failed version check. Expected 46, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V46 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V45->V46 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V45->V46 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V45->V46: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V46 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
@@ -8695,6 +8782,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 45 and current_db_version == 44:
                         self._migrate_from_v44_to_v45(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 46 and current_db_version == 45:
+                        self._migrate_from_v45_to_v46(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -9040,6 +9130,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 self._migrate_from_v43_to_v44(conn)
                             elif fallback_version == 44:
                                 self._migrate_from_v44_to_v45(conn)
+                            elif fallback_version == 45:
+                                self._migrate_from_v45_to_v46(conn)
                             else:
                                 raise SchemaError(  # noqa: TRY003, TRY301
                                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
@@ -9150,6 +9242,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 45 and current_db_version == 44:
                     self._migrate_from_v44_to_v45(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 46 and current_db_version == 45:
+                    self._migrate_from_v45_to_v46(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -12967,6 +13062,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 45:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V44_TO_V45_POSTGRES, conn, expected_version=45)
                 current_version = 45
+            if current_version < 46:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V45_TO_V46_POSTGRES, conn, expected_version=46)
+                current_version = 46
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -23761,6 +23859,9 @@ for _persona_state_store_method in (
     "_persona_visual_pack_row_to_dict",
     "_persona_visual_asset_row_to_dict",
     "_persona_visual_candidate_row_to_dict",
+    "_persona_visual_library_item_row_to_dict",
+    "_normalize_persona_visual_library_tags",
+    "_require_persona_visual_library_item_owner",
     "_normalize_persona_visual_enum",
     "_require_persona_visual_pack_owner",
     "_persona_scope_rule_row_to_dict",
@@ -23794,6 +23895,12 @@ for _persona_state_store_method in (
     "update_persona_visual_pack_manifest",
     "update_persona_visual_pack_status",
     "soft_delete_persona_visual_pack_with_assets",
+    "upsert_persona_visual_library_item",
+    "list_persona_visual_library_items",
+    "get_persona_visual_library_item",
+    "get_persona_visual_library_item_by_source",
+    "update_persona_visual_library_item",
+    "soft_delete_persona_visual_library_item",
     "create_persona_visual_asset",
     "get_persona_visual_asset",
     "list_persona_visual_assets",

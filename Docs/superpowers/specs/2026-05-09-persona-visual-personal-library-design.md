@@ -76,8 +76,6 @@ CREATE TABLE persona_visual_library_items (
   title TEXT NOT NULL,
   notes TEXT,
   tags_json TEXT NOT NULL DEFAULT '[]',
-  source_persona_name_snapshot TEXT,
-  source_pack_title_snapshot TEXT,
   source_pack_version INTEGER,
   created_at DATETIME NOT NULL,
   last_modified DATETIME NOT NULL,
@@ -104,10 +102,12 @@ the API should surface `source_changed: true` so the UI can show a small status
 label.
 
 `source_persona_id` and `source_pack_id` are nullable so hard deletes or future
-maintenance operations do not delete or block the library entry. The snapshot
-name/title fields preserve enough display metadata to show stale entries and let
-users remove them. `source_available` is derived at read time from whether the
-source IDs are present and still resolve to non-deleted same-user records.
+maintenance operations do not delete or block the library entry. V1 stores no
+source display snapshots; stale entries remain listed and removable using the
+library item's own title while live source display fields are populated only
+from source rows that still resolve. `source_available` is derived at read time
+from whether the source IDs are present and still resolve to non-deleted
+same-user records.
 
 ## Library Item Shape
 
@@ -124,8 +124,6 @@ API responses should include:
   "source_available": true,
   "source_persona_name": "Research Buddy",
   "source_pack_title": "Warm desk assistant",
-  "source_persona_name_snapshot": "Research Buddy",
-  "source_pack_title_snapshot": "Warm desk assistant",
   "title": "Warm desk assistant",
   "notes": "Good default for focused research sessions.",
   "tags": ["research", "calm"],

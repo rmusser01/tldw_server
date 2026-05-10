@@ -15,6 +15,12 @@ import type {
   PersonaVisualImportCommitStartResponse,
   PersonaVisualImportPreviewResponse,
   PersonaVisualImportPreviewStartResponse,
+  PersonaVisualLibraryDeleteResponse,
+  PersonaVisualLibraryItem,
+  PersonaVisualLibraryListResponse,
+  PersonaVisualLibrarySaveRequest,
+  PersonaVisualLibraryUpdateRequest,
+  PersonaVisualLibraryUseRequest,
   PersonaVisualManifestUpdate,
   PersonaVisualPack,
   PersonaVisualPackCreate,
@@ -61,6 +67,11 @@ const packPath = (
     personaId,
     `/visual-packs/${encodeURIComponent(packId)}${suffix}`
   ) as `/api/v1/persona/profiles/${string}/visual-packs/${string}${string}`
+
+const visualLibraryPath = (
+  suffix = ""
+): `/api/v1/persona/visual-library${string}` =>
+  `/api/v1/persona/visual-library${suffix}`
 
 const normalizeBody = (
   body: PersonaVisualFetchInit["body"],
@@ -155,6 +166,68 @@ export async function duplicatePersonaVisualPack(
 ): Promise<PersonaVisualPack> {
   return fetchPersonaVisualJson<PersonaVisualPack>(
     packPath(sourcePersonaId, packId, "/duplicate"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function listPersonaVisualLibraryItems(): Promise<
+  PersonaVisualLibraryListResponse
+> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualLibraryItem[] | PersonaVisualLibraryListResponse
+  >(visualLibraryPath())
+  return Array.isArray(payload)
+    ? { items: payload }
+    : { items: Array.isArray(payload?.items) ? payload.items : [] }
+}
+
+export async function savePersonaVisualPackToLibrary(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualLibrarySaveRequest
+): Promise<PersonaVisualLibraryItem> {
+  return fetchPersonaVisualJson<PersonaVisualLibraryItem>(
+    packPath(personaId, packId, "/library"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function updatePersonaVisualLibraryItem(
+  itemId: string,
+  payload: PersonaVisualLibraryUpdateRequest
+): Promise<PersonaVisualLibraryItem> {
+  return fetchPersonaVisualJson<PersonaVisualLibraryItem>(
+    visualLibraryPath(`/${encodeURIComponent(itemId)}`),
+    {
+      method: "PATCH",
+      body: payload
+    }
+  )
+}
+
+export async function deletePersonaVisualLibraryItem(
+  itemId: string
+): Promise<PersonaVisualLibraryDeleteResponse> {
+  return fetchPersonaVisualJson<PersonaVisualLibraryDeleteResponse>(
+    visualLibraryPath(`/${encodeURIComponent(itemId)}`),
+    {
+      method: "DELETE"
+    }
+  )
+}
+
+export async function usePersonaVisualLibraryItem(
+  itemId: string,
+  payload: PersonaVisualLibraryUseRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    visualLibraryPath(`/${encodeURIComponent(itemId)}/use`),
     {
       method: "POST",
       body: payload
