@@ -533,6 +533,59 @@ describe("SidepanelPersona", () => {
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
   })
 
+  it("shows profile load failures in Persona/Buddy diagnostics", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.capabilitiesState.capabilities = {
+      hasPersona: true,
+      hasPersonalization: true,
+      hasMcp: true
+    } as any
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            { id: "research_assistant", name: "Research Assistant" }
+          ]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: false,
+          error: "Profile service offline",
+          json: async () => ({})
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitForLiveSessionPanel()
+    const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
+
+    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Profile")
+    expect(diagnostics).toHaveTextContent("Load failed")
+    expect(diagnostics).toHaveTextContent("Profile service offline")
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
+  })
+
   it("boots persona selection and active tab from query params", async () => {
     mocks.location.search = "?persona_id=garden-helper&tab=profiles"
     mocks.getConfig.mockResolvedValue({

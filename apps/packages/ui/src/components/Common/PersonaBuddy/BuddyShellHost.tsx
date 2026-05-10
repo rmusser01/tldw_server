@@ -301,9 +301,15 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const setVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
     (state) => state.setRuntimeDiagnostics
   )
+  const clearVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.clearRuntimeDiagnostics
+  )
   const clearExpiredVisualOverride = usePersonaVisualRuntimeStore(
     (state) => state.clearExpired
   )
+  const visualDiagnosticsSourceId = `${root}:${
+    renderContext.surface_id || "unknown"
+  }`
 
   React.useEffect(() => {
     clearExpiredVisualOverride()
@@ -393,24 +399,34 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     },
     [visualRenderKey]
   )
-  const visualDiagnostic: PersonaVisualDiagnostic | null =
-    getPrimaryPersonaVisualDiagnostic({
-      pack: visualPack,
-      visualState,
-      loadStatus: visualPackLoadStatus,
-      loadError: visualPackLoadError,
-      renderError: activeVisualRenderError,
-      includeNoActivePack: visualPackLoadStatus === "loaded"
-    })
+  const visualDiagnostic: PersonaVisualDiagnostic | null = React.useMemo(
+    () =>
+      getPrimaryPersonaVisualDiagnostic({
+        pack: visualPack,
+        visualState,
+        loadStatus: visualPackLoadStatus,
+        loadError: visualPackLoadError,
+        renderError: activeVisualRenderError,
+        includeNoActivePack: visualPackLoadStatus === "loaded"
+      }),
+    [
+      activeVisualRenderError,
+      visualPack,
+      visualPackLoadError,
+      visualPackLoadStatus,
+      visualState
+    ]
+  )
 
   React.useEffect(() => {
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
     if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
-      setVisualRuntimeDiagnostics(null)
-      return
+      clearVisualRuntimeDiagnostics(visualDiagnosticsSourceId)
+      return undefined
     }
 
     setVisualRuntimeDiagnostics({
+      sourceId: visualDiagnosticsSourceId,
       personaId: activePersonaId,
       sessionId: renderContext.live_session_id ?? null,
       packId: visualPack?.id ?? null,
@@ -420,12 +436,17 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       diagnostic: visualDiagnostic,
       updatedAt: Date.now()
     })
+    return () => {
+      clearVisualRuntimeDiagnostics(visualDiagnosticsSourceId)
+    }
   }, [
+    clearVisualRuntimeDiagnostics,
     renderContext.live_session_id,
     resolvedPersona.activePersonaId,
     resolvedPersona.hasTargetPersona,
     setVisualRuntimeDiagnostics,
     visualDiagnostic,
+    visualDiagnosticsSourceId,
     visualPack?.id,
     visualPack?.title,
     visualPackLoadStatus,

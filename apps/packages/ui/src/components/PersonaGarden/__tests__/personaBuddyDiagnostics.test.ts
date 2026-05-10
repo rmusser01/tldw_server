@@ -12,13 +12,24 @@ describe("buildPersonaBuddyDiagnostics", () => {
       liveSession: { connected: true, connecting: false, sessionId: "session-1" },
       liveVoice: { state: "idle", recoveryMode: "none" },
       wake: { armed: true, detectorState: "ready", triggerPhrases: ["hey ada"] },
-      visual: { packLoadStatus: "loaded", diagnostic: null }
+      visual: {
+        packId: "pack-1",
+        packTitle: "Animated Pack",
+        packLoadStatus: "loaded",
+        visualState: "idle",
+        diagnostic: null
+      }
     })
 
     expect(diagnostics.state).toBe("healthy")
     expect(diagnostics.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: "Persona", value: "Ada" }),
+        expect.objectContaining({
+          label: "Visual pack",
+          value: "Animated Pack",
+          detail: "Render state: Idle"
+        }),
         expect.objectContaining({ label: "Live session", value: "Connected" })
       ])
     )

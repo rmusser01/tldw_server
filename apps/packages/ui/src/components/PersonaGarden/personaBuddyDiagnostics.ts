@@ -68,6 +68,7 @@ export type PersonaBuddyDiagnosticsInput = {
     packId?: string | null
     packTitle?: string | null
     packLoadStatus?: "idle" | "loading" | "loaded" | "error"
+    visualState?: string | null
     diagnostic?: PersonaVisualDiagnostic | null
   } | null
 }
@@ -130,12 +131,15 @@ const summarizeVisual = (
   visual: PersonaBuddyDiagnosticsInput["visual"]
 ): PersonaBuddyDiagnosticRow => {
   const diagnostic = visual?.diagnostic
+  const renderState = visual?.visualState
+    ? `Render state: ${titleCase(visual.visualState)}`
+    : undefined
   if (diagnostic?.code === "no_active_pack") {
     return {
       label: "Visual pack",
       value: "Default Buddy fallback",
       state: "healthy",
-      detail: diagnostic.message
+      detail: [diagnostic.message, renderState].filter(Boolean).join(" - ")
     }
   }
 
@@ -144,7 +148,7 @@ const summarizeVisual = (
       label: "Visual pack",
       value: diagnostic.title || titleCase(diagnostic.code),
       state: diagnostic.severity === "info" ? "healthy" : "degraded",
-      detail: diagnostic.message
+      detail: [diagnostic.message, renderState].filter(Boolean).join(" - ")
     }
   }
 
@@ -152,7 +156,8 @@ const summarizeVisual = (
     return {
       label: "Visual pack",
       value: "Loading",
-      state: "recovering"
+      state: "recovering",
+      detail: renderState
     }
   }
 
@@ -161,7 +166,9 @@ const summarizeVisual = (
       label: "Visual pack",
       value: "Load failed",
       state: "degraded",
-      detail: "The active visual pack could not be loaded."
+      detail: ["The active visual pack could not be loaded.", renderState]
+        .filter(Boolean)
+        .join(" - ")
     }
   }
 
@@ -169,7 +176,8 @@ const summarizeVisual = (
   return {
     label: "Visual pack",
     value: activePack ? String(activePack) : "Default Buddy fallback",
-    state: "healthy"
+    state: "healthy",
+    detail: renderState
   }
 }
 

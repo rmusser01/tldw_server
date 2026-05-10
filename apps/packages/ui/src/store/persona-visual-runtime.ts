@@ -12,6 +12,7 @@ export interface PersonaVisualRuntimeOverride {
 }
 
 export interface PersonaVisualRuntimeDiagnostics {
+  sourceId?: string
   personaId: string
   sessionId: string | null
   packId: string | null
@@ -29,6 +30,7 @@ type PersonaVisualRuntimeStore = {
   setRuntimeDiagnostics: (
     diagnostics: PersonaVisualRuntimeDiagnostics | null
   ) => void
+  clearRuntimeDiagnostics: (sourceId?: string) => void
   clearExpired: (now?: number) => void
   clearForSession: (sessionId: string | null) => void
 }
@@ -39,6 +41,15 @@ export const usePersonaVisualRuntimeStore = create<PersonaVisualRuntimeStore>(
     runtimeDiagnostics: null,
     setOverride: (override) => set({ override }),
     setRuntimeDiagnostics: (runtimeDiagnostics) => set({ runtimeDiagnostics }),
+    clearRuntimeDiagnostics: (sourceId) => {
+      const diagnostics = get().runtimeDiagnostics
+      if (
+        diagnostics &&
+        (!sourceId || !diagnostics.sourceId || diagnostics.sourceId === sourceId)
+      ) {
+        set({ runtimeDiagnostics: null })
+      }
+    },
     clearExpired: (now = Date.now()) => {
       const current = get().override
       if (current && current.expiresAt <= now) {

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 07:18'
-updated_date: '2026-05-10 15:31'
+updated_date: '2026-05-10 15:45'
 labels:
   - persona
   - buddy
@@ -63,12 +63,16 @@ Task 3 complete: wired diagnostics into Persona Live, added visual runtime diagn
 Final verification passed from apps/packages/ui: bun run test src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts src/store/__tests__/persona-visual-runtime.test.ts src/components/PersonaGarden/__tests__/LiveSessionPanel.test.ts (33 tests); bun run test src/routes/__tests__/sidepanel-persona.test.tsx -t diagnostics (1 selected test); bun run test src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx -t visual (4 selected tests); git diff --check passed. Bandit skipped because no Python files changed.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1518
+
+Code review fixes applied: profile fetch failures now surface as degraded diagnostics, visual runtime diagnostics are source-scoped and cleared on Buddy shell unmount, healthy visual pack diagnostics include render state, and runtime store tests reset diagnostics state.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented Stage 1 Persona/Buddy diagnostics as a read-only frontend surface. Added a pure diagnostics projector, StatePanel-backed panel, Persona Live route integration, visual runtime diagnostics bridge from BuddyShellHost, focused tests for projection/panel/route visual degradation, and an audit tracking note for issue #1511. Verification passed; Bandit skipped because the touched scope is TypeScript/Markdown/Backlog only.
+
+Code-review fixes now surface profile load failures, clear source-scoped visual runtime diagnostics on Buddy shell lifecycle, include healthy visual render state, and cover the runtime store reset/source behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -197,6 +197,9 @@ const SidepanelPersona = ({
     number | null
   >(null)
   const [personaProfileLoading, setPersonaProfileLoading] = React.useState(false)
+  const [personaProfileError, setPersonaProfileError] = React.useState<string | null>(
+    null
+  )
   const [liveSessionVoiceDefaultsBaseline, setLiveSessionVoiceDefaultsBaseline] =
     React.useState<PersonaVoiceDefaults | null>(null)
   const [activeTab, setActiveTab] = React.useState<PersonaGardenTabKey>("live")
@@ -309,6 +312,7 @@ const SidepanelPersona = ({
       setSavedPersonaSetup(null)
       setSavedPersonaProfileVersion(null)
       setPersonaProfileLoading(false)
+      setPersonaProfileError(null)
       if (!connected) {
         setLiveSessionVoiceDefaultsBaseline(null)
       }
@@ -319,6 +323,7 @@ const SidepanelPersona = ({
     setSavedPersonaBuddySummary(null)
     setSavedPersonaBuddySummaryPersonaId(null)
     setPersonaProfileLoading(true)
+    setPersonaProfileError(null)
     ;(async () => {
       try {
         const response = await tldwClient.fetchWithAuth(
@@ -337,14 +342,20 @@ const SidepanelPersona = ({
           setSavedPersonaProfileVersion(
             typeof payload?.version === "number" ? payload.version : null
           )
+          setPersonaProfileError(null)
         }
-      } catch {
+      } catch (profileError) {
         if (!cancelled) {
           setSavedPersonaBuddySummary(null)
           setSavedPersonaBuddySummaryPersonaId(null)
           setSavedPersonaVoiceDefaults(null)
           setSavedPersonaSetup(null)
           setSavedPersonaProfileVersion(null)
+          setPersonaProfileError(
+            profileError instanceof Error
+              ? profileError.message
+              : "Failed to load persona profile"
+          )
         }
       } finally {
         if (!cancelled) {
@@ -1135,9 +1146,11 @@ const SidepanelPersona = ({
     null
   const personaProfileState: PersonaBuddyProfileState = personaProfileLoading
     ? "loading"
-    : selectedPersonaId
-      ? "loaded"
-      : "idle"
+    : personaProfileError
+      ? "error"
+      : selectedPersonaId
+        ? "loaded"
+        : "idle"
   const activeVisualRuntimeDiagnostics =
     visualRuntimeDiagnostics &&
     visualRuntimeDiagnostics.personaId === normalizedLivePersonaId &&
@@ -1152,6 +1165,7 @@ const SidepanelPersona = ({
       name: selectedPersonaName
     },
     profileState: personaProfileState,
+    profileError: personaProfileError,
     buddySummary: activeBuddySummary,
     capabilities,
     capabilitiesLoading: capsLoading,
@@ -1180,6 +1194,7 @@ const SidepanelPersona = ({
       packId: activeVisualRuntimeDiagnostics?.packId ?? null,
       packTitle: activeVisualRuntimeDiagnostics?.packTitle ?? null,
       packLoadStatus: activeVisualRuntimeDiagnostics?.packLoadStatus ?? "idle",
+      visualState: activeVisualRuntimeDiagnostics?.visualState ?? resolvedLiveVisualState,
       diagnostic: activeVisualRuntimeDiagnostics?.diagnostic ?? null
     }
   })
