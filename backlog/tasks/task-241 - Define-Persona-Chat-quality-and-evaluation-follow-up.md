@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 19:32'
-updated_date: '2026-05-10 19:35'
+updated_date: '2026-05-10 19:47'
 labels:
   - persona
   - chat
@@ -17,6 +17,8 @@ references:
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
   - 'https://github.com/rmusser01/tldw_server/issues/1543'
   - 'https://github.com/rmusser01/tldw_server/issues/635'
+  - 'https://github.com/rmusser01/tldw_server/pull/1545'
+  - 'https://github.com/rmusser01/tldw_server/issues/1546'
 documentation:
   - Docs/Reviews/PERSONA_BUDDY_CURRENT_STATE_AUDIT_2026_05_10.md
   - Docs/Reviews/PERSONA_CHAT_QUALITY_EVAL_FOLLOWUP_2026_05_10.md
@@ -56,12 +58,16 @@ Created Docs/Reviews/PERSONA_CHAT_QUALITY_EVAL_FOLLOWUP_2026_05_10.md as the Sta
 The artifact preserves #635 references as inspiration only, separates Persona Chat quality/evaluation from Buddy/Persona Live reliability and VN/CYOA runtime work, defines quality axes and risks, and proposes five PR-sized follow-up slices: trace/error taxonomy, deterministic fixtures, telemetry label normalization, effective context preview, and optional calibrated LLM-as-judge evaluation.
 
 Verification: placeholder/deferred-marker scan for the new doc returned no matches; git diff --check passed. Runtime tests were not run because this slice is docs/Backlog-only. Bandit is not applicable because no Python files changed.
+
+GitHub packaging: opened PR #1545 for the Stage 2 Persona Chat quality/evaluation artifact, opened follow-up issue #1546 for the recommended trace/error taxonomy slice, and linked both back to parent tracker #1543.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Defined the Stage 2 Persona Chat quality/evaluation follow-up for issue #1543. Added a repo-grounded planning artifact that inventories current persona-backed chat contracts and tests, preserves legacy #635 references, defines quality axes and risks, separates this work from Buddy/Live reliability and VN/CYOA, and recommends PR-sized next slices. Verification passed for documentation marker scan and git diff hygiene; Bandit was skipped for docs-only changes.
+
+Packaged the artifact in PR #1545 and opened follow-up issue #1546 for the next trace/error taxonomy slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
