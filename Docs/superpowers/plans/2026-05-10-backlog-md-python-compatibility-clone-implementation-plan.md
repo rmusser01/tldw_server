@@ -451,7 +451,7 @@ git commit -m "Add pinned Backlog.md oracle manifest"
 - Create: `tools/backlog-py/tests/test_project_discovery.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing discovery tests**
+- [x] **Step 1: Write failing discovery tests**
 
 Create `tools/backlog-py/tests/test_project_discovery.py`:
 
@@ -484,7 +484,7 @@ def test_backlog_cwd_overrides_process_cwd(tmp_path, monkeypatch):
     assert project.config.project_name == "env-demo"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -495,7 +495,7 @@ python -m pytest tools/backlog-py/tests/test_project_discovery.py -v
 
 Expected: FAIL with missing `backlog_py.storage`.
 
-- [ ] **Step 3: Implement config and project models**
+- [x] **Step 3: Implement config and project models**
 
 Create `tools/backlog-py/src/backlog_py/core/models.py`:
 
@@ -539,7 +539,7 @@ shape, and return the resolved backlog root plus loaded config.
 
 Support `backlog.config.yml`, `backlog/config.yml`, `.backlog/config.yml`, `BACKLOG_CWD`, and explicit `--cwd` precedence.
 
-- [ ] **Step 4: Add root and `.backlog` tests**
+- [x] **Step 4: Add root and `.backlog` tests**
 
 Add tests for:
 
@@ -549,7 +549,7 @@ Add tests for:
 - camelCase keys accepted when present in generated config output
 - `--no-git` style config with `remote_operations=false`, `auto_commit=false`, `check_active_branches=false`
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -560,7 +560,7 @@ python -m pytest tools/backlog-py/tests/test_project_discovery.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
