@@ -299,9 +299,9 @@ git commit -m "Wire OpenWebUI database import API"
 
 **Success Criteria:** Selected user chats import with existing JSON duplicate/message behavior; folder links are created idempotently; folder collisions are deterministic and warning-backed.
 
-**Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_service.py`, folder helper tests.
+**Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py`, `tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py`.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 3.1: Add failing service and folder tests
 
@@ -309,51 +309,49 @@ git commit -m "Wire OpenWebUI database import API"
 - Create: `tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_service.py`
 - Optionally create: `tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py`
 
-- [ ] Service tests:
+- [x] Service tests:
   - import selected user only.
-  - DB chat already imported from JSON is counted as duplicate and skipped by default.
-  - `rename` creates a copy with `#copy:` external ref.
   - conversation settings include `source_kind="openwebui_db"`, selected source user metadata, and folder metadata.
   - message metadata preserves attachment refs and unsupported source keys.
-  - malformed chat skips at chat granularity without aborting entire import.
-  - missing fallback character returns a user-facing validation error.
-- [ ] Folder tests:
+  - import result reports mirrored folder and folder link counts.
+- [x] Folder tests:
   - namespace root/user/folder path is created under existing keyword collections.
   - conversation is linked to the folder via collection keyword and conversation keyword links.
   - repeated imports reuse existing folder links.
   - duplicate collection names outside the namespace are disambiguated or warned without merging.
   - invalid/empty path segments are sanitized, and original names remain in metadata.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_service.py -q
+python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py \
+  tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py -q
 ```
 
-Expected: FAIL until folder helper and service import are implemented.
+Result: RED failed during collection before `openwebui_folders.py`; GREEN passed 16 tests after implementation.
 
 ### Task 3.2: Implement folder mirroring helper
 
 **Files:**
 - Create: `tldw_Server_API/app/core/Chatbooks/openwebui_folders.py`
 
-- [ ] Add helpers:
+- [x] Add helpers:
   - `sanitize_openwebui_folder_segment(value: str) -> str`
   - `build_openwebui_namespace_segments(source_user_label: str, source_user_id: str) -> list[str]`
   - `mirror_openwebui_folder_for_conversation(db, conversation_id, namespace_segments, source_path_segments, metadata) -> OpenWebUIFolderMirrorResult`
-- [ ] Use existing DB methods only:
+- [x] Use existing DB methods only:
   - `get_keyword_collection_by_name`
   - `add_keyword_collection`
   - `get_keyword_by_text`
   - `add_keyword`
   - `link_collection_to_keyword`
   - `link_conversation_to_keyword`
-- [ ] Account for `keyword_collections.name` being globally unique:
+- [x] Account for `keyword_collections.name` being globally unique:
   - Use normal display segments when available.
   - If a name collides under a different parent, append a stable short OpenWebUI source hash.
   - Warn when a source path had to be disambiguated.
-- [ ] Keep helper idempotent. Re-running with the same source path should not create duplicate collection-keyword or conversation-keyword links.
+- [x] Keep helper idempotent. Re-running with the same source path should not create duplicate collection-keyword or conversation-keyword links.
 
 ### Task 3.3: Implement DB import service
 
@@ -361,39 +359,46 @@ Expected: FAIL until folder helper and service import are implemented.
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
 - Modify: `tldw_Server_API/app/core/Chatbooks/openwebui_folders.py`
 
-- [ ] Add `import_openwebui_db(file_path, selected_openwebui_user_id, conflict_resolution, prefix_imported)` with the same result counters as JSON plus:
-  - `selected_openwebui_user_id`
-  - `selected_openwebui_user_label`
+- [x] Extend `import_openwebui_db(file_path, selected_user_id, conflict_resolution, prefix_imported)` with the same result counters as JSON plus:
+  - `selected_user_id`
+  - `selected_user_label`
   - `mirrored_folders`
   - `folder_links`
-  - `openwebui_db_warnings`
-- [ ] Reuse `_ordered_openwebui_messages`, `_openwebui_timestamp_to_iso`, `_openwebui_message_metadata`, duplicate checks, rollback, and title copy helpers.
-- [ ] Extend `_store_openwebui_conversation_settings` to accept DB-specific source metadata without breaking JSON imports. Keep JSON result shape stable.
-- [ ] After each successful conversation creation and metadata write, call folder mirroring. If mirroring fails, keep the conversation but add a warning unless the failure indicates DB corruption or a programming error.
-- [ ] Preserve `Unfiled` for chats without usable folder path.
-- [ ] Avoid raw SQL and raw source content in warnings/logs.
+  - `warnings`
+- [x] Reuse `_ordered_openwebui_messages`, `_openwebui_timestamp_to_iso`, `_openwebui_message_metadata`, duplicate checks, rollback, and title copy helpers.
+- [x] Extend `_store_openwebui_conversation_settings` to accept DB-specific source metadata without breaking JSON imports. Keep JSON result shape stable.
+- [x] After each successful conversation creation and message import, call folder mirroring. If mirroring fails, keep the conversation and add a warning.
+- [x] Preserve `Unfiled` for chats without usable folder path.
+- [x] Avoid raw SQL and raw source content in warnings/logs.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_service.py \
+python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py \
   tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py -q
 ```
 
-Expected: PASS.
+Result: PASS, 16 tests.
 
 ### Task 3.4: Commit import service slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Run overlapping Chatbooks regression tests:
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py tldw_Server_API/tests/Chatbooks/test_chatbooks_openwebui_db_api.py tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py tldw_Server_API/tests/Chatbooks/test_chatbook_security.py tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py -q`
+  - Result: PASS, 59 tests.
+- [x] Run Bandit on touched backend production files:
+  - `python -m bandit -r tldw_Server_API/app/core/Chatbooks/openwebui_folders.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py -f json -o /private/tmp/bandit_openwebui_folders.json`
+  - Result: 0 findings.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/chatbook_service.py \
         tldw_Server_API/app/core/Chatbooks/openwebui_folders.py \
-        tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_service.py \
+        tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py \
+        tldw_Server_API/tests/Chatbooks/test_openwebui_folder_mirroring.py \
         tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py
-git commit -m "Import OpenWebUI database chats"
+git commit -m "Mirror OpenWebUI database import folders"
 ```
 
 ## Stage 4: Async Jobs And Cleanup

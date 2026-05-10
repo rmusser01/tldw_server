@@ -252,6 +252,8 @@ def test_import_openwebui_db_imports_only_selected_user(openwebui_service):
     assert result["selected_user_label"] == "Alice"
     assert result["imported_chats"] == 1
     assert result["imported_messages"] == 3
+    assert result["mirrored_folders"] == 1
+    assert result["folder_links"] == 1
 
     db = openwebui_service.db
     imported = db.get_conversation_by_source_ref("openwebui", "chat-a", client_id=db.client_id)
@@ -263,6 +265,20 @@ def test_import_openwebui_db_imports_only_selected_user(openwebui_service):
     assert metadata["source_kind"] == "openwebui_db"
     assert metadata["source_user_id"] == "user-a"
     assert metadata["folder_id"] == "folder-a"
+
+    openwebui_root = db.get_keyword_collection_by_name("OpenWebUI")
+    user_folder = db.get_keyword_collection_by_name("Alice (user-a)")
+    research_folder = db.get_keyword_collection_by_name("Research")
+    assert openwebui_root is not None
+    assert user_folder is not None
+    assert research_folder is not None
+    collection_keyword_ids = {
+        keyword["id"] for keyword in db.get_keywords_for_collection(research_folder["id"])
+    }
+    conversation_keyword_ids = {
+        keyword["id"] for keyword in db.get_keywords_for_conversation(imported["id"])
+    }
+    assert collection_keyword_ids & conversation_keyword_ids
 
 
 @pytest.mark.asyncio

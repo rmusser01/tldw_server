@@ -335,6 +335,8 @@ class OpenWebUIDatabaseImportResult(OpenWebUIImportResult):
     """OpenWebUI database import result for a selected source user."""
     selected_user_id: str
     selected_user_label: str
+    mirrored_folders: int = Field(default=0, ge=0)
+    folder_links: int = Field(default=0, ge=0)
 
 
 class CreateChatbookResponse(BaseModel):

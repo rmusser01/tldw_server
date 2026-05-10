@@ -39,7 +39,7 @@ from loguru import logger
 from tldw_Server_API.app.core.config import load_comprehensive_config, settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
-from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from ..DB_Management.db_path_utils import DatabasePaths
 from ..Templating.template_renderer import (
     TemplateContext,
@@ -85,6 +85,10 @@ from .import_adapters.openwebui_db import (
     extract_openwebui_db_user,
     preview_openwebui_db as build_openwebui_db_preview,
 )
+from .openwebui_folders import (
+    build_openwebui_namespace_segments,
+    mirror_openwebui_folder_for_conversation,
+)
 
 _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ArchiveError,
@@ -107,6 +111,10 @@ _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     json.JSONDecodeError,
     zipfile.BadZipFile,
     asyncio.CancelledError,
+)
+_OPENWEBUI_FOLDER_MIRROR_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    *_CHATBOOK_NONCRITICAL_EXCEPTIONS,
+    CharactersRAGDBError,
 )
 
 _CHATBOOK_TEMPLATE_MODES = {"pass_through", "render_on_export", "render_on_import"}
@@ -2465,19 +2473,23 @@ class ChatbookService:
         conversation_id: str,
         chat: OpenWebUIConversationPlan,
         external_ref: str,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Merge OpenWebUI import metadata into conversation settings."""
         current = self.db.get_conversation_settings(conversation_id) or {}
         settings = current.get("settings") if isinstance(current, dict) else {}
         if not isinstance(settings, dict):
             settings = {}
+        metadata = dict(chat.source_metadata)
+        if extra_metadata:
+            metadata.update(extra_metadata)
         merged = dict(settings)
         merged["openwebui_import"] = {
             "source": "openwebui",
             "external_ref": external_ref,
             "history_current_id": chat.history_current_id,
             "branched": chat.is_branched,
-            "metadata": dict(chat.source_metadata),
+            "metadata": metadata,
         }
         return bool(self.db.upsert_conversation_settings(conversation_id, merged))
 
@@ -2723,8 +2735,15 @@ class ChatbookService:
             "imported_messages": 0,
             "skipped_messages": 0,
             "duplicate_chats": 0,
+            "mirrored_folders": 0,
+            "folder_links": 0,
             "warnings": list(extracted.warnings),
         }
+        mirrored_folder_ids: set[int] = set()
+        namespace_segments = build_openwebui_namespace_segments(
+            extracted.selected_user_label,
+            extracted.selected_user_id,
+        )
 
         for chat in extracted.chats:
             import_external_ref = chat.external_ref
@@ -2785,7 +2804,21 @@ class ChatbookService:
                     result["warnings"].append(f"OpenWebUI chat {chat.external_ref} could not create a conversation.")
                     continue
 
-                if not self._store_openwebui_conversation_settings(conversation_id, chat, import_external_ref):
+                folder_plan = extracted.folder_plans_by_external_ref.get(chat.external_ref)
+                folder_metadata: dict[str, Any] = {}
+                if folder_plan is not None:
+                    folder_metadata = {
+                        "folder_path": list(folder_plan.source_path),
+                        "folder_source_parent_id": folder_plan.source_parent_id,
+                        "folder_source_meta": dict(folder_plan.source_meta),
+                    }
+
+                if not self._store_openwebui_conversation_settings(
+                    conversation_id,
+                    chat,
+                    import_external_ref,
+                    extra_metadata=folder_metadata,
+                ):
                     raise DatabaseError(
                         f"OpenWebUI chat {chat.external_ref} conversation metadata was not stored."
                     )
@@ -2840,6 +2873,34 @@ class ChatbookService:
                         f"OpenWebUI chat {chat.external_ref} imported no messages and was rolled back."
                     )
                     continue
+
+                source_path = list(folder_plan.source_path) if folder_plan is not None else ["Unfiled"]
+                source_folder_id = folder_plan.source_folder_id if folder_plan is not None else None
+                source_meta = dict(folder_plan.source_meta) if folder_plan is not None else {}
+                try:
+                    mirror_result = mirror_openwebui_folder_for_conversation(
+                        self.db,
+                        conversation_id=conversation_id,
+                        namespace_segments=namespace_segments,
+                        source_path_segments=source_path,
+                        source_folder_id=source_folder_id,
+                        metadata={
+                            "source_user_id": extracted.selected_user_id,
+                            "external_ref": chat.external_ref,
+                            "import_external_ref": import_external_ref,
+                            "source_meta": source_meta,
+                        },
+                    )
+                    if mirror_result.final_collection_id is not None:
+                        mirrored_folder_ids.add(mirror_result.final_collection_id)
+                        result["mirrored_folders"] = len(mirrored_folder_ids)
+                    if mirror_result.conversation_keyword_linked:
+                        result["folder_links"] += 1
+                    chat_warnings.extend(mirror_result.warnings)
+                except _OPENWEBUI_FOLDER_MIRROR_EXCEPTIONS as exc:
+                    chat_warnings.append(
+                        f"OpenWebUI chat {chat.external_ref} folder mirroring failed: {exc}"
+                    )
 
                 result["imported_messages"] += chat_imported_messages
                 result["skipped_messages"] += chat_skipped_messages
