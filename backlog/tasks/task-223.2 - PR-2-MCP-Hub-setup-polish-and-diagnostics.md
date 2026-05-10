@@ -1,11 +1,11 @@
 ---
 id: TASK-223.2
 title: 'PR 2: MCP Hub setup polish and diagnostics'
-status: In Progress
+status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 16:09'
+updated_date: '2026-05-10 19:20'
 labels:
   - mcp
   - webui
@@ -70,6 +70,7 @@ Stages:
 2026-05-10: Opened PR #1531 for branch codex/mcp-hub-pr2-setup-polish.
 2026-05-10: Addressed PR #1531 review feedback. Removed the committed toy walkthrough API key in favor of per-run generation, tightened Tool Catalog chat-executability guidance to chat-enabled tools only, surfaced external-server inventory load failures as a retryable unknown state instead of a false no-server empty state, and cleaned the Playwright toy MCP temp directory in finally.
 2026-05-10: Review-fix verification: `cd apps/packages/ui && bun run test src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx` passed 9 tests. `cd apps/packages/ui && bun run test src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx src/components/Option/MCPHub/__tests__/DeploymentDiagnosticsPanel.test.tsx src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx` passed 4 files / 30 tests. `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts --list` listed 9 tests. `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts --reporter=line` passed 3 and skipped 6 live-server-dependent cases. `git diff --check` passed. Bandit remains skipped because the review fixes touched TypeScript, docs, and Playwright only; no Python production code was touched.
+2026-05-10: PR #1531 merged to dev at merge commit da374c5e8.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
