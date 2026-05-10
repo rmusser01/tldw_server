@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 21:03'
-updated_date: '2026-05-10 21:06'
+updated_date: '2026-05-10 21:11'
 labels:
   - persona
   - chat
@@ -19,6 +19,8 @@ references:
   - 'https://github.com/rmusser01/tldw_server/issues/1546'
   - 'https://github.com/rmusser01/tldw_server/pull/1545'
   - 'https://github.com/rmusser01/tldw_server/issues/635'
+  - 'https://github.com/rmusser01/tldw_server/pull/1551'
+  - 'https://github.com/rmusser01/tldw_server/issues/1552'
 documentation:
   - Docs/Reviews/PERSONA_CHAT_QUALITY_EVAL_FOLLOWUP_2026_05_10.md
   - Docs/Reviews/PERSONA_CHAT_TRACE_ERROR_TAXONOMY_2026_05_10.md
@@ -56,12 +58,16 @@ Define Slice 1 for Stage 2 Persona Chat quality work from GitHub issue #1546. Pr
 Created Docs/Reviews/PERSONA_CHAT_TRACE_ERROR_TAXONOMY_2026_05_10.md. Rechecked ordinary persona-backed chat identity, conversation response fields, frontend create/reuse/restore paths, memory mode UI, runtime exemplar guidance, prompt assembly, retrieval, memory writeback, telemetry, backend tests, frontend tests, and dialogue-tree robustness reports from source. The artifact documents why synthetic fixtures are the right first pass, defines 20 representative ordinary Persona Chat fixture cases, maps failure labels to deterministic/judge-candidate/human-review handling, identifies backend/frontend deterministic fixture surfaces, and names the next PR/task as Stage 2: Add deterministic Persona Chat quality fixtures.
 
 Verification: taxonomy doc marker scan returned no matches and git diff --check passed. Runtime tests were not run because this slice changes docs/Backlog only. Bandit is not applicable because no Python files changed.
+
+GitHub packaging: opened PR #1551 for the trace/error taxonomy artifact, opened follow-up issue #1552 for deterministic Persona Chat quality fixtures, and linked both from parent tracker #1546.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Defined the Persona Chat trace/error taxonomy for #1546 with synthetic-fixture rationale, 20 representative cases, failure labels, deterministic fixture surfaces, and the next deterministic fixture task.
+
+Packaged the taxonomy artifact in PR #1551 and opened follow-up issue #1552 for deterministic fixture coverage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
