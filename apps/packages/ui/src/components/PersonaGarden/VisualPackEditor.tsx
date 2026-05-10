@@ -706,7 +706,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [isActive, selectedPersonaId, selectedPack?.id])
 
   const loadDuplicateTargets = React.useCallback(async () => {
-    if (!isActive || !selectedPersonaId || !selectedPack) {
+    if (!isActive || !selectedPersonaId) {
       duplicateTargetsRequestIdRef.current += 1
       setDuplicateTargets([])
       setDuplicateTargetId("")
@@ -738,7 +738,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     } finally {
       if (isLatestRequest()) setDuplicateTargetsLoading(false)
     }
-  }, [isActive, selectedPersonaId, selectedPack?.id])
+  }, [isActive, selectedPersonaId])
 
   const loadLibrary = React.useCallback(async () => {
     if (!isActive || !selectedPersonaId) {
@@ -1026,10 +1026,15 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const item = await savePersonaVisualPackToLibrary(
         selectedPersonaId,
         selectedPack.id,
-        {
-          title: selectedPack.title,
-          tags: []
-        }
+        selectedPackLibraryItem
+          ? {
+              title: selectedPackLibraryItem.title,
+              notes: selectedPackLibraryItem.notes ?? null,
+              tags: selectedPackLibraryItem.tags
+            }
+          : {
+              title: selectedPack.title
+            }
       )
       setLibraryItems((current) => upsertLibraryItem(current, item))
       setStatusMessage("Saved to personal library.")
@@ -1928,6 +1933,40 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         </div>
       ) : null}
 
+      <div
+        data-testid="persona-visual-library-panel"
+        className="rounded-lg border border-border bg-surface p-3"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+              Personal library
+            </div>
+            <div className="mt-1 text-xs text-text-muted">
+              Save reusable Persona Buddy visual packs as user-owned references.
+              Using one creates a draft on the target persona.
+            </div>
+          </div>
+          <Button
+            size="small"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            loading={libraryLoading}
+            onClick={() => void loadLibrary()}
+          >
+            Refresh library
+          </Button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {libraryItems.length ? (
+            libraryItems.map(renderLibraryItem)
+          ) : (
+            <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
+              No saved visual packs.
+            </div>
+          )}
+        </div>
+      </div>
+
       {selectedPack ? (
         <>
           <div className="rounded-lg border border-border bg-surface p-3">
@@ -2257,40 +2296,6 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   <div className="mt-2 text-xs text-text-muted">No import preview.</div>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div
-            data-testid="persona-visual-library-panel"
-            className="rounded-lg border border-border bg-surface p-3"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-                  Personal library
-                </div>
-                <div className="mt-1 text-xs text-text-muted">
-                  Save reusable Persona Buddy visual packs as user-owned references.
-                  Using one creates a draft on the target persona.
-                </div>
-              </div>
-              <Button
-                size="small"
-                icon={<RefreshCw className="h-3.5 w-3.5" />}
-                loading={libraryLoading}
-                onClick={() => void loadLibrary()}
-              >
-                Refresh library
-              </Button>
-            </div>
-            <div className="mt-3 space-y-2">
-              {libraryItems.length ? (
-                libraryItems.map(renderLibraryItem)
-              ) : (
-                <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
-                  No saved visual packs.
-                </div>
-              )}
             </div>
           </div>
 

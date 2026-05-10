@@ -2651,20 +2651,22 @@ class PersonaStateStore:
             if not title_value:
                 raise InputError("title is required for persona visual library items.")  # noqa: TRY003
 
-            existing_row = conn.execute(
-                """
-                SELECT id
-                  FROM persona_visual_library_items
-                 WHERE user_id = ?
-                   AND source_persona_id = ?
-                   AND source_pack_id = ?
-                   AND deleted = ?
-                 LIMIT 1
-                """,
-                (user_id, source_persona_id, source_pack_id, deleted_false),
-            ).fetchone()
-            if existing_row:
-                item_id_value = str(dict(existing_row)["id"])
+            def _load_existing_library_item_id() -> str | None:
+                row = conn.execute(
+                    """
+                    SELECT id
+                      FROM persona_visual_library_items
+                     WHERE user_id = ?
+                       AND source_persona_id = ?
+                       AND source_pack_id = ?
+                       AND deleted = ?
+                     LIMIT 1
+                    """,
+                    (user_id, source_persona_id, source_pack_id, deleted_false),
+                ).fetchone()
+                return str(dict(row)["id"]) if row else None
+
+            def _update_existing_library_item(existing_item_id: str) -> None:
                 update_query = (
                     "UPDATE persona_visual_library_items "
                     "SET title = ?, notes = ?, tags_json = ?, source_persona_name_snapshot = ?, "
@@ -2680,12 +2682,17 @@ class PersonaStateStore:
                     source["source_pack_title"],
                     int(source["source_pack_version"]),
                     now,
-                    item_id_value,
+                    existing_item_id,
                     user_id,
                     deleted_false,
                 )
                 prepared_update, prepared_update_params = self._prepare_backend_statement(update_query, update_params)
                 conn.execute(prepared_update, prepared_update_params or ())
+
+            existing_item_id = _load_existing_library_item_id()
+            if existing_item_id:
+                item_id_value = existing_item_id
+                _update_existing_library_item(item_id_value)
             else:
                 insert_query = (
                     "INSERT INTO persona_visual_library_items("
@@ -2711,7 +2718,25 @@ class PersonaStateStore:
                     1,
                 )
                 prepared_insert, prepared_insert_params = self._prepare_backend_statement(insert_query, insert_params)
-                conn.execute(prepared_insert, prepared_insert_params or ())
+                try:
+                    conn.execute(prepared_insert, prepared_insert_params or ())
+                except sqlite3.IntegrityError as exc:
+                    msg = str(exc).lower()
+                    if "unique constraint failed" not in msg:
+                        raise
+                    raced_item_id = _load_existing_library_item_id()
+                    if not raced_item_id:
+                        raise
+                    item_id_value = raced_item_id
+                    _update_existing_library_item(item_id_value)
+                except BackendDatabaseError as exc:
+                    if not self._is_unique_violation(exc):
+                        raise
+                    raced_item_id = _load_existing_library_item_id()
+                    if not raced_item_id:
+                        raise
+                    item_id_value = raced_item_id
+                    _update_existing_library_item(item_id_value)
 
         item = self.get_persona_visual_library_item(item_id=item_id_value, user_id=user_id)
         if not item:
@@ -2821,6 +2846,63 @@ class PersonaStateStore:
                 deleted_false,
                 item_id,
                 user_id,
+                bool(include_deleted),
+                deleted_false,
+            ),
+        )
+        return self._persona_visual_library_item_row_to_dict(cursor.fetchone())
+
+    def get_persona_visual_library_item_by_source(
+        self,
+        *,
+        user_id: str,
+        source_persona_id: str,
+        source_pack_id: str,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        user_id = str(user_id or "").strip()
+        source_persona_id = str(source_persona_id or "").strip()
+        source_pack_id = str(source_pack_id or "").strip()
+        if not user_id or not source_persona_id or not source_pack_id:
+            return None
+        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        deleted_false = bool_cast(False)
+        query = """
+            SELECT l.*,
+                   pp.name AS live_source_persona_name,
+                   p.title AS live_source_pack_title,
+                   p.version AS source_current_version,
+                   CASE WHEN pp.id IS NOT NULL AND p.id IS NOT NULL THEN 1 ELSE 0 END AS source_available,
+                   CASE
+                     WHEN p.version IS NOT NULL
+                      AND l.source_pack_version IS NOT NULL
+                      AND p.version <> l.source_pack_version
+                     THEN 1 ELSE 0
+                   END AS source_changed
+              FROM persona_visual_library_items l
+              LEFT JOIN persona_profiles pp
+                ON pp.id = l.source_persona_id
+               AND pp.user_id = l.user_id
+               AND pp.deleted = ?
+              LEFT JOIN persona_visual_packs p
+                ON p.id = l.source_pack_id
+               AND p.persona_id = l.source_persona_id
+               AND p.user_id = l.user_id
+               AND p.deleted = ?
+             WHERE l.user_id = ?
+               AND l.source_persona_id = ?
+               AND l.source_pack_id = ?
+               AND (? OR l.deleted = ?)
+             LIMIT 1
+        """
+        cursor = self.execute_query(
+            query,
+            (
+                deleted_false,
+                deleted_false,
+                user_id,
+                source_persona_id,
+                source_pack_id,
                 bool(include_deleted),
                 deleted_false,
             ),

@@ -99,7 +99,7 @@ class PersonaVisualPackDuplicateRequest(BaseModel):
 class PersonaVisualLibrarySaveRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] | None = Field(default=None)
 
     @field_validator("title")
     @classmethod
@@ -121,7 +121,9 @@ class PersonaVisualLibrarySaveRequest(BaseModel):
 
     @field_validator("tags")
     @classmethod
-    def normalize_tags(cls, value: list[str]) -> list[str]:
+    def normalize_tags(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
         return _normalize_persona_visual_library_tags(value)
 
 

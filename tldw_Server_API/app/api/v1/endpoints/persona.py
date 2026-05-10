@@ -2149,6 +2149,8 @@ def _persona_visual_library_service_error_to_http(exc: PersonaVisualLibraryServi
     status_code = status.HTTP_400_BAD_REQUEST
     if exc.code in {"library_item_not_found", "source_pack_not_found", "target_persona_not_found"}:
         status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"forbidden"}:
+        status_code = status.HTTP_403_FORBIDDEN
     elif exc.code in {"source_pack_unavailable", "library_item_conflict"}:
         status_code = status.HTTP_409_CONFLICT
     elif exc.code in {"invalid_library_metadata"}:
@@ -3795,14 +3797,27 @@ async def save_persona_visual_pack_to_library(
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
+        existing_item = await _run_persona_db_call(
+            library_service.get_item_for_source,
+            user_id=user_id,
+            source_persona_id=persona_id,
+            source_pack_id=pack_id,
+        )
+        provided_fields = payload.model_fields_set
+        existing_title = existing_item.get("title") if existing_item else None
+        existing_notes = existing_item.get("notes") if existing_item else None
+        existing_tags = existing_item.get("tags") if existing_item else None
+        title = payload.title if "title" in provided_fields else existing_title
+        notes = payload.notes if "notes" in provided_fields else existing_notes
+        tags = payload.tags if "tags" in provided_fields else existing_tags
         item = await _run_persona_db_call(
             library_service.save_pack,
             user_id=user_id,
             source_persona_id=persona_id,
             source_pack_id=pack_id,
-            title=payload.title,
-            notes=payload.notes,
-            tags=payload.tags,
+            title=title,
+            notes=notes,
+            tags=tags,
         )
         return _persona_visual_library_item_to_response(item)
     except PersonaVisualLibraryServiceError as exc:

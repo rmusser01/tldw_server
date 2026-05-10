@@ -23902,6 +23902,7 @@ for _persona_state_store_method in (
     "upsert_persona_visual_library_item",
     "list_persona_visual_library_items",
     "get_persona_visual_library_item",
+    "get_persona_visual_library_item_by_source",
     "update_persona_visual_library_item",
     "soft_delete_persona_visual_library_item",
     "create_persona_visual_asset",

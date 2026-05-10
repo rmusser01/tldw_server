@@ -1304,9 +1304,6 @@ describe("VisualPackEditor", () => {
     }
     const savedLibraryItem = {
       ...changedLibraryItem,
-      title: "Animated pack",
-      notes: null,
-      tags: [],
       source_pack_version: 3,
       source_changed: false,
       version: 3
@@ -1344,8 +1341,9 @@ describe("VisualPackEditor", () => {
         method === "POST"
       ) {
         expect(parseJsonBody(init?.body)).toEqual({
-          title: "Animated pack",
-          tags: []
+          title: "Saved animated pack",
+          notes: "Reusable idle and speaking poses.",
+          tags: ["idle", "speaking"]
         })
         return okResponse(savedLibraryItem)
       }
@@ -1380,8 +1378,97 @@ describe("VisualPackEditor", () => {
     )
     expect(await screen.findByText("Saved to personal library.")).toBeInTheDocument()
     expect(screen.getByTestId("persona-visual-library-item-library-1")).toHaveTextContent(
-      "Animated pack"
+      "Saved animated pack"
     )
+  })
+
+  it("shows personal library items and uses them when the selected persona has no packs", async () => {
+    const calls: string[] = []
+    const sourceLibraryItem = {
+      id: "library-1",
+      user_id: "user-1",
+      source_persona_id: "persona-1",
+      source_pack_id: "pack-1",
+      title: "Reusable source pack",
+      notes: "Useful for new personas.",
+      tags: ["idle"],
+      source_persona_name: "Source Persona",
+      source_pack_title: "Animated pack",
+      source_persona_name_snapshot: "Source Persona",
+      source_pack_title_snapshot: "Animated pack",
+      source_pack_version: 3,
+      source_current_version: 3,
+      source_available: true,
+      source_changed: false,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 2
+    }
+    const duplicatedPack = {
+      id: "pack-library-copy",
+      persona_id: "persona-2",
+      title: "Reusable source pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      parent_pack_id: "pack-1",
+      version: 1
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse([])
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Source Persona" },
+          { id: "persona-2", name: "Target Persona" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [sourceLibraryItem] })
+      }
+      if (path === "/api/v1/persona/visual-library/library-1/use" && method === "POST") {
+        expect(parseJsonBody(init?.body)).toEqual({
+          target_persona_id: "persona-2"
+        })
+        return okResponse(duplicatedPack)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Target Persona"
+        isActive
+      />
+    )
+
+    const libraryPanel = await screen.findByTestId("persona-visual-library-panel")
+    expect(libraryPanel).toHaveTextContent("Personal library")
+    expect(within(libraryPanel).getByText("Reusable source pack")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("persona-visual-library-target-library-1"), {
+      target: { value: "persona-2" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-library-use-library-1"))
+
+    await waitFor(() =>
+      expect(calls).toContain("POST /api/v1/persona/visual-library/library-1/use")
+    )
+    expect(
+      await screen.findByText(/Library item copied as a draft for Target Persona/)
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
   })
 
   it("edits, removes, and uses personal library entries as draft target packs", async () => {

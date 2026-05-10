@@ -1,3 +1,5 @@
+"""Service layer for user-scoped Persona Visual pack library operations."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -84,6 +86,19 @@ class PersonaVisualLibraryService:
             include_deleted=include_deleted,
             limit=limit,
             offset=offset,
+        )
+
+    def get_item_for_source(
+        self,
+        *,
+        user_id: str,
+        source_persona_id: str,
+        source_pack_id: str,
+    ) -> dict[str, Any] | None:
+        return self._db.get_persona_visual_library_item_by_source(
+            user_id=str(user_id or "").strip(),
+            source_persona_id=str(source_persona_id or "").strip(),
+            source_pack_id=str(source_pack_id or "").strip(),
         )
 
     def update_item(

@@ -1,6 +1,8 @@
 import sqlite3
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -135,6 +137,74 @@ def test_upsert_and_list_persona_visual_library_item_with_source_status(
     assert item["source_available"] is True
     assert item["title"] == "Warm desk assistant"
     assert item["notes"] == "Updated notes"
+    assert item["tags"] == ["calm"]
+
+
+def test_upsert_persona_visual_library_item_recovers_from_duplicate_source_race(
+    db_instance: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persona_id, pack = _create_persona_and_pack(db_instance)
+    store = db_instance.persona_state_store
+    real_transaction = store.transaction
+
+    class RaceConnection:
+        def __init__(self, conn: Any) -> None:
+            self._conn = conn
+            self._injected = False
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._conn, name)
+
+        def execute(self, query: str, params: tuple[Any, ...] = ()) -> Any:
+            normalized_query = " ".join(str(query).split()).upper()
+            if (
+                not self._injected
+                and "INSERT INTO PERSONA_VISUAL_LIBRARY_ITEMS" in normalized_query
+            ):
+                self._injected = True
+                self._conn.execute(
+                    query,
+                    (
+                        "race-library-item",
+                        "user-1",
+                        persona_id,
+                        pack["id"],
+                        "Concurrent helper",
+                        None,
+                        "[]",
+                        "Research Buddy",
+                        "Warm desk assistant",
+                        int(pack["version"]),
+                        "2026-05-09T00:00:00+00:00",
+                        "2026-05-09T00:00:00+00:00",
+                        0,
+                        1,
+                    ),
+                )
+            return self._conn.execute(query, params)
+
+    @contextmanager
+    def race_transaction() -> Iterator[RaceConnection]:
+        with real_transaction() as conn:
+            yield RaceConnection(conn)
+
+    monkeypatch.setattr(store, "transaction", race_transaction)
+
+    item = db_instance.upsert_persona_visual_library_item(
+        user_id="user-1",
+        source_persona_id=persona_id,
+        source_pack_id=pack["id"],
+        title="Resolved helper",
+        notes="Caller metadata should win.",
+        tags=["calm"],
+    )
+
+    listed = db_instance.list_persona_visual_library_items(user_id="user-1")
+    assert [listed_item["id"] for listed_item in listed] == ["race-library-item"]
+    assert item["id"] == "race-library-item"
+    assert item["title"] == "Resolved helper"
+    assert item["notes"] == "Caller metadata should win."
     assert item["tags"] == ["calm"]
 
 

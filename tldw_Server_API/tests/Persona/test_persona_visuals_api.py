@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Persona.visual_library_service import PersonaVisualLibraryServiceError
 
 
 pytestmark = pytest.mark.unit
@@ -303,6 +304,16 @@ def test_visual_library_save_list_update_and_delete(persona_db: CharactersRAGDB)
         assert updated.json()["notes"] is None
         assert updated.json()["tags"] == ["focus"]
 
+        resaved = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/library",
+            json={},
+        )
+        assert resaved.status_code == 201, resaved.text
+        assert resaved.json()["id"] == item["id"]
+        assert resaved.json()["title"] == "Updated helper"
+        assert resaved.json()["notes"] is None
+        assert resaved.json()["tags"] == ["focus"]
+
         deleted = client.delete(f"/api/v1/persona/visual-library/{item['id']}")
         assert deleted.status_code == 200, deleted.text
         assert deleted.json() == {"status": "deleted", "item_id": item["id"]}
@@ -449,6 +460,23 @@ def test_visual_library_rejects_cross_user_item_source_and_target(persona_db: Ch
         )
         assert use_other_item.status_code == 404
         assert use_other_item.json()["detail"]["code"] == "library_item_not_found"
+
+
+def test_visual_library_error_mapper_returns_403_for_forbidden() -> None:
+    exc = PersonaVisualLibraryServiceError(
+        "forbidden",
+        "Library item does not belong to the current user.",
+        details={"item_id": "library-1"},
+    )
+
+    http_exc = persona_ep._persona_visual_library_service_error_to_http(exc)
+
+    assert http_exc.status_code == 403
+    assert http_exc.detail == {
+        "code": "forbidden",
+        "message": "Library item does not belong to the current user.",
+        "details": {"item_id": "library-1"},
+    }
 
 
 def test_upload_rejects_unsupported_mime_type(persona_db: CharactersRAGDB) -> None:
