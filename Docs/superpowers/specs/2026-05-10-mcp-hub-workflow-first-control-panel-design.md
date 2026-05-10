@@ -19,7 +19,7 @@ The approved direction is the heavier workflow-first redesign. The new page shou
 - Governance
 - Audit
 
-The first implementation program should preserve existing child components and service contracts wherever possible. It should change the information architecture, routing state, workflow framing, readiness summaries, and first-use guidance before attempting deeper form rewrites.
+The overall implementation program should preserve existing child components and service contracts wherever possible. It should change the information architecture, routing state, workflow framing, readiness summaries, and first-use guidance before attempting deeper form rewrites.
 
 For PR sizing, split that program into at least two slices: Stage 1 ships the workflow shell, URL state, child-view grouping, audit drilldown mapping, and Setup-first default; Stage 2 adds readiness/status summaries and richer first-use empty-state guidance. Stage 1 may include static workflow descriptions or lightweight placeholders, but it should not require all readiness aggregation to land in the same PR.
 
@@ -112,7 +112,7 @@ Use five top-level workflows:
 
 | Workflow | User job | Existing child views |
 | --- | --- | --- |
-| Setup | Connect MCP servers, configure credentials, verify available tools | Tool Catalog, Servers & Credentials |
+| Setup | Connect MCP servers, configure credentials, verify available tools | Servers & Credentials, Tool Catalog |
 | Access | Define who can use tools and bind access to personas, groups, or defaults | Profiles, Assignments |
 | Workspaces | Define trusted local path and workspace boundaries | Path Scopes, Workspace Sets, Shared Workspaces |
 | Governance | Manage approvals, portable packs, and capability adapters | Approvals, Governance Packs, Capability Mappings |
@@ -196,6 +196,8 @@ Rules:
 - Query updates should use replace behavior for internal tab switching where possible, so navigation does not pollute browser history.
 - `/settings/mcp-hub` should continue to reach the same workflow shell through existing route behavior.
 
+Implementation constraint: shared WebUI/extension code should use the existing `react-router-dom` compatibility layer (`useSearchParams`, `useNavigate`, or a small helper built on those hooks) rather than direct `window.history` calls. The Next WebUI currently aliases `react-router-dom` to the extension shim, so route-state code must keep both surfaces on the same path.
+
 ### Legacy tab-key compatibility
 
 Audit findings and older tests already use tab/view keys such as `assignments`, `credentials`, and `workspace-sets`. Keep those keys as the canonical child view keys. The redesign should wrap them in workflows, not rename them.
@@ -236,7 +238,7 @@ Selected child view content:
   existing component
 ```
 
-The status strip should be a short operational summary, not a tutorial block. It should answer:
+The eventual status strip should be a short operational summary, not a tutorial block. It should answer:
 
 - What exists?
 - What is missing?
@@ -244,9 +246,11 @@ The status strip should be a short operational summary, not a tutorial block. It
 
 The existing dismissible explainer can remain, but it should be rewritten to reflect the workflow model and should not be the only source of first-use guidance.
 
+Stage 1 can omit dynamic readiness/status aggregation. If the first shell reserves visual space for status, keep it static and descriptive until the Stage 2 readiness model is implemented.
+
 ## Readiness Summary Model
 
-The first implementation should derive summary state on the frontend from existing endpoints. A later backend summary endpoint can be added only if the frontend implementation becomes too slow, inconsistent, or duplicated across components.
+The Stage 2 readiness implementation should derive summary state on the frontend from existing endpoints. A later backend summary endpoint can be added only if the frontend implementation becomes too slow, inconsistent, or duplicated across components.
 
 ### Setup readiness
 
@@ -480,6 +484,7 @@ Deliverables:
 - child component rendering by view key
 - old audit drilldown mapped through workflow/view
 - Setup-first default route
+- shared WebUI/extension route-state handling through the existing router shim
 
 Primary files:
 
@@ -527,7 +532,9 @@ These are intentionally outside the first shell slice.
 
 ### Unit and component tests
 
-Add or update focused tests under [apps/packages/ui/src/components/Option/MCPHub/__tests__](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/__tests__):
+Add or update focused tests under [apps/packages/ui/src/components/Option/MCPHub/__tests__](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/MCPHub/__tests__).
+
+Stage 1 expectations:
 
 - workflow config maps every current view key to exactly one workflow
 - default route lands on Setup / Servers & Credentials
@@ -536,6 +543,9 @@ Add or update focused tests under [apps/packages/ui/src/components/Option/MCPHub
 - selecting a child view updates selected view
 - audit `Open` maps a finding to the expected workflow and child view
 - explainer dismissal behavior still works
+
+Stage 2 readiness expectations:
+
 - readiness summary failure does not hide the selected child view
 
 ### Extension route parity
@@ -554,13 +564,14 @@ Required checks:
 Update [mcp-hub.spec.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts):
 
 - page loads with MCP Hub heading and workflow navigation
+- page-object helpers move from tab-only `switchToTab` locators to workflow/view selection helpers
 - each workflow can be selected
 - representative child views load and fire expected API calls:
   - Setup / Tool Catalog -> `GET /api/v1/mcp/hub/tool-registry`
   - Setup / Servers & Credentials -> `GET /api/v1/mcp/hub/external-servers`
   - Access / Profiles -> `GET /api/v1/mcp/hub/permission-profiles`
   - Access / Assignments -> `GET /api/v1/mcp/hub/policy-assignments`
-  - Audit -> `GET /api/v1/mcp/hub/governance-audit`
+  - Audit -> `GET /api/v1/mcp/hub/audit/findings`
 - audit drilldown opens the mapped workflow and child view
 
 ### Verification commands
@@ -569,7 +580,7 @@ Expected focused verification after implementation:
 
 ```bash
 cd apps/tldw-frontend
-bunx vitest run ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.ftux.test.tsx
+bunx vitest run ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubWorkflowConfig.test.ts ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.ftux.test.tsx
 bunx vitest run ../packages/ui/src/routes/__tests__/mcp-hub-route.test.tsx ../../apps/tldw-frontend/__tests__/extension/route-registry.mcp-hub.test.tsx
 npx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts --reporter=line
 ```
