@@ -22,7 +22,9 @@ from .errors import (
     SyncStoreError,
 )
 from .models import (
+    ConflictStatus,
     EncryptionPolicy,
+    SyncConflict,
     SyncConflictCreate,
     SyncDataset,
     SyncDatasetCreate,
@@ -32,6 +34,8 @@ from .models import (
     SyncDomain,
     SyncEnvelope,
     SyncEnvelopeCreate,
+    SyncKeyRecord,
+    SyncKeyRecordCreate,
 )
 from .security import PrivatePayloadValidationError, validate_private_payload
 from .store import SyncV2Store
@@ -47,6 +51,7 @@ class SyncV2Settings:
     max_pull_page_size: int = 100
     max_envelope_payload_bytes: int = 262_144
     max_attachment_bytes: int = 1_048_576
+    supports_attachments: bool = False
     encryption_policies: list[EncryptionPolicy] = field(
         default_factory=lambda: [
             "client_private_v1",
@@ -68,7 +73,7 @@ class SyncV2Capabilities:
     max_attachment_bytes: int
     supports_restore_manifest: bool = True
     supports_conflicts: bool = True
-    supports_attachments: bool = True
+    supports_attachments: bool = False
     server_time: str | None = None
 
 
@@ -191,6 +196,7 @@ class SyncV2Service:
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
+            supports_attachments=self.settings.supports_attachments,
             server_time=self.clock() or None,
         )
 
@@ -493,6 +499,72 @@ class SyncV2Service:
                 "dataset_ids": list(dataset_ids or []),
                 "domains": list(domains or []),
             },
+        )
+
+    def list_conflicts(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        status: ConflictStatus | None = None,
+    ) -> list[SyncConflict]:
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return self.store.list_conflicts(dataset_id, status=status)
+
+    def resolve_conflict(
+        self,
+        *,
+        user_id: str,
+        conflict_id: str,
+        action: str,
+        resolved_by_envelope_id: str | None = None,
+        resolved_by_device_id: str | None = None,
+        notes: str | None = None,
+    ) -> SyncConflict:
+        for dataset in self.store.list_datasets_for_user(user_id):
+            if any(
+                conflict.conflict_id == conflict_id
+                for conflict in self.store.list_conflicts(dataset.dataset_id)
+            ):
+                return self.store.resolve_conflict(
+                    conflict_id,
+                    status="dismissed" if action == "dismiss" else "resolved",
+                    resolved_by_envelope_id=resolved_by_envelope_id,
+                    resolved_by_device_id=resolved_by_device_id,
+                    resolution_action=action,
+                    resolution_notes=notes,
+                )
+        raise SyncStoreError("Sync conflict was not found or is not accessible")
+
+    def store_key_recovery_bundle(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None,
+        key_purpose: str,
+        wrapped_key_blob: str,
+        kdf_metadata: dict[str, object] | None = None,
+        recovery_hint: str | None = None,
+        rotation_of_key_record_id: str | None = None,
+    ) -> SyncKeyRecord:
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return self.store.store_key_record(
+            SyncKeyRecordCreate(
+                key_record_id=self.id_factory("key"),
+                dataset_id=dataset.dataset_id,
+                user_id=user_id,
+                device_id=device_id,
+                key_purpose=key_purpose,
+                wrapped_key_blob=wrapped_key_blob,
+                kdf_metadata=dict(kdf_metadata or {}),
+                recovery_hint=recovery_hint,
+                rotation_of_key_record_id=rotation_of_key_record_id,
+            )
         )
 
     def _evaluate_envelope(
