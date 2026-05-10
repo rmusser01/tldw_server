@@ -162,6 +162,11 @@ def _parse_import_content_selections_field(value: str | None) -> dict[ContentTyp
     return _coerce_import_content_selections(parsed)
 
 
+def _default_import_chatbook_request() -> ImportChatbookRequest:
+    """Return default import options; multipart fields are parsed explicitly."""
+    return ImportChatbookRequest()
+
+
 def _persist_completed_sync_export_job(
     service: ChatbookService,
     user_id: str,
@@ -514,7 +519,7 @@ async def import_chatbook(
     background_tasks: BackgroundTasks,
     request: Request,
     file: UploadFile = File(...),
-    import_request: ImportChatbookRequest = Depends(),
+    import_request: ImportChatbookRequest = Depends(_default_import_chatbook_request),
     source_format: ChatbookImportSourceFormat | None = Form(None),
     conflict_resolution: APIConflictResolution | None = Form(None),
     prefix_imported: bool | None = Form(None),
