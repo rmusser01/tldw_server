@@ -1,3 +1,4 @@
+import json
 from collections.abc import Generator, Iterator
 from typing import Any
 
@@ -231,6 +232,32 @@ def _create_story_session_with_choice(
     return session.id
 
 
+def _create_story_session_with_completed_branch(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    *,
+    character_id: int,
+    pack_id: int,
+    idempotency_key: str,
+) -> tuple[int, int]:
+    story_session_id = _create_story_session_with_choice(
+        chacha_db,
+        character_id=character_id,
+        pack_id=pack_id,
+    )
+    turn_response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/turn",
+        json={
+            "choice_id": "open",
+            "client_scene_version": 1,
+            "idempotency_key": idempotency_key,
+        },
+    )
+    assert turn_response.status_code == 200
+    branch_id = int(turn_response.json()["current_scene"]["active_branch_node_id"])
+    return story_session_id, branch_id
+
+
 def test_turn_request_requires_exactly_one_input_field() -> None:
     VNPlayTurnRequest(input_text="hello", client_scene_version=0, idempotency_key="k")
 
@@ -399,6 +426,359 @@ def test_branch_list_keeps_branch_path_list_shape(
     body = response.json()
     assert isinstance(body[0]["branch_path"], list)
     assert body[0]["branch_path"][0]["choice_id"] == "open"
+
+
+def test_branch_navigation_returns_active_path_and_restore_capability(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id, branch_id = _create_story_session_with_completed_branch(
+        client,
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+        idempotency_key="api-branch-navigation-choice",
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/sessions/{story_session_id}/branch-navigation"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == story_session_id
+    assert body["active_branch_node_id"] == branch_id
+    assert body["active_path"] == [
+        {
+            "branch_id": branch_id,
+            "branch_label": "Open the door",
+            "choice_id": "open",
+            "choice_text": "Open the door",
+            "depth": 1,
+        }
+    ]
+    branch = body["branches"][0]
+    assert branch["branch_id"] == branch_id
+    assert branch["is_active"] is True
+    assert branch["is_on_active_path"] is True
+    assert branch["restore"]["supported"] is True
+    assert branch["restore"]["default_target"] == "branch_latest"
+    assert branch["restore"]["targets"]["branch_latest"]["event_id"] is not None
+    assert branch["restore"]["targets"]["choice_point"]["event_id"] is not None
+
+
+def test_branch_events_filter_keeps_existing_list_response_shape(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id, branch_id = _create_story_session_with_completed_branch(
+        client,
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+        idempotency_key="api-branch-events-choice",
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/sessions/{story_session_id}/events",
+        params={
+            "branch_id": branch_id,
+            "limit": 2,
+            "include_descendants": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body, list)
+    assert 1 <= len(body) <= 2
+    assert {event["branch_node_id"] for event in body} == {branch_id}
+
+
+def test_unfiltered_events_preserve_legacy_unbounded_default(
+    client: TestClient,
+    session_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_limit: list[int | None] = []
+
+    def list_events_with_metadata(
+        self: VNPlayService,
+        session_id: int,
+        *,
+        branch_id: int | None = None,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+        include_descendants: bool = False,
+    ) -> dict[str, Any]:
+        captured_limit.append(limit)
+        return {
+            "events": [
+                {
+                    "id": index,
+                    "session_id": session_id,
+                    "owner_user_id": self.owner_user_id,
+                    "sequence_number": index,
+                    "event_type": "model_turn",
+                    "event_payload": {"text": f"Event {index}"},
+                    "source": "model",
+                    "created_at": "2026-05-09T00:00:00Z",
+                }
+                for index in range(1, 102)
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(
+        VNPlayService,
+        "list_events_with_metadata",
+        list_events_with_metadata,
+    )
+
+    response = client.get(f"/api/v1/vn-play/sessions/{session_id}/events")
+
+    assert response.status_code == 200
+    assert captured_limit == [None]
+    assert len(response.json()) == 101
+
+
+def test_branch_events_default_to_bounded_limit(
+    client: TestClient,
+    session_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_limit: list[int | None] = []
+
+    def list_events_with_metadata(
+        self: VNPlayService,
+        session_id: int,
+        *,
+        branch_id: int | None = None,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+        include_descendants: bool = False,
+    ) -> dict[str, Any]:
+        captured_limit.append(limit)
+        return {"events": [], "warnings": []}
+
+    monkeypatch.setattr(
+        VNPlayService,
+        "list_events_with_metadata",
+        list_events_with_metadata,
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/events",
+        params={"branch_id": 7},
+    )
+
+    assert response.status_code == 200
+    assert captured_limit == [100]
+
+
+def test_branch_events_warning_header_uses_compact_json(
+    client: TestClient,
+    session_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warning = {
+        "code": "branch_interval_replay_limit_exceeded",
+        "severity": "warning",
+        "message": "Branch replay was capped.",
+        "recoverable": True,
+        "branch_id": 7,
+    }
+
+    def list_events_with_warning(
+        self: VNPlayService,
+        session_id: int,
+        *,
+        branch_id: int | None = None,
+        after_sequence: int | None = None,
+        limit: int | None = None,
+        include_descendants: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "events": [
+                {
+                    "id": 100,
+                    "session_id": session_id,
+                    "owner_user_id": self.owner_user_id,
+                    "sequence_number": 4,
+                    "event_type": "model_turn",
+                    "event_payload": {"text": "Filtered"},
+                    "source": "model",
+                    "branch_node_id": branch_id,
+                    "created_at": "2026-05-09T00:00:00Z",
+                }
+            ],
+            "warnings": [warning],
+        }
+
+    monkeypatch.setattr(
+        VNPlayService,
+        "list_events_with_metadata",
+        list_events_with_warning,
+    )
+
+    response = client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/events",
+        params={
+            "branch_id": 7,
+            "after_sequence": 3,
+            "limit": 2,
+            "include_descendants": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["branch_node_id"] == 7
+    assert json.loads(response.headers["X-VN-Play-Warnings"]) == [warning]
+    assert ": " not in response.headers["X-VN-Play-Warnings"]
+    assert ", " not in response.headers["X-VN-Play-Warnings"]
+
+
+def test_branch_restore_returns_response_shape_and_replays_idempotently(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id, branch_id = _create_story_session_with_completed_branch(
+        client,
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+        idempotency_key="api-branch-restore-choice",
+    )
+    payload = {
+        "client_scene_version": 2,
+        "idempotency_key": "api-branch-restore",
+    }
+
+    first = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/branches/{branch_id}/restore",
+        json=payload,
+    )
+    second = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/branches/{branch_id}/restore",
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_body = first.json()
+    second_body = second.json()
+    assert first_body["status"] == "completed"
+    assert first_body["replayed"] is False
+    assert first_body["branch_id"] == branch_id
+    assert first_body["target"] == "branch_latest"
+    assert first_body["scene_version"] == 3
+    assert first_body["session"]["id"] == story_session_id
+    assert first_body["current_scene"]["scene_version"] == 3
+    assert first_body["branch_navigation"]["active_branch_node_id"] == branch_id
+    assert second_body == {**first_body, "replayed": True}
+
+
+def test_branch_restore_stale_scene_version_returns_conflict(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id, branch_id = _create_story_session_with_completed_branch(
+        client,
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+        idempotency_key="api-branch-restore-stale-choice",
+    )
+
+    response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/branches/{branch_id}/restore",
+        json={
+            "client_scene_version": 1,
+            "idempotency_key": "api-branch-restore-stale",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "stale_scene_version"
+
+
+def test_branch_restore_missing_branch_returns_branch_not_found(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    ready_pack_id: int,
+) -> None:
+    story_session_id = _create_story_session_with_choice(
+        chacha_db,
+        character_id=character_id,
+        pack_id=ready_pack_id,
+    )
+
+    response = client.post(
+        f"/api/v1/vn-play/sessions/{story_session_id}/branches/9999/restore",
+        json={
+            "client_scene_version": 1,
+            "idempotency_key": "api-branch-restore-missing",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "branch_not_found"
+
+
+def test_checkpoint_restore_passes_idempotency_key_and_replays(
+    client: TestClient,
+    session_id: int,
+) -> None:
+    first_turn = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/turn",
+        json={
+            "input_text": "First",
+            "client_scene_version": 0,
+            "idempotency_key": "api-checkpoint-first-turn",
+        },
+    )
+    assert first_turn.status_code == 200
+    checkpoint = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/checkpoint",
+        json={"label": "First"},
+    )
+    assert checkpoint.status_code == 200
+    second_turn = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/turn",
+        json={
+            "input_text": "Second",
+            "client_scene_version": 1,
+            "idempotency_key": "api-checkpoint-second-turn",
+        },
+    )
+    assert second_turn.status_code == 200
+    restore_payload = {
+        "checkpoint_id": checkpoint.json()["id"],
+        "idempotency_key": "api-checkpoint-restore",
+    }
+
+    first_restore = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/restore",
+        json=restore_payload,
+    )
+    second_restore = client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/restore",
+        json=restore_payload,
+    )
+
+    assert first_restore.status_code == 200
+    assert second_restore.status_code == 200
+    assert first_restore.json()["scene_version"] == 3
+    assert second_restore.json()["scene_version"] == 3
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ title: Implement VN Play branch navigation API
 status: In Progress
 assignee: []
 created_date: '2026-05-09 22:22'
-updated_date: '2026-05-09 23:56'
+updated_date: '2026-05-10 00:34'
 labels:
   - vn-play
   - api
@@ -94,6 +94,12 @@ Task 4 review fix loop complete. Fix commit 2957038cb Fix VN Play restore action
 Rebased codex/vn-play-branch-navigation-api onto latest origin/dev before Task 5. Post-rebase head b104bbb06; Task 4 commits rewritten as 480595fad Add guarded VN Play branch restore and 689d972cf Fix VN Play restore action races. Post-rebase focused VN Play baseline: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 110 passed, 5 warnings in 29.49s.
 
 Task 5 API slice started in .worktrees/vn-play-branch-navigation-api at 847bbbee8 after rebase. Scope constrained to vn_play_schemas.py, vn_play.py, and test_vn_play_api.py. Plan: write failing API tests for branch-navigation, branch-aware events including warning header, branch restore, stale/branch error mappings, and checkpoint restore idempotency wiring; add schemas/endpoints/query parameters/error mapping; run focused API tests, full VN Play tests if practical, diff check, Bandit on touched API files, and commit.
+
+Task 5 API slice complete after worker handoff required controller cleanup. API schema/endpoint/test patch preserved; malformed Backlog note collapse rejected and restored in worktree. Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q => 30 passed, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 117 passed, 5 warnings in 32.60s; git diff --check => exit 0; Bandit API scope wrote /tmp/bandit_vn_play_branch_navigation_task5.json with results/errors empty.
+
+Task 5 review fix complete. Fixed legacy events compatibility so omitted unfiltered limit remains unbounded while branch-filtered omitted limit defaults to 100. Re-review found no Critical Important or Minor issues and approved commit. Verification after fix: API tests 32 passed, VN_Play suite 119 passed, diff check clean, Bandit task5 JSON empty.
+
+Task 5 API implementation is complete. AC4 remains unchecked until Task 6 documents the API contract.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

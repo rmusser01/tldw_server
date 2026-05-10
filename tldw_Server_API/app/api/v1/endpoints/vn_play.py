@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from typing import Any, cast
 
@@ -9,7 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
+    VNPlayBranchNavigationResponse,
     VNPlayBranchResponse,
+    VNPlayBranchRestoreRequest,
+    VNPlayBranchRestoreResponse,
     VNPlayCheckpointCreate,
     VNPlayCheckpointResponse,
     VNPlayEventResponse,
@@ -28,7 +32,12 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Play.constants import (
+    ERROR_BRANCH_NOT_FOUND,
+    ERROR_BRANCH_RESTORE_AMBIGUOUS,
+    ERROR_BRANCH_RESTORE_NOT_ALLOWED,
+    ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
     TURN_STATUS_MODEL_FAILED,
@@ -52,8 +61,14 @@ from tldw_Server_API.app.core.VN_Play.service import (
 router = APIRouter(prefix="/vn-play", tags=["vn-play"])
 CONFLICT_ERROR_CODES = {
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
+    ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
+}
+BAD_REQUEST_ERROR_CODES = {
+    ERROR_BRANCH_RESTORE_AMBIGUOUS,
+    ERROR_BRANCH_RESTORE_NOT_ALLOWED,
+    ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
 }
 
 
@@ -211,15 +226,53 @@ async def retry_last_turn(
         raise _http_error_for_service_exception(exc) from exc
 
 
+@router.get(
+    "/sessions/{session_id}/branch-navigation",
+    response_model=VNPlayBranchNavigationResponse,
+)
+def get_branch_navigation(
+    session_id: int,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayBranchNavigationResponse:
+    try:
+        return VNPlayBranchNavigationResponse.model_validate(
+            service.get_branch_navigation(session_id)
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
 @router.get("/sessions/{session_id}/events", response_model=list[VNPlayEventResponse])
 def list_events(
     session_id: int,
+    response: Response,
+    branch_id: int | None = Query(default=None, ge=1),
+    after_sequence: int | None = Query(default=None, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=250),
+    include_descendants: bool = Query(default=False),
     service: VNPlayService = Depends(_service),
 ) -> list[VNPlayEventResponse]:
     try:
-        return [VNPlayEventResponse.model_validate(event) for event in service.list_events(session_id)]
-    except VNPlayNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found") from exc
+        effective_limit = 100 if branch_id is not None and limit is None else limit
+        result = service.list_events_with_metadata(
+            session_id,
+            branch_id=branch_id,
+            after_sequence=after_sequence,
+            limit=effective_limit,
+            include_descendants=include_descendants,
+        )
+        warnings = result.get("warnings") or []
+        if warnings:
+            response.headers["X-VN-Play-Warnings"] = json.dumps(
+                warnings,
+                separators=(",", ":"),
+            )
+        return [
+            VNPlayEventResponse.model_validate(event)
+            for event in result.get("events", [])
+        ]
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
 
 
 @router.post("/sessions/{session_id}/checkpoint", response_model=VNPlayCheckpointResponse)
@@ -261,10 +314,14 @@ def restore_checkpoint(
     service: VNPlayService = Depends(_service),
 ) -> VNPlaySessionResponse:
     try:
-        service.restore_checkpoint(session_id, request.checkpoint_id)
+        service.restore_checkpoint(
+            session_id,
+            request.checkpoint_id,
+            idempotency_key=request.idempotency_key,
+        )
         return _session_response(service, service.get_session(session_id))
-    except VNPlayNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found") from exc
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
 
 
 @router.get("/sessions/{session_id}/branches", response_model=list[VNPlayBranchResponse])
@@ -276,6 +333,30 @@ def list_branches(
         return [VNPlayBranchResponse.model_validate(branch) for branch in service.list_branches(session_id)]
     except VNPlayNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found") from exc
+
+
+@router.post(
+    "/sessions/{session_id}/branches/{branch_id}/restore",
+    response_model=VNPlayBranchRestoreResponse,
+)
+def restore_branch(
+    session_id: int,
+    branch_id: int,
+    request: VNPlayBranchRestoreRequest,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayBranchRestoreResponse:
+    try:
+        return VNPlayBranchRestoreResponse.model_validate(
+            service.restore_branch(
+                session_id,
+                branch_id=branch_id,
+                client_scene_version=request.client_scene_version,
+                idempotency_key=request.idempotency_key,
+                target=request.target,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
 
 
 def _session_response(
@@ -309,9 +390,15 @@ def _scene_state(service: VNPlayService, session_id: int) -> dict[str, Any] | No
 def _http_error_for_service_exception(exc: Exception) -> HTTPException:
     detail = str(exc) or exc.__class__.__name__
     if isinstance(exc, VNPlayNotFoundError):
+        if detail == ERROR_BRANCH_NOT_FOUND:
+            return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
     if isinstance(exc, VNPlayConflictError) or detail in CONFLICT_ERROR_CODES:
+        if detail in BAD_REQUEST_ERROR_CODES:
+            return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     if detail in {TURN_STATUS_MODEL_FAILED, TURN_STATUS_PARSE_FAILED}:
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+    if detail in BAD_REQUEST_ERROR_CODES:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
