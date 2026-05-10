@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
+    SyncPushRequest,
     SyncPushResponse,
     SyncV2Envelope,
 )
@@ -41,14 +42,26 @@ def test_sync_envelope_allows_private_routing_metadata_in_clear_payload():
         _private_envelope_payload(
             payload_clear={
                 "status": "archived",
-                "routing": {"entity_kind": "note"},
+                "entity_kind": "note",
                 "tag_ids": ["tag-1"],
+                "attachment_id": "attachment-1",
             }
         )
     )
 
     assert envelope.payload_clear["status"] == "archived"
-    assert envelope.payload_clear["routing"]["entity_kind"] == "note"
+    assert envelope.payload_clear["entity_kind"] == "note"
+    assert envelope.payload_clear["attachment_id"] == "attachment-1"
+
+
+def test_sync_envelope_rejects_unknown_clear_payload_keys_for_private_policy():
+    payload = _private_envelope_payload(
+        payload_ciphertext=None,
+        payload_clear={"fields": {"headline": "known plaintext"}},
+    )
+
+    with pytest.raises(ValidationError):
+        SyncV2Envelope.model_validate(payload)
 
 
 def test_sync_envelope_requires_adapter_version():
@@ -87,6 +100,21 @@ def test_push_response_reports_per_envelope_outcomes():
     assert response.accepted[0].server_sequence == 1
     assert response.rejected[0].error_code == "unsupported_adapter_version"
     assert response.conflicts[0].conflict_id == "conflict-1"
+
+
+def test_push_request_rejects_envelope_dataset_mismatch():
+    with pytest.raises(ValidationError):
+        SyncPushRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "envelopes": [
+                    _private_envelope_payload(
+                        client_envelope_id="env-2",
+                        dataset_id="dataset-2",
+                    )
+                ],
+            }
+        )
 
 
 def test_attachment_upload_request_response_models():

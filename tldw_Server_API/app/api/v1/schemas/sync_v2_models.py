@@ -22,15 +22,39 @@ V1_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "shared_workspace_v1",
 ]
 
-_PRIVATE_CLEAR_PAYLOAD_KEYS = {
-    "attachment",
-    "attachments",
-    "body",
-    "content",
-    "summary",
-    "text",
-    "title",
-    "transcript",
+_PRIVATE_CLEAR_PAYLOAD_ALLOWED_KEYS = {
+    "archive_status",
+    "archived",
+    "attachment_id",
+    "attachment_ids",
+    "availability",
+    "content_type",
+    "deleted",
+    "entity_kind",
+    "entity_type",
+    "link_type",
+    "media_id",
+    "order_key",
+    "parent_entity_id",
+    "parent_entity_kind",
+    "payload_hash",
+    "payload_size_bytes",
+    "position",
+    "record_type",
+    "relation_type",
+    "relationship",
+    "size_bytes",
+    "soft_deleted",
+    "sort_key",
+    "source_id",
+    "stable_key",
+    "status",
+    "sync_status",
+    "tag_ids",
+    "target_entity_id",
+    "target_entity_kind",
+    "tombstone",
+    "workspace_id",
 }
 
 
@@ -40,21 +64,11 @@ def _normalize_object_map(value: Any) -> dict[str, Any]:
     return value
 
 
-def _find_private_clear_payload_key(value: Any, path: str = "payload_clear") -> str | None:
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            normalized_key = str(key).strip().lower().replace("-", "_")
-            nested_path = f"{path}.{key}"
-            if normalized_key in _PRIVATE_CLEAR_PAYLOAD_KEYS or normalized_key.startswith("attachment_"):
-                return nested_path
-            private_nested_key = _find_private_clear_payload_key(nested, nested_path)
-            if private_nested_key:
-                return private_nested_key
-    elif isinstance(value, list):
-        for index, nested in enumerate(value):
-            private_nested_key = _find_private_clear_payload_key(nested, f"{path}[{index}]")
-            if private_nested_key:
-                return private_nested_key
+def _find_disallowed_private_clear_payload_key(value: dict[str, Any]) -> str | None:
+    for key in value:
+        normalized_key = str(key).strip().lower().replace("-", "_")
+        if normalized_key not in _PRIVATE_CLEAR_PAYLOAD_ALLOWED_KEYS:
+            return f"payload_clear.{key}"
     return None
 
 
@@ -222,10 +236,10 @@ class SyncV2Envelope(BaseModel):
         if self.encryption_policy != "client_private_v1":
             return self
 
-        private_key_path = _find_private_clear_payload_key(self.payload_clear)
-        if private_key_path:
+        disallowed_key_path = _find_disallowed_private_clear_payload_key(self.payload_clear)
+        if disallowed_key_path:
             raise ValueError(
-                f"{private_key_path} must be encrypted for client_private_v1 sync envelopes"
+                f"{disallowed_key_path} is not allowed in clear client_private_v1 sync envelopes"
             )
         return self
 
@@ -255,6 +269,15 @@ class SyncPushRequest(BaseModel):
     envelopes: list[SyncV2Envelope] = Field(default_factory=list)
     idempotency_key: str | None = None
     last_known_cursor: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_envelope_dataset_ids(self) -> "SyncPushRequest":
+        for envelope in self.envelopes:
+            if envelope.dataset_id != self.dataset_id:
+                raise ValueError(
+                    "envelope dataset_id must match SyncPushRequest.dataset_id"
+                )
+        return self
 
 
 class SyncPushAcceptedEnvelope(BaseModel):
