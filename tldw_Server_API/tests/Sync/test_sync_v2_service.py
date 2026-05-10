@@ -805,6 +805,62 @@ def test_device_scoped_operations_require_registered_user_device(
         )
 
 
+def test_list_key_recovery_bundles_returns_filtered_opaque_material(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:opaque-dataset-key",
+        kdf_metadata={"algorithm": "scrypt", "salt": "opaque-salt"},
+        recovery_hint="laptop",
+    )
+
+    records = sync_service.list_key_recovery_bundles(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+    )
+    wrong_device = sync_service.list_key_recovery_bundles(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        key_purpose="dataset_recovery",
+    )
+    wrong_purpose = sync_service.list_key_recovery_bundles(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        key_purpose="workspace_share",
+    )
+    manifest = sync_service.restore_manifest(user_id="user-1")
+
+    assert len(records) == 1
+    assert records[0].wrapped_key_blob == "wrapped:opaque-dataset-key"
+    assert records[0].kdf_metadata == {"algorithm": "scrypt", "salt": "opaque-salt"}
+    assert records[0].recovery_hint == "laptop"
+    assert records[0].revoked_at is None
+    assert wrong_device == []
+    assert wrong_purpose == []
+    assert manifest.datasets[0].key_recovery_available is True
+    assert "wrapped:opaque-dataset-key" not in str(manifest)
+    assert "opaque-salt" not in str(manifest)
+
+
+def test_list_key_recovery_bundles_rejects_inaccessible_dataset(
+    sync_service: SyncV2Service,
+):
+    with pytest.raises(SyncStoreError, match="Sync dataset was not found"):
+        sync_service.list_key_recovery_bundles(
+            user_id="user-1",
+            dataset_id="missing-dataset",
+            key_purpose="dataset_recovery",
+        )
+
+
 def test_resolve_conflict_rejects_invalid_private_resolution_payload(
     sync_store: SyncV2Store,
 ):

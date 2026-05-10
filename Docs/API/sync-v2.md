@@ -16,6 +16,7 @@ uses the existing `/api/v1/sync` route family and keeps the older media-only
 | `GET` | `/api/v1/sync/pull` | Pull envelopes after a cursor with optional domain filters. |
 | `GET` | `/api/v1/sync/conflicts` | List unresolved, resolved, or dismissed conflicts for a dataset. |
 | `POST` | `/api/v1/sync/conflicts/{conflict_id}/resolve` | Resolve or dismiss a conflict, optionally with a resolution envelope. |
+| `GET` | `/api/v1/sync/keys/recovery-bundle` | Retrieve stored opaque key-recovery bundles for an accessible dataset. |
 | `POST` | `/api/v1/sync/keys/recovery-bundle` | Store opaque key-recovery metadata for encrypted datasets. |
 | `POST` | `/api/v1/sync/attachments` | Feature-detect attachment upload support. Currently returns not enabled. |
 
@@ -65,6 +66,18 @@ GET /api/v1/sync/pull?dataset_id=dataset-1&device_id=device-b&cursor=0&domain=no
 The response contains encrypted envelopes. The server does not decrypt them.
 The client decrypts locally, applies through domain-specific local adapters, and
 keeps conflicts visible until resolved.
+
+## Key Recovery Bundles
+
+`POST /api/v1/sync/keys/recovery-bundle` stores client-generated wrapped dataset
+keys. The server stores the wrapped key blob and KDF metadata as opaque material
+and returns only non-secret storage metadata from the write response.
+
+`GET /api/v1/sync/keys/recovery-bundle?dataset_id=...` returns active recovery
+bundle records for a dataset the authenticated user can access. Optional
+`device_id` and `key_purpose` query parameters narrow the result. This endpoint
+is the only Sync v2 response that returns `wrapped_key_blob` and `kdf_metadata`;
+restore manifests continue to expose only `key_recovery_available`.
 
 ## Conflict Policy
 

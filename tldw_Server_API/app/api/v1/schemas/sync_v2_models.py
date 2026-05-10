@@ -397,6 +397,28 @@ class SyncKeyRecoveryBundleRequest(BaseModel):
     rotation_of_key_record_id: str | None = None
 
 
+class SyncKeyRecoveryBundleRecord(BaseModel):
+    """Stored encrypted recovery material returned to an authenticated client."""
+
+    key_record_id: str
+    dataset_id: str
+    device_id: str | None = None
+    key_purpose: str
+    wrapped_key_blob: str
+    kdf_metadata: dict[str, Any] = Field(default_factory=dict)
+    recovery_hint: str | None = None
+    rotation_of_key_record_id: str | None = None
+    created_at: str | None = None
+    revoked_at: str | None = None
+
+
+class SyncKeyRecoveryBundleListResponse(BaseModel):
+    """Recovery bundle records available for a dataset."""
+
+    dataset_id: str
+    key_records: list[SyncKeyRecoveryBundleRecord] = Field(default_factory=list)
+
+
 __all__ = [
     "ConflictResolutionAction",
     "ConflictStatus",
@@ -412,7 +434,9 @@ __all__ = [
     "SyncDeviceRegisterRequest",
     "SyncDeviceRegisterResponse",
     "SyncDomain",
+    "SyncKeyRecoveryBundleListResponse",
     "SyncKeyRecoveryBundleRequest",
+    "SyncKeyRecoveryBundleRecord",
     "SyncOperation",
     "SyncPullResponse",
     "SyncPushAcceptedEnvelope",

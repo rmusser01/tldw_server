@@ -523,6 +523,66 @@ def test_key_recovery_bundle_endpoint_stores_safe_metadata(client: TestClient):
     assert "very-secret-key" not in str(body)
 
 
+def test_key_recovery_bundle_endpoint_lists_opaque_material_without_manifest_leakage(
+    client: TestClient,
+):
+    _register_device(client)
+    _enroll_dataset(client, domains=["notes"])
+    stored = client.post(
+        "/api/v1/sync/keys/recovery-bundle",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "key_purpose": "dataset_recovery",
+            "wrapped_key_blob": "wrapped:very-secret-key",
+            "kdf_metadata": {"algorithm": "scrypt", "salt": "opaque-salt"},
+            "recovery_hint": "laptop",
+        },
+    )
+
+    response = client.get(
+        "/api/v1/sync/keys/recovery-bundle",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "key_purpose": "dataset_recovery",
+        },
+    )
+    manifest = client.get("/api/v1/sync/restore-manifest", params={"dataset_id": "dataset-1"})
+
+    assert stored.status_code == 200
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dataset_id"] == "dataset-1"
+    assert len(body["key_records"]) == 1
+    assert body["key_records"][0]["key_record_id"] == "key-generated"
+    assert body["key_records"][0]["wrapped_key_blob"] == "wrapped:very-secret-key"
+    assert body["key_records"][0]["kdf_metadata"] == {"algorithm": "scrypt", "salt": "opaque-salt"}
+    assert body["key_records"][0]["recovery_hint"] == "laptop"
+    assert body["key_records"][0]["revoked_at"] is None
+    assert manifest.status_code == 200
+    assert manifest.json()["datasets"][0]["key_recovery_available"] is True
+    assert "wrapped:very-secret-key" not in str(manifest.json())
+    assert "opaque-salt" not in str(manifest.json())
+
+
+def test_key_recovery_bundle_endpoint_rejects_inaccessible_dataset_without_leakage(
+    client: TestClient,
+):
+    response = client.get(
+        "/api/v1/sync/keys/recovery-bundle",
+        params={
+            "dataset_id": "missing-dataset",
+            "key_purpose": "dataset_recovery",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error_code"] == "sync_resource_not_found"
+    assert "wrapped_key_blob" not in str(response.json())
+    assert "kdf_metadata" not in str(response.json())
+
+
 def test_sync_v2_errors_and_logs_do_not_expose_sensitive_material(client: TestClient):
     log_messages: list[str] = []
     sink_id = logger.add(

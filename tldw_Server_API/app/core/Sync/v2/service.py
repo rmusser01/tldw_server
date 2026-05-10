@@ -631,6 +631,28 @@ class SyncV2Service:
             )
         )
 
+    def list_key_recovery_bundles(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None = None,
+        key_purpose: str | None = "dataset_recovery",
+    ) -> list[SyncKeyRecord]:
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return [
+            record
+            for record in self.store.list_key_records(
+                dataset.dataset_id,
+                user_id=user_id,
+                device_id=device_id,
+                key_purpose=key_purpose,
+            )
+            if record.revoked_at is None
+        ]
+
     def _evaluate_envelope(
         self,
         dataset: SyncDataset,

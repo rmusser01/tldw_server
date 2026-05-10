@@ -42,7 +42,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncDeviceRegisterRequest,
     SyncDeviceRegisterResponse,
     SyncDomain,
+    SyncKeyRecoveryBundleListResponse,
     SyncKeyRecoveryBundleRequest,
+    SyncKeyRecoveryBundleRecord,
     SyncPullResponse,
     SyncPushAcceptedEnvelope,
     SyncPushConflictEnvelope,
@@ -291,6 +293,21 @@ def _api_key_record_metadata(record: Any) -> dict[str, Any]:
     }
 
 
+def _api_key_record_export(record: Any) -> SyncKeyRecoveryBundleRecord:
+    return SyncKeyRecoveryBundleRecord(
+        key_record_id=record.key_record_id,
+        dataset_id=record.dataset_id,
+        device_id=record.device_id,
+        key_purpose=record.key_purpose,
+        wrapped_key_blob=record.wrapped_key_blob,
+        kdf_metadata=record.kdf_metadata,
+        recovery_hint=record.recovery_hint,
+        rotation_of_key_record_id=record.rotation_of_key_record_id,
+        created_at=record.created_at,
+        revoked_at=record.revoked_at,
+    )
+
+
 @router.get(
     "/capabilities",
     response_model=SyncCapabilitiesResponse,
@@ -519,6 +536,33 @@ def resolve_sync_v2_conflict(
     except Exception as exc:
         raise _safe_sync_v2_http_error(exc) from exc
     return _api_conflict_from_core(conflict)
+
+
+@router.get(
+    "/keys/recovery-bundle",
+    response_model=SyncKeyRecoveryBundleListResponse,
+    summary="List Sync v2 encrypted key recovery material",
+)
+def list_sync_v2_key_recovery_bundles(
+    dataset_id: str = Query(...),
+    device_id: str | None = Query(None),
+    key_purpose: str | None = Query("dataset_recovery"),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        records = service.list_key_recovery_bundles(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            key_purpose=key_purpose,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(exc) from exc
+    return SyncKeyRecoveryBundleListResponse(
+        dataset_id=dataset_id,
+        key_records=[_api_key_record_export(record) for record in records],
+    )
 
 
 @router.post(
