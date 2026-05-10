@@ -118,6 +118,14 @@ mode before any mutation, and then run the real host smoke. A host reboot drill
 must not be added to scheduled CI until a dedicated prepared runner can tolerate
 disruptive reboot testing and preserve helper/stdout/serial logs reliably.
 
+For a non-launchd helper lifecycle check, maintainers can run
+`tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill` against a helper
+that was started through `vz-helperctl.py start`. That drill is local and
+operator-owned: it validates managed helper status, stops the pid-file-owned
+process, starts a replacement on the same socket/log paths, and validates
+status again. It is not a substitute for launchd bootstrap/bootout testing or a
+host reboot drill.
+
 ## Expected Skips And Non-Blocking Conditions
 
 These are expected and should not block ordinary PRs:
@@ -130,6 +138,8 @@ These are expected and should not block ordinary PRs:
 - local developer machines without a prepared bundle/helper environment
 - failure-drill coverage skipped because manual dispatch did not set
   `include_failure_drills=true`
+- managed helper `restart-drill` skipped because no helper was started through
+  the local `vz-helperctl.py start` workflow
 - host reboot or launchd-managed restart validation handled through a manual
   operator procedure rather than the workflow
 
