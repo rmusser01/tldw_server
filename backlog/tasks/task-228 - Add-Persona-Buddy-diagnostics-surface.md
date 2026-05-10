@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 07:18'
-updated_date: '2026-05-10 15:21'
+updated_date: '2026-05-10 15:31'
 labels:
   - persona
   - buddy
@@ -15,6 +15,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
   - 'https://github.com/rmusser01/tldw_server/issues/1511'
+  - 'https://github.com/rmusser01/tldw_server/pull/1518'
 documentation:
   - Docs/Reviews/PERSONA_BUDDY_CURRENT_STATE_AUDIT_2026_05_10.md
 priority: medium
@@ -60,6 +61,8 @@ Task 2 complete: added PersonaBuddyDiagnosticsPanel using the existing StatePane
 Task 3 complete: wired diagnostics into Persona Live, added visual runtime diagnostics to the existing persona visual runtime store, and published BuddyShellHost visual diagnostics for route consumption. Verification: bun run test src/routes/__tests__/sidepanel-persona.test.tsx -t diagnostics passed; bun run test src/store/__tests__/persona-visual-runtime.test.ts passed; bun run test src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx passed; bun run test src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx -t visual passed.
 
 Final verification passed from apps/packages/ui: bun run test src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts src/components/PersonaGarden/__tests__/PersonaBuddyDiagnosticsPanel.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts src/store/__tests__/persona-visual-runtime.test.ts src/components/PersonaGarden/__tests__/LiveSessionPanel.test.ts (33 tests); bun run test src/routes/__tests__/sidepanel-persona.test.tsx -t diagnostics (1 selected test); bun run test src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx -t visual (4 selected tests); git diff --check passed. Bandit skipped because no Python files changed.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1518
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
