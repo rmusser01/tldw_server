@@ -260,6 +260,7 @@ class SyncV2Service:
         device_id: str,
         envelopes: Sequence[SyncEnvelopeCreate],
     ) -> SyncPushResult:
+        self._require_registered_device(user_id, device_id)
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
         if dataset is None:
             return SyncPushResult(
@@ -428,6 +429,7 @@ class SyncV2Service:
         page_size: int | None = None,
         include_own_changes: bool = False,
     ) -> SyncPullResult:
+        self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
@@ -529,6 +531,8 @@ class SyncV2Service:
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
     ) -> SyncConflict:
+        if resolved_by_device_id is not None:
+            self._require_registered_device(user_id, resolved_by_device_id)
         for dataset in self.store.list_datasets_for_user(user_id):
             conflict = next(
                 (
@@ -540,6 +544,8 @@ class SyncV2Service:
             )
             if conflict is not None:
                 if resolution_envelope is not None:
+                    resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
+                    self._require_registered_device(user_id, resolution_device_id or "")
                     if resolution_envelope.dataset_id != dataset.dataset_id:
                         raise SyncStoreError(
                             "Sync resolution envelope dataset_id must match the conflict dataset"
@@ -563,18 +569,23 @@ class SyncV2Service:
                         raise SyncStoreError(
                             "Sync resolution envelope payload exceeds the server size limit"
                         )
-                    outcome = self._evaluate_envelope(dataset, resolution_envelope)
+                    try:
+                        outcome = self._evaluate_envelope(dataset, resolution_envelope)
+                    except PrivatePayloadValidationError as exc:
+                        raise SyncStoreError(
+                            "Sync resolution envelope private payload validation failed"
+                        ) from exc
                     if not isinstance(outcome, AdapterAccepted):
                         raise SyncStoreError("Sync resolution envelope was not accepted")
                     inserted = self.store.insert_envelope(
                         replace(
                             resolution_envelope,
-                            device_id=resolution_envelope.device_id or resolved_by_device_id,
+                            device_id=resolution_device_id,
                             status="accepted",
                         )
                     )
                     resolved_by_envelope_id = inserted.client_envelope_id
-                    resolved_by_device_id = resolved_by_device_id or inserted.device_id
+                    resolved_by_device_id = resolution_device_id
                 return self.store.resolve_conflict(
                     conflict_id,
                     status="dismissed" if action == "dismiss" else "resolved",
@@ -600,6 +611,8 @@ class SyncV2Service:
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
         if dataset is None:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
         return self.store.store_key_record(
             SyncKeyRecordCreate(
                 key_record_id=self.id_factory("key"),
@@ -634,6 +647,14 @@ class SyncV2Service:
             envelope,
             dataset=dataset,
         )
+
+    def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
+        if not device_id:
+            raise SyncStoreError("Sync device was not found or is not accessible")
+        for device in self.store.list_devices_for_user(user_id):
+            if device.device_id == device_id and device.revoked_at is None:
+                return device
+        raise SyncStoreError("Sync device was not found or is not accessible")
 
     def _payload_exceeds_size_limit(self, envelope: SyncEnvelopeCreate) -> bool:
         max_bytes = self.settings.max_envelope_payload_bytes

@@ -422,6 +422,49 @@ def test_conflict_resolve_endpoint_persists_resolution_envelope(client: TestClie
     assert [item["client_envelope_id"] for item in pulled.json()["envelopes"]] == ["env-resolution"]
 
 
+def test_conflict_resolve_endpoint_returns_client_error_for_invalid_private_resolution(
+    client: TestClient,
+):
+    _register_device(client)
+    _enroll_dataset(client, domains=["chat"])
+    conflict_push = _push(
+        client,
+        [
+            _envelope(
+                client_envelope_id="env-conflict",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:conflict",
+            )
+        ],
+    )
+    conflict_id = conflict_push.json()["conflicts"][0]["conflict_id"]
+
+    response = client.post(
+        f"/api/v1/sync/conflicts/{conflict_id}/resolve",
+        json={
+            "action": "merge",
+            "resolved_by_device_id": "device-1",
+            "resolution_envelope": _envelope(
+                client_envelope_id="env-invalid-resolution",
+                domain="chat",
+                entity_id="conversation-1",
+                operation="resolve_conflict",
+                stable_key="chat:conversation-1",
+                payload_ciphertext=None,
+                payload_clear={"body": "known plaintext"},
+                payload_hash="sha256:invalid-resolution",
+                encryption_policy="server_trusted",
+            ),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert "known plaintext" not in str(response.json())
+
+
 def test_attachments_endpoint_returns_feature_detect_response(client: TestClient):
     response = client.post(
         "/api/v1/sync/attachments",

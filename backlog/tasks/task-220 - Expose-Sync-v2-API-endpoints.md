@@ -4,7 +4,7 @@ title: Expose Sync v2 API endpoints
 status: Done
 assignee: []
 created_date: '2026-05-10 04:56'
-updated_date: '2026-05-10 05:31'
+updated_date: '2026-05-10 05:41'
 labels:
   - sync
   - api
@@ -51,6 +51,8 @@ Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints
 Controller spec-fix pass: added the Sync v2 service dependency to the attachments feature-detect stub so the route remains auth/service-gated. Extended endpoint coverage with loguru log capture proving safe Sync v2 error logging does not emit wrapped keys, encrypted payload values, or known plaintext. Focused endpoint test run: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py -q -> 11 passed.
 
 Code-quality review fix pass: persisted submitted conflict resolution envelopes before marking conflicts resolved; carried dataset encryption_policy through pull responses instead of hard-coding client_private_v1; made SyncPushRequest.device_id required at the API boundary; made /attachments feature detection ignore strict body shape while remaining service-gated; converted new Sync v2 endpoint handlers to sync functions so FastAPI runs blocking service/store work in its threadpool. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 80 passed.
+
+Second quality re-review fix pass: SyncV2Service now requires registered, non-revoked user-owned devices for push, pull, conflict resolution attribution/resolution envelopes, and key recovery metadata. Conflict resolution now maps private resolution-envelope payload validation failures to SyncStoreError so endpoints return a safe client error instead of a generic 500. Added regression coverage for unregistered device rejection across device-scoped service paths and invalid private resolution envelope handling. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 83 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
