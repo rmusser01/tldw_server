@@ -265,7 +265,7 @@ class SyncPushRequest(BaseModel):
     """Batch of client-originated envelopes pushed to the server."""
 
     dataset_id: str
-    device_id: str | None = None
+    device_id: str = Field(..., min_length=1)
     envelopes: list[SyncV2Envelope] = Field(default_factory=list)
     idempotency_key: str | None = None
     last_known_cursor: str | None = None

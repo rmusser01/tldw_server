@@ -114,6 +114,7 @@ def _enroll_dataset(
     *,
     dataset_id: str = "dataset-1",
     domains: list[str] | None = None,
+    encryption_policy: str = "client_private_v1",
 ) -> dict[str, Any]:
     response = client.post(
         "/api/v1/sync/datasets/enroll",
@@ -122,7 +123,7 @@ def _enroll_dataset(
             "device_id": "device-1",
             "scope_type": "personal",
             "domains": domains or ["notes", "chat", "source_cache"],
-            "encryption_policy": "client_private_v1",
+            "encryption_policy": encryption_policy,
             "metadata": {"label": "private label"},
         },
     )
@@ -238,6 +239,18 @@ def test_push_endpoint_is_idempotent_and_rejects_unsupported_adapter_versions(
     assert first_body["rejected"][0]["error_code"] == "unsupported_adapter_version"
 
 
+def test_push_endpoint_requires_top_level_device_id(client: TestClient):
+    _register_device(client)
+    _enroll_dataset(client, domains=["notes"])
+
+    response = client.post(
+        "/api/v1/sync/push",
+        json={"dataset_id": "dataset-1", "envelopes": [_envelope()]},
+    )
+
+    assert response.status_code == 422
+
+
 def test_pull_endpoint_filters_domains_excludes_echo_and_pages(client: TestClient):
     _register_device(client, "device-1")
     _register_device(client, "device-2")
@@ -300,6 +313,38 @@ def test_pull_endpoint_filters_domains_excludes_echo_and_pages(client: TestClien
     assert second.json()["has_more"] is False
 
 
+def test_pull_endpoint_preserves_dataset_encryption_policy(client: TestClient):
+    _register_device(client, "device-1")
+    _register_device(client, "device-2")
+    _enroll_dataset(client, domains=["notes"], encryption_policy="server_trusted")
+    pushed = _push(
+        client,
+        [
+            _envelope(
+                client_envelope_id="server-trusted-note",
+                device_id="device-2",
+                payload_ciphertext=None,
+                payload_clear={"body": "clear server-managed content"},
+                payload_hash="sha256:server-trusted-note",
+                encryption_policy="server_trusted",
+            )
+        ],
+        device_id="device-2",
+    )
+
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={"dataset_id": "dataset-1", "device_id": "device-1", "cursor": "0"},
+    )
+
+    assert pushed.status_code == 200
+    assert pulled.status_code == 200
+    envelope = pulled.json()["envelopes"][0]
+    assert envelope["client_envelope_id"] == "server-trusted-note"
+    assert envelope["encryption_policy"] == "server_trusted"
+    assert envelope["payload_clear"]["body"] == "clear server-managed content"
+
+
 def test_conflicts_list_and_resolve_endpoints(client: TestClient):
     _register_device(client)
     _enroll_dataset(client, domains=["chat"])
@@ -332,6 +377,51 @@ def test_conflicts_list_and_resolve_endpoints(client: TestClient):
     assert resolved.json()["resolved_at"] is not None
 
 
+def test_conflict_resolve_endpoint_persists_resolution_envelope(client: TestClient):
+    _register_device(client, "device-1")
+    _register_device(client, "device-2")
+    _enroll_dataset(client, domains=["chat"])
+    conflict_push = _push(
+        client,
+        [
+            _envelope(
+                client_envelope_id="env-conflict",
+                domain="chat",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:conflict",
+            )
+        ],
+    )
+    conflict_id = conflict_push.json()["conflicts"][0]["conflict_id"]
+
+    resolved = client.post(
+        f"/api/v1/sync/conflicts/{conflict_id}/resolve",
+        json={
+            "action": "merge",
+            "resolved_by_device_id": "device-1",
+            "resolution_envelope": _envelope(
+                client_envelope_id="env-resolution",
+                domain="chat",
+                entity_id="conversation-1",
+                operation="resolve_conflict",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:resolution",
+            ),
+        },
+    )
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={"dataset_id": "dataset-1", "device_id": "device-2", "domain": "chat", "cursor": "0"},
+    )
+
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "resolved"
+    assert resolved.json()["resolved_by_envelope_id"] == "env-resolution"
+    assert pulled.status_code == 200
+    assert [item["client_envelope_id"] for item in pulled.json()["envelopes"]] == ["env-resolution"]
+
+
 def test_attachments_endpoint_returns_feature_detect_response(client: TestClient):
     response = client.post(
         "/api/v1/sync/attachments",
@@ -345,6 +435,17 @@ def test_attachments_endpoint_returns_feature_detect_response(client: TestClient
             "payload_ciphertext": "ciphertext:attachment-secret",
             "payload_hash": "sha256:attachment",
         },
+    )
+
+    assert response.status_code == 501
+    assert response.json()["detail"]["error_code"] == "sync_attachments_not_enabled"
+    assert "attachment-secret" not in str(response.json())
+
+
+def test_attachments_endpoint_feature_detects_without_strict_body_validation(client: TestClient):
+    response = client.post(
+        "/api/v1/sync/attachments",
+        json={"payload_ciphertext": "ciphertext:attachment-secret"},
     )
 
     assert response.status_code == 501

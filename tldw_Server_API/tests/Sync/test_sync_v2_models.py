@@ -117,6 +117,16 @@ def test_push_request_rejects_envelope_dataset_mismatch():
         )
 
 
+def test_push_request_requires_top_level_device_id():
+    with pytest.raises(ValidationError):
+        SyncPushRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "envelopes": [_private_envelope_payload()],
+            }
+        )
+
+
 def test_attachment_upload_request_response_models():
     request = SyncAttachmentUploadRequest.model_validate(
         {

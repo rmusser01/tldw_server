@@ -129,6 +129,7 @@ class SyncPushResult:
 @dataclass(frozen=True, slots=True)
 class SyncPullResult:
     dataset_id: str
+    encryption_policy: EncryptionPolicy = "client_private_v1"
     envelopes: list[SyncEnvelope] = field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
@@ -432,7 +433,10 @@ class SyncV2Service:
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
         if dataset is None:
             since_sequence = self._parse_cursor(cursor)
-            return SyncPullResult(dataset_id=dataset_id, next_cursor=str(since_sequence))
+            return SyncPullResult(
+                dataset_id=dataset_id,
+                next_cursor=str(since_sequence),
+            )
 
         selected_domains = self._selected_domains(dataset, domains)
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
@@ -456,6 +460,7 @@ class SyncV2Service:
         self._update_cursors(dataset_id, device_id, selected_domains, next_sequence)
         return SyncPullResult(
             dataset_id=dataset_id,
+            encryption_policy=dataset.encryption_policy,
             envelopes=page,
             next_cursor=str(next_sequence),
             has_more=has_more,
@@ -519,15 +524,57 @@ class SyncV2Service:
         user_id: str,
         conflict_id: str,
         action: str,
+        resolution_envelope: SyncEnvelopeCreate | None = None,
         resolved_by_envelope_id: str | None = None,
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
     ) -> SyncConflict:
         for dataset in self.store.list_datasets_for_user(user_id):
-            if any(
-                conflict.conflict_id == conflict_id
-                for conflict in self.store.list_conflicts(dataset.dataset_id)
-            ):
+            conflict = next(
+                (
+                    item
+                    for item in self.store.list_conflicts(dataset.dataset_id)
+                    if item.conflict_id == conflict_id
+                ),
+                None,
+            )
+            if conflict is not None:
+                if resolution_envelope is not None:
+                    if resolution_envelope.dataset_id != dataset.dataset_id:
+                        raise SyncStoreError(
+                            "Sync resolution envelope dataset_id must match the conflict dataset"
+                        )
+                    if (
+                        resolution_envelope.domain != conflict.domain
+                        or resolution_envelope.entity_id != conflict.entity_id
+                    ):
+                        raise SyncStoreError(
+                            "Sync resolution envelope must target the conflict domain and entity"
+                        )
+                    if (
+                        resolved_by_device_id is not None
+                        and resolution_envelope.device_id is not None
+                        and resolution_envelope.device_id != resolved_by_device_id
+                    ):
+                        raise SyncStoreError(
+                            "Sync resolution envelope device_id must match resolved_by_device_id"
+                        )
+                    if self._payload_exceeds_size_limit(resolution_envelope):
+                        raise SyncStoreError(
+                            "Sync resolution envelope payload exceeds the server size limit"
+                        )
+                    outcome = self._evaluate_envelope(dataset, resolution_envelope)
+                    if not isinstance(outcome, AdapterAccepted):
+                        raise SyncStoreError("Sync resolution envelope was not accepted")
+                    inserted = self.store.insert_envelope(
+                        replace(
+                            resolution_envelope,
+                            device_id=resolution_envelope.device_id or resolved_by_device_id,
+                            status="accepted",
+                        )
+                    )
+                    resolved_by_envelope_id = inserted.client_envelope_id
+                    resolved_by_device_id = resolved_by_device_id or inserted.device_id
                 return self.store.resolve_conflict(
                     conflict_id,
                     status="dismissed" if action == "dismiss" else "resolved",

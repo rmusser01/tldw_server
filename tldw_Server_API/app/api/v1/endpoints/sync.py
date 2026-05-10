@@ -16,6 +16,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     status,
 )
 from loguru import logger
@@ -33,7 +34,6 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
 )
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     ConflictStatus,
-    SyncAttachmentUploadRequest,
     SyncCapabilitiesResponse,
     SyncConflictRecord,
     SyncConflictResolveRequest,
@@ -206,7 +206,11 @@ def _safe_sync_v2_http_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
-        if "invalid sync cursor" in lowered or "page_size" in lowered:
+        if (
+            "invalid sync cursor" in lowered
+            or "page_size" in lowered
+            or "resolution envelope" in lowered
+        ):
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -246,9 +250,13 @@ def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
-def _api_envelope_from_core(envelope: Any) -> SyncV2Envelope:
+def _api_envelope_from_core(
+    envelope: Any,
+    *,
+    encryption_policy: str = "client_private_v1",
+) -> SyncV2Envelope:
     payload = asdict(envelope)
-    payload["encryption_policy"] = "client_private_v1"
+    payload["encryption_policy"] = encryption_policy
     return SyncV2Envelope(**payload)
 
 
@@ -277,7 +285,7 @@ def _api_key_record_metadata(record: Any) -> dict[str, Any]:
     response_model=SyncCapabilitiesResponse,
     summary="Return Sync v2 protocol capabilities",
 )
-async def get_sync_v2_capabilities(
+def get_sync_v2_capabilities(
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
     return _api_capabilities_from_core(service.capabilities())
@@ -288,7 +296,7 @@ async def get_sync_v2_capabilities(
     response_model=SyncDeviceRegisterResponse,
     summary="Register or refresh a Sync v2 device",
 )
-async def register_sync_v2_device(
+def register_sync_v2_device(
     request: SyncDeviceRegisterRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
@@ -318,7 +326,7 @@ async def register_sync_v2_device(
     response_model=SyncDatasetEnrollResponse,
     summary="Create or join a Sync v2 dataset",
 )
-async def enroll_sync_v2_dataset(
+def enroll_sync_v2_dataset(
     request: SyncDatasetEnrollRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
@@ -355,7 +363,7 @@ async def enroll_sync_v2_dataset(
     response_model=SyncRestoreManifestResponse,
     summary="Return Sync v2 restore inventory metadata",
 )
-async def get_sync_v2_restore_manifest(
+def get_sync_v2_restore_manifest(
     dataset_ids: list[str] | None = Query(None, alias="dataset_id"),
     domains: list[SyncDomain] | None = Query(None, alias="domain"),
     user: User = Depends(get_request_user),
@@ -382,7 +390,7 @@ async def get_sync_v2_restore_manifest(
     response_model=SyncPushResponse,
     summary="Push Sync v2 envelopes",
 )
-async def push_sync_v2_envelopes(
+def push_sync_v2_envelopes(
     request: SyncPushRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
@@ -391,7 +399,7 @@ async def push_sync_v2_envelopes(
         result = service.push(
             user_id=_sync_user_id(user),
             dataset_id=request.dataset_id,
-            device_id=request.device_id or "",
+            device_id=request.device_id,
             envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
         )
     except Exception as exc:
@@ -410,7 +418,7 @@ async def push_sync_v2_envelopes(
     response_model=SyncPullResponse,
     summary="Pull Sync v2 envelopes",
 )
-async def pull_sync_v2_envelopes(
+def pull_sync_v2_envelopes(
     dataset_id: str,
     device_id: str,
     cursor: str | None = None,
@@ -434,7 +442,13 @@ async def pull_sync_v2_envelopes(
         raise _safe_sync_v2_http_error(exc) from exc
     return SyncPullResponse(
         dataset_id=result.dataset_id,
-        envelopes=[_api_envelope_from_core(envelope) for envelope in result.envelopes],
+        envelopes=[
+            _api_envelope_from_core(
+                envelope,
+                encryption_policy=result.encryption_policy,
+            )
+            for envelope in result.envelopes
+        ],
         next_cursor=result.next_cursor,
         has_more=result.has_more,
     )
@@ -445,7 +459,7 @@ async def pull_sync_v2_envelopes(
     response_model=list[SyncConflictRecord],
     summary="List Sync v2 conflicts",
 )
-async def list_sync_v2_conflicts(
+def list_sync_v2_conflicts(
     dataset_id: str,
     conflict_status: ConflictStatus | None = Query(None, alias="status"),
     user: User = Depends(get_request_user),
@@ -467,7 +481,7 @@ async def list_sync_v2_conflicts(
     response_model=SyncConflictRecord,
     summary="Resolve a Sync v2 conflict",
 )
-async def resolve_sync_v2_conflict(
+def resolve_sync_v2_conflict(
     conflict_id: str,
     request: SyncConflictResolveRequest,
     user: User = Depends(get_request_user),
@@ -478,6 +492,11 @@ async def resolve_sync_v2_conflict(
             user_id=_sync_user_id(user),
             conflict_id=conflict_id,
             action=request.action,
+            resolution_envelope=(
+                _core_envelope_from_api(request.resolution_envelope)
+                if request.resolution_envelope is not None
+                else None
+            ),
             resolved_by_envelope_id=(
                 request.resolution_envelope.client_envelope_id
                 if request.resolution_envelope is not None
@@ -496,8 +515,8 @@ async def resolve_sync_v2_conflict(
     status_code=status.HTTP_501_NOT_IMPLEMENTED,
     summary="Feature-detect Sync v2 attachment upload support",
 )
-async def upload_sync_v2_attachment(
-    _request: SyncAttachmentUploadRequest,
+def upload_sync_v2_attachment(
+    _request: Request,
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
     supports_attachments = service.capabilities().supports_attachments
@@ -515,7 +534,7 @@ async def upload_sync_v2_attachment(
     "/keys/recovery-bundle",
     summary="Store Sync v2 encrypted key recovery material",
 )
-async def store_sync_v2_key_recovery_bundle(
+def store_sync_v2_key_recovery_bundle(
     request: SyncKeyRecoveryBundleRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),

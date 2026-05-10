@@ -612,6 +612,62 @@ def test_conflict_push_rejects_idempotency_drift_without_aborting_batch(
     assert len(sync_store.list_conflicts("dataset-1", status="unresolved")) == 1
 
 
+def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+    conflict_id = pushed.conflicts[0].conflict_id
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        conflict_id=conflict_id,
+        action="merge",
+        resolved_by_device_id="device-1",
+        resolution_envelope=_envelope(
+            client_envelope_id="env-resolution",
+            operation="resolve_conflict",
+            payload_hash="sha256:resolution",
+        ),
+    )
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor="0",
+    )
+
+    assert resolved.status == "resolved"
+    assert resolved.resolved_by_envelope_id == "env-resolution"
+    assert resolved.resolution_action == "merge"
+    assert [envelope.client_envelope_id for envelope in pulled.envelopes] == ["env-resolution"]
+    assert pulled.envelopes[0].status == "accepted"
+
+
 def test_pull_uses_stable_server_cursor(sync_service: SyncV2Service):
     sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
     sync_service.push(
