@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 23:08'
-updated_date: '2026-05-10 23:49'
+updated_date: '2026-05-11 00:09'
 labels:
   - persona
   - chat
@@ -86,6 +86,13 @@ Review-fix verification:
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Normalized Persona Chat telemetry so persona-backed chat metrics now carry assistant_kind and assistant_id labels while preserving character_id compatibility. Added summary grouping by assistant identity through MetricsRegistry, regression coverage linked to PC-CASE-019 / PC-TEL-001, and recorded focused verification plus Bandit and diff hygiene.
+
+Review follow-up:
+- Added focused hook tests for character label compatibility, sustained IOO key compatibility, assistant-id sanitization, and alert-window LRU capping.
+- Preserved legacy character telemetry labels while limiting assistant_kind/assistant_id labels to persona-backed telemetry.
+- Switched persona-backed chat telemetry identity to server-resolved persona_assistant_id.
+- Made metrics sample count grouping use cumulative histogram counts when available, with regression coverage.
+- Resolved all five PR #1558 review threads after pushing commit 8d0b70979.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
