@@ -1135,6 +1135,119 @@ def test_setup_options_returns_script_versions_for_scripted_story(
     assert "character_safety_missing" in warning_codes
 
 
+def test_setup_options_exposes_script_generation_runtime_metadata(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    pack_id = _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+    published = _publish_script_version(
+        chacha_db,
+        owner_user_id=42,
+        pack_id=pack_id,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": pack_id,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Create a branch choice.",
+                        "output_schema": "choice_set",
+                        "requires_user_confirm": True,
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "end"}],
+            },
+        },
+    )
+
+    response = client.get(
+        "/api/v1/vn-play/setup-options"
+        f"?mode=scripted_story&selected_character_id={character_id}"
+    )
+
+    assert response.status_code == 200
+    script_option = response.json()["script_versions"][0]
+    assert script_option["id"] == published["version_id"]
+    assert script_option["generation_profile_key"] == "default"
+    assert script_option["generation_profile_snapshot_id"] == published[
+        "generation_profile_snapshot_id"
+    ]
+    assert script_option["generation_profile_snapshot_immutable"] is True
+    assert script_option["provider_class"] == "local"
+    assert script_option["max_automatic_generation_batch_count"] == 1
+    assert script_option["moderation_required"] is False
+    assert script_option["estimated_cost_class"] is None
+    assert script_option["supported_output_schemas"] == [
+        "choice_set",
+        "narrative_dialogue",
+        "scene_update",
+    ]
+    assert script_option["dynamic_choice_support"] is True
+    assert script_option["scene_update_support"] is False
+    assert script_option["confirmation_required"] is True
+
+
+def test_setup_options_warns_when_generation_profile_snapshot_is_missing(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+) -> None:
+    pack_id = _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+    published = _publish_script_version(
+        chacha_db,
+        owner_user_id=42,
+        pack_id=pack_id,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": pack_id,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {"op": "generate", "id": "line", "prompt": "Write a line."},
+                    {"op": "end"},
+                ]
+            },
+        },
+    )
+    chacha_db.execute_query(
+        """
+        UPDATE vn_script_versions
+        SET generation_profile_snapshot_id = ?
+        WHERE id = ?
+        """,
+        (999999, published["version_id"]),
+    )
+
+    response = client.get(
+        "/api/v1/vn-play/setup-options"
+        f"?mode=scripted_story&selected_character_id={character_id}"
+    )
+
+    assert response.status_code == 200
+    script_option = response.json()["script_versions"][0]
+    assert script_option["ready"] is False
+    warning_codes = {
+        warning["code"]
+        for warning in script_option["warning_summary"]["warnings"]
+    }
+    assert "generation_profile_snapshot_unavailable" in warning_codes
+
+
 def test_setup_options_returns_script_empty_state_for_scripted_story(
     client: TestClient,
 ) -> None:

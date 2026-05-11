@@ -244,6 +244,16 @@ class VNPlaySetupScriptVersionOption(BaseModel):
     generation_profile_snapshot_id: StrictInt
     policy_profile_id: StrictStr
     generation_profile_id: StrictStr
+    generation_profile_key: StrictStr = "default"
+    generation_profile_snapshot_immutable: StrictBool = True
+    provider_class: StrictStr | None = None
+    max_automatic_generation_batch_count: StrictInt | None = Field(default=None, ge=0)
+    moderation_required: StrictBool | None = None
+    estimated_cost_class: StrictStr | None = None
+    supported_output_schemas: list[StrictStr] = Field(default_factory=list)
+    dynamic_choice_support: StrictBool = False
+    scene_update_support: StrictBool = False
+    confirmation_required: StrictBool = False
     content_rating: StrictStr
     ready: StrictBool
     warning_summary: VNPlaySetupWarningSummary

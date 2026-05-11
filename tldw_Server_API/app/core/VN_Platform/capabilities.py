@@ -12,6 +12,8 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
 )
 
 VN_BASE_PATH = "/api/v1/vn"
+VN_SCRIPTED_GENERATION_OUTPUT_SCHEMAS = ["narrative_dialogue", "choice_set", "scene_update"]
+VN_SCRIPTED_GENERATION_AUTOMATIC_BATCH_LIMIT = 1
 VN_RESOURCE_PATHS = {
     "assets": f"{VN_BASE_PATH}/vn-assets",
     "scripts": f"{VN_BASE_PATH}/vn-scripts",
@@ -41,6 +43,11 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "asset_generation": enabled_modules["assets"],
             "asset_portability": enabled_modules["assets"],
             "scripted_story": enabled_modules["scripts"] and enabled_modules["play"],
+            "scripted_generation": enabled_modules["scripts"] and enabled_modules["play"],
+            "scripted_generation_confirmation": enabled_modules["scripts"] and enabled_modules["play"],
+            "scripted_generation_revision_activation": enabled_modules["play"],
+            "scripted_generation_history": enabled_modules["play"],
+            "scripted_generation_debug_detail": enabled_modules["play"],
             "story_start": enabled_modules["play"],
             "tts_jobs": enabled_modules["audio"],
             "realtime_image_generation": False,
@@ -51,6 +58,8 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "max_slot_variants": DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
             "max_choices_per_scene": 8,
             "runtime_model_timeout_seconds": 120,
+            "max_scripted_generation_output_schemas": len(VN_SCRIPTED_GENERATION_OUTPUT_SCHEMAS),
+            "max_automatic_generation_batch_count": VN_SCRIPTED_GENERATION_AUTOMATIC_BATCH_LIMIT,
         },
         "supported_content_ratings": ["general", "teen", "suggestive", "mature"],
         "visible_policy_profiles": [
@@ -63,6 +72,18 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
         "supported_media_types": {
             "image": list(VN_SUPPORTED_IMAGE_MEDIA_TYPES),
             "audio": list(VN_SUPPORTED_AUDIO_MEDIA_TYPES),
+        },
+        "scripted_generation": {
+            "enabled": enabled_modules["scripts"] and enabled_modules["play"],
+            "output_schemas": list(VN_SCRIPTED_GENERATION_OUTPUT_SCHEMAS),
+            "confirmation_supported": enabled_modules["scripts"] and enabled_modules["play"],
+            "revision_activation_supported": enabled_modules["play"],
+            "history_supported": enabled_modules["play"],
+            "debug_detail_supported": enabled_modules["play"],
+            "dynamic_choice_supported": True,
+            "scene_update_supported": True,
+            "max_automatic_generation_batch_count": VN_SCRIPTED_GENERATION_AUTOMATIC_BATCH_LIMIT,
+            "moderation_blocked_raw_reveal_supported": True,
         },
         "route_migration": {
             "canonical": "/api/v1/vn/vn-*",

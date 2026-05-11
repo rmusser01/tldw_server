@@ -351,6 +351,8 @@ Backend tests to extend first:
 
 **Goal:** Make the backend contract discoverable and verify the touched backend surface.
 
+**Status:** Complete.
+
 **Files:**
 
 - `tldw_Server_API/app/api/v1/endpoints/vn_capabilities.py`
@@ -363,14 +365,14 @@ Backend tests to extend first:
 
 **Steps:**
 
-- [ ] Add capability flags/limits for scripted generation, output schemas, confirmation support, revision activation, history debug detail, and batch limits.
-- [ ] Add setup-options and script-version metadata for profile key, immutable snapshot ID, provider class, max automatic generation batch count, moderation requirement, estimated cost class, supported output schemas, dynamic choice support, scene update support, and whether confirmation is required by profile or opcode.
-- [ ] Add readiness warnings when required profile snapshots are missing, unavailable, or incompatible with a script's generated output requirements.
-- [ ] Update API docs with endpoint list, public/debug response boundary, idempotency requirements, and examples for confirmation/cancel/regenerate/activate.
-- [ ] Run focused VN test suites.
-- [ ] Run compile check on touched backend packages.
-- [ ] Run Bandit on touched backend scope.
-- [ ] Run `git diff --check`.
+- [x] Add capability flags/limits for scripted generation, output schemas, confirmation support, revision activation, history debug detail, and batch limits.
+- [x] Add setup-options and script-version metadata for profile key, immutable snapshot ID, provider class, max automatic generation batch count, moderation requirement, estimated cost class, supported output schemas, dynamic choice support, scene update support, and whether confirmation is required by profile or opcode.
+- [x] Add readiness warnings when required profile snapshots are missing, unavailable, or incompatible with a script's generated output requirements.
+- [x] Update API docs with endpoint list, public/debug response boundary, idempotency requirements, and examples for confirmation/cancel/regenerate/activate.
+- [x] Run focused VN test suites.
+- [x] Run compile check on touched backend packages.
+- [x] Run Bandit on touched backend scope.
+- [x] Run `git diff --check`.
 
 **Verification Commands:**
 

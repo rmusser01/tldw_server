@@ -23,6 +23,21 @@ class VNSupportedMediaTypes(BaseModel):
     audio: list[str] = Field(default_factory=list)
 
 
+class VNScriptedGenerationCapabilities(BaseModel):
+    """Stable capabilities for backend-owned scripted generation."""
+
+    enabled: bool
+    output_schemas: list[str] = Field(default_factory=list)
+    confirmation_supported: bool
+    revision_activation_supported: bool
+    history_supported: bool
+    debug_detail_supported: bool
+    dynamic_choice_supported: bool
+    scene_update_supported: bool
+    max_automatic_generation_batch_count: int
+    moderation_blocked_raw_reveal_supported: bool
+
+
 class VNRouteMigration(BaseModel):
     """Canonical route metadata for clients migrating to the VN namespace."""
 
@@ -44,6 +59,7 @@ class VNCapabilitiesResponse(BaseModel):
     visible_policy_profiles: list[VNProfileSummary]
     visible_generation_profiles: list[VNProfileSummary]
     supported_media_types: VNSupportedMediaTypes
+    scripted_generation: VNScriptedGenerationCapabilities
     route_migration: VNRouteMigration
     docs: dict[str, str]
     openapi: str
