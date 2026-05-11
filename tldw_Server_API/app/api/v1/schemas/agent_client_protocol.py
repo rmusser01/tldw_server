@@ -22,6 +22,21 @@ def _default_offset_pagination_aliases(response):
 
 # Agent type identifiers are user-configurable strings.
 ACPAgentType = str
+ACP_COMPATIBILITY_DOCS_URL = "/docs-static/Development/ACP_Compatibility_Matrix.md"
+ACPSupportState = Literal[
+    "supported",
+    "supported_with_caveats",
+    "experimental",
+    "documented_unverified",
+    "unsupported",
+]
+ACPVerificationLevel = Literal[
+    "documented_only",
+    "stub_smoke_tested",
+    "live_e2e_tested",
+    "sandbox_tested",
+    "production_supported",
+]
 
 
 class ACPAgentInfo(BaseModel):
@@ -36,12 +51,75 @@ class ACPAgentInfo(BaseModel):
         default=None,
         description="Name of required API key if not configured (e.g., 'ANTHROPIC_API_KEY')",
     )
+    support_state: ACPSupportState = Field(
+        default="documented_unverified",
+        description="Compatibility support state from the ACP compatibility matrix.",
+    )
+    verification_level: ACPVerificationLevel = Field(
+        default="documented_only",
+        description="Evidence level behind the compatibility support state.",
+    )
+    compatibility_notes: str = Field(
+        default="Configured locally; live-agent ACP compatibility has not been certified.",
+        description="Human-readable compatibility caveat or certification note.",
+    )
+    compatibility_docs_url: str | None = Field(
+        default=ACP_COMPATIBILITY_DOCS_URL,
+        description="Documentation path or URL for compatibility details.",
+    )
 
 
 class ACPAgentListResponse(BaseModel):
     """Response for listing available agents."""
     agents: list[ACPAgentInfo] = Field(default_factory=list)
     default_agent: ACPAgentType = Field(default="custom")
+
+
+class ACPAgentCompatibilityStatus(BaseModel):
+    """Compatibility status for an ACP downstream agent."""
+    support_state: ACPSupportState = Field(
+        default="documented_unverified",
+        description="Compatibility support state from the ACP compatibility matrix.",
+    )
+    verification_level: ACPVerificationLevel = Field(
+        default="documented_only",
+        description="Evidence level behind the compatibility support state.",
+    )
+    notes: str = Field(
+        default="Configured locally; live-agent ACP compatibility has not been certified.",
+        description="Human-readable compatibility caveat or certification note.",
+    )
+    docs_url: str = Field(
+        default=ACP_COMPATIBILITY_DOCS_URL,
+        description="Served documentation URL for compatibility details.",
+    )
+
+
+class ACPSetupGuideComponent(BaseModel):
+    """Setup guide entry for a non-agent ACP component."""
+    component: str = Field(..., description="Component identifier")
+    status: str = Field(default="unknown", description="Runtime setup status")
+    steps: list[str] = Field(default_factory=list, description="Actionable setup steps")
+
+
+class ACPSetupGuideAgent(BaseModel):
+    """Setup guide entry for one ACP downstream agent."""
+    agent_type: ACPAgentType = Field(..., description="Agent type identifier")
+    name: str = Field(..., description="Human-readable agent name")
+    status: str = Field(default="unknown", description="Runtime setup status")
+    compatibility: ACPAgentCompatibilityStatus = Field(
+        default_factory=ACPAgentCompatibilityStatus,
+        description="Compatibility support status and evidence level.",
+    )
+    steps: list[str] = Field(default_factory=list, description="Actionable setup or certification steps")
+    docs_url: str | None = Field(default=None, description="Agent documentation URL")
+
+
+class ACPSetupGuideResponse(BaseModel):
+    """Response for ACP setup-guide diagnostics."""
+    timestamp: str = Field(..., description="ISO 8601 timestamp")
+    runner: ACPSetupGuideComponent = Field(..., description="Runner setup guidance")
+    guides: list[ACPSetupGuideAgent] = Field(default_factory=list, description="Agent setup guidance")
 
 
 class ACPAgentRegisterRequest(BaseModel):

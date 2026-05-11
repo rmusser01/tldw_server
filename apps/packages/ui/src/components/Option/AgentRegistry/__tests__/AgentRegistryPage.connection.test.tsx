@@ -234,4 +234,43 @@ describe("AgentRegistryPage connection config", () => {
     expect(await screen.findByText(/Runner source PATH path \/opt\/homebrew\/bin\/go/i)).toBeInTheDocument()
     expect(screen.getByText(/1\/1 agents available/i)).toBeInTheDocument()
   })
+
+  it("renders ACP compatibility support and verification states separately from runtime setup", async () => {
+    acpMocks.getAvailableAgents.mockResolvedValue({
+      agents: [
+        {
+          type: "codex",
+          name: "Codex CLI",
+          description: "Configured locally",
+          is_configured: true,
+          support_state: "documented_unverified",
+          verification_level: "documented_only",
+          compatibility_notes: "Configured locally, but live-agent compatibility is not certified.",
+          compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+        },
+        {
+          type: "stub",
+          name: "In-repo ACP stub",
+          description: "Protocol fixture",
+          is_configured: true,
+          support_state: "supported_with_caveats",
+          verification_level: "stub_smoke_tested",
+          compatibility_notes: "Stub protocol coverage only."
+        }
+      ]
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Codex CLI")).toBeInTheDocument()
+    expect(screen.getByText("documented_unverified")).toBeInTheDocument()
+    expect(screen.getByText("documented_only")).toBeInTheDocument()
+    expect(screen.getByText("supported_with_caveats")).toBeInTheDocument()
+    expect(screen.getByText("stub_smoke_tested")).toBeInTheDocument()
+    expect(screen.getByText(/configured but compatibility is documented_unverified/i)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Compatibility matrix/i })).toHaveAttribute(
+      "href",
+      "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    )
+  })
 })

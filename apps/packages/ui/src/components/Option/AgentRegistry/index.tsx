@@ -15,6 +15,7 @@ import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConf
 import { ACPRestClient } from "@/services/acp/client"
 import { buildACPAuthHeaders, buildACPClientConfig } from "@/services/acp/connection"
 import { normalizeACPHealthStatus, type ACPHealthStatus } from "@/services/acp/readiness"
+import type { ACPSupportState, ACPVerificationLevel } from "@/services/acp/types"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 
 type AgentEntry = {
@@ -24,6 +25,18 @@ type AgentEntry = {
   status: "available" | "unavailable" | "requires_setup"
   reason?: string
   is_default?: boolean
+  support_state: ACPSupportState
+  verification_level: ACPVerificationLevel
+  compatibility_notes?: string
+  compatibility_docs_url?: string | null
+}
+
+const COMPATIBILITY_COLOR: Record<ACPSupportState, "success" | "warning" | "error" | "processing" | "default"> = {
+  supported: "success",
+  supported_with_caveats: "processing",
+  experimental: "warning",
+  documented_unverified: "warning",
+  unsupported: "error"
 }
 
 export const AgentRegistryPage: React.FC = () => {
@@ -55,7 +68,11 @@ export const AgentRegistryPage: React.FC = () => {
           type: agent.type,
           name: agent.name,
           description: agent.description,
-          status: agent.is_configured ? "available" : "requires_setup"
+          status: agent.is_configured ? "available" : "requires_setup",
+          support_state: agent.support_state ?? "documented_unverified",
+          verification_level: agent.verification_level ?? "documented_only",
+          compatibility_notes: agent.compatibility_notes,
+          compatibility_docs_url: agent.compatibility_docs_url
         }))
       )
     } catch (err) {
@@ -241,6 +258,8 @@ const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
       : agent.status === "requires_setup"
         ? "Setup Required"
         : "Unavailable"
+  const showUnverifiedWarning =
+    agent.status === "available" && agent.support_state === "documented_unverified"
 
   return (
     <div className="rounded-lg border border-border p-4 transition-shadow hover:shadow-md">
@@ -262,6 +281,35 @@ const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
       <p className="mb-3 text-sm text-muted-foreground">
         {agent.description || `Agent type: ${agent.type}`}
       </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        <Tag color={COMPATIBILITY_COLOR[agent.support_state]}>
+          {agent.support_state}
+        </Tag>
+        <Tag>{agent.verification_level}</Tag>
+        {agent.compatibility_docs_url && (
+          <a
+            className="text-primary hover:underline"
+            href={agent.compatibility_docs_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Compatibility matrix
+          </a>
+        )}
+      </div>
+
+      {agent.compatibility_notes && (
+        <div className="mb-3 rounded bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+          {agent.compatibility_notes}
+        </div>
+      )}
+
+      {showUnverifiedWarning && (
+        <div className="mb-3 rounded bg-yellow-50 p-2 text-xs text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">
+          Configured but compatibility is documented_unverified. Run the ACP certification checklist before release claims.
+        </div>
+      )}
 
       {agent.reason && (
         <div className="mb-3 rounded bg-yellow-50 p-2 text-xs text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">
