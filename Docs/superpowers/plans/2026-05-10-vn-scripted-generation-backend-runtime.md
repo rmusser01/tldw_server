@@ -307,6 +307,8 @@ Backend tests to extend first:
 
 **Goal:** Expose backend-owned generation commands and history through stable VN API endpoints.
 
+**Status:** Complete.
+
 **Files:**
 
 - `tldw_Server_API/app/api/v1/endpoints/vn_play.py`
@@ -317,29 +319,29 @@ Backend tests to extend first:
 
 **Steps:**
 
-- [ ] Add request/response schemas for generation confirmation, cancellation, regeneration, activation, history list, revision list/detail, and debug detail.
-- [ ] Add `waiting_generation_confirmation` and generated-choice fields to public script state schemas.
-- [ ] Add event type literals for generation lifecycle events.
-- [ ] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generation-requests/{generation_request_id}/confirm`.
-- [ ] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generation-requests/{generation_request_id}/cancel`.
-- [ ] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generations/{generation_id}/regenerate`.
-- [ ] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/activate`.
-- [ ] Implement `GET /api/v1/vn/vn-play/sessions/{session_id}/script/generations` with offset pagination.
-- [ ] Implement `GET /api/v1/vn/vn-play/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/debug` as owner/admin debug-only detail.
-- [ ] Implement explicit debug authorization for owner/admin access; do not assume the current owner-scoped `_service` dependency provides admin cross-user access.
-- [ ] Redact moderation-blocked raw output by default and require explicit reveal parameters such as `include_blocked_raw=true&confirm=REVEAL_MODERATION_BLOCKED`.
-- [ ] Emit `vn.script_generation.debug_read` through the existing audit/logging path for successful, denied, and moderation-blocked reveal reads where configured; in single-user/no-audit deployments, log a structured warning instead of blocking.
-- [ ] Keep raw prompts, raw model output, parser diagnostics, and moderation diagnostics out of public list/state responses.
+- [x] Add request/response schemas for generation confirmation, cancellation, regeneration, activation, history list, revision list/detail, and debug detail.
+- [x] Add `waiting_generation_confirmation` and generated-choice fields to public script state schemas.
+- [x] Add event type literals for generation lifecycle events.
+- [x] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generation-requests/{generation_request_id}/confirm`.
+- [x] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generation-requests/{generation_request_id}/cancel`.
+- [x] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generations/{generation_id}/regenerate`.
+- [x] Implement `POST /api/v1/vn/vn-play/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/activate`.
+- [x] Implement `GET /api/v1/vn/vn-play/sessions/{session_id}/script/generations` with offset pagination.
+- [x] Implement `GET /api/v1/vn/vn-play/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/debug` as owner/admin debug-only detail.
+- [x] Implement explicit debug authorization for owner/admin access; do not assume the current owner-scoped `_service` dependency provides admin cross-user access.
+- [x] Redact moderation-blocked raw output by default and require explicit reveal parameters such as `include_blocked_raw=true&confirm=REVEAL_MODERATION_BLOCKED`.
+- [x] Emit `vn.script_generation.debug_read` through the existing audit/logging path for successful, denied, and moderation-blocked reveal reads where configured; in single-user/no-audit deployments, log a structured warning instead of blocking.
+- [x] Keep raw prompts, raw model output, parser diagnostics, and moderation diagnostics out of public list/state responses.
 
 **Tests:**
 
-- [ ] Endpoints enforce session owner access.
-- [ ] Confirm/cancel/regenerate/activate are idempotent and reject stale `client_scene_version`.
-- [ ] History list uses canonical offset pagination metadata.
-- [ ] Debug endpoint includes diagnostics only for authorized owner/admin.
-- [ ] Non-owner debug access is denied and recorded through the audit/logging path.
-- [ ] Moderation-blocked raw output is redacted by default and revealed only with explicit confirmation parameters.
-- [ ] Public responses never include raw prompt or raw model output.
+- [x] Endpoints enforce session owner access.
+- [x] Confirm/cancel/regenerate/activate are idempotent and reject stale `client_scene_version`.
+- [x] History list uses canonical offset pagination metadata.
+- [x] Debug endpoint includes diagnostics only for authorized owner/admin.
+- [x] Non-owner debug access is denied and recorded through the audit/logging path.
+- [x] Moderation-blocked raw output is redacted by default and revealed only with explicit confirmation parameters.
+- [x] Public responses never include raw prompt or raw model output.
 
 **Commit message:** `Expose VN generation runtime API`
 

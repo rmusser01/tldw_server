@@ -1064,6 +1064,46 @@ class VNPlayService:
             raise
         return response
 
+    def _recover_completed_confirm_generation_action(
+        self,
+        *,
+        session: VNPlaySession,
+        action: Mapping[str, Any],
+        generation: Mapping[str, Any],
+        request: Mapping[str, Any],
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Complete an outer confirm action when the inner provider action already did."""
+        generation_action = self.repo.get_generation_action_by_key(
+            session_id=session.id,
+            owner_user_id=self.owner_user_id,
+            idempotency_key=f"{idempotency_key}:generation-confirm:{int(request['id'])}",
+        )
+        if generation_action is None or generation_action.get("status") != "completed":
+            return None
+        generation_response = self._completed_generation_action_response(generation_action)
+        self.repo.clear_session_action_lock(
+            session_id=session.id,
+            owner_user_id=self.owner_user_id,
+            action_id=int(action["id"]),
+        )
+        response = self._apply_generation_revision_to_script_state(
+            session_id=session.id,
+            session=session,
+            action_id=int(action["id"]),
+            generation_response=generation_response,
+            client_scene_version=client_scene_version,
+        )
+        self.repo.mark_session_action_terminal(
+            session_id=session.id,
+            owner_user_id=self.owner_user_id,
+            action_id=int(action["id"]),
+            status=SESSION_ACTION_STATUS_COMPLETED,
+            response_payload=response,
+        )
+        return response
+
     def restore_checkpoint(
         self,
         session_id: int,
@@ -1668,6 +1708,127 @@ class VNPlayService:
             raise
         return response
 
+    async def confirm_script_generation_request(
+        self,
+        session_id: int,
+        *,
+        generation_request_id: int,
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not idempotency_key:
+            raise VNPlayTurnError("idempotency_key_required")
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        request = self.repo.get_generation_request(
+            generation_request_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if request is None or int(request["session_id"]) != session_id:
+            raise VNPlayNotFoundError("generation_request_not_found")
+        generation = self.repo.get_generation(
+            int(request["generation_id"]),
+            owner_user_id=self.owner_user_id,
+        )
+        if generation is None or int(generation["session_id"]) != session_id:
+            raise VNPlayNotFoundError("generation_not_found")
+        request_payload_hash = _payload_hash(
+            {
+                "action_type": "script_generation_confirm",
+                "generation_request_id": generation_request_id,
+                "client_scene_version": client_scene_version,
+            }
+        )
+        action = self._create_or_replay_session_action(
+            session_id=session_id,
+            action_type="script_generation_confirm",
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_payload_hash,
+        )
+        if action["status"] == SESSION_ACTION_STATUS_COMPLETED:
+            return self._completed_session_action_response(action)
+        self._raise_for_terminal_session_action(action)
+        recovered_response = self._recover_completed_confirm_generation_action(
+            session=session,
+            action=action,
+            generation=generation,
+            request=request,
+            client_scene_version=client_scene_version,
+            idempotency_key=idempotency_key,
+        )
+        if recovered_response is not None:
+            return recovered_response
+
+        lock_acquired = False
+        try:
+            self._validate_restore_can_start(
+                session_id=session_id,
+                action_id=int(action["id"]),
+                expected_scene_version=client_scene_version,
+            )
+            lock_acquired = True
+            request = self.repo.get_generation_request(
+                generation_request_id,
+                owner_user_id=self.owner_user_id,
+            )
+            if request is None or int(request["session_id"]) != session_id:
+                raise VNPlayNotFoundError("generation_request_not_found")
+            if request["status"] != "pending_confirmation":
+                raise VNPlayConflictError(ERROR_GENERATION_REQUEST_NOT_PENDING)
+            profile_snapshot = self._script_generation_profile_snapshot(
+                version=self._script_version_for_session(session),
+                profile_key=str(generation["generation_profile_key"]),
+            )
+            opcode_snapshot = _mapping_or_empty(request.get("opcode_snapshot"))
+            generation_response = await self.execute_script_generation_call(
+                session_id=session_id,
+                client_scene_version=client_scene_version,
+                idempotency_key=f"{idempotency_key}:generation-confirm:{generation_request_id}",
+                generation_point_key=str(generation["generation_point_key"]),
+                output_schema=str(generation["output_schema"]),
+                generation_profile_key=str(generation["generation_profile_key"]),
+                generation_profile_snapshot_id=int(generation["generation_profile_snapshot_id"]),
+                profile_snapshot=profile_snapshot,
+                messages=_script_generation_messages(opcode_snapshot),
+                request_kind="confirmation",
+                opcode_snapshot=opcode_snapshot,
+                prompt_fingerprint=str(request.get("prompt_fingerprint") or ""),
+                existing_generation_request_id=generation_request_id,
+            )
+            response = self._apply_generation_revision_to_script_state(
+                session_id=session_id,
+                session=session,
+                action_id=int(action["id"]),
+                generation_response=generation_response,
+                client_scene_version=client_scene_version,
+            )
+            self.repo.mark_session_action_terminal(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_id=int(action["id"]),
+                status=SESSION_ACTION_STATUS_COMPLETED,
+                response_payload=response,
+            )
+        except VNPlayConflictError as exc:
+            if lock_acquired:
+                self._abandon_session_action(
+                    session_id=session_id,
+                    action_id=int(action["id"]),
+                    error_code=str(exc),
+                )
+            raise
+        except Exception as exc:
+            if lock_acquired:
+                self._mark_session_action_failed(
+                    session_id=session_id,
+                    action_id=int(action["id"]),
+                    error_code=ERROR_INTERNAL_ERROR,
+                    error_type=exc.__class__.__name__,
+                )
+            raise
+        return response
+
     async def regenerate_script_generation(
         self,
         session_id: int,
@@ -1951,6 +2112,244 @@ class VNPlayService:
         )
         return state
 
+    def list_script_generation_history(
+        self,
+        session_id: int,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return owner-safe generated revision history for a scripted-story session."""
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        generations = self.repo.list_generations(session_id, owner_user_id=self.owner_user_id)
+        generation_by_id = {int(generation["id"]): generation for generation in generations}
+        revisions: list[dict[str, Any]] = []
+        for generation in generations:
+            revisions.extend(
+                self.repo.list_generation_revisions(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    generation_id=int(generation["id"]),
+                )
+            )
+        revisions.sort(key=lambda revision: int(revision["id"]), reverse=True)
+        total = len(revisions)
+        paged = revisions[offset : offset + limit]
+        items = [
+            self._public_generation_revision_item(
+                revision,
+                generation=generation_by_id[int(revision["generation_id"])],
+            )
+            for revision in paged
+        ]
+        next_offset = offset + limit if offset + limit < total else None
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+            "pagination": {
+                "mode": "offset",
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": next_offset is not None,
+                "next_offset": next_offset,
+            },
+        }
+
+    def list_script_generation_revisions(
+        self,
+        session_id: int,
+        *,
+        generation_id: int,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return owner-safe revisions for one generation point."""
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        generation = self.repo.get_generation(generation_id, owner_user_id=self.owner_user_id)
+        if generation is None or int(generation["session_id"]) != session_id:
+            raise VNPlayNotFoundError("generation_not_found")
+        all_revisions = self.repo.list_generation_revisions(
+            session_id=session_id,
+            owner_user_id=self.owner_user_id,
+            generation_id=generation_id,
+        )
+        total = len(all_revisions)
+        paged = all_revisions[offset : offset + limit]
+        next_offset = offset + limit if offset + limit < total else None
+        return {
+            "items": [
+                self._public_generation_revision_item(revision, generation=generation)
+                for revision in paged
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+            "pagination": {
+                "mode": "offset",
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": next_offset is not None,
+                "next_offset": next_offset,
+            },
+        }
+
+    def get_script_generation_revision(
+        self,
+        session_id: int,
+        *,
+        generation_id: int,
+        revision_id: int,
+    ) -> dict[str, Any]:
+        """Return one owner-safe generation revision detail."""
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        generation = self.repo.get_generation(generation_id, owner_user_id=self.owner_user_id)
+        revision = self.repo.get_generation_revision(revision_id, owner_user_id=self.owner_user_id)
+        if (
+            generation is None
+            or int(generation["session_id"]) != session_id
+            or revision is None
+            or int(revision["session_id"]) != session_id
+            or int(revision["generation_id"]) != generation_id
+        ):
+            raise VNPlayNotFoundError(ERROR_GENERATION_REVISION_NOT_FOUND)
+        return self._public_generation_revision_item(revision, generation=generation)
+
+    def get_script_generation_revision_debug(
+        self,
+        session_id: int,
+        *,
+        generation_id: int,
+        revision_id: int,
+        include_blocked_raw: bool = False,
+        confirm: str | None = None,
+    ) -> dict[str, Any]:
+        """Return owner-visible diagnostics for one generation revision."""
+        session = self.get_session(session_id)
+        if session.mode != MODE_SCRIPTED_STORY:
+            raise VNPlayConflictError("scripted_story_required")
+        generation = self.repo.get_generation(generation_id, owner_user_id=self.owner_user_id)
+        revision = self.repo.get_generation_revision(revision_id, owner_user_id=self.owner_user_id)
+        if (
+            generation is None
+            or int(generation["session_id"]) != session_id
+            or revision is None
+            or int(revision["session_id"]) != session_id
+            or int(revision["generation_id"]) != generation_id
+        ):
+            raise VNPlayNotFoundError(ERROR_GENERATION_REVISION_NOT_FOUND)
+        request = self.repo.get_generation_request(
+            int(revision["generation_request_id"]),
+            owner_user_id=self.owner_user_id,
+        )
+        raw_output_debug = revision.get("raw_output_debug")
+        raw_debug_state = "absent"
+        is_moderation_blocked = revision["status"] == "moderation_blocked"
+        reveal_raw = (
+            is_moderation_blocked
+            and include_blocked_raw
+            and confirm == "REVEAL_MODERATION_BLOCKED"
+        )
+        if isinstance(raw_output_debug, Mapping):
+            raw_debug_state = "available"
+        if isinstance(raw_output_debug, Mapping) and is_moderation_blocked and not reveal_raw:
+            raw_debug_state = "redacted"
+            raw_output_debug = {
+                "redacted": True,
+                "reason": "moderation_blocked_raw_requires_explicit_reveal",
+            }
+        elif isinstance(raw_output_debug, Mapping) and reveal_raw:
+            raw_debug_state = "revealed"
+        logger.warning(
+            "vn.script_generation.debug_read owner_user_id={} session_id={} generation_id={} revision_id={} reveal={}",
+            self.owner_user_id,
+            session_id,
+            generation_id,
+            revision_id,
+            reveal_raw,
+        )
+        return {
+            "id": int(revision["id"]),
+            "generation_id": generation_id,
+            "generation_request_id": int(revision["generation_request_id"]),
+            "generation_point_key": str(revision["generation_point_key"]),
+            "revision_number": int(revision["revision_number"]),
+            "status": str(revision["status"]),
+            "output_schema": str(revision["output_schema"]),
+            "public_output": _mapping_or_empty(revision.get("public_output")),
+            "raw_output_debug_state": raw_debug_state,
+            "raw_output_debug": (
+                dict(raw_output_debug) if isinstance(raw_output_debug, Mapping) else None
+            ),
+            "parser_diagnostics": _safe_debug_metadata(revision.get("parser_diagnostics")),
+            "moderation_diagnostics": _safe_debug_metadata(
+                revision.get("moderation_diagnostics")
+            ),
+            "model_metadata": _mapping_or_empty(revision.get("model_metadata")),
+            "usage_metadata": _mapping_or_empty(revision.get("usage_metadata")),
+            "request": {
+                "id": int(request["id"]) if request is not None else None,
+                "request_kind": str(request.get("request_kind") or "") if request else "",
+                "status": str(request.get("status") or "") if request else "",
+                "client_scene_version": (
+                    int(request["client_scene_version"]) if request is not None else None
+                ),
+            },
+            "profile": self._generation_profile_summary(generation),
+            "created_at": revision.get("created_at"),
+        }
+
+    def _public_generation_revision_item(
+        self,
+        revision: Mapping[str, Any],
+        *,
+        generation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "id": int(revision["id"]),
+            "generation_id": int(revision["generation_id"]),
+            "generation_point_key": str(revision["generation_point_key"]),
+            "revision_number": int(revision["revision_number"]),
+            "status": str(revision["status"]),
+            "active": _optional_int(generation.get("active_revision_id")) == int(revision["id"]),
+            "output_schema": str(revision["output_schema"]),
+            "public_output": _mapping_or_empty(revision.get("public_output")),
+            "applied_visuals": _list_of_dicts(revision.get("applied_visuals")),
+            "rejected_visuals": _list_of_dicts(revision.get("rejected_visuals")),
+            "public_error_code": revision.get("public_error_code"),
+            "source": str(revision.get("source") or "model"),
+            "profile": self._generation_profile_summary(generation),
+            "created_at": revision.get("created_at"),
+        }
+
+    def _generation_profile_summary(self, generation: Mapping[str, Any]) -> dict[str, Any]:
+        snapshot_id = int(generation["generation_profile_snapshot_id"])
+        snapshot = VNProfileSnapshotRepository.initialized(self.repo.db).get_profile_snapshot(
+            snapshot_id,
+            owner_user_id=self.owner_user_id,
+        )
+        definition = _mapping_or_empty(snapshot.get("definition") if snapshot else {})
+        return {
+            "profile_key": str(generation["generation_profile_key"]),
+            "snapshot_id": snapshot_id,
+            "provider_class": definition.get("provider_class"),
+            "moderation_required": definition.get("moderation_required"),
+            "estimated_cost_class": definition.get("estimated_cost_class"),
+        }
+
     async def execute_script_generation_call(
         self,
         *,
@@ -1966,6 +2365,7 @@ class VNPlayService:
         request_kind: str = "automatic",
         opcode_snapshot: Mapping[str, Any] | None = None,
         prompt_fingerprint: str | None = None,
+        existing_generation_request_id: int | None = None,
         provider_lease_seconds: int = 300,
     ) -> dict[str, Any]:
         """Run one recoverable scripted generation provider call."""
@@ -1987,6 +2387,7 @@ class VNPlayService:
             opcode_snapshot=opcode_snapshot,
             prompt_fingerprint=prompt_fingerprint,
             messages=messages,
+            existing_generation_request_id=existing_generation_request_id,
         )
         action = self.repo.get_generation_action_by_key(
             session_id=session_id,
@@ -2013,20 +2414,65 @@ class VNPlayService:
         if session.scene_version != client_scene_version:
             raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
 
-        generation = self.repo.get_or_create_generation(
-            session_id=session_id,
-            owner_user_id=self.owner_user_id,
-            generation_point_key=generation_point_key,
-            output_schema=output_schema,
-            generation_profile_key=generation_profile_key,
-            generation_profile_snapshot_id=generation_profile_snapshot_id,
-            script_id=session.script_id,
-            script_version_id=session.script_version_id,
-            status="in_progress",
-        )
+        if existing_generation_request_id is not None:
+            request = self.repo.get_generation_request(
+                existing_generation_request_id,
+                owner_user_id=self.owner_user_id,
+            )
+            if request is None or int(request["session_id"]) != session_id:
+                raise VNPlayNotFoundError("generation_request_not_found")
+            generation = self.repo.get_generation(
+                int(request["generation_id"]),
+                owner_user_id=self.owner_user_id,
+            )
+            if (
+                generation is None
+                or int(generation["session_id"]) != session_id
+                or str(generation["generation_point_key"]) != generation_point_key
+                or str(generation["output_schema"]) != output_schema
+                or str(generation["generation_profile_key"]) != generation_profile_key
+                or int(generation["generation_profile_snapshot_id"])
+                != generation_profile_snapshot_id
+            ):
+                raise VNPlayConflictError(ERROR_IDEMPOTENCY_KEY_CONFLICT)
+        else:
+            generation = self.repo.get_or_create_generation(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                generation_point_key=generation_point_key,
+                output_schema=output_schema,
+                generation_profile_key=generation_profile_key,
+                generation_profile_snapshot_id=generation_profile_snapshot_id,
+                script_id=session.script_id,
+                script_version_id=session.script_version_id,
+                status="in_progress",
+            )
         if action is not None:
             if int(action.get("generation_id") or 0) != int(generation["id"]):
                 raise VNPlayConflictError(ERROR_IDEMPOTENCY_KEY_CONFLICT)
+        elif existing_generation_request_id is not None:
+            if request["status"] != "pending_confirmation":
+                raise VNPlayConflictError(ERROR_GENERATION_REQUEST_NOT_PENDING)
+            action = self.repo.create_generation_action(
+                session_id=session_id,
+                owner_user_id=self.owner_user_id,
+                action_kind="execute",
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                generation_id=int(generation["id"]),
+                generation_request_id=int(request["id"]),
+                status="in_progress",
+            )
+            updated_request = self.repo.update_generation_request(
+                int(request["id"]),
+                {
+                    "execute_action_id": int(action["id"]),
+                    "status": "in_progress",
+                },
+                owner_user_id=self.owner_user_id,
+            )
+            if updated_request is not None:
+                request = updated_request
         else:
             request = self.repo.create_generation_request(
                 session_id=session_id,
@@ -2083,6 +2529,7 @@ class VNPlayService:
             "generation_profile_snapshot_id": generation_profile_snapshot_id,
             "generation_point_key": generation_point_key,
         }
+        generation_failure_recorded = False
         try:
             provider_result = await self.generation_adapter.generate(
                 VNGenerationCallRequest(
@@ -2102,6 +2549,21 @@ class VNPlayService:
                 context=usage_context,
             )
             if not moderation.allowed:
+                self._mark_generation_call_failed(
+                    session_id=session_id,
+                    request_id=int(request["id"]),
+                    action_id=int(action["id"]),
+                    error_code=moderation.public_error_code or "moderation_blocked",
+                    output_schema=output_schema,
+                    debug_metadata={"moderation_status": moderation.status},
+                    moderation_diagnostics=moderation.debug_metadata,
+                    revision_status=(
+                        "moderation_blocked"
+                        if moderation.status == "blocked"
+                        else "moderation_failed"
+                    ),
+                )
+                generation_failure_recorded = True
                 raise VNPlayTurnError(moderation.public_error_code or "moderation_blocked")
         except VNGenerationAdapterError as exc:
             self._mark_generation_call_failed(
@@ -2123,13 +2585,14 @@ class VNPlayService:
             )
             raise VNPlayTurnError(str(exc) or "invalid_generation_output") from exc
         except VNPlayTurnError as exc:
-            self._mark_generation_call_failed(
-                session_id=session_id,
-                request_id=int(request["id"]),
-                action_id=int(action["id"]),
-                error_code=str(exc) or ERROR_INTERNAL_ERROR,
-                output_schema=output_schema,
-            )
+            if not generation_failure_recorded:
+                self._mark_generation_call_failed(
+                    session_id=session_id,
+                    request_id=int(request["id"]),
+                    action_id=int(action["id"]),
+                    error_code=str(exc) or ERROR_INTERNAL_ERROR,
+                    output_schema=output_schema,
+                )
             raise
 
         applied_visuals, rejected_visuals = self._resolve_generated_scene_update_visuals(
@@ -2149,6 +2612,11 @@ class VNPlayService:
             model_metadata=provider_result.response_metadata,
             usage_metadata=provider_result.usage_metadata,
             moderation_diagnostics=moderation.audit_metadata,
+            raw_output_debug={
+                "raw_model_output": provider_result.raw_content,
+                "prompt_fingerprint": prompt_fingerprint,
+                "messages": [dict(message) for message in messages],
+            },
             applied_visuals=applied_visuals,
             rejected_visuals=rejected_visuals,
             source="model",
@@ -2287,6 +2755,7 @@ class VNPlayService:
         opcode_snapshot: Mapping[str, Any] | None,
         prompt_fingerprint: str | None,
         messages: Sequence[Mapping[str, Any]] | None,
+        existing_generation_request_id: int | None = None,
     ) -> str:
         """Return the idempotency hash for one generation action request."""
         return _payload_hash(
@@ -2301,6 +2770,7 @@ class VNPlayService:
                 "opcode_snapshot": dict(opcode_snapshot or {}),
                 "prompt_fingerprint": prompt_fingerprint,
                 "messages": [dict(message) for message in messages or []],
+                "existing_generation_request_id": existing_generation_request_id,
             }
         )
 
@@ -2376,6 +2846,8 @@ class VNPlayService:
         error_code: str,
         output_schema: str,
         debug_metadata: Mapping[str, Any] | None = None,
+        moderation_diagnostics: Mapping[str, Any] | None = None,
+        revision_status: str = "failed",
     ) -> None:
         request = self.repo.get_generation_request(request_id, owner_user_id=self.owner_user_id)
         if request is not None:
@@ -2384,10 +2856,11 @@ class VNPlayService:
                 owner_user_id=self.owner_user_id,
                 generation_id=int(request["generation_id"]),
                 generation_request_id=request_id,
-                status="failed",
+                status=revision_status,
                 output_schema=output_schema,
                 public_error_code=error_code,
                 raw_output_debug=debug_metadata,
+                moderation_diagnostics=moderation_diagnostics,
                 source="model",
             )
         self.repo.update_generation_request(
@@ -4319,6 +4792,11 @@ def _script_public_state_payload(
         "waiting_choice": waiting_choice,
         "ended": bool(position.get("ended")),
     }
+    waiting_generation = _script_public_waiting_generation(
+        position.get("waiting_generation_confirmation")
+    )
+    if waiting_generation is not None:
+        payload["waiting_generation_confirmation"] = waiting_generation
     active_generation = _script_public_generation(position.get("last_generation"))
     if active_generation is not None:
         payload["active_generation"] = active_generation
@@ -4339,6 +4817,57 @@ def _script_public_generation(generation: Any) -> dict[str, Any] | None:
         "output_schema": str(generation.get("output_schema") or ""),
         "public_output": _mapping_or_empty(generation.get("public_output")),
     }
+
+
+def _script_public_waiting_generation(waiting_generation: Any) -> dict[str, Any] | None:
+    if not isinstance(waiting_generation, Mapping):
+        return None
+    generation_id = _optional_int(waiting_generation.get("generation_id"))
+    request_id = _optional_int(waiting_generation.get("generation_request_id"))
+    if generation_id is None or request_id is None:
+        return None
+    return {
+        "generation_id": generation_id,
+        "generation_request_id": request_id,
+        "generation_point_key": str(waiting_generation.get("generation_point_key") or ""),
+        "profile_key": str(waiting_generation.get("profile_key") or ""),
+        "output_schema": str(waiting_generation.get("output_schema") or ""),
+    }
+
+
+_SENSITIVE_DEBUG_KEY_FRAGMENTS = (
+    "content",
+    "message",
+    "output",
+    "prompt",
+    "raw",
+    "text",
+)
+
+
+def _safe_debug_metadata(metadata: Any) -> dict[str, Any]:
+    """Return primitive debug metadata without provider prompt/output payloads."""
+    if not isinstance(metadata, Mapping):
+        return {}
+    safe: dict[str, Any] = {}
+    for key, value in metadata.items():
+        key_text = str(key)
+        if any(fragment in key_text.lower() for fragment in _SENSITIVE_DEBUG_KEY_FRAGMENTS):
+            safe[key_text] = {"redacted": True}
+            continue
+        if value is None or isinstance(value, (bool, int, float, str)):
+            safe[key_text] = value
+        elif isinstance(value, list):
+            safe[key_text] = [
+                item
+                for item in value
+                if item is None or isinstance(item, (bool, int, float, str))
+            ]
+        elif isinstance(value, Mapping):
+            safe[key_text] = _safe_debug_metadata(value)
+        else:
+            safe[key_text] = str(type(value).__name__)
+    return safe
 
 
 def _script_progress_token(position: Mapping[str, Any]) -> str:

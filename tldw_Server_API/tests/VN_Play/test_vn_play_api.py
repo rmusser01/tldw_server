@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.vn_play import router as vn_play_router
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints.vn_play import (
+    _service as vn_play_service_dependency,
+    router as vn_play_router,
+)
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetPackCreate,
     VNAssetReadinessResponse,
@@ -19,10 +23,17 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlayTurnRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Play.adapters import (
+    VNGenerationCallRequest,
+    VNGenerationCallResult,
+)
+from tldw_Server_API.app.core.VN_Play.constants import MODE_SCRIPTED_STORY
 from tldw_Server_API.app.core.VN_Play.models import TurnResult
 from tldw_Server_API.app.core.VN_Play.service import VNPlayService, VNPlayTurnContext
 from tldw_Server_API.app.core.VN_Scripts.service import VNScriptService
@@ -193,6 +204,91 @@ class _VisualDirectiveAdapter:
             ],
             scene_updates={"location_key": "library"},
         )
+
+
+class _ScriptedGenerationAdapter:
+    def __init__(self, raw_content: str | None = None) -> None:
+        self.raw_content = raw_content or (
+            '{"schema":"narrative_dialogue","narrative":[{"text":"Generated archive beat."}]}'
+        )
+        self.calls: list[VNGenerationCallRequest] = []
+
+    async def generate(self, request: VNGenerationCallRequest) -> VNGenerationCallResult:
+        self.calls.append(request)
+        return VNGenerationCallResult(
+            raw_content=self.raw_content,
+            usage_metadata={"total_tokens": 18},
+            response_metadata={"model": "fake-model"},
+        )
+
+
+def _generation_profile_snapshot(chacha_db: CharactersRAGDB) -> dict[str, Any]:
+    return VNProfileSnapshotRepository.initialized(chacha_db).create_profile_snapshot(
+        owner_user_id=42,
+        snapshot_type="generation",
+        profile_id="story_default",
+        profile_version=1,
+        resource_type="script_version",
+        resource_id=200,
+        definition={
+            "provider": "fake",
+            "model": "fake-model",
+            "moderation_required": False,
+            "automatic_generation_batch_cap": 1,
+            "supported_output_schemas": ["narrative_dialogue", "choice_set"],
+        },
+    )
+
+
+def _scripted_generation_api_client(
+    chacha_db: CharactersRAGDB,
+    *,
+    program: dict[str, Any],
+    adapter: _ScriptedGenerationAdapter | None = None,
+) -> tuple[TestClient, VNPlayService, int, _ScriptedGenerationAdapter]:
+    app = FastAPI()
+    app.include_router(vn_play_router, prefix="/api/v1")
+    snapshot = _generation_profile_snapshot(chacha_db)
+    generation_adapter = adapter or _ScriptedGenerationAdapter()
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        generation_adapter=generation_adapter,
+    )
+    row = service.repo.create_session(
+        owner_user_id=42,
+        mode=MODE_SCRIPTED_STORY,
+        title="Scripted generation",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-1",
+        script_id=100,
+        script_version_id=200,
+        script_manifest_snapshot_id=300,
+        script_policy_snapshot_id=400,
+        script_generation_profile_snapshot_id=int(snapshot["id"]),
+        script_position={"label": "start", "index": 0},
+    )
+    version = {
+        "id": 200,
+        "script_id": 100,
+        "generation_profile_snapshot_id": int(snapshot["id"]),
+        "generation_profile_snapshots": {"default": int(snapshot["id"])},
+        "program": program,
+    }
+    service._script_version_for_session = lambda session: version  # type: ignore[method-assign]
+    service._build_pack_manifest = lambda pack_id: {"assets": {}, "pack_id": pack_id}  # type: ignore[method-assign]
+
+    async def override_user() -> User:
+        return User(id=42, username="user-42")
+
+    async def override_service() -> VNPlayService:
+        return service
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[vn_play_service_dependency] = override_service
+    return TestClient(app), service, int(row["id"]), generation_adapter
 
 
 def _create_visual_pack(chacha_db: CharactersRAGDB) -> tuple[int, int, int, int]:
@@ -1992,6 +2088,247 @@ def test_turn_endpoint_rejects_stale_scene_version(
     )
     assert stale_retry.status_code == 409
     assert stale_retry.json()["detail"]["code"] == "stale_scene_version"
+
+
+def test_script_generation_confirmation_cancel_and_history_api(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    api_client, service, session_id, adapter = _scripted_generation_api_client(
+        chacha_db,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "confirm-me",
+                        "prompt": "Write after confirmation",
+                        "requires_user_confirm": True,
+                    }
+                ]
+            },
+        },
+    )
+    paused = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/advance",
+        json={"client_scene_version": 0, "idempotency_key": "pause-generation"},
+    )
+    assert paused.status_code == 200
+    waiting = paused.json()["script_state"]["waiting_generation_confirmation"]
+    assert waiting["generation_point_key"] == "start:0:confirm-me"
+    assert adapter.calls == []
+
+    canceled = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generation-requests/"
+        f"{waiting['generation_request_id']}/cancel",
+        json={"client_scene_version": 1, "idempotency_key": "cancel-generation"},
+    )
+    assert canceled.status_code == 200
+    assert canceled.json()["script_state"]["position"]["waiting_reason"] == "generation_canceled"
+
+    replayed = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generation-requests/"
+        f"{waiting['generation_request_id']}/cancel",
+        json={"client_scene_version": 1, "idempotency_key": "cancel-generation"},
+    )
+    assert replayed.status_code == 200
+    assert replayed.json()["replayed"] is True
+
+    stale = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generation-requests/"
+        f"{waiting['generation_request_id']}/cancel",
+        json={"client_scene_version": 0, "idempotency_key": "cancel-generation-stale"},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "stale_scene_version"
+
+    history = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations?limit=10&offset=0"
+    )
+    assert history.status_code == 200
+    body = history.json()
+    assert body["pagination"]["mode"] == "offset"
+    assert body["limit"] == body["pagination"]["limit"] == 10
+    assert body["offset"] == body["pagination"]["offset"] == 0
+    assert body["total"] == 0
+    assert "raw_output_debug" not in json.dumps(body)
+    assert "Write after confirmation" not in json.dumps(body)
+
+    generation = service.repo.get_generation_by_point(
+        session_id=session_id,
+        owner_user_id=42,
+        generation_point_key="start:0:confirm-me",
+    )
+    assert generation is not None
+
+
+def test_script_generation_confirm_regenerate_activate_and_debug_api_redaction(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = _ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"first","text":"First choice"}]}'
+    )
+    api_client, service, session_id, adapter = _scripted_generation_api_client(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "requires_user_confirm": True,
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "end"}],
+            },
+        },
+    )
+    paused = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/advance",
+        json={"client_scene_version": 0, "idempotency_key": "confirm-pause"},
+    )
+    assert paused.status_code == 200
+    request_id = paused.json()["script_state"]["waiting_generation_confirmation"][
+        "generation_request_id"
+    ]
+
+    confirmed = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generation-requests/{request_id}/confirm",
+        json={"client_scene_version": 1, "idempotency_key": "confirm-execute"},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["script_state"]["waiting_choice"]["choices"][0]["id"] == "first"
+    assert len(adapter.calls) == 1
+    generation_id = confirmed.json()["script_state"]["active_generation"]["generation_id"]
+    first_revision_id = confirmed.json()["script_state"]["active_generation"]["revision_id"]
+
+    stale_regenerate = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/regenerate",
+        json={"client_scene_version": 1, "idempotency_key": "stale-regenerate-choice"},
+    )
+    assert stale_regenerate.status_code == 409
+    assert stale_regenerate.json()["detail"]["code"] == "stale_scene_version"
+
+    adapter.raw_content = (
+        '{"schema":"choice_set","choices":[{"id":"second","text":"Second choice"}]}'
+    )
+    regenerated = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/regenerate",
+        json={"client_scene_version": 2, "idempotency_key": "regenerate-choice"},
+    )
+    assert regenerated.status_code == 200
+    assert regenerated.json()["script_state"]["waiting_choice"]["choices"][0]["id"] == "second"
+    second_revision_id = regenerated.json()["script_state"]["active_generation"]["revision_id"]
+    assert second_revision_id != first_revision_id
+
+    activated = api_client.post(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{first_revision_id}/activate",
+        json={"client_scene_version": 3, "idempotency_key": "activate-first"},
+    )
+    assert activated.status_code == 200
+    assert activated.json()["script_state"]["waiting_choice"]["choices"][0]["id"] == "first"
+
+    history = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations?limit=1&offset=0"
+    )
+    assert history.status_code == 200
+    history_body = history.json()
+    assert history_body["total"] == 2
+    assert history_body["has_more"] is True
+    assert history_body["next_offset"] == 1
+    assert history_body["items"][0]["id"] == second_revision_id
+    assert "raw_output_debug" not in json.dumps(history_body)
+
+    second_revision = service.repo.get_generation_revision(second_revision_id, owner_user_id=42)
+    assert second_revision is not None
+    service.repo.update_generation_revision_diagnostics(
+        second_revision_id,
+        raw_output_debug={"raw": "blocked raw text"},
+        parser_diagnostics={"trace": "parser detail"},
+        moderation_diagnostics={"blocked": True},
+        owner_user_id=42,
+    )
+
+    debug_redacted = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{second_revision_id}/debug"
+    )
+    assert debug_redacted.status_code == 200
+    assert debug_redacted.json()["raw_output_debug_state"] == "available"
+    assert debug_redacted.json()["raw_output_debug"]["raw"] == "blocked raw text"
+
+    revision_list = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        "revisions?limit=10&offset=0"
+    )
+    assert revision_list.status_code == 200
+    assert revision_list.json()["total"] == 2
+    revision_detail = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{second_revision_id}"
+    )
+    assert revision_detail.status_code == 200
+    assert "raw_output_debug" not in json.dumps(revision_detail.json())
+
+    blocked_revision = service.repo.create_generation_revision(
+        session_id=session_id,
+        owner_user_id=42,
+        generation_id=generation_id,
+        generation_request_id=int(second_revision["generation_request_id"]),
+        status="moderation_blocked",
+        output_schema="choice_set",
+        raw_output_debug={"raw_model_output": "moderation blocked raw text"},
+        moderation_diagnostics={"policy": "test", "raw_text": "sensitive moderation text"},
+        source="model",
+    )
+    blocked_revision_id = int(blocked_revision["id"])
+    blocked_default = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{blocked_revision_id}/debug"
+    )
+    assert blocked_default.status_code == 200
+    assert blocked_default.json()["raw_output_debug_state"] == "redacted"
+    assert "moderation blocked raw text" not in json.dumps(blocked_default.json())
+    assert blocked_default.json()["moderation_diagnostics"]["raw_text"]["redacted"] is True
+
+    debug_revealed = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{blocked_revision_id}/debug"
+        "?include_blocked_raw=true&confirm=REVEAL_MODERATION_BLOCKED"
+    )
+    assert debug_revealed.status_code == 200
+    assert debug_revealed.json()["raw_output_debug_state"] == "revealed"
+    assert (
+        debug_revealed.json()["raw_output_debug"]["raw_model_output"]
+        == "moderation blocked raw text"
+    )
+
+    async def override_intruder() -> User:
+        return User(id=99, username="user-99")
+
+    async def override_intruder_principal() -> AuthPrincipal:
+        return AuthPrincipal(kind="user", user_id=99, username="user-99")
+
+    api_client.app.dependency_overrides[get_request_user] = override_intruder
+    api_client.app.dependency_overrides[get_auth_principal] = override_intruder_principal
+    forbidden = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{second_revision_id}/debug?owner_user_id=42"
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.json()["detail"]["code"] == "debug_read_forbidden"
 
 
 def test_delete_session_endpoint_soft_deletes(

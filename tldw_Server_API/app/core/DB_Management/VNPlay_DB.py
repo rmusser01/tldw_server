@@ -1539,6 +1539,12 @@ class VNPlayRepository:
         }
         if existing is not None:
             for field_name, expected_value in generation_fields.items():
+                if expected_value is None and field_name in {
+                    "opcode_id",
+                    "opcode_label",
+                    "opcode_index",
+                }:
+                    continue
                 if existing.get(field_name) != expected_value:
                     raise ValueError("generation_point_conflict")
             return existing
@@ -2209,6 +2215,37 @@ class VNPlayRepository:
         )
         row = cursor.fetchone()
         return _decode_generation_revision(row) if row is not None else None
+
+    def update_generation_revision_diagnostics(
+        self,
+        revision_id: int,
+        *,
+        raw_output_debug: Mapping[str, Any] | None = None,
+        parser_diagnostics: Mapping[str, Any] | None = None,
+        moderation_diagnostics: Mapping[str, Any] | None = None,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Update diagnostic fields for a generation revision."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE vn_play_generation_revisions
+                SET raw_output_debug_json = ?,
+                    parser_diagnostics_json = ?,
+                    moderation_diagnostics_json = ?
+                WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+                """,
+                (
+                    None if raw_output_debug is None else _json_dump(dict(raw_output_debug)),
+                    _json_dump(dict(parser_diagnostics or {})),
+                    _json_dump(dict(moderation_diagnostics or {})),
+                    revision_id,
+                    owner_user_id,
+                    owner_user_id,
+                ),
+            )
+        return self.get_generation_revision(revision_id, owner_user_id=owner_user_id)
 
     def list_generation_revisions(
         self,

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.VN_Play.service import (
     VNPlayConflictError,
     VNPlayService,
     VNPlayTurnError,
+    _payload_hash,
 )
 
 
@@ -383,6 +384,85 @@ async def test_cancel_generation_confirmation_without_on_cancel_leaves_stable_st
             client_scene_version=int(response["scene_version"]),
             idempotency_key="advance-after-canceled-generation",
         )
+
+
+@pytest.mark.asyncio
+async def test_confirm_generation_recovers_completed_inner_generation_action(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service, session, adapter, _ = _scripted_service(
+        chacha_db,
+        program=_program_with_generates(
+            {
+                "op": "generate",
+                "id": "confirm-me",
+                "prompt": "Write after confirmation",
+                "requires_user_confirm": True,
+            }
+        ),
+    )
+    await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="recover-confirm-pause",
+    )
+    request_id = _waiting_generation_request_id(service, session.id)
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:confirm-me",
+    )
+    assert generation is not None
+    request = service.repo.get_generation_request(request_id, owner_user_id=42)
+    assert request is not None
+    confirm_payload_hash = _payload_hash(
+        {
+            "action_type": "script_generation_confirm",
+            "generation_request_id": request_id,
+            "client_scene_version": 1,
+        }
+    )
+    outer_action = service._create_or_replay_session_action(
+        session_id=session.id,
+        action_type="script_generation_confirm",
+        idempotency_key="recover-confirm",
+        request_payload_hash=confirm_payload_hash,
+    )
+    assert service.repo.try_acquire_session_action_lock(
+        session_id=session.id,
+        owner_user_id=42,
+        action_id=int(outer_action["id"]),
+        expected_scene_version=1,
+    )
+    await service.execute_script_generation_call(
+        session_id=session.id,
+        client_scene_version=1,
+        idempotency_key=f"recover-confirm:generation-confirm:{request_id}",
+        generation_point_key=str(generation["generation_point_key"]),
+        output_schema=str(generation["output_schema"]),
+        generation_profile_key=str(generation["generation_profile_key"]),
+        generation_profile_snapshot_id=int(generation["generation_profile_snapshot_id"]),
+        profile_snapshot=service._script_generation_profile_snapshot(
+            version=service._script_version_for_session(session),
+            profile_key=str(generation["generation_profile_key"]),
+        ),
+        messages=[{"role": "user", "content": "Write after confirmation"}],
+        request_kind="confirmation",
+        opcode_snapshot=request["opcode_snapshot"],
+        prompt_fingerprint=str(request.get("prompt_fingerprint") or ""),
+        existing_generation_request_id=request_id,
+    )
+
+    recovered = await service.confirm_script_generation_request(
+        session.id,
+        generation_request_id=request_id,
+        client_scene_version=1,
+        idempotency_key="recover-confirm",
+    )
+
+    assert recovered["scene_version"] == 2
+    assert recovered["script_state"]["active_generation"]["generation_id"] == int(generation["id"])
+    assert len(adapter.calls) == 1
 
 
 @pytest.mark.asyncio
