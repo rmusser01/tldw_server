@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+from tldw_Server_API.app.core.DB_Management.OpenWebUI_DB import (
+    iter_openwebui_chats_for_user as _iter_chats_for_user,
+    load_openwebui_folders_for_user as _load_folders_for_user,
+    load_openwebui_user as _load_user,
+    load_openwebui_users as _load_users,
+    open_validated_openwebui_db as _open_validated_db,
+)
 
 from .openwebui import (
     OpenWebUIConversationPlan,
@@ -19,41 +25,31 @@ from .openwebui import (
 )
 
 
-SQLITE_MAGIC = b"SQLite format 3\x00"
 UNFILED_FOLDER_PATH = ["Unfiled"]
+MAX_PREVIEW_WARNINGS_PER_USER = 100
+MAX_PREVIEW_WARNINGS_TOTAL = 500
 
-REQUIRED_SCHEMA: dict[str, set[str]] = {
-    "user": {"id", "name", "email", "created_at", "updated_at"},
-    "folder": {
-        "id",
-        "parent_id",
-        "user_id",
-        "name",
-        "items",
-        "meta",
-        "is_expanded",
-        "created_at",
-        "updated_at",
-    },
-    "chat": {
-        "id",
-        "user_id",
-        "title",
-        "chat",
-        "created_at",
-        "updated_at",
-        "share_id",
-        "archived",
-        "pinned",
-        "meta",
-        "folder_id",
-    },
-}
-TABLE_INFO_QUERIES = {
-    "user": "PRAGMA table_info(user)",
-    "folder": "PRAGMA table_info(folder)",
-    "chat": "PRAGMA table_info(chat)",
-}
+
+@dataclass
+class _PreviewWarningAccumulator:
+    """Count all preview warnings while retaining only bounded details."""
+
+    detail_limit: int
+    truncation_message: str
+    count: int = 0
+    warnings: list[str] = field(default_factory=list)
+    truncated: bool = False
+
+    def extend(self, warning_items: list[str]) -> None:
+        """Record warnings without allowing response warning arrays to grow unbounded."""
+        for warning in warning_items:
+            self.count += 1
+            if len(self.warnings) < self.detail_limit:
+                self.warnings.append(warning)
+                continue
+            if not self.truncated:
+                self.warnings.append(self.truncation_message)
+                self.truncated = True
 
 
 @dataclass(frozen=True)
@@ -140,11 +136,17 @@ def preview_openwebui_db(
     with _open_validated_db(file_path) as conn:
         users = _load_users(conn)
         user_previews: list[OpenWebUIDatabaseUserPreview] = []
-        warnings: list[str] = []
+        warnings = _PreviewWarningAccumulator(
+            MAX_PREVIEW_WARNINGS_TOTAL,
+            f"Warnings truncated (showing first {MAX_PREVIEW_WARNINGS_TOTAL} total warnings).",
+        )
         for user in users:
             user_id = str(user["id"])
             folders = _load_folders_for_user(conn, user_id)
-            user_warnings: list[str] = []
+            user_warnings = _PreviewWarningAccumulator(
+                MAX_PREVIEW_WARNINGS_PER_USER,
+                f"Warnings truncated (showing first {MAX_PREVIEW_WARNINGS_PER_USER} warnings for this user).",
+            )
             chat_count = 0
             message_count = 0
             branched_chat_count = 0
@@ -161,10 +163,13 @@ def preview_openwebui_db(
                 chat_plan, chat_warnings = _conversation_plan_from_chat_row(chat_row)
                 if chat_plan is None:
                     user_warnings.extend(chat_warnings)
+                    warnings.extend(chat_warnings)
                     continue
                 user_warnings.extend(chat_warnings)
+                warnings.extend(chat_warnings)
                 folder_plan = _folder_plan_for_chat(chat_row, folders)
                 user_warnings.extend(folder_plan.warnings)
+                warnings.extend(folder_plan.warnings)
                 chat_count += 1
                 message_count += len(chat_plan.messages)
                 branched_chat_count += int(chat_plan.is_branched)
@@ -184,13 +189,12 @@ def preview_openwebui_db(
                     archived_chat_count=archived_chat_count,
                     pinned_chat_count=pinned_chat_count,
                     attachment_reference_count=attachment_reference_count,
-                    warning_count=len(user_warnings),
-                    warnings=user_warnings,
+                    warning_count=user_warnings.count,
+                    warnings=list(user_warnings.warnings),
                 )
             )
-            warnings.extend(user_warnings)
 
-        return OpenWebUIDatabasePreview(users=user_previews, warnings=warnings)
+        return OpenWebUIDatabasePreview(users=user_previews, warnings=list(warnings.warnings))
 
 
 def extract_openwebui_db_user(
@@ -233,113 +237,6 @@ def extract_openwebui_db_user(
             folder_plans_by_external_ref=folder_plans_by_external_ref,
             warnings=warnings,
         )
-
-
-@contextmanager
-def _open_validated_db(file_path: str | Path) -> Iterator[sqlite3.Connection]:
-    path = Path(file_path)
-    try:
-        with path.open("rb") as handle:
-            if handle.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
-                raise ValueError("Invalid OpenWebUI SQLite database")
-    except ValueError:
-        raise
-    except OSError as exc:
-        raise ValueError("Unable to read OpenWebUI SQLite database") from exc
-
-    resolved = path.resolve()
-    uri = f"{resolved.as_uri()}?mode=ro"
-    conn: sqlite3.Connection | None = None
-    try:
-        conn = sqlite3.connect(uri, uri=True)
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.enable_load_extension(False)
-        except (AttributeError, sqlite3.OperationalError):
-            pass
-        _validate_schema(conn)
-        yield conn
-    except ValueError:
-        raise
-    except sqlite3.Error as exc:
-        raise ValueError("Invalid OpenWebUI SQLite database") from exc
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def _validate_schema(conn: sqlite3.Connection) -> None:
-    table_rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)",
-        tuple(REQUIRED_SCHEMA.keys()),
-    ).fetchall()
-    tables = {str(row["name"]) for row in table_rows}
-    missing_tables = sorted(set(REQUIRED_SCHEMA) - tables)
-    if missing_tables:
-        missing = ", ".join(missing_tables)
-        raise ValueError(f"missing required OpenWebUI table: {missing}")
-
-    for table, required_columns in REQUIRED_SCHEMA.items():
-        column_rows = conn.execute(TABLE_INFO_QUERIES[table]).fetchall()
-        columns = {str(row["name"]) for row in column_rows}
-        missing_columns = sorted(required_columns - columns)
-        if missing_columns:
-            missing = ", ".join(missing_columns)
-            raise ValueError(f"missing required OpenWebUI column in {table}: {missing}")
-
-
-def _load_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return list(
-        conn.execute(
-            """
-            SELECT id, name, email, created_at, updated_at
-            FROM user
-            ORDER BY COALESCE(name, email, id), id
-            """
-        ).fetchall()
-    )
-
-
-def _load_user(conn: sqlite3.Connection, user_id: str) -> sqlite3.Row | None:
-    return conn.execute(
-        """
-        SELECT id, name, email, created_at, updated_at
-        FROM user
-        WHERE id = ?
-        """,
-        (user_id,),
-    ).fetchone()
-
-
-def _load_chats_for_user(conn: sqlite3.Connection, user_id: str) -> list[sqlite3.Row]:
-    return list(_iter_chats_for_user(conn, user_id))
-
-
-def _iter_chats_for_user(conn: sqlite3.Connection, user_id: str) -> Iterator[sqlite3.Row]:
-    return iter(
-        conn.execute(
-            """
-            SELECT id, user_id, title, chat, created_at, updated_at, share_id, archived, pinned, meta, folder_id
-            FROM chat
-            WHERE user_id = ?
-            ORDER BY COALESCE(updated_at, created_at, 0), id
-            """,
-            (user_id,),
-        )
-    )
-
-
-def _load_folders_for_user(conn: sqlite3.Connection, user_id: str) -> dict[str, sqlite3.Row]:
-    rows = conn.execute(
-        """
-        SELECT id, parent_id, user_id, name, items, meta, is_expanded, created_at, updated_at
-        FROM folder
-        WHERE user_id = ?
-        """,
-        (user_id,),
-    ).fetchall()
-    return {str(row["id"]): row for row in rows}
-
 
 def _conversation_plan_from_chat_row(
     row: sqlite3.Row,

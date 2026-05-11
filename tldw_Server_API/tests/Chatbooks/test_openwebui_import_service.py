@@ -322,6 +322,23 @@ def test_preview_openwebui_json_returns_error_for_unsafe_upload_path(openwebui_s
     assert error == "Invalid or potentially malicious import file"
 
 
+@pytest.mark.asyncio
+async def test_import_openwebui_db_unsafe_path_reports_import_file_error(openwebui_service, tmp_path):
+    outside_path = tmp_path / "outside-webui.db"
+    outside_path.write_bytes(b"SQLite format 3\x00")
+
+    success, message, result = await openwebui_service.import_chatbook(
+        str(outside_path),
+        source_format="openwebui_db",
+        selected_openwebui_user_id="user-a",
+        conflict_resolution=ConflictResolution.SKIP,
+    )
+
+    assert success is False
+    assert message == "Invalid or potentially malicious import file"
+    assert result is None
+
+
 def test_import_openwebui_json_rolls_back_when_message_insert_fails(openwebui_service, monkeypatch):
     payload = _branched_export()
     path = _write_export(openwebui_service, payload)

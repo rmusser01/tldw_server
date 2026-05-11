@@ -1923,7 +1923,7 @@ class ChatbookService:
             logger.warning(f"Chatbooks import rejected file path: {exc}")
             detail = (
                 "Invalid or potentially malicious import file"
-                if source_format_value == "openwebui_json"
+                if source_format_value in {"openwebui_json", "openwebui_db"}
                 else "Invalid or potentially malicious archive file"
             )
             return False, detail, None

@@ -124,3 +124,23 @@ def test_chatbook_openapi_documents_openwebui_multipart_fields() -> None:
             "openwebui_db",
         ]
         assert "/chatbooks/import/jobs/{job_id}" in spec["paths"]  # nosec B101
+
+
+def test_chatbook_openapi_database_import_result_matches_backend_schema() -> None:
+    for path in (
+        Path("Docs/API-related/chatbook_openapi.yaml"),
+        Path("Docs/Published/API-related/chatbook_openapi.yaml"),
+    ):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        properties = (
+            spec["components"]["schemas"]["OpenWebUIDatabaseImportResult"]["allOf"][1]["properties"]
+        )
+
+        assert "selected_user_id" in properties  # nosec B101
+        assert "selected_user_label" in properties  # nosec B101
+        assert "mirrored_folders" in properties  # nosec B101
+        assert "folder_links" in properties  # nosec B101
+        assert "source_user_id" not in properties  # nosec B101
+        assert "source_user_label" not in properties  # nosec B101
+        assert "folder_count" not in properties  # nosec B101
+        assert "selected_user" not in properties  # nosec B101

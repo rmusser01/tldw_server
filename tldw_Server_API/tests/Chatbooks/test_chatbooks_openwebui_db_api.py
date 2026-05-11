@@ -1,5 +1,6 @@
 import json
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
@@ -68,6 +69,20 @@ def test_schema_accepts_openwebui_db_source_format_and_selected_user():
     assert ChatbookImportSourceFormat.OPENWEBUI_DB.value == "openwebui_db"
     assert request.source_format == ChatbookImportSourceFormat.OPENWEBUI_DB
     assert request.selected_openwebui_user_id == "user-a"
+
+
+def test_preview_chatbook_route_has_rbac_rate_limit():
+    route = next(
+        route
+        for route in chatbooks_endpoints.router.routes
+        if isinstance(route, APIRoute) and route.path == "/chatbooks/preview" and "POST" in route.methods
+    )
+    resources = [
+        getattr(dependency.call, "_tldw_rate_limit_resource", None)
+        for dependency in route.dependant.dependencies
+    ]
+
+    assert "chatbooks.preview" in resources
 
 
 def test_preview_openwebui_db_source_format_skips_archive_validation(monkeypatch):

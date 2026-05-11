@@ -9,6 +9,7 @@ from tldw_Server_API.app.core.Chatbooks.import_adapters.openwebui_db import (
     extract_openwebui_db_user,
     preview_openwebui_db,
 )
+from tldw_Server_API.app.core.DB_Management import OpenWebUI_DB as openwebui_db_reader
 
 
 pytestmark = pytest.mark.unit
@@ -47,6 +48,18 @@ def _message_tree(*, content: str = "secret user content", branched: bool = Fals
             "messages": messages,
         },
         "models": ["gpt-4o"],
+    }
+
+
+def _malformed_message_tree(message_count: int) -> dict:
+    return {
+        "history": {
+            "currentId": "malformed-0",
+            "messages": {
+                f"malformed-{index}": "not a message object"
+                for index in range(message_count)
+            },
+        },
     }
 
 
@@ -236,8 +249,8 @@ def test_open_validated_db_uses_path_as_uri_for_read_only_connection(tmp_path, m
         connect_calls.append((database, uri))
         return FakeConnection()
 
-    monkeypatch.setattr(openwebui_db_adapter.sqlite3, "connect", fake_connect)
-    monkeypatch.setattr(openwebui_db_adapter, "_validate_schema", lambda _conn: None)
+    monkeypatch.setattr(openwebui_db_reader.sqlite3, "connect", fake_connect)
+    monkeypatch.setattr(openwebui_db_reader, "validate_openwebui_schema", lambda _conn: None)
 
     with openwebui_db_adapter._open_validated_db(db_path):
         pass
@@ -256,6 +269,38 @@ def test_iter_chats_for_user_returns_lazy_rows(tmp_path):
         assert [row["id"] for row in rows] == ["chat-a"]
     finally:
         conn.close()
+
+
+def test_preview_openwebui_db_caps_warning_details_but_preserves_count(tmp_path):
+    warning_count = openwebui_db_adapter.MAX_PREVIEW_WARNINGS_PER_USER + 25
+    db_path = _write_openwebui_db(
+        tmp_path / "many-warnings.db",
+        users=[{"id": "user-a", "name": "Alice"}],
+        chats=[
+            {
+                "id": "chat-many-warnings",
+                "user_id": "user-a",
+                "title": "Many warnings",
+                "chat": _malformed_message_tree(warning_count),
+            }
+        ],
+    )
+
+    preview = preview_openwebui_db(db_path)
+
+    assert preview.users[0].warning_count == warning_count
+    assert len(preview.users[0].warnings) <= openwebui_db_adapter.MAX_PREVIEW_WARNINGS_PER_USER + 1
+    assert any("Warnings truncated" in warning for warning in preview.users[0].warnings)
+    assert len(preview.warnings) <= openwebui_db_adapter.MAX_PREVIEW_WARNINGS_TOTAL + 1
+
+
+def test_openwebui_db_adapter_keeps_raw_sql_in_db_management_layer():
+    adapter_path = Path(openwebui_db_adapter.__file__)
+    adapter_source = adapter_path.read_text(encoding="utf-8")
+
+    assert ".execute(" not in adapter_source
+    assert "sqlite_master" not in adapter_source
+    assert "PRAGMA" not in adapter_source
 
 
 def test_preview_openwebui_db_lists_users_counts_and_hides_content(tmp_path):

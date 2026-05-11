@@ -768,18 +768,14 @@ components:
         - $ref: '#/components/schemas/OpenWebUIImportResult'
         - type: object
           properties:
-            source_user_id:
+            selected_user_id:
               type: string
-            source_user_label:
+            selected_user_label:
               type: string
-            folder_count:
-              type: integer
             mirrored_folders:
               type: integer
             folder_links:
               type: integer
-            selected_user:
-              $ref: '#/components/schemas/OpenWebUIDatabaseUserPreview'
 
     ContentItemResponse:
       type: object

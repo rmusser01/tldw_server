@@ -816,7 +816,11 @@ async def import_chatbook(
                 )
 
 
-@router.post("/preview", response_model=PreviewChatbookResponse)
+@router.post(
+    "/preview",
+    response_model=PreviewChatbookResponse,
+    dependencies=[Depends(rbac_rate_limit("chatbooks.preview"))],
+)
 async def preview_chatbook(
     request: Request,
     file: UploadFile = File(...),
