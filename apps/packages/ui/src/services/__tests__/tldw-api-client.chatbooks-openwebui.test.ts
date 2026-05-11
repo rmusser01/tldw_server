@@ -133,4 +133,68 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
       })
     )
   })
+
+  it("previews OpenWebUI attachment hydration with a JSON request", async () => {
+    mocks.bgRequest.mockResolvedValue({ summary: { referenced_files: 1 } })
+
+    const client = new TldwApiClient()
+    const payload = {
+      openwebui_data_root: "/srv/openwebui",
+      scope: {
+        conversation_ids: ["conv-a"],
+        source_user_id: "ow-user"
+      },
+      process_supported_files: false
+    }
+
+    await client.previewOpenWebUIHydration(payload)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/hydration/preview",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+    )
+  })
+
+  it("creates an OpenWebUI attachment hydration job with a JSON request", async () => {
+    mocks.bgRequest.mockResolvedValue({ job_id: "42", status: "queued" })
+
+    const client = new TldwApiClient()
+    const payload = {
+      openwebui_data_root: "/srv/openwebui",
+      scope: {
+        conversation_ids: ["conv-a"],
+        source_user_id: "ow-user"
+      },
+      process_supported_files: true
+    }
+
+    await client.createOpenWebUIHydrationJob(payload)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+    )
+  })
+
+  it("gets an OpenWebUI attachment hydration job by id", async () => {
+    mocks.bgRequest.mockResolvedValue({ job_id: "42", status: "completed" })
+
+    const client = new TldwApiClient()
+    await client.getOpenWebUIHydrationJob("job/42")
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/hydration/jobs/job%2F42",
+        method: "GET"
+      })
+    )
+  })
 })

@@ -19,6 +19,7 @@ import type {
   ConversationShareLinkCreateResponse,
   ConversationShareLinksListResponse,
   ConversationShareLinkResolveResponse,
+  OpenWebUIHydrationRequest,
   WorldBookProcessResponse,
 } from '../TldwApiClient'
 
@@ -1791,6 +1792,41 @@ export const chatRagMethods = {
       method: "POST",
       fields: normalized,
       file: { name, type, data }
+    })
+  },
+
+  async previewOpenWebUIHydration(
+    this: TldwApiClientCore,
+    payload: OpenWebUIHydrationRequest
+  ): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async createOpenWebUIHydrationJob(
+    this: TldwApiClientCore,
+    payload: OpenWebUIHydrationRequest
+  ): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async getOpenWebUIHydrationJob(
+    this: TldwApiClientCore,
+    job_id: string
+  ): Promise<any> {
+    const id = encodeURIComponent(String(job_id))
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/openwebui/hydration/jobs/${id}`,
+      method: "GET"
     })
   },
 

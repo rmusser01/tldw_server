@@ -4,7 +4,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { useQuery } from "@tanstack/react-query"
 import { ChatbooksPlaygroundPage } from "../ChatbooksPlaygroundPage"
 
-const { useQueryMock, tldwClientMock } = vi.hoisted(() => ({
+const { capabilitiesMock, useQueryMock, tldwClientMock } = vi.hoisted(() => ({
+  capabilitiesMock: {
+    hasChatbooks: true
+  },
   useQueryMock: vi.fn(),
   tldwClientMock: {
     initialize: vi.fn(async () => undefined),
@@ -20,7 +23,10 @@ const { useQueryMock, tldwClientMock } = vi.hoisted(() => ({
     removeChatbookImportJob: vi.fn(),
     exportChatbook: vi.fn(),
     previewChatbook: vi.fn(),
-    importChatbook: vi.fn()
+    importChatbook: vi.fn(),
+    previewOpenWebUIHydration: vi.fn(),
+    createOpenWebUIHydrationJob: vi.fn(),
+    getOpenWebUIHydrationJob: vi.fn()
   }
 }))
 
@@ -86,9 +92,7 @@ vi.mock("@/hooks/useServerOnline", () => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: {
-      hasChatbooks: true
-    }
+    capabilities: capabilitiesMock
   })
 }))
 
@@ -165,6 +169,7 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    capabilitiesMock.hasChatbooks = true
     vi.mocked(useQuery).mockReturnValue({
       data: { items: [], total: 0 },
       isLoading: false,
@@ -365,4 +370,155 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     expect(screen.getByText("22")).toBeInTheDocument()
     expect(screen.queryByText("11")).not.toBeInTheDocument()
   })
+
+  it("previews OpenWebUI hydration before enabling job creation", async () => {
+    tldwClientMock.previewOpenWebUIHydration.mockResolvedValueOnce({
+      summary: {
+        referenced_files: 3,
+        resolved_files: 2,
+        image_files: 1,
+        media_files: 1,
+        missing_files: 1,
+        unsupported_files: 0,
+        failed_files: 0,
+        hydrated_images: 0,
+        registered_media_files: 0,
+        already_hydrated: 0,
+        processed_files: 0,
+        warning_count: 1
+      },
+      warnings: ["Missing 1 source file"]
+    })
+    tldwClientMock.createOpenWebUIHydrationJob.mockResolvedValueOnce({
+      job_id: "hydration-job-1",
+      status: "queued"
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+
+    fireEvent.change(screen.getByLabelText("OpenWebUI data root"), {
+      target: { value: "/srv/openwebui" }
+    })
+    fireEvent.change(screen.getByLabelText("Imported conversation IDs"), {
+      target: { value: "conv-a\nconv-b" }
+    })
+    fireEvent.change(screen.getByLabelText("OpenWebUI source user id"), {
+      target: { value: "ow-user" }
+    })
+
+    const runButton = screen.getByRole("button", { name: "Run hydration job" })
+    expect(runButton).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview attachments" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.previewOpenWebUIHydration).toHaveBeenCalledWith({
+        openwebui_data_root: "/srv/openwebui",
+        scope: {
+          conversation_ids: ["conv-a", "conv-b"],
+          source_user_id: "ow-user"
+        },
+        process_supported_files: false
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Referenced files")).toBeInTheDocument()
+      expect(screen.getByText("Missing 1 source file")).toBeInTheDocument()
+    })
+
+    fireEvent.click(runButton)
+
+    await waitFor(() => {
+      expect(tldwClientMock.createOpenWebUIHydrationJob).toHaveBeenCalledWith({
+        openwebui_data_root: "/srv/openwebui",
+        scope: {
+          conversation_ids: ["conv-a", "conv-b"],
+          source_user_id: "ow-user"
+        },
+        process_supported_files: false
+      })
+    })
+    expect(screen.getByText("queued")).toBeInTheDocument()
+  })
+
+  it("requires a fresh hydration preview after opting into supported-file processing", async () => {
+    tldwClientMock.previewOpenWebUIHydration.mockResolvedValue({
+      summary: {
+        referenced_files: 1,
+        resolved_files: 1,
+        image_files: 0,
+        media_files: 1,
+        missing_files: 0,
+        unsupported_files: 0,
+        failed_files: 0,
+        hydrated_images: 0,
+        registered_media_files: 0,
+        already_hydrated: 0,
+        processed_files: 1,
+        warning_count: 0
+      },
+      warnings: []
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+
+    fireEvent.change(screen.getByLabelText("OpenWebUI data root"), {
+      target: { value: "/srv/openwebui" }
+    })
+    fireEvent.change(screen.getByLabelText("Imported conversation IDs"), {
+      target: { value: "conv-a" }
+    })
+
+    const runButton = screen.getByRole("button", { name: "Run hydration job" })
+    fireEvent.click(screen.getByRole("button", { name: "Preview attachments" }))
+    await waitFor(() => {
+      expect(runButton).toBeEnabled()
+    })
+
+    fireEvent.click(screen.getByRole("switch", { name: "Process supported files" }))
+    expect(runButton).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview attachments" }))
+    await waitFor(() => {
+      expect(tldwClientMock.previewOpenWebUIHydration).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          process_supported_files: true
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(runButton).toBeEnabled()
+    })
+  }, 10000)
+
+  it("disables OpenWebUI hydration controls when Chatbooks capability is unavailable", async () => {
+    const { rerender } = render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+
+    capabilitiesMock.hasChatbooks = false
+    rerender(<ChatbooksPlaygroundPage />)
+
+    expect(screen.getByLabelText("OpenWebUI data root")).toBeDisabled()
+    expect(screen.getByLabelText("Imported conversation IDs")).toBeDisabled()
+    expect(screen.getByRole("switch", { name: "Process supported files" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Preview attachments" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Run hydration job" })).toBeDisabled()
+  }, 10000)
 })

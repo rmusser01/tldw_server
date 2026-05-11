@@ -753,7 +753,7 @@ Verification:
 
 **Tests:** Vitest client and Chatbooks page tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 7.1: Write failing API client tests
 
@@ -762,9 +762,12 @@ Verification:
 - Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 - Modify: `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`
 
-- [ ] Test `previewOpenWebUIHydration({ openwebui_data_root, scope, process_supported_files })` POSTs JSON to `/chatbooks/openwebui/hydration/preview`.
-- [ ] Test `createOpenWebUIHydrationJob(...)` POSTs JSON to `/chatbooks/openwebui/hydration/jobs`.
-- [ ] Test `getOpenWebUIHydrationJob(jobId)` GETs `/chatbooks/openwebui/hydration/jobs/{jobId}`.
+- [x] Test `previewOpenWebUIHydration({ openwebui_data_root, scope, process_supported_files })` POSTs JSON to `/chatbooks/openwebui/hydration/preview`.
+- [x] Test `createOpenWebUIHydrationJob(...)` POSTs JSON to `/chatbooks/openwebui/hydration/jobs`.
+- [x] Test `getOpenWebUIHydrationJob(jobId)` GETs `/chatbooks/openwebui/hydration/jobs/{jobId}`.
+
+Verification:
+- 2026-05-11: `bun run test src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` from `apps/packages/ui` failed as expected with missing `previewOpenWebUIHydration`, `createOpenWebUIHydrationJob`, and `getOpenWebUIHydrationJob`.
 
 Run:
 
@@ -780,12 +783,15 @@ Expected: FAIL because client methods do not exist.
 - Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 - Modify: `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`
 
-- [ ] Add method names:
+- [x] Add method names:
   - `previewOpenWebUIHydration`
   - `createOpenWebUIHydrationJob`
   - `getOpenWebUIHydrationJob`
-- [ ] Use existing `request()`/`bgRequest()` conventions for JSON calls.
-- [ ] Do not use upload helpers; V1 sends server-local path text, not a file.
+- [x] Use existing `request()`/`bgRequest()` conventions for JSON calls.
+- [x] Do not use upload helpers; V1 sends server-local path text, not a file.
+
+Verification:
+- 2026-05-11: `bun run test src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` from `apps/packages/ui` passed, 7 tests.
 
 Run:
 
@@ -801,13 +807,16 @@ Expected: PASS.
 - Modify: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx`
 
-- [ ] Test hydration controls are visible near OpenWebUI import when capability/auth allows.
-- [ ] Test the data root input is required before preview.
-- [ ] Test preview sends `process_supported_files: false` by default.
-- [ ] Test toggling processing sends `process_supported_files: true`.
-- [ ] Test preview counts render `referenced_files`, `hydrated_images`, `registered_media_files`, and warnings.
-- [ ] Test enqueue calls `createOpenWebUIHydrationJob` only after a successful preview.
-- [ ] Test non-authorized/capability-missing state hides or disables hydration controls.
+- [x] Test hydration controls are visible near OpenWebUI import when capability/auth allows.
+- [x] Test the data root input is required before preview.
+- [x] Test preview sends `process_supported_files: false` by default.
+- [x] Test toggling processing sends `process_supported_files: true`.
+- [x] Test preview counts render `referenced_files`, `hydrated_images`, `registered_media_files`, and warnings.
+- [x] Test enqueue calls `createOpenWebUIHydrationJob` only after a successful preview.
+- [x] Test non-authorized/capability-missing state hides or disables hydration controls.
+
+Verification:
+- 2026-05-11: `bun run test src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx` from `apps/packages/ui` failed as expected because the hydration controls were not present.
 
 Run:
 
@@ -822,20 +831,26 @@ Expected: FAIL until UI is implemented.
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx`
 
-- [ ] Add local state:
+- [x] Add local state:
   - `hydrationDataRoot`
   - `hydrationProcessingEnabled`
   - `hydrationPreview`
   - `hydrationJob`
   - `hydrationLoading`
   - `hydrationError`
-- [ ] Place controls in the existing import panel near OpenWebUI JSON/DB preview areas.
-- [ ] Use an input for server-local data root.
-- [ ] Use a checkbox/switch for opt-in processing.
-- [ ] Show preview counts and warnings in compact rows.
-- [ ] Disable job creation until preview succeeds.
-- [ ] Surface API errors with existing Ant Design alert/message patterns.
-- [ ] Add job id/status link or summary near existing job tracker.
+- [x] Place controls in the existing import panel near OpenWebUI JSON/DB preview areas.
+- [x] Use an input for server-local data root.
+- [x] Use a checkbox/switch for opt-in processing.
+- [x] Show preview counts and warnings in compact rows.
+- [x] Disable job creation until preview succeeds.
+- [x] Surface API errors with existing Ant Design alert/message patterns.
+- [x] Add job id/status link or summary near existing job tracker.
+
+Verification:
+- 2026-05-11: `bun run test src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx` from `apps/packages/ui` passed, 6 tests.
+- 2026-05-11: `bun run test src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx` from `apps/packages/ui` passed, 13 tests.
+- 2026-05-11: `bun run verify:openapi` from `apps/packages/ui` passed with 259 client paths verified and 10 existing reviewed exception paths.
+- 2026-05-11: `bunx tsc -p tsconfig.json --noEmit` from `apps/packages/ui` failed on existing unrelated package-wide baseline TypeScript errors; no reported error referenced the new Chatbooks hydration files.
 
 Run:
 
@@ -847,8 +862,11 @@ Expected: PASS.
 
 ### Task 7.5: Commit frontend slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+
+Verification:
+- 2026-05-11: `git diff --check` passed.
+- [x] Commit:
 
 ```bash
 git add apps/packages/ui/src/services/tldw/TldwApiClient.ts \
