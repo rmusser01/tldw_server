@@ -2,7 +2,7 @@
 
 Date: 2026-05-11
 Owner: Codex collaboration session
-Status: User-approved design, pending implementation planning
+Status: User-approved design, reviewed and amended, pending implementation planning
 Backlog: TASK-233.14
 
 ## Summary
@@ -151,6 +151,91 @@ Use Approach 2.
 
 Implement a separate OpenWebUI attachment hydration job that targets only imported-chat references. V1 uses a trusted server-local OpenWebUI data root, restores images as message attachments, registers non-image files in Media DB, and records per-reference hydration status in message metadata. Processing remains opt-in.
 
+## Design Review Findings And Adjustments
+
+Review against the current Chatbooks, OpenWebUI DB, Jobs, ChaCha image, path-safety, and Media DB code found several constraints that should shape the implementation plan.
+
+### 1. Metadata Updates Need Deep Merge Semantics
+
+`ChaChaNotesDB.set_message_metadata_extra(..., merge=True)` currently merges only top-level keys in `message_metadata.extra`. Passing a partial value such as:
+
+```json
+{"openwebui_import": {"hydration": {"items": []}}}
+```
+
+would replace the existing `openwebui_import` block and could discard source message ids, parent/child ids, role, model, and original `attachment_refs`.
+
+Implementation must read the current message metadata, update `extra.openwebui_import.hydration` in memory, and write the full `openwebui_import` object back. A focused helper such as `merge_openwebui_message_hydration_metadata(message_id, hydration_patch)` is preferred over repeatedly open-coding this read-modify-write logic. Tests must prove original import metadata survives hydration status updates.
+
+### 2. Existing Message Images Have No Source Key
+
+The `message_images` table is keyed by `(message_id, position)` and stores only bytes, MIME type, and timestamps. It cannot directly express "this row came from OpenWebUI file id X." A retry-safe design therefore cannot rely on the table alone for idempotency.
+
+V1 should use message metadata as the source index for hydrated OpenWebUI images:
+
+- derive a stable `source_key` from source file id when present, else from run-local content hash
+- check existing `openwebui_import.hydration.items` for that source key before inserting
+- append images after the current maximum message image position unless the same source key is already recorded
+- update image rows and hydration metadata in one DB transaction where practical
+- never overwrite existing non-OpenWebUI image positions
+
+If this becomes too fragile, add a small source-mapping table rather than overloading image position semantics. The implementation plan should make this an explicit checkpoint.
+
+### 3. Media DB Registration Must Avoid Text-Content Dedupe Pitfalls
+
+The current `add_media_with_keywords` path is text-content oriented: it requires `content`, hashes that text, and has existing URL/content-hash dedupe behavior that is not inherently scoped to one OpenWebUI import or one tldw user. That is risky for binary attachment registration, especially if all unprocessed files use empty placeholder content.
+
+V1 must not blindly register binary files through `add_media_with_keywords(content="")`.
+
+Recommended implementation direction:
+
+- copy the OpenWebUI source file into a tldw-owned durable storage location before creating the Media DB file row
+- compute the file byte SHA-256 and store it as `source_hash` and/or `MediaFiles.checksum`
+- use a stable OpenWebUI-specific URL such as `openwebui://file/<source_file_id>` when a source id exists, or `openwebui://run/<hydration_job_id>/<sha256>` for source-id-less refs
+- set `owner_user_id` and `visibility="personal"` explicitly
+- use or add owner-aware lookup helpers for OpenWebUI source ids and file hashes; do not reuse a Media row owned by another user
+- if a placeholder `Media.content` value is required, include source id, filename, MIME, and byte hash so the content hash is not identical for unrelated files
+
+The implementation plan should identify the exact Media DB helper to use or introduce before coding this path.
+
+### 4. Hydration Should Be Its Own Chatbooks Job Type
+
+The current Chatbooks Jobs worker uses the `chatbooks` domain with `job_type="export"` or `job_type="import"` and requires a `chatbooks_job_id` that maps to the Chatbooks export/import job records. Hydration should not overload the import job type, because it has different inputs, status, retry, and result semantics.
+
+V1 should use a dedicated core Jobs contract, for example:
+
+```text
+domain = chatbooks
+queue = CHATBOOKS_JOBS_QUEUE or default
+job_type = openwebui_attachment_hydration
+```
+
+The design still allows the UI to present hydration near import history, but the worker routing, job payload, result summary, and cancellation semantics should be separate from archive/chat import. If the UI needs durable history beyond core Jobs retention, add a minimal Chatbooks-side hydration job journal instead of reusing import job rows.
+
+### 5. Hydration DB Schema Checks Must Not Regress Chat Import
+
+The existing OpenWebUI DB chat import validates only the tables needed for chat/folder import. Hydration needs `file` and sometimes `chat_file`, but making those mandatory in the existing `open_validated_openwebui_db()` helper would break chat import for databases that are still valid for text-only migration.
+
+Add hydration-specific validation such as `validate_openwebui_file_schema(conn)` or an `include_file_tables=True` option used only by the hydration flow. Missing `file` or `chat_file` should be a hydration preview/job failure, not a baseline OpenWebUI chat import failure.
+
+### 6. Preserve Original Source Chat Identity For DB Fallbacks
+
+For `openwebui_db` imports, source chat identity can live in conversation settings under the OpenWebUI metadata. If conflict resolution creates a copied tldw conversation, the conversation external reference may no longer be the raw OpenWebUI chat id. Hydration should therefore prefer the preserved DB metadata such as `openwebui_import.metadata.row_id` when looking up `chat_file` rows.
+
+If a future implementation discovers that a needed original source id was not preserved for a source format, patch the importer metadata first rather than guessing from renamed external refs. For JSON imports, `chat_file` fallback is inherently weaker because there may be no selected source user or local DB chat row identity.
+
+### 7. Reference Extraction Is Limited By What Import Preserved
+
+The current OpenWebUI JSON/DB adapters preserve attachment refs from known top-level message keys such as `files`, `attachments`, `images`, `artifacts`, `file_ids`, and `fileIds`. Hydration should not assume it can reconstruct refs that the importer never stored.
+
+If implementation finds additional OpenWebUI reference shapes in real exports, extend the import adapter and tests first so future imports preserve those refs. Existing imported chats can only hydrate from the metadata already present plus DB-level `chat_file` fallback where source chat ids are reliable.
+
+### 8. File Classification Needs Byte-Level Guardrails
+
+The design already calls for MIME/type policy, but implementation should not trust extension or OpenWebUI metadata alone. Image embedding should use conservative byte sniffing, enforce existing message-image byte caps, and reject polyglot or unknown files as non-image/unsupported rather than embedding them.
+
+Non-image registration should also enforce per-file and total-run byte caps before copying into tldw storage.
+
 ## User Workflow
 
 1. User imports OpenWebUI chats through JSON or uploaded `webui.db` using the existing Chatbooks import UI.
@@ -210,6 +295,8 @@ iter_openwebui_files_for_user(conn, user_id)
 
 The hydrator should use file-id lookups derived from imported metadata first. `chat_file` rows can fill gaps when message-level attachment refs are incomplete, but v1 should still keep the scope constrained to imported chat ids.
 
+Do not add file-table requirements to the baseline chat-import schema validation path. Hydration should call a separate file-schema validation helper so a missing or incompatible `file`/`chat_file` table blocks only hydration.
+
 ### Path Resolution
 
 Input is an OpenWebUI data root, not arbitrary paths to individual files.
@@ -250,6 +337,8 @@ Supported reference forms in v1:
 Unsupported refs should remain in metadata with a hydration status of `unsupported_reference_shape`.
 
 For `openwebui_db` imports, source chat ids and selected user metadata are available. For `openwebui_json` imports, file IDs may exist in the JSON refs but source user may be absent; the job can resolve by file id and warn when user ownership cannot be verified.
+
+When resolving DB-backed `chat_file` fallback rows, use preserved source DB metadata such as `openwebui_import.metadata.row_id` instead of any tldw duplicate-copy external ref. If the original source chat id is absent, skip the fallback and report a warning rather than broadening scope.
 
 ### Hydration Status Metadata
 
@@ -294,6 +383,8 @@ Allowed statuses:
 
 The implementation may store a job-level summary separately, but message metadata should be sufficient for chat rendering and future retries.
 
+Because the existing metadata merge helper is shallow at the `openwebui_import` level, implementation must update this block with a full read-modify-write merge. Hydration metadata writes must preserve existing source ids, roles, parent/child ids, model metadata, and original attachment refs.
+
 ### Image Hydration
 
 Images should be restored as chat-message images when:
@@ -309,6 +400,8 @@ append_message_image_if_absent(message_id, source_key, image_bytes, mime_type)
 ```
 
 `source_key` should be derived from OpenWebUI source file id or run-local hash so retries are idempotent. If the current message image table cannot store source keys, add a small metadata-side guard and use deterministic positions carefully. Do not duplicate images on rerun.
+
+The current table cannot store source keys. V1 should record the source-key to image-position mapping in `openwebui_import.hydration.items` and append to the next free position only when the source key is absent. If retries or concurrent jobs make metadata-only idempotency unreliable, add a small message-image source mapping table before shipping image hydration.
 
 ### Non-Image File Registration
 
@@ -331,6 +424,8 @@ Recommended source metadata:
 
 The Media DB record should be discoverable as an imported OpenWebUI attachment and should link back from the message hydration metadata. The exact storage/copy location should follow existing Media DB file storage conventions; do not leave records pointing at the OpenWebUI source path as the durable copy.
 
+Implementation must avoid content-text dedupe traps in the current Media DB add path. Binary file registration should copy bytes first, persist a `MediaFiles` row with checksum, and use owner-aware source-id/file-hash lookup. If `add_media_with_keywords` is used for the parent Media row, it must receive a non-empty placeholder content value derived from the source id, filename, MIME, and byte hash, plus explicit `source_hash`, `owner_user_id`, and `visibility`.
+
 If `process_supported_files=true`, the implementation should enqueue or invoke existing ingestion/reprocessing flows for supported file types after registration. Processing failures should not undo registration.
 
 ### Deduplication
@@ -348,6 +443,16 @@ This avoids storage bloat during retries without collapsing unrelated source rec
 ## API And Jobs Design
 
 Use Jobs for hydration because this is user-visible, may be long-running, needs progress, and should be retryable.
+
+Use a dedicated Chatbooks Jobs type rather than the existing import type:
+
+```text
+domain = chatbooks
+job_type = openwebui_attachment_hydration
+queue = CHATBOOKS_JOBS_QUEUE or default
+```
+
+The existing export/import worker can be extended to route this job type, or a small sibling worker can be added if that keeps ownership cleaner. The payload should not require `chatbooks_job_id` unless a separate hydration journal is added.
 
 Suggested endpoint shape:
 
@@ -467,6 +572,12 @@ Backend tests:
 10. Run-local hash dedupe works only inside one hydration run when source IDs are absent.
 11. Missing source files produce warnings and do not fail the whole job.
 12. Multi-user non-admin requests are rejected.
+13. Hydration metadata updates preserve existing `openwebui_import` fields despite shallow DB metadata merge behavior.
+14. Media registration does not reuse another user's media row when content bytes or placeholder content collide.
+15. Binary registration does not create identical placeholder-content hashes for unrelated unprocessed files.
+16. Hydration-specific `file`/`chat_file` schema validation does not change baseline OpenWebUI chat import validation.
+17. DB `chat_file` fallback uses preserved source chat ids and skips fallback when only renamed tldw external refs are available.
+18. Dedicated `openwebui_attachment_hydration` Jobs routing does not interfere with existing Chatbooks import/export job handling.
 
 Frontend tests:
 
