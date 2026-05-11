@@ -34,7 +34,7 @@ agents:
     docs_url: "https://docs.anthropic.com/en/docs/claude-code"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Claude Code ACP compatibility is not certified yet."
+    compatibility_notes: "Configured-agent setup is documented, but live Claude Code ACP compatibility remains blocked until credentials and an ACP-compatible stdio command are verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: codex
@@ -49,7 +49,7 @@ agents:
     docs_url: "https://github.com/openai/codex"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Codex ACP compatibility is not certified yet."
+    compatibility_notes: "Configured-agent setup is documented, but live Codex ACP compatibility remains blocked until an ACP-compatible stdio command and provider credentials are verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: aider
