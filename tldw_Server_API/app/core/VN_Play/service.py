@@ -2048,7 +2048,18 @@ class VNPlayService:
         dialogue.extend(_list_of_dicts(generation_result.get("dialogue")))
         generation_results = _list_of_dicts(execution.get("generation_results"))
         generation_results.append(generation_result)
+        opcode_snapshot = _mapping_or_empty(pending_generation.get("opcode_snapshot"))
+        generated_choices = _generated_choices_from_generation_result(
+            generation_result,
+            on_generated_choice=(
+                pending_generation.get("on_generated_choice")
+                or opcode_snapshot.get("on_generated_choice")
+            ),
+        )
         position["last_generation"] = generation_result
+        if generated_choices:
+            position["waiting_choice_id"] = str(pending_generation.get("id") or "")
+            position["waiting_choices"] = generated_choices
         if _next_script_opcode_is_generate(version.get("program"), position):
             position["waiting_reason"] = "generation_batch_limit"
         else:
@@ -2058,7 +2069,7 @@ class VNPlayService:
             variables=dict(execution.get("variables") or {}),
             narrative_lines=narrative_lines,
             dialogue=dialogue,
-            visible_choices=[],
+            visible_choices=generated_choices,
             selected_choice=(
                 execution.get("selected_choice")
                 if isinstance(execution.get("selected_choice"), Mapping)
@@ -2151,6 +2162,11 @@ class VNPlayService:
                 choice_id=choice_id,
                 seed=session.seed,
             )
+            if choice_id is not None:
+                self._validate_active_generated_choice(
+                    session=session,
+                    selected_choice=execution.get("selected_choice"),
+                )
             pending_generation = execution.get("pending_generation")
             if isinstance(pending_generation, Mapping):
                 execution = await self._resolve_pending_script_generation(
@@ -2162,12 +2178,53 @@ class VNPlayService:
                     idempotency_key=idempotency_key,
                 )
             next_scene_version = client_scene_version + 1
+            scene_state_before_action = self.repo.get_scene_state(
+                session_id,
+                owner_user_id=self.owner_user_id,
+            )
+            branch_node_id: int | None = _optional_int(
+                scene_state_before_action.get("active_branch_node_id")
+                if scene_state_before_action is not None
+                else None
+            )
+            selected_choice = execution.get("selected_choice")
+            if choice_id is not None and isinstance(selected_choice, Mapping):
+                events_before_choice = self.repo.list_events(session_id)
+                choice_presented_event_id = _parent_choice_event_id(
+                    events_before_choice,
+                    _optional_int(
+                        scene_state_before_action.get("last_event_id")
+                        if scene_state_before_action is not None
+                        else None
+                    ),
+                    choice_id,
+                )
+                branch = self.repo.create_branch(
+                    session_id=session_id,
+                    owner_user_id=self.owner_user_id,
+                    parent_event_id=choice_presented_event_id,
+                    branch_label=_choice_text(selected_choice),
+                    branch_path=_branch_path_for_choice(
+                        selected_choice,
+                        scene_version=client_scene_version,
+                        choice_presented_event_id=choice_presented_event_id,
+                        parent_branch_path=_active_branch_path(
+                            self.repo.list_branches(
+                                session_id,
+                                owner_user_id=self.owner_user_id,
+                            ),
+                            scene_state_before_action,
+                        ),
+                    ),
+                )
+                branch_node_id = int(branch["id"])
             events = self._append_script_events(
                 session_id=session_id,
                 action_id=int(action["id"]),
                 execution=execution,
                 scene_version=next_scene_version,
                 selected_choice_id=choice_id,
+                branch_node_id=branch_node_id,
             )
             state = derive_scene_state(self.repo.list_events(session_id))
             last_event_id = int(events[-1]["id"]) if events else None
@@ -2341,6 +2398,76 @@ class VNPlayService:
             raise VNPlayNotFoundError("script_version_not_found")
         return version
 
+    def _validate_active_generated_choice(
+        self,
+        *,
+        session: VNPlaySession,
+        selected_choice: Any,
+    ) -> None:
+        if not isinstance(selected_choice, Mapping):
+            return
+        if selected_choice.get("source") != "generated":
+            return
+        generation_id = _optional_int(selected_choice.get("generation_id"))
+        revision_id = _optional_int(selected_choice.get("revision_id"))
+        generation_point_key = selected_choice.get("generation_point_key")
+        if generation_id is None or revision_id is None or not isinstance(generation_point_key, str):
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        generation = self.repo.get_generation_by_point(
+            session_id=session.id,
+            owner_user_id=self.owner_user_id,
+            generation_point_key=generation_point_key,
+        )
+        if generation is None:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        if int(generation["id"]) != generation_id:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        if _optional_int(generation.get("active_revision_id")) != revision_id:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        revision = self.repo.get_generation_revision(
+            revision_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if revision is None:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        if _optional_int(revision.get("generation_id")) != generation_id:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        if _optional_int(revision.get("session_id")) != session.id:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        request = self.repo.get_generation_request(
+            int(revision["generation_request_id"]),
+            owner_user_id=self.owner_user_id,
+        )
+        if request is None:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        if _optional_int(request.get("generation_id")) != generation_id:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        opcode_snapshot = request.get("opcode_snapshot")
+        if not isinstance(opcode_snapshot, Mapping):
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        expected_target = str(opcode_snapshot.get("on_generated_choice") or "")
+        if not expected_target or str(selected_choice.get("target") or "") != expected_target:
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        public_output = revision.get("public_output")
+        if not isinstance(public_output, Mapping) or public_output.get("schema") != "choice_set":
+            raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+        selected_choice_id = str(selected_choice.get("id") or "")
+        selected_choice_text = str(selected_choice.get("text") or selected_choice_id)
+        selected_metadata = selected_choice.get("metadata")
+        selected_metadata_dict = dict(selected_metadata) if isinstance(selected_metadata, Mapping) else {}
+        for output_choice in _list_of_dicts(public_output.get("choices")):
+            output_choice_id = str(output_choice.get("id") or "")
+            if output_choice_id != selected_choice_id:
+                continue
+            if str(output_choice.get("text") or output_choice_id) != selected_choice_text:
+                raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+            output_metadata = output_choice.get("metadata")
+            output_metadata_dict = dict(output_metadata) if isinstance(output_metadata, Mapping) else {}
+            if output_metadata_dict != selected_metadata_dict:
+                raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+            return
+        raise VNPlayTurnError(ERROR_INVALID_CHOICE_ID)
+
     def _append_script_events(
         self,
         *,
@@ -2349,76 +2476,101 @@ class VNPlayService:
         execution: Mapping[str, Any],
         scene_version: int,
         selected_choice_id: str | None,
+        branch_node_id: int | None = None,
     ) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
         if selected_choice_id is not None:
             selected_choice = execution.get("selected_choice")
+            public_choice = (
+                _script_event_choice(selected_choice)
+                if isinstance(selected_choice, Mapping)
+                else {}
+            )
+            event_payload = {
+                "session_action_id": action_id,
+                "choice_id": selected_choice_id,
+                "choice": public_choice,
+                "scene_version": scene_version,
+            }
+            if branch_node_id is not None:
+                event_payload["branch_node_id"] = branch_node_id
+            generated_choice_metadata = (
+                _generated_choice_event_metadata(selected_choice)
+                if isinstance(selected_choice, Mapping)
+                else None
+            )
+            if generated_choice_metadata is not None:
+                event_payload["generated_choice"] = generated_choice_metadata
             events.append(
                 self.repo.append_event(
                     session_id=session_id,
                     owner_user_id=self.owner_user_id,
                     event_type=EVENT_CHOICE_SELECTED,
-                    event_payload={
-                        "session_action_id": action_id,
-                        "choice_id": selected_choice_id,
-                        "choice": (
-                            _script_public_choice(selected_choice)
-                            if isinstance(selected_choice, Mapping)
-                            else {}
-                        ),
-                        "scene_version": scene_version,
-                    },
+                    event_payload=event_payload,
                     source="user",
+                    branch_node_id=branch_node_id,
                 )
             )
         narrative_text = str(execution.get("narrative_text") or "")
         dialogue = _list_of_dicts(execution.get("dialogue"))
         generation_results = _list_of_dicts(execution.get("generation_results"))
         if narrative_text or dialogue or generation_results:
+            event_payload = {
+                "session_action_id": action_id,
+                "narrative_text": narrative_text,
+                "dialogue": dialogue,
+                "scripted": True,
+                "generation_results": generation_results,
+                "scene_version": scene_version,
+            }
+            if branch_node_id is not None:
+                event_payload["branch_node_id"] = branch_node_id
             events.append(
                 self.repo.append_event(
                     session_id=session_id,
                     owner_user_id=self.owner_user_id,
                     event_type=EVENT_MODEL_TURN,
-                    event_payload={
-                        "session_action_id": action_id,
-                        "narrative_text": narrative_text,
-                        "dialogue": dialogue,
-                        "scripted": True,
-                        "generation_results": generation_results,
-                        "scene_version": scene_version,
-                    },
+                    event_payload=event_payload,
                     source="runtime",
+                    branch_node_id=branch_node_id,
                 )
             )
         choices = _script_public_choices(execution.get("visible_choices"))
         random_results = _list_of_dicts(execution.get("random_results"))
         if choices:
+            event_payload = {
+                "session_action_id": action_id,
+                "choices": choices,
+                "scene_version": scene_version,
+            }
+            if branch_node_id is not None:
+                event_payload["branch_node_id"] = branch_node_id
             events.append(
                 self.repo.append_event(
                     session_id=session_id,
                     owner_user_id=self.owner_user_id,
                     event_type=EVENT_CHOICE_PRESENTED,
-                    event_payload={
-                        "session_action_id": action_id,
-                        "choices": choices,
-                        "scene_version": scene_version,
-                    },
+                    event_payload=event_payload,
                     source="runtime",
+                    branch_node_id=branch_node_id,
                 )
             )
+        event_payload = {
+            "session_action_id": action_id,
+            "visible_choices": choices,
+            "random_results": random_results,
+            "scene_version": scene_version,
+        }
+        if branch_node_id is not None:
+            event_payload["branch_node_id"] = branch_node_id
         events.append(
             self.repo.append_event(
                 session_id=session_id,
                 owner_user_id=self.owner_user_id,
                 event_type=EVENT_SCENE_STATE_CHANGED,
-                event_payload={
-                    "session_action_id": action_id,
-                    "visible_choices": choices,
-                    "random_results": random_results,
-                    "scene_version": scene_version,
-                },
+                event_payload=event_payload,
                 source="runtime",
+                branch_node_id=branch_node_id,
             )
         )
         return events
@@ -3162,6 +3314,8 @@ def _execute_script_program(
     selected_choice: dict[str, Any] | None = None
     if choice_id is not None:
         selected_choice = _script_selected_choice(current_position, choice_id)
+        if selected_choice.get("source") == "generated":
+            variables.update(_generated_choice_variables(selected_choice))
         current_position = {
             "label": selected_choice["target"],
             "index": 0,
@@ -3565,9 +3719,87 @@ def _script_public_choices(raw_choices: Any) -> list[dict[str, Any]]:
 
 
 def _script_public_choice(choice: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    public_choice = {
         "id": str(choice.get("id") or ""),
         "text": str(choice.get("text") or choice.get("id") or ""),
+    }
+    if choice.get("source") == "generated":
+        public_choice["source"] = "generated"
+        generation_id = _optional_int(choice.get("generation_id"))
+        revision_id = _optional_int(choice.get("revision_id"))
+        if generation_id is not None:
+            public_choice["generation_id"] = generation_id
+        if revision_id is not None:
+            public_choice["revision_id"] = revision_id
+    return public_choice
+
+
+def _script_event_choice(choice: Mapping[str, Any]) -> dict[str, Any]:
+    event_choice = _script_public_choice(choice)
+    metadata = choice.get("metadata")
+    if choice.get("source") == "generated" and isinstance(metadata, Mapping):
+        event_choice["metadata"] = dict(metadata)
+    return event_choice
+
+
+def _generated_choices_from_generation_result(
+    generation_result: Mapping[str, Any],
+    *,
+    on_generated_choice: Any,
+) -> list[dict[str, Any]]:
+    public_output = generation_result.get("public_output")
+    if not isinstance(public_output, Mapping) or public_output.get("schema") != "choice_set":
+        return []
+    target = str(on_generated_choice or "")
+    if not target:
+        raise VNPlayTurnError("script_generated_choice_target_missing")
+    generation_id = _optional_int(generation_result.get("generation_id"))
+    revision_id = _optional_int(generation_result.get("revision_id"))
+    generation_point_key = str(generation_result.get("generation_point_key") or "")
+    if generation_id is None or revision_id is None or not generation_point_key:
+        raise VNPlayTurnError("script_generated_choice_metadata_missing")
+    choices: list[dict[str, Any]] = []
+    for choice in _list_of_dicts(public_output.get("choices")):
+        choice_id = str(choice.get("id") or "")
+        if not choice_id:
+            continue
+        generated_choice = {
+            "id": choice_id,
+            "text": str(choice.get("text") or choice_id),
+            "source": "generated",
+            "generation_id": generation_id,
+            "revision_id": revision_id,
+            "generation_point_key": generation_point_key,
+            "target": target,
+        }
+        metadata = choice.get("metadata")
+        if isinstance(metadata, Mapping):
+            generated_choice["metadata"] = dict(metadata)
+        choices.append(generated_choice)
+    return choices
+
+
+def _generated_choice_event_metadata(choice: Mapping[str, Any]) -> dict[str, Any] | None:
+    if choice.get("source") != "generated":
+        return None
+    generation_id = _optional_int(choice.get("generation_id"))
+    revision_id = _optional_int(choice.get("revision_id"))
+    choice_id = str(choice.get("id") or "")
+    if generation_id is None or revision_id is None or not choice_id:
+        return None
+    return {
+        "generation_id": generation_id,
+        "revision_id": revision_id,
+        "choice_id": choice_id,
+    }
+
+
+def _generated_choice_variables(choice: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = choice.get("metadata")
+    return {
+        "last_generated_choice.id": str(choice.get("id") or ""),
+        "last_generated_choice.text": str(choice.get("text") or choice.get("id") or ""),
+        "last_generated_choice.metadata": dict(metadata) if isinstance(metadata, Mapping) else {},
     }
 
 
@@ -3696,16 +3928,18 @@ def _branch_path_for_choice(
     parent_branch_path: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     path = [dict(step) for step in parent_branch_path or []]
-    path.append(
-        {
-            "schema_version": 1,
-            "type": "choice",
-            "choice_id": str(choice.get("id")),
-            "choice_text": _choice_text(choice),
-            "choice_presented_event_id": choice_presented_event_id,
-            "scene_version": scene_version,
-        }
-    )
+    step = {
+        "schema_version": 1,
+        "type": "choice",
+        "choice_id": str(choice.get("id")),
+        "choice_text": _choice_text(choice),
+        "choice_presented_event_id": choice_presented_event_id,
+        "scene_version": scene_version,
+    }
+    generated_choice_metadata = _generated_choice_event_metadata(choice)
+    if generated_choice_metadata is not None:
+        step["generated_choice"] = generated_choice_metadata
+    path.append(step)
     return path
 
 

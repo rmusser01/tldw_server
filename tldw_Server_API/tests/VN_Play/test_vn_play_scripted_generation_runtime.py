@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.VN_Play.adapters import (
     VNGenerationCallRequest,
     VNGenerationCallResult,
 )
+from tldw_Server_API.app.core.VN_Play.branch_navigation import filter_branch_events
 from tldw_Server_API.app.core.VN_Play.constants import MODE_SCRIPTED_STORY
 from tldw_Server_API.app.core.VN_Play.models import VisualDirectiveResolution
 from tldw_Server_API.app.core.VN_Play.service import (
@@ -50,6 +51,7 @@ def _profile_snapshot(
     chacha_db: CharactersRAGDB,
     *,
     batch_cap: int = 1,
+    supported_output_schemas: list[str] | None = None,
 ) -> dict[str, Any]:
     return VNProfileSnapshotRepository.initialized(chacha_db).create_profile_snapshot(
         owner_user_id=42,
@@ -63,7 +65,8 @@ def _profile_snapshot(
             "model": "fake-model",
             "moderation_required": False,
             "automatic_generation_batch_cap": batch_cap,
-            "supported_output_schemas": ["narrative_dialogue", "scene_update"],
+            "supported_output_schemas": supported_output_schemas
+            or ["narrative_dialogue", "scene_update", "choice_set"],
         },
     )
 
@@ -339,3 +342,401 @@ async def test_generation_model_failure_persists_failed_revision_without_advanci
     )
     assert revisions[0]["status"] == "failed"
     assert revisions[0]["public_error_code"] == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_generated_choice_selection_jumps_to_authored_on_generated_choice(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content=(
+            '{"schema":"choice_set",'
+            '"lead_in":"Mira studies your reaction.",'
+            '"choices":[{"id":"ask_map","text":"Ask about the map","metadata":{"tone":"curious"}}]}'
+        )
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {
+                "last_generated_choice.id": {"public": True},
+                "last_generated_choice.text": {"public": True},
+                "last_generated_choice.metadata": {"public": True},
+            },
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "dynamic-choice",
+                        "prompt": "Offer a dynamic choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "generated_branch",
+                    }
+                ],
+                "generated_branch": [
+                    {"op": "narrate", "text": "The authored generated-choice branch runs."},
+                    {"op": "end"},
+                ],
+            },
+        },
+    )
+
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="choice-set-generate",
+    )
+
+    waiting_choice = first["script_state"]["waiting_choice"]
+    assert waiting_choice is not None
+    public_choice = waiting_choice["choices"][0]
+    assert public_choice == {
+        "id": "ask_map",
+        "text": "Ask about the map",
+        "source": "generated",
+        "generation_id": public_choice["generation_id"],
+        "revision_id": public_choice["revision_id"],
+    }
+    assert "target" not in public_choice
+    assert first["current_scene"]["visible_choices"][0] == public_choice
+
+    second = await service.choose_script_option(
+        session.id,
+        choice_id="ask_map",
+        client_scene_version=1,
+        idempotency_key="select-generated-choice",
+    )
+
+    assert second["script_state"]["ended"] is True
+    model_event = next(event for event in second["events"] if event["event_type"] == "model_turn")
+    assert model_event["event_payload"]["narrative_text"] == "The authored generated-choice branch runs."
+    variables = second["script_state"]["variables"]
+    assert variables["last_generated_choice.id"] == "ask_map"
+    assert variables["last_generated_choice.text"] == "Ask about the map"
+    assert variables["last_generated_choice.metadata"] == {"tone": "curious"}
+
+
+@pytest.mark.asyncio
+async def test_generated_choice_metadata_is_stored_in_branch_events(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content=(
+            '{"schema":"choice_set","choices":['
+            '{"id":"follow_clue","text":"Follow the clue","metadata":{"risk":"high"}}]}'
+        )
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [
+                    {"op": "narrate", "text": "Followed."},
+                    {
+                        "op": "generate",
+                        "id": "literal-branch-beat",
+                        "prompt": "Literal branch beat",
+                        "narrative_text": "Generated branch beat.",
+                    },
+                    {"op": "narrate", "text": "Continued."},
+                    {"op": "end"},
+                ],
+            },
+        },
+    )
+
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="branch-metadata-generate",
+    )
+    generation_id = first["script_state"]["waiting_choice"]["choices"][0]["generation_id"]
+    revision_id = first["script_state"]["waiting_choice"]["choices"][0]["revision_id"]
+
+    await service.choose_script_option(
+        session.id,
+        choice_id="follow_clue",
+        client_scene_version=1,
+        idempotency_key="branch-metadata-select",
+    )
+    await service.advance_script(
+        session.id,
+        client_scene_version=2,
+        idempotency_key="branch-metadata-continue",
+    )
+
+    all_events = service.repo.list_events(session.id)
+    choice_event = next(
+        event
+        for event in all_events
+        if event["event_type"] == "choice_selected"
+        and event["event_payload"].get("choice_id") == "follow_clue"
+    )
+    assert choice_event["event_payload"]["generated_choice"] == {
+        "generation_id": generation_id,
+        "revision_id": revision_id,
+        "choice_id": "follow_clue",
+    }
+    assert choice_event["event_payload"]["choice"]["metadata"] == {"risk": "high"}
+    assert "raw_output" not in choice_event["event_payload"]
+    assert "raw_prompt" not in choice_event["event_payload"]
+    navigation = service.get_branch_navigation(session.id)
+    branch = navigation["branches"][0]
+    branch_id = branch["branch_id"]
+    assert branch["generated_choice"] == {
+        "generation_id": generation_id,
+        "revision_id": revision_id,
+        "choice_id": "follow_clue",
+    }
+    assert branch["branch_path"][-1]["generated_choice"] == branch["generated_choice"]
+    assert navigation["active_path"][0]["generated_choice"] == branch["generated_choice"]
+    assert "metadata" not in branch["generated_choice"]
+
+    branch_events = [
+        event
+        for event in all_events
+        if event["event_type"] in {"choice_selected", "model_turn", "scene_state_changed"}
+        and event.get("branch_node_id") == branch_id
+    ]
+    assert [event["event_type"] for event in branch_events] == [
+        "choice_selected",
+        "model_turn",
+        "scene_state_changed",
+        "model_turn",
+        "scene_state_changed",
+    ]
+    for event in branch_events:
+        assert event["event_payload"]["branch_node_id"] == branch_id
+
+    filtered_events, warnings = filter_branch_events(
+        branch_id=branch_id,
+        branches=service.repo.list_branches(session.id),
+        events=all_events,
+        replay_limit=1,
+    )
+    assert {warning["code"] for warning in warnings} == {
+        "branch_interval_replay_limit_exceeded",
+    }
+    assert [event["event_type"] for event in filtered_events] == [
+        "choice_selected",
+        "model_turn",
+        "scene_state_changed",
+        "model_turn",
+        "scene_state_changed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generated_choice_from_inactive_revision_cannot_be_selected(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"active","text":"Active choice"}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "end"}],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="inactive-choice-generate",
+    )
+    active_choice = first["script_state"]["waiting_choice"]["choices"][0]
+    inactive_revision = service.repo.create_generation_revision(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_id=int(active_choice["generation_id"]),
+        generation_request_id=1,
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={
+            "schema": "choice_set",
+            "choices": [{"id": "inactive", "text": "Inactive choice"}],
+        },
+    )
+
+    position = dict(service.get_session(session.id).script_position)
+    stale_choices = [dict(choice) for choice in position["waiting_choices"]]
+    stale_choices.append(
+        {
+            "id": "inactive",
+            "text": "Inactive choice",
+            "source": "generated",
+            "generation_id": int(active_choice["generation_id"]),
+            "revision_id": int(inactive_revision["id"]),
+            "generation_point_key": "start:0:choice",
+            "target": "after",
+        }
+    )
+    position["waiting_choices"] = stale_choices
+    service.repo.update_session(
+        session.id,
+        {"script_position": position},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayTurnError, match="invalid_choice_id"):
+        await service.choose_script_option(
+            session.id,
+            choice_id="inactive",
+            client_scene_version=1,
+            idempotency_key="inactive-choice-select",
+        )
+
+
+@pytest.mark.asyncio
+async def test_generated_choice_not_in_active_revision_cannot_be_selected(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"active","text":"Active choice"}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "end"}],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="tampered-choice-generate",
+    )
+    active_choice = first["script_state"]["waiting_choice"]["choices"][0]
+
+    position = dict(service.get_session(session.id).script_position)
+    tampered_choices = [dict(choice) for choice in position["waiting_choices"]]
+    tampered_choices.append(
+        {
+            "id": "fabricated",
+            "text": "Fabricated choice",
+            "source": "generated",
+            "generation_id": int(active_choice["generation_id"]),
+            "revision_id": int(active_choice["revision_id"]),
+            "generation_point_key": "start:0:choice",
+            "target": "after",
+        }
+    )
+    position["waiting_choices"] = tampered_choices
+    service.repo.update_session(
+        session.id,
+        {"script_position": position},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayTurnError, match="invalid_choice_id"):
+        await service.choose_script_option(
+            session.id,
+            choice_id="fabricated",
+            client_scene_version=1,
+            idempotency_key="tampered-choice-select",
+        )
+
+
+@pytest.mark.asyncio
+async def test_generated_choice_target_must_match_generation_opcode(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"active","text":"Active choice"}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "end"}],
+                "other": [{"op": "end"}],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="tampered-target-generate",
+    )
+    active_choice = first["script_state"]["waiting_choice"]["choices"][0]
+
+    position = dict(service.get_session(session.id).script_position)
+    tampered_choices = [dict(choice) for choice in position["waiting_choices"]]
+    tampered_choices[0]["target"] = "other"
+    position["waiting_choices"] = tampered_choices
+    service.repo.update_session(
+        session.id,
+        {"script_position": position},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayTurnError, match="invalid_choice_id"):
+        await service.choose_script_option(
+            session.id,
+            choice_id=str(active_choice["id"]),
+            client_scene_version=1,
+            idempotency_key="tampered-target-select",
+        )

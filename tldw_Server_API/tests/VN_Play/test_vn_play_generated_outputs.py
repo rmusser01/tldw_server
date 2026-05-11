@@ -144,6 +144,14 @@ def test_choice_set_validates_choice_ids_uniqueness_and_public_payload() -> None
             "schema": "choice_set",
             "choices": [{"id": "allowed", "text": "No injected target", "source": "generated"}],
         },
+        {
+            "schema": "choice_set",
+            "choices": [{"id": "allowed", "text": "No injected target", "target": "model_label"}],
+        },
+        {
+            "schema": "choice_set",
+            "choices": [{"id": "allowed", "text": "No injected target", "next_label": "model_label"}],
+        },
     ):
         with pytest.raises(VNGenerationOutputParseError, match="invalid_generation_output"):
             parse_vn_generation_output(payload, output_schema="choice_set")
