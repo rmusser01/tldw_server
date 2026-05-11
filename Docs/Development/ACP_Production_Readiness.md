@@ -35,7 +35,7 @@ Recommended order: seed #1472, then complete #1479, #1478, #1476, #1475,
 
 | Surface | Owner modules | Required evidence | Verification commands | Pass/fail gate | Runtime caveats |
 | --- | --- | --- | --- | --- | --- |
-| ACP REST, WebSocket, SSE, and session lifecycle | `tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py`, `tldw_Server_API/app/core/Agent_Client_Protocol/`, `Docs/Development/ACP_Compatibility_Matrix.md` | Session create, prompt, cancel, close, reconnect, streaming, and error paths are covered; named downstream-agent support claims use the compatibility matrix support states and evidence fields. | `source .venv/bin/activate`; `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol -q` | Pass when focused ACP pytest suite is green and failures distinguish user errors from server faults. | Stub-agent tests are sufficient for base protocol; live downstream agents should be verified through `ACP_Compatibility_Matrix.md` before release notes claim support. |
+| ACP REST, WebSocket, SSE, and session lifecycle | `tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py`, `tldw_Server_API/app/core/Agent_Client_Protocol/`, `Docs/Development/ACP_Compatibility_Matrix.md`, `Docs/Development/ACP_Certification_Checklist.md` | Session create, prompt, cancel, close, reconnect, streaming, and error paths are covered; named downstream-agent support claims use the compatibility matrix support states, checklist, smoke manifest, and evidence fields. | `source .venv/bin/activate`; `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol -q` | Pass when focused ACP pytest suite is green and failures distinguish user errors from server faults. | Stub-agent tests are sufficient for base protocol; live downstream agents should be verified through `ACP_Certification_Checklist.md` and `ACP_Compatibility_Matrix.md` before release notes claim support. |
 | Agent orchestration tasks | `tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py`, `tldw_Server_API/app/core/Agent_Orchestration/`, orchestration DB helpers | Tasks persist status, attempts, outputs, completion reason, and retry/timeout state. | `source .venv/bin/activate`; `python -m pytest tldw_Server_API/tests/Agent_Orchestration -q` | Pass when task state transitions are durable and completion signals satisfy #1479. | Background-worker tests may need runtime feature flags if a local worker pool is not enabled by default. |
 | Structured completion and failure semantics | ACP schemas, orchestration service, run handlers, session store | Every run records terminal state, reason, timestamps, and retriable/non-retriable classification. | Focus the new/changed tests from #1479 plus `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_run_handler.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_service.py -q` | Pass when UI and API can consume the same terminal state without text parsing. | This is a blocker for reviewer loops, schedules, and production run history. |
 | Reviewer-agent loop and triage history | Orchestration service, task APIs, run/history DB tables | Review requests, reviewer responses, decisions, follow-up tasks, and overrides are durable. | Add #1478 focused pytest coverage, then include it in the orchestration suite. | Pass when a reviewer decision can be traced from task request to final run history. | Do not count manual GitHub comments as triage history unless they are linked from durable ACP state. |
@@ -73,6 +73,17 @@ python -m pytest \
   tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py \
   -q
 ```
+
+### ACP Certification Manifests
+
+```bash
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile stub-smoke --format json
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --format json
+```
+
+Use `--run` only when the profile prerequisites are satisfied. `stub-smoke`
+runs safe-by-default in-repo gates; `live-e2e` refuses to run without
+`TLDW_E2E_SERVER_URL`, `TLDW_E2E_API_KEY`, and `ACP_AGENT_PROFILE`.
 
 ### Frontend Unit Contracts
 
