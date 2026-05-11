@@ -16,11 +16,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
+    ACP_COMPATIBILITY_DOCS_URL,
+    ACPAgentCompatibilityStatus,
     ACPAgentInfo,
     ACPAgentListResponse,
     ACPAgentHealthEntry,
@@ -32,6 +35,7 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAsyncPromptResponse,
     ACPCheckpointListResponse,
     ACPHealthResponse,
+    ACPSetupGuideResponse,
     ACPRollbackRequest,
     ACPRollbackResponse,
     ACPSessionCancelRequest,
@@ -171,6 +175,20 @@ _ACP_DIAGNOSTIC_REASON_MAP: dict[str, str] = {
     "runtime_error": "failed_runtime",
     "invariant_violation": "invariant_violation",
 }
+_ACP_SUPPORT_STATES = frozenset({
+    "supported",
+    "supported_with_caveats",
+    "experimental",
+    "documented_unverified",
+    "unsupported",
+})
+_ACP_VERIFICATION_LEVELS = frozenset({
+    "documented_only",
+    "stub_smoke_tested",
+    "live_e2e_tested",
+    "sandbox_tested",
+    "production_supported",
+})
 
 
 def get_acp_runtime_policy_service() -> ACPRuntimePolicyService:
@@ -1587,10 +1605,59 @@ def _check_agent_availability(agent_type: str) -> dict[str, Any]:
             "status": "unknown",
             "binary_found": False,
             "api_key_set": False,
+            "support_state": "documented_unverified",
+            "verification_level": "documented_only",
+            "compatibility_notes": "Agent is not present in the registry; live-agent ACP compatibility has not been certified.",
+            "compatibility_docs_url": ACP_COMPATIBILITY_DOCS_URL,
         }
     result = entry.check_availability()
     result["agent_type"] = agent_type
     return result
+
+
+def _build_agent_compatibility_status(source: Any) -> ACPAgentCompatibilityStatus:
+    """Return ACP compatibility metadata with conservative defaults."""
+    get_value = source.get if isinstance(source, dict) else lambda key, default=None: getattr(source, key, default)
+
+    support_state = str(get_value("support_state") or "documented_unverified")
+    verification_level = str(get_value("verification_level") or "documented_only")
+    if support_state not in _ACP_SUPPORT_STATES:
+        support_state = "documented_unverified"
+    if verification_level not in _ACP_VERIFICATION_LEVELS:
+        verification_level = "documented_only"
+    notes = (
+        get_value("compatibility_notes")
+        or "Configured locally; live-agent ACP compatibility has not been certified."
+    )
+    docs_url = get_value("compatibility_docs_url") or ACP_COMPATIBILITY_DOCS_URL
+    if str(docs_url).startswith("Docs/"):
+        docs_url = f"/docs-static/{str(docs_url).removeprefix('Docs/')}"
+    return ACPAgentCompatibilityStatus(
+        support_state=support_state,
+        verification_level=verification_level,
+        notes=str(notes),
+        docs_url=str(docs_url),
+    )
+
+
+def _compatibility_setup_steps(compatibility: ACPAgentCompatibilityStatus) -> list[str]:
+    """Return setup-guide actions for ACP compatibility certification state."""
+    support_state = compatibility.support_state
+    if support_state == "documented_unverified":
+        return [
+            "Run the ACP certification checklist before claiming live-agent support.",
+            "Record evidence in the ACP compatibility matrix after live verification.",
+        ]
+    if support_state == "unsupported":
+        return [
+            "Do not claim ACP support for this agent until the compatibility issue is resolved.",
+            "Open or link a follow-up issue before release if this agent must ship.",
+        ]
+    if support_state == "experimental":
+        return ["Treat this ACP integration as experimental and review the compatibility caveats before release."]
+    if support_state == "supported_with_caveats":
+        return ["Review the ACP compatibility matrix caveats before release claims."]
+    return []
 
 
 @router.get(
@@ -1627,6 +1694,10 @@ async def acp_health(
             "binary_found": avail.get("binary_found", False),
             "api_key_set": avail.get("api_key_set", False),
             "is_configured": avail.get("is_configured", False),
+            "support_state": avail.get("support_state", "documented_unverified"),
+            "verification_level": avail.get("verification_level", "documented_only"),
+            "compatibility_notes": avail.get("compatibility_notes", ""),
+            "compatibility_docs_url": avail.get("compatibility_docs_url"),
         })
     result["agents"] = agents_status
 
@@ -1694,6 +1765,7 @@ async def acp_health(
 
 @router.get(
     "/setup-guide",
+    response_model=ACPSetupGuideResponse,
     dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.setup_guide"))],
 )
 async def acp_setup_guide(
@@ -1740,6 +1812,7 @@ async def acp_setup_guide(
             "agent_type": reg_entry.type,
             "name": reg_entry.name,
             "status": avail.get("status", "unknown"),
+            "compatibility": _build_agent_compatibility_status(reg_entry),
             "steps": [],
         }
 
@@ -1751,6 +1824,8 @@ async def acp_setup_guide(
 
         if not avail.get("api_key_set", True) and reg_entry.requires_api_key:
             guide_item["steps"].append(f"Set {reg_entry.requires_api_key} environment variable or add to .env file")
+
+        guide_item["steps"].extend(_compatibility_setup_steps(guide_item["compatibility"]))
 
         if not guide_item["steps"]:
             guide_item["steps"] = [f"{reg_entry.name} is fully configured"]
@@ -1778,6 +1853,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="Anthropic's Claude Code agent for software development tasks",
             is_configured=bool(anthropic_key),
             requires_api_key="ANTHROPIC_API_KEY" if not anthropic_key else None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Static fallback only; live Claude Code ACP compatibility has not been certified.",
         )
     )
 
@@ -1789,6 +1867,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="OpenAI's Codex agent for code generation and analysis",
             is_configured=bool(openai_key),
             requires_api_key="OPENAI_API_KEY" if not openai_key else None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Static fallback only; live Codex ACP compatibility has not been certified.",
         )
     )
 
@@ -1799,6 +1880,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="Open-source coding agent (github.com/sst/opencode)",
             is_configured=True,
             requires_api_key=None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Static fallback only; live OpenCode ACP compatibility has not been certified.",
         )
     )
 
@@ -1809,6 +1893,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="Configure a custom agent with your own settings",
             is_configured=True,
             requires_api_key=None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Custom agent profiles require certification evidence before release claims.",
         )
     )
 
@@ -1825,6 +1912,7 @@ def _get_registry_agents() -> tuple[list[ACPAgentInfo], str] | None:
             return None
         agents: list[ACPAgentInfo] = []
         for item in available:
+            compatibility = _build_agent_compatibility_status(item)
             agents.append(
                 ACPAgentInfo(
                     type=str(item["type"]),
@@ -1832,6 +1920,10 @@ def _get_registry_agents() -> tuple[list[ACPAgentInfo], str] | None:
                     description=str(item.get("description", "")),
                     is_configured=bool(item.get("is_configured", False)),
                     requires_api_key=item.get("missing_api_key"),
+                    support_state=compatibility.support_state,
+                    verification_level=compatibility.verification_level,
+                    compatibility_notes=compatibility.notes,
+                    compatibility_docs_url=compatibility.docs_url,
                 )
             )
         return agents, registry.default_type
@@ -1870,15 +1962,23 @@ async def _get_available_agents() -> tuple[list[ACPAgentInfo], str]:
         requires_api_key = item.get("requiresApiKey")
         if requires_api_key is None:
             requires_api_key = item.get("requires_api_key")
-        agents.append(
-            ACPAgentInfo(
+        compatibility = _build_agent_compatibility_status(item)
+        try:
+            agent_info = ACPAgentInfo(
                 type=str(agent_type),
                 name=str(name),
                 description=str(item.get("description") or ""),
                 is_configured=bool(is_configured),
                 requires_api_key=str(requires_api_key) if requires_api_key else None,
+                support_state=compatibility.support_state,
+                verification_level=compatibility.verification_level,
+                compatibility_notes=compatibility.notes,
+                compatibility_docs_url=compatibility.docs_url,
             )
-        )
+        except ValidationError:
+            logger.warning("Skipping invalid ACP runner agent entry: {}", agent_type)
+            continue
+        agents.append(agent_info)
 
     if not agents:
         return _get_static_agents()

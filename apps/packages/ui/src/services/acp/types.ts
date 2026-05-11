@@ -9,6 +9,19 @@
 // -----------------------------------------------------------------------------
 
 export type ACPAgentType = string
+export type ACPSupportState =
+  | "supported"
+  | "supported_with_caveats"
+  | "experimental"
+  | "documented_unverified"
+  | "unsupported"
+
+export type ACPVerificationLevel =
+  | "documented_only"
+  | "stub_smoke_tested"
+  | "live_e2e_tested"
+  | "sandbox_tested"
+  | "production_supported"
 
 export interface ACPAgentInfo {
   type: ACPAgentType
@@ -16,6 +29,10 @@ export interface ACPAgentInfo {
   description: string
   is_configured: boolean
   requires_api_key?: string | null
+  support_state?: ACPSupportState
+  verification_level?: ACPVerificationLevel
+  compatibility_notes?: string
+  compatibility_docs_url?: string | null
 }
 
 export interface ACPAgentListResponse {

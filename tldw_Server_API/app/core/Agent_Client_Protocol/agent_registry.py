@@ -22,6 +22,9 @@ except ImportError:
     yaml = None  # type: ignore[assignment]
 
 
+ACP_COMPATIBILITY_DOCS_URL = "/docs-static/Development/ACP_Compatibility_Matrix.md"
+
+
 @dataclass
 class AgentRegistryEntry:
     """A single agent entry from the registry."""
@@ -35,6 +38,22 @@ class AgentRegistryEntry:
     default: bool = False
     install_instructions: list[str] = field(default_factory=list)
     docs_url: str | None = None
+    support_state: Literal[
+        "supported",
+        "supported_with_caveats",
+        "experimental",
+        "documented_unverified",
+        "unsupported",
+    ] = "documented_unverified"
+    verification_level: Literal[
+        "documented_only",
+        "stub_smoke_tested",
+        "live_e2e_tested",
+        "sandbox_tested",
+        "production_supported",
+    ] = "documented_only"
+    compatibility_notes: str = "Configured locally; live-agent ACP compatibility has not been certified."
+    compatibility_docs_url: str | None = ACP_COMPATIBILITY_DOCS_URL
 
     # Protocol adapter fields (new for agent workspace harness)
     protocol: Literal["stdio", "mcp", "openai_tool_use"] = "stdio"
@@ -61,6 +80,10 @@ class AgentRegistryEntry:
             "type": self.type,
             "name": self.name,
             "description": self.description,
+            "support_state": self.support_state,
+            "verification_level": self.verification_level,
+            "compatibility_notes": self.compatibility_notes,
+            "compatibility_docs_url": self.compatibility_docs_url,
         }
 
         # Check binary
@@ -159,6 +182,15 @@ class AgentRegistry:
                 default=bool(item.get("default", False)),
                 install_instructions=list(item.get("install_instructions", [])),
                 docs_url=item.get("docs_url"),
+                support_state=item.get("support_state", "documented_unverified"),
+                verification_level=item.get("verification_level", "documented_only"),
+                compatibility_notes=str(
+                    item.get(
+                        "compatibility_notes",
+                        "Configured locally; live-agent ACP compatibility has not been certified.",
+                    )
+                ),
+                compatibility_docs_url=item.get("compatibility_docs_url", ACP_COMPATIBILITY_DOCS_URL),
                 mcp_orchestration=item.get("mcp_orchestration", "agent_driven"),
                 mcp_entry_tool=str(item.get("mcp_entry_tool", "execute")),
                 mcp_structured_response=bool(item.get("mcp_structured_response", False)),
@@ -229,6 +261,10 @@ class AgentRegistry:
                     default=bool(row.get("is_default", 0)),
                     install_instructions=self._load_json(row.get("install_instructions"), []),
                     docs_url=row.get("docs_url"),
+                    support_state="documented_unverified",
+                    verification_level="documented_only",
+                    compatibility_notes="Registered dynamically; live-agent ACP compatibility has not been certified.",
+                    compatibility_docs_url=ACP_COMPATIBILITY_DOCS_URL,
                     mcp_orchestration=row.get("mcp_orchestration", "agent_driven"),
                     mcp_entry_tool=row.get("mcp_entry_tool", "execute"),
                     mcp_structured_response=bool(row.get("mcp_structured_response", 0)),
