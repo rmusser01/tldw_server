@@ -1,10 +1,10 @@
 ---
 id: TASK-253
 title: Add effective Persona Chat context preview
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-11 00:44'
-updated_date: '2026-05-11 00:59'
+updated_date: '2026-05-11 01:03'
 labels:
   - persona
   - chat
@@ -15,6 +15,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1560'
   - 'https://github.com/rmusser01/tldw_server/issues/1543'
+  - 'https://github.com/rmusser01/tldw_server/pull/1561'
 documentation:
   - Docs/superpowers/plans/2026-05-11-persona-chat-context-preview.md
 priority: high
@@ -55,12 +56,18 @@ Self-review hardening: added a bounded-diagnostics regression test that first fa
 Updated verification: prompt assembly suite now passes with 9 tests after the bounding regression; the three focused prompt-preview integration tests, py_compile, Bandit, and git diff --check all pass after the scalar hardening change.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added a bounded persona_context envelope to the existing chat prompt-preview endpoint for persona-backed conversations. The implementation reuses shared persona exemplar assembly so preview diagnostics show selected sections plus selected/rejected exemplar IDs without creating a parallel context engine or changing provider payload construction. Verification covered prompt assembly, focused prompt-preview integrations, py_compile, Bandit, and diff hygiene; the PR is open as #1561.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

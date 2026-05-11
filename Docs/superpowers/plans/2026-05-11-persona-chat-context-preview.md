@@ -41,4 +41,4 @@
 - [x] Run `py_compile` on touched backend modules.
 - [x] Run Bandit on touched backend files.
 - [x] Run `git diff --check`.
-- [ ] Update `TASK-253`, commit, push, and open a PR linked to #1560.
+- [x] Update `TASK-253`, commit, push, and open a PR linked to #1560.
