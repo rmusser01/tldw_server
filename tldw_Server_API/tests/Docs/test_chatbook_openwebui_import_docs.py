@@ -20,6 +20,11 @@ def test_openwebui_import_is_discoverable_from_user_guides() -> None:
     assert "webui.db" in guide_text  # nosec B101 - pytest assertion
     assert "selected OpenWebUI user" in guide_text  # nosec B101 - pytest assertion
     assert "OpenWebUI / <selected user>" in guide_text  # nosec B101 - pytest assertion
+    assert "OpenWebUI attachment hydration" in guide_text  # nosec B101
+    assert "`uploads/`" in guide_text  # nosec B101
+    assert "Files.ingestion_source_allowed_roots" in guide_text  # nosec B101
+    assert "INGESTION_SOURCE_ALLOWED_ROOTS" in guide_text  # nosec B101
+    assert "Process supported files" in guide_text  # nosec B101
     assert "OpenWebUI chat JSON migration" in readme_text  # nosec B101
     assert "OpenWebUI webui.db migration" in readme_text  # nosec B101
     assert "WebUI_Extension/Chatbook_User_Guide.md" in readme_text  # nosec B101
@@ -44,6 +49,11 @@ def test_openwebui_import_is_discoverable_from_api_docs() -> None:
     assert "OpenWebUI webui.db database" in api_doc  # nosec B101
     assert "selected_openwebui_user_id" in api_doc  # nosec B101
     assert "OpenWebUI / <selected user>" in api_doc  # nosec B101
+    assert "/api/v1/chatbooks/openwebui/hydration/preview" in api_doc  # nosec B101
+    assert "/api/v1/chatbooks/openwebui/hydration/jobs" in api_doc  # nosec B101
+    assert "process_supported_files" in api_doc  # nosec B101
+    assert "Files.ingestion_source_allowed_roots" in api_doc  # nosec B101
+    assert "OpenWebUI attachment hydration preview/job endpoints" in api_tags  # nosec B101
 
 
 def test_openwebui_import_is_reflected_in_published_docs() -> None:
@@ -59,8 +69,10 @@ def test_openwebui_import_is_reflected_in_published_docs() -> None:
 
     assert "OpenWebUI Chat Import" in published_guide  # nosec B101
     assert "OpenWebUI database" in published_guide  # nosec B101
+    assert "OpenWebUI attachment hydration" in published_guide  # nosec B101
     assert "source_format=openwebui_json" in published_api  # nosec B101
     assert "source_format=openwebui_db" in published_api  # nosec B101
+    assert "/api/v1/chatbooks/openwebui/hydration/preview" in published_api  # nosec B101
     assert "OpenWebUI JSON and database chat import" in feature_status  # nosec B101
 
 
@@ -91,7 +103,8 @@ def test_chatbook_import_docs_match_multipart_contract() -> None:
         assert "**Import Embeddings**: Not supported yet" in guide_text  # nosec B101
         assert "Keep this set to false" in guide_text  # nosec B101
         assert "Default: true" not in guide_text  # nosec B101
-        assert "Files, images, and artifacts import as metadata references only" in guide_text  # nosec B101
+        assert "OpenWebUI JSON and database imports preserve attachment references first" in guide_text  # nosec B101
+        assert "Run OpenWebUI attachment hydration after import" in guide_text  # nosec B101
 
 
 def test_chatbook_openapi_documents_openwebui_multipart_fields() -> None:
@@ -124,6 +137,14 @@ def test_chatbook_openapi_documents_openwebui_multipart_fields() -> None:
             "openwebui_db",
         ]
         assert "/chatbooks/import/jobs/{job_id}" in spec["paths"]  # nosec B101
+        assert "/chatbooks/openwebui/hydration/preview" in spec["paths"]  # nosec B101
+        assert "/chatbooks/openwebui/hydration/jobs" in spec["paths"]  # nosec B101
+        assert "/chatbooks/openwebui/hydration/jobs/{job_id}" in spec["paths"]  # nosec B101
+        hydration_request = spec["components"]["schemas"]["OpenWebUIHydrationRequest"]
+        assert "openwebui_data_root" in hydration_request["required"]  # nosec B101
+        assert hydration_request["properties"]["process_supported_files"]["default"] is False  # nosec B101
+        assert "OpenWebUIHydrationPreviewResponse" in spec["components"]["schemas"]  # nosec B101
+        assert "OpenWebUIHydrationJobResponse" in spec["components"]["schemas"]  # nosec B101
 
 
 def test_chatbook_openapi_database_import_result_matches_backend_schema() -> None:

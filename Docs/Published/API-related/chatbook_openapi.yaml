@@ -218,6 +218,95 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /chatbooks/openwebui/hydration/preview:
+    post:
+      tags:
+        - Import
+      summary: Preview OpenWebUI attachment hydration
+      description: Preview files referenced by imported OpenWebUI conversations from a server-local OpenWebUI data root. The data root must contain webui.db and uploads/ and resolve under configured ingestion source allowed roots.
+      operationId: previewOpenWebUIAttachmentHydration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenWebUIHydrationRequest'
+      responses:
+        '200':
+          description: Hydration preview retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenWebUIHydrationPreviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/openwebui/hydration/jobs:
+    post:
+      tags:
+        - Jobs
+      summary: Create OpenWebUI attachment hydration job
+      description: Enqueue a background job that hydrates referenced OpenWebUI files for imported conversations. Image files are copied into tldw-owned storage, non-image files are registered in Media DB when available, and supported-file processing is opt-in.
+      operationId: createOpenWebUIAttachmentHydrationJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenWebUIHydrationRequest'
+      responses:
+        '200':
+          description: Hydration job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenWebUIHydrationJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/openwebui/hydration/jobs/{job_id}:
+    get:
+      tags:
+        - Jobs
+      summary: Get OpenWebUI attachment hydration job
+      description: Return one OpenWebUI hydration job visible to the current caller. Non-admin users can only read their own jobs.
+      operationId: getOpenWebUIAttachmentHydrationJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Hydration job retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenWebUIHydrationJobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /chatbooks/export/jobs:
     get:
       tags:
@@ -1004,6 +1093,175 @@ components:
           items:
             type: string
 
+    OpenWebUIHydrationScopeRequest:
+      type: object
+      properties:
+        conversation_ids:
+          type: array
+          maxItems: 1000
+          description: Imported tldw conversation IDs to scan. Empty means no conversations are selected.
+          items:
+            type: string
+        source_user_id:
+          type: string
+          nullable: true
+          description: Optional OpenWebUI source user ID used for chat_file fallback lookups.
+
+    OpenWebUIHydrationRequest:
+      type: object
+      required:
+        - openwebui_data_root
+      properties:
+        openwebui_data_root:
+          type: string
+          maxLength: 4096
+          description: Server-local OpenWebUI data root containing webui.db and uploads/. Must resolve under configured ingestion source allowed roots.
+        scope:
+          $ref: '#/components/schemas/OpenWebUIHydrationScopeRequest'
+        process_supported_files:
+          type: boolean
+          default: false
+          description: Opt-in flag for processing supported non-image files after registration. Defaults to false.
+
+    OpenWebUIHydrationSummary:
+      type: object
+      properties:
+        referenced_files:
+          type: integer
+          minimum: 0
+        resolved_files:
+          type: integer
+          minimum: 0
+        image_files:
+          type: integer
+          minimum: 0
+        media_files:
+          type: integer
+          minimum: 0
+        missing_files:
+          type: integer
+          minimum: 0
+        unsupported_files:
+          type: integer
+          minimum: 0
+        failed_files:
+          type: integer
+          minimum: 0
+        hydrated_images:
+          type: integer
+          minimum: 0
+        registered_media_files:
+          type: integer
+          minimum: 0
+        already_hydrated:
+          type: integer
+          minimum: 0
+        processed_files:
+          type: integer
+          minimum: 0
+        warning_count:
+          type: integer
+          minimum: 0
+
+    OpenWebUIHydrationItem:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          nullable: true
+        message_id:
+          type: string
+          nullable: true
+        file_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+        warning_code:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        file_kind:
+          type: string
+          nullable: true
+        mime_type:
+          type: string
+          nullable: true
+        media_id:
+          type: integer
+          nullable: true
+        media_file_id:
+          type: string
+          nullable: true
+        checksum:
+          type: string
+          nullable: true
+        processing_status:
+          type: string
+          nullable: true
+
+    OpenWebUIHydrationPreviewResponse:
+      type: object
+      properties:
+        scope:
+          $ref: '#/components/schemas/OpenWebUIHydrationScopeRequest'
+        process_supported_files:
+          type: boolean
+          default: false
+        summary:
+          $ref: '#/components/schemas/OpenWebUIHydrationSummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenWebUIHydrationItem'
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIHydrationJobResponse:
+      type: object
+      required:
+        - job_id
+        - status
+      properties:
+        job_id:
+          type: string
+        job_uuid:
+          type: string
+          nullable: true
+        status:
+          type: string
+        domain:
+          type: string
+          default: chatbooks
+        queue:
+          type: string
+          default: default
+        job_type:
+          type: string
+          default: openwebui_attachment_hydration
+        owner_user_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        result:
+          type: object
+          nullable: true
+          additionalProperties: true
+        error:
+          type: string
+          nullable: true
+
     ExportJobResponse:
       type: object
       required:
@@ -1186,6 +1444,16 @@ components:
           example:
             detail: Authentication required
             error_type: AuthenticationError
+
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: OpenWebUI hydration requires owner or admin access
+            error_type: PermissionError
 
     NotFound:
       description: Resource not found

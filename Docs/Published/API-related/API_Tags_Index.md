@@ -35,4 +35,6 @@ Notes:
 | `mcp-unified` | MCP/Unified/Developer_Guide.md |
 | `workflows` | Coming soon |
 
+The `chatbooks` tag includes chatbook export/import, OpenWebUI JSON and database import, and OpenWebUI attachment hydration preview/job endpoints.
+
 If you spot a mismatch between tags and docs, please open an issue or PR.

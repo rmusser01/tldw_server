@@ -129,6 +129,8 @@ Chatbooks provide portable backup, restore, sharing, and migration workflows. Th
 - `POST /api/v1/chatbooks/export` - create a `.chatbook` archive
 - `POST /api/v1/chatbooks/import` - import a `.chatbook` archive, OpenWebUI chat export JSON, or OpenWebUI database. Database imports require `selected_openwebui_user_id`.
 - `POST /api/v1/chatbooks/preview` - inspect a chatbook, OpenWebUI JSON export, or OpenWebUI database before importing
+- `POST /api/v1/chatbooks/openwebui/hydration/preview` - preview server-local OpenWebUI attachment hydration for imported conversation references
+- `POST /api/v1/chatbooks/openwebui/hydration/jobs` and `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}` - create and inspect OpenWebUI attachment hydration jobs
 - `GET /api/v1/chatbooks/export/jobs` and `GET /api/v1/chatbooks/import/jobs` - list background jobs
 - `GET /api/v1/chatbooks/download/{job_id}` - download a completed export
 

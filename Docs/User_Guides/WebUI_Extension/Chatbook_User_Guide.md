@@ -196,7 +196,36 @@ Use database import when you have local access to the OpenWebUI SQLite database 
 
 Database import reads chats only for the selected source user. It does not import every user from the database by default. Folder paths are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`; if the same folder name is already used elsewhere, tldw keeps the displayed path but safely disambiguates the backing collection name.
 
-Files, images, and artifacts import as metadata references only; binaries are not copied from the OpenWebUI attachment store. OpenWebUI v1 import does not connect to a live OpenWebUI server, import admin exports, hydrate attachments, import media binaries, import embeddings, or apply content selections.
+OpenWebUI import first preserves files, images, and artifacts as metadata references. The import step does not copy binaries from the OpenWebUI attachment store. Use the separate attachment hydration workflow below after the conversations are imported.
+
+#### Hydrating OpenWebUI Attachments
+
+OpenWebUI attachment hydration is a follow-up step for imported conversations. V1 hydrates only referenced files preserved during OpenWebUI JSON or database import; it does not scan every file in an OpenWebUI instance and does not connect to a live OpenWebUI server.
+
+Before hydrating, copy or mount the OpenWebUI data directory on the tldw_server host. The data root must contain:
+
+- `webui.db`
+- `uploads/`
+
+The data root and all resolved files must be under configured allowed roots. Configure those roots with `Files.ingestion_source_allowed_roots` in `config.txt`, or with `INGESTION_SOURCE_ALLOWED_ROOTS` / `TLDW_INGESTION_SOURCE_ALLOWED_ROOTS`. Multiple roots can be separated with commas or the platform path separator. If no allowed roots are configured, or if the OpenWebUI data root resolves outside them, preview and jobs are rejected.
+
+To hydrate from the WebUI:
+
+1. Import the OpenWebUI JSON or database first.
+2. In the Chatbooks import tab, use the OpenWebUI attachment hydration panel.
+3. Enter the server-local OpenWebUI data root.
+4. Enter the imported tldw conversation IDs to scan. For database imports, keep the selected OpenWebUI source user when shown.
+5. Click "Preview attachments" and review referenced, resolved, missing, image, media, and warning counts.
+6. Leave "Process supported files" off unless you want supported non-image files processed after registration.
+7. Click "Run hydration job" only after the preview matches the intended root and scope.
+
+Image files are copied into tldw-owned storage and message metadata is updated so imported image references can resolve from tldw. Non-image files are registered in the Media DB when available. Processing supported non-image files is opt-in and defaults to false; without that opt-in, hydration registers the file reference but does not run ingestion processing.
+
+Hydration output storage uses `OPENWEBUI_HYDRATION_MEDIA_STORAGE_PATH` when set, otherwise `MEDIA_STORAGE_PATH`, otherwise the server's default media storage directory.
+
+Hydration requires a single-user session or a user/admin allowed to operate on the imported conversations. Common warnings include missing files, unsupported file types, oversized files, path rejected, and path outside allowed roots.
+
+OpenWebUI v1 import does not import admin exports, import embeddings, apply content selections, or import unreferenced OpenWebUI files.
 
 ### Conflict Resolution Strategies
 
@@ -233,7 +262,7 @@ When importing content that already exists:
 - **Import Media**: Not supported yet
   - Default: false
   - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON and database imports preserve only attachment references
+  - OpenWebUI JSON and database imports preserve attachment references first; use OpenWebUI attachment hydration after import to copy referenced images and register supported files
 
 - **Import Embeddings**: Not supported yet
   - Default: false
@@ -250,6 +279,7 @@ Always preview a chatbook or OpenWebUI export before importing:
    - Total items by type
    - OpenWebUI chat/message/branch counts when importing JSON
    - OpenWebUI database users, folder counts, and selected-user destination namespace when importing `webui.db`
+   - OpenWebUI hydration referenced/resolved file counts before running a hydration job
    - Duplicate and malformed-chat counts
    - Creation date
    - Author information
@@ -473,7 +503,7 @@ A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSO
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON and database imports preserve file, image, and artifact references as metadata only.
+A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON and database imports preserve file, image, and artifact references first. Run OpenWebUI attachment hydration after import when you have the server-local OpenWebUI data root and want to copy referenced images or register supported files.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.

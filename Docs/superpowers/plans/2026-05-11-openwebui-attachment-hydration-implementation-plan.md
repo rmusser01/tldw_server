@@ -885,7 +885,7 @@ git commit -m "Add OpenWebUI hydration UI"
 
 **Tests:** Docs test plus focused backend/frontend suites.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 8.1: Update user and API docs
 
@@ -902,14 +902,17 @@ git commit -m "Add OpenWebUI hydration UI"
 - Modify: `Docs/Published/API-related/API_Tags_Index.md`
 - Modify: `tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py`
 
-- [ ] Document that v1 hydrates referenced files only.
-- [ ] Document required local root shape: `webui.db` plus `uploads/`.
-- [ ] Document `Files.ingestion_source_allowed_roots` and env var configuration.
-- [ ] Document image vs non-image behavior.
-- [ ] Document processing opt-in default.
-- [ ] Document single-user owner/admin permission requirement.
-- [ ] Document common warnings: missing files, unsupported type, oversized, path rejected.
-- [ ] Update docs tests to assert hydration feature text is present.
+- [x] Document that v1 hydrates referenced files only.
+- [x] Document required local root shape: `webui.db` plus `uploads/`.
+- [x] Document `Files.ingestion_source_allowed_roots` and env var configuration.
+- [x] Document image vs non-image behavior.
+- [x] Document processing opt-in default.
+- [x] Document single-user owner/admin permission requirement.
+- [x] Document common warnings: missing files, unsupported type, oversized, path rejected.
+- [x] Update docs tests to assert hydration feature text is present.
+
+Verification:
+- 2026-05-11: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py -q` passed, 6 passed, 5 warnings.
 
 Run:
 
@@ -924,7 +927,7 @@ Expected: PASS.
 
 **Files:** no edits unless failures identify necessary fixes.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -942,11 +945,14 @@ python -m pytest \
 
 Expected: PASS.
 
+Verification:
+- 2026-05-11: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_db_helpers.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_paths.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py tldw_Server_API/tests/Chatbooks/test_chatbooks_openwebui_db_api.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py -q` passed, 65 passed, 5 warnings.
+
 ### Task 8.3: Run focused frontend verification
 
 **Files:** no edits unless failures identify necessary fixes.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 bunx vitest run \
@@ -956,11 +962,14 @@ bunx vitest run \
 
 Expected: PASS.
 
+Verification:
+- 2026-05-11: `bun run test src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx` from `apps/packages/ui` passed, 13 passed.
+
 ### Task 8.4: Run Bandit on touched backend scope
 
 **Files:** no edits unless findings identify new issues.
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -977,10 +986,13 @@ python -m bandit -r \
 
 Expected: PASS or no new findings in touched hydration code. Fix new findings before continuing.
 
+Verification:
+- 2026-05-11: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py tldw_Server_API/app/core/Chatbooks/openwebui_hydration_jobs.py tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py tldw_Server_API/app/core/DB_Management/chacha/message_store.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py -f json -o /tmp/bandit_openwebui_hydration.json` passed with 0 findings and 0 errors.
+
 ### Task 8.5: Commit docs and verification slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md \

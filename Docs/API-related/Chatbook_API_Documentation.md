@@ -66,6 +66,14 @@ Import (sync/async)
          → OpenWebUI JSON: Parse export JSON → Import chat trees
          → OpenWebUI DB: Preview users → Require selected user → Import that user's chat trees and mirror folders
          ← Sync: { success, imported_items, warnings } or Async: { job_id }
+
+OpenWebUI attachment hydration
+  Client → POST /api/v1/chatbooks/openwebui/hydration/preview (JSON)
+         → Validate owner/admin access → Resolve data root under allowed roots
+         → Read imported OpenWebUI metadata + webui.db file rows → Return counts/warnings
+  Client → POST /api/v1/chatbooks/openwebui/hydration/jobs (JSON)
+         → Enqueue openwebui_attachment_hydration job
+  Worker → Copy referenced images, register supported files, optionally process files
 ```
 
 ## Authentication
@@ -173,7 +181,7 @@ For `source_format=chatbook`, the upload must be a `.zip` or `.chatbook` archive
 
 OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It imports every valid chat as one tldw conversation and preserves all valid message branches through `parent_message_id`.
 
-OpenWebUI webui.db database import supports uploaded SQLite databases copied from an OpenWebUI instance. Preview first, choose exactly one `selected_openwebui_user_id`, then import with `source_format=openwebui_db`. The import reads only chats owned by the selected source user. Source folders are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`, and folder links are attached to imported conversations. Duplicate detection uses `source=openwebui` and a deterministic external reference for both JSON and DB imports. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, admin export import, live OpenWebUI server import, attachment hydration, media import, embeddings import, or content selections. Files, images, and artifacts import as metadata references only.
+OpenWebUI webui.db database import supports uploaded SQLite databases copied from an OpenWebUI instance. Preview first, choose exactly one `selected_openwebui_user_id`, then import with `source_format=openwebui_db`. The import reads only chats owned by the selected source user. Source folders are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`, and folder links are attached to imported conversations. Duplicate detection uses `source=openwebui` and a deterministic external reference for both JSON and DB imports. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, admin export import, live OpenWebUI server import, embeddings import, content selections, or unreferenced attachment import. Files, images, and artifacts import as metadata references first; use the OpenWebUI attachment hydration endpoints after import to copy referenced images and register supported files from a server-local OpenWebUI data root.
 
 **Response**:
 ```json
@@ -309,7 +317,133 @@ OpenWebUI webui.db database import supports uploaded SQLite databases copied fro
 }
 ```
 
-### 4. Download Chatbook
+### 4. Preview OpenWebUI Attachment Hydration
+
+**Endpoint**: `POST /api/v1/chatbooks/openwebui/hydration/preview`
+
+**Description**: Preview hydration for files referenced by imported OpenWebUI conversations. This endpoint validates the server-local OpenWebUI data root, scans the selected imported tldw conversations for preserved OpenWebUI attachment metadata, resolves referenced files through `webui.db` and `uploads/`, and returns counts and warnings without copying files.
+
+Hydration v1 is reference-driven. It does not scan every file under `uploads/` and does not connect to a live OpenWebUI server.
+
+**Auth and path requirements**:
+- Single-user mode is allowed.
+- Multi-user mode requires an owner/admin principal authorized for the imported conversations.
+- `openwebui_data_root` must be a server-local path containing `webui.db` and `uploads/`.
+- The data root and resolved files must be under `Files.ingestion_source_allowed_roots`, `INGESTION_SOURCE_ALLOWED_ROOTS`, or `TLDW_INGESTION_SOURCE_ALLOWED_ROOTS`.
+
+**Request**: JSON
+```json
+{
+  "openwebui_data_root": "/srv/openwebui/data",
+  "scope": {
+    "conversation_ids": ["conv_123", "conv_456"],
+    "source_user_id": "user_abc123"
+  },
+  "process_supported_files": false
+}
+```
+
+Fields:
+- `openwebui_data_root`: required server-local OpenWebUI data root.
+- `scope.conversation_ids`: imported tldw conversation IDs to scan. Empty means no conversations are selected.
+- `scope.source_user_id`: optional OpenWebUI user id used for database `chat_file` fallback lookups.
+- `process_supported_files`: optional, defaults to `false`. When `true`, preview includes supported-file processing intent for non-image files.
+
+**Response**:
+```json
+{
+  "scope": {
+    "conversation_ids": ["conv_123", "conv_456"],
+    "source_user_id": "user_abc123"
+  },
+  "process_supported_files": false,
+  "summary": {
+    "referenced_files": 3,
+    "resolved_files": 2,
+    "image_files": 1,
+    "media_files": 1,
+    "missing_files": 1,
+    "unsupported_files": 0,
+    "failed_files": 0,
+    "hydrated_images": 0,
+    "registered_media_files": 0,
+    "already_hydrated": 0,
+    "processed_files": 0,
+    "warning_count": 1
+  },
+  "items": [
+    {
+      "conversation_id": "conv_123",
+      "message_id": "msg_123",
+      "file_id": "file_abc",
+      "status": "preview_ready",
+      "file_kind": "image",
+      "mime_type": "image/png"
+    }
+  ],
+  "warnings": ["1 referenced file was missing"]
+}
+```
+
+Common warnings include `missing_file`, `unsupported_file_type`, `file_too_large`, `path_rejected`, and paths outside allowed roots.
+
+### 5. Create OpenWebUI Attachment Hydration Job
+
+**Endpoint**: `POST /api/v1/chatbooks/openwebui/hydration/jobs`
+
+**Description**: Enqueue the same hydration operation as a background job. Use preview first; the WebUI gates job creation on a successful preview for the same payload.
+
+Image files are copied into tldw-owned storage and message metadata is updated. Non-image files are registered in the Media DB when available. File processing remains opt-in through `process_supported_files=true`; with the default `false`, supported non-image files are registered but not processed.
+
+Hydration output storage uses `OPENWEBUI_HYDRATION_MEDIA_STORAGE_PATH` when set, otherwise `MEDIA_STORAGE_PATH`, otherwise the server's default media storage directory.
+
+**Request**: Same JSON shape as preview.
+
+**Response**:
+```json
+{
+  "job_id": "123",
+  "job_uuid": "7d0d6a9a-4a48-4d35-bd4e-3e33b6f2dfb1",
+  "status": "pending",
+  "domain": "chatbooks",
+  "queue": "default",
+  "job_type": "openwebui_attachment_hydration",
+  "owner_user_id": "1",
+  "created_at": "2026-05-11T17:00:00Z",
+  "updated_at": "2026-05-11T17:00:00Z",
+  "result": null,
+  "error": null
+}
+```
+
+### 6. Get OpenWebUI Attachment Hydration Job
+
+**Endpoint**: `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}`
+
+**Description**: Return one OpenWebUI hydration job visible to the current caller. Non-admin users can only read their own jobs.
+
+**Response**:
+```json
+{
+  "job_id": "123",
+  "status": "completed",
+  "job_type": "openwebui_attachment_hydration",
+  "result": {
+    "summary": {
+      "referenced_files": 3,
+      "resolved_files": 2,
+      "hydrated_images": 1,
+      "registered_media_files": 1,
+      "processed_files": 0,
+      "warning_count": 1
+    },
+    "warnings": ["1 referenced file was missing"]
+  },
+  "error": null
+}
+```
+
+### 7. Download Chatbook
 
 **Endpoint**: `GET /api/v1/chatbooks/download/{job_id}`
 
@@ -322,7 +456,7 @@ Signed URLs (optional):
 - If `CHATBOOKS_ENFORCE_EXPIRY=true`, the server enforces job-level `expires_at` and returns `410` when expired.
 - Invalid or missing signature returns `403`; an expired `exp` parameter returns `410`.
 
-### 5. List Export Jobs
+### 8. List Export Jobs
 
 **Endpoint**: `GET /api/v1/chatbooks/export/jobs`
 
@@ -352,13 +486,13 @@ Signed URLs (optional):
 }
 ```
 
-### 6. Get Export Job Status
+### 9. Get Export Job Status
 
 **Endpoint**: `GET /api/v1/chatbooks/export/jobs/{job_id}`
 
 **Response**: Same as individual job in list response.
 
-### 7. List Import Jobs
+### 10. List Import Jobs
 
 **Endpoint**: `GET /api/v1/chatbooks/import/jobs`
 
@@ -390,13 +524,13 @@ Signed URLs (optional):
 }
 ```
 
-### 8. Get Import Job Status
+### 11. Get Import Job Status
 
 **Endpoint**: `GET /api/v1/chatbooks/import/jobs/{job_id}`
 
 **Response**: Same as individual job in list response.
 
-### 9. Cancel Export Job
+### 12. Cancel Export Job
 
 **Endpoint**: `DELETE /api/v1/chatbooks/export/jobs/{job_id}`
 
@@ -407,7 +541,7 @@ Signed URLs (optional):
 }
 ```
 
-### 10. Cancel Import Job
+### 13. Cancel Import Job
 
 **Endpoint**: `DELETE /api/v1/chatbooks/import/jobs/{job_id}`
 
@@ -418,7 +552,7 @@ Signed URLs (optional):
 }
 ```
 
-### 11. Remove Export Job
+### 14. Remove Export Job
 
 **Endpoint**: `DELETE /api/v1/chatbooks/export/jobs/{job_id}/remove`
 
@@ -433,7 +567,7 @@ Removes a completed or cancelled export job (and deletes the exported archive).
 }
 ```
 
-### 12. Remove Import Job
+### 15. Remove Import Job
 
 **Endpoint**: `DELETE /api/v1/chatbooks/import/jobs/{job_id}/remove`
 
@@ -448,7 +582,7 @@ Removes a completed or cancelled import job.
 }
 ```
 
-### 13. Cleanup Expired Exports
+### 16. Cleanup Expired Exports
 
 **Endpoint**: `POST /api/v1/chatbooks/cleanup`
 
@@ -462,7 +596,7 @@ Scheduled cleanup runs via the Chatbooks worker; use this endpoint to trigger a 
 }
 ```
 
-### 14. Service Health
+### 17. Service Health
 
 Lightweight liveness check for the Chatbooks subsystem.
 
