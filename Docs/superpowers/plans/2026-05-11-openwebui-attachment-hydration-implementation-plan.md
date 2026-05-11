@@ -412,22 +412,22 @@ git commit -m "Hydrate OpenWebUI image attachments"
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 4.1: Write failing media registration tests
 
 **Files:**
 - Modify: `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py`
 
-- [ ] Test a PDF ref creates a Media row and a MediaFiles original row.
-- [ ] Assert the MediaFiles storage path is not under the OpenWebUI source data root.
-- [ ] Assert `source_hash` or `checksum` equals byte SHA-256.
-- [ ] Assert `owner_user_id` is the active tldw user and `visibility == "personal"`.
-- [ ] Assert a same `source_file_id` in the same user scope reuses the existing Media link.
-- [ ] Assert the same bytes for a different tldw user does not reuse another user's Media row.
-- [ ] Assert two source-id-less files with different filenames but empty extracted text do not collapse to the same placeholder content hash.
-- [ ] Assert `process_supported_files=false` leaves chunking/processing pending and does not enqueue processing.
-- [ ] Assert `process_supported_files=true` calls a mocked processing hook after registration and processing failure does not remove the MediaFiles row.
+- [x] Test a PDF ref creates a Media row and a MediaFiles original row.
+- [x] Assert the MediaFiles storage path is not under the OpenWebUI source data root.
+- [x] Assert `source_hash` or `checksum` equals byte SHA-256.
+- [x] Assert `owner_user_id` is the active tldw user and `visibility == "personal"`.
+- [x] Assert a same `source_file_id` in the same user scope reuses the existing Media link.
+- [x] Assert the same bytes for a different tldw user does not reuse another user's Media row.
+- [x] Assert two source-id-less files with different filenames but empty extracted text do not collapse to the same placeholder content hash.
+- [x] Assert `process_supported_files=false` leaves chunking/processing pending and does not enqueue processing.
+- [x] Assert `process_supported_files=true` calls a mocked processing hook after registration and processing failure does not remove the MediaFiles row.
 
 Run:
 
@@ -447,12 +447,12 @@ Expected: FAIL because non-image registration is missing.
   - `tldw_Server_API/app/core/DB_Management/media_db/api.py`
   - `tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py`
 
-- [ ] Add a storage helper that copies source bytes into a per-user tldw-owned import directory. Prefer an existing media storage convention if one exists; otherwise use a new Chatbooks-owned subdirectory under the configured user database/media area.
-- [ ] Use `open_safe_local_path()` for source file reads when practical.
-- [ ] Compute `sha256` from source bytes while streaming/copying.
-- [ ] Add owner-aware lookup by OpenWebUI source id in safe metadata/source URL.
-- [ ] Add owner-aware lookup by byte hash only inside current hydration run when no source id exists.
-- [ ] Register a parent Media row with:
+- [x] Add a storage helper that copies source bytes into a per-user tldw-owned import directory. Prefer an existing media storage convention if one exists; otherwise use a new Chatbooks-owned subdirectory under the configured user database/media area.
+- [x] Use `open_safe_local_path()` for source file reads when practical.
+- [x] Compute `sha256` from source bytes while streaming/copying.
+- [x] Add owner-aware lookup by OpenWebUI source id in safe metadata/source URL.
+- [x] Add owner-aware lookup by byte hash only inside current hydration run when no source id exists.
+- [x] Register a parent Media row with:
 
 ```python
 placeholder_content = json.dumps(
@@ -467,13 +467,14 @@ placeholder_content = json.dumps(
 )
 ```
 
-- [ ] Use an OpenWebUI-specific URL:
-  - `openwebui://file/{source_file_id}` when source id exists
-  - `openwebui://run/{job_id}/{byte_sha256}` when source id is missing
-- [ ] Pass `source_hash=byte_sha256`, `owner_user_id=<tldw user id>`, and `visibility="personal"`.
-- [ ] Insert `MediaFiles` row with `file_type="original"`, copied storage path, original filename, file size, MIME type, and checksum.
-- [ ] Record `status="registered_media"` and `media_id`/`media_file_id` in message hydration metadata.
-- [ ] Keep optional processing hook separated behind `process_supported_files`.
+- [x] Use an OpenWebUI-specific URL:
+  - `openwebui://user/{owner_user_id}/file/{source_file_id}` when source id exists
+  - `openwebui://user/{owner_user_id}/run/{job_id}/{byte_sha256}` when source id is missing
+  - Chosen instead of the earlier non-owner URL shape because `Media.url` is globally unique in the current schema.
+- [x] Pass `source_hash=byte_sha256`, `owner_user_id=<tldw user id>`, and `visibility="personal"`.
+- [x] Insert `MediaFiles` row with `file_type="original"`, copied storage path, original filename, file size, MIME type, and checksum.
+- [x] Record `status="registered_media"` and `media_id`/`media_file_id` in message hydration metadata.
+- [x] Keep optional processing hook separated behind `process_supported_files`.
 
 Run:
 
@@ -486,8 +487,8 @@ Expected: PASS.
 
 ### Task 4.3: Commit media registration slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py \

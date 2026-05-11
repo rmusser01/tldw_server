@@ -1,3 +1,5 @@
+import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -6,11 +8,13 @@ import pytest
 
 from tldw_Server_API.app.core.Chatbooks import openwebui_hydration as hydration
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
 pytestmark = pytest.mark.unit
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-png"
+PDF_BYTES = b"%PDF-1.4\nfake-pdf\n%%EOF"
 
 
 class FakeChaChaDB:
@@ -112,6 +116,16 @@ def real_hydration_db(tmp_path):
     return db
 
 
+@pytest.fixture()
+def media_db(tmp_path):
+    db = MediaDatabase(
+        db_path=str(tmp_path / "openwebui-media.sqlite"),
+        client_id="101",
+    )
+    yield db
+    db.close_connection()
+
+
 def _resolved_file(path: Path, *, file_id: str = "file-image") -> hydration.OpenWebUIHydrationResolvedFile:
     file_kind, mime_type = hydration.classify_openwebui_file(path)
     return hydration.OpenWebUIHydrationResolvedFile(
@@ -125,15 +139,31 @@ def _resolved_file(path: Path, *, file_id: str = "file-image") -> hydration.Open
     )
 
 
-def _reference(*, file_id: str = "file-image") -> hydration.OpenWebUIHydrationReference:
+def _reference(
+    *,
+    file_id: str = "file-image",
+    message_id: str | None = "msg-a",
+    source_message_id: str | None = "source-msg-a",
+) -> hydration.OpenWebUIHydrationReference:
     return hydration.OpenWebUIHydrationReference(
         conversation_id="conv-a",
-        message_id="msg-a",
+        message_id=message_id,
         file_id=file_id,
         raw_ref_index=0,
         raw_ref={"id": file_id},
         source="message_metadata",
-        source_message_id="source-msg-a",
+        source_message_id=source_message_id,
+    )
+
+
+def _add_hydration_message(db: CharactersRAGDB, message_id: str) -> str | None:
+    return db.add_message(
+        {
+            "id": message_id,
+            "conversation_id": "conv-a",
+            "sender": "user",
+            "content": f"message {message_id}",
+        }
     )
 
 
@@ -371,3 +401,188 @@ def test_hydrate_image_ref_rejects_png_extension_with_non_image_bytes(real_hydra
 
     assert item.status == "unsupported_file_type"
     assert len(real_hydration_db.get_message_images("msg-a")) == 1
+
+
+def test_register_pdf_ref_creates_owned_media_and_media_file(real_hydration_db, media_db, tmp_path):
+    source_root = tmp_path / "openwebui-source"
+    source_root.mkdir()
+    pdf_path = source_root / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "tldw-owned-storage"
+    expected_hash = hashlib.sha256(PDF_BYTES).hexdigest()
+
+    item = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-pdf"),
+        _resolved_file(pdf_path, file_id="file-pdf"),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+
+    media = media_db.get_media_by_id(item.media_id)
+    media_file = media_db.get_media_file(item.media_id, "original")
+    metadata = real_hydration_db.get_message_metadata("msg-a")
+    hydration_item = metadata["extra"]["openwebui_import"]["hydration"]["items"][0]
+    safe_metadata = json.loads(media_db.get_all_document_versions(item.media_id)[0]["safe_metadata"])
+
+    assert item.status == "registered_media"
+    assert item.media_id is not None
+    assert item.media_file_id == media_file["uuid"]
+    assert item.checksum == expected_hash
+    assert media["url"] == "openwebui://user/101/file/file-pdf"
+    assert media["source_hash"] == expected_hash
+    assert media["owner_user_id"] == 101
+    assert media["visibility"] == "personal"
+    assert media_file["checksum"] == expected_hash
+    assert media_file["mime_type"] == "application/pdf"
+    assert str(source_root) not in media_file["storage_path"]
+    assert (storage_root / media_file["storage_path"]).read_bytes() == PDF_BYTES
+    assert hydration_item["status"] == "registered_media"
+    assert hydration_item["media_id"] == item.media_id
+    assert hydration_item["media_file_id"] == item.media_file_id
+    assert safe_metadata["source"] == "openwebui"
+    assert safe_metadata["source_file_id"] == "file-pdf"
+    assert safe_metadata["sha256"] == expected_hash
+    assert "source_path" not in safe_metadata
+
+
+def test_register_same_source_file_reuses_owned_media_link(real_hydration_db, media_db, tmp_path):
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "tldw-owned-storage"
+    reference = _reference(file_id="file-reused")
+    resolved = _resolved_file(pdf_path, file_id="file-reused")
+
+    first = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        reference,
+        resolved,
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+    second = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        reference,
+        resolved,
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+
+    assert first.media_id == second.media_id
+    assert second.status == "already_registered_media"
+    assert len(media_db.get_media_files(first.media_id)) == 1
+
+
+def test_register_same_source_file_does_not_cross_tldw_users(real_hydration_db, media_db, tmp_path):
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "tldw-owned-storage"
+    _add_hydration_message(real_hydration_db, "msg-b")
+
+    first = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-shared", message_id="msg-a"),
+        _resolved_file(pdf_path, file_id="file-shared"),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+    second = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-shared", message_id="msg-b", source_message_id="source-msg-b"),
+        _resolved_file(pdf_path, file_id="file-shared"),
+        owner_user_id=202,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+
+    assert first.media_id != second.media_id
+    assert media_db.get_media_by_id(first.media_id)["url"] != media_db.get_media_by_id(second.media_id)["url"]
+    assert media_db.get_media_by_id(first.media_id)["owner_user_id"] == 101
+    assert media_db.get_media_by_id(second.media_id)["owner_user_id"] == 202
+
+
+def test_register_source_id_less_files_do_not_share_placeholder_content_hash(real_hydration_db, media_db, tmp_path):
+    first_path = tmp_path / "alpha.txt"
+    second_path = tmp_path / "beta.txt"
+    first_path.write_bytes(b"alpha")
+    second_path.write_bytes(b"beta")
+    storage_root = tmp_path / "tldw-owned-storage"
+    _add_hydration_message(real_hydration_db, "msg-b")
+
+    first = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="", message_id="msg-a"),
+        _resolved_file(first_path, file_id=""),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+    second = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="", message_id="msg-b", source_message_id="source-msg-b"),
+        _resolved_file(second_path, file_id=""),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+
+    assert first.media_id != second.media_id
+    assert media_db.get_media_by_id(first.media_id)["content_hash"] != media_db.get_media_by_id(
+        second.media_id
+    )["content_hash"]
+
+
+def test_register_non_image_processing_hook_is_optional_and_failure_keeps_media_file(
+    real_hydration_db,
+    media_db,
+    tmp_path,
+):
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "tldw-owned-storage"
+    calls: list[int] = []
+
+    def failing_processor(**kwargs):
+        calls.append(kwargs["media_id"])
+        raise RuntimeError("processor failed")
+
+    skipped = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-no-process"),
+        _resolved_file(pdf_path, file_id="file-no-process"),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+        process_supported_files=False,
+        processing_hook=failing_processor,
+    )
+    _add_hydration_message(real_hydration_db, "msg-b")
+    processed = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-process", message_id="msg-b", source_message_id="source-msg-b"),
+        _resolved_file(pdf_path, file_id="file-process"),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+        process_supported_files=True,
+        processing_hook=failing_processor,
+    )
+
+    assert calls == [processed.media_id]
+    assert skipped.processing_status == "skipped"
+    assert processed.status == "registered_media"
+    assert processed.warning_code == "processing_failed"
+    assert media_db.get_media_file(processed.media_id, "original") is not None

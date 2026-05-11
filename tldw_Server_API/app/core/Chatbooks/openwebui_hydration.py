@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import shutil
 import sqlite3
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from tldw_Server_API.app.core.DB_Management.OpenWebUI_DB import (
     load_openwebui_chat_file_rows_for_chats,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
+    open_safe_local_path,
+    resolve_safe_local_path,
+)
 from tldw_Server_API.app.core.config import get_ingestion_source_allowed_roots
 
 
@@ -83,6 +90,11 @@ class OpenWebUIHydrationPreviewItem:
     source_key: str | None = None
     message_image_position: int | None = None
     mime_type: str | None = None
+    media_id: int | None = None
+    media_file_id: str | None = None
+    checksum: str | None = None
+    storage_path: str | None = None
+    processing_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -434,6 +446,195 @@ def hydrate_image_reference(
     )
 
 
+def register_non_image_reference(
+    chacha_db: Any,
+    media_db: Any,
+    reference: OpenWebUIHydrationReference,
+    resolved_file: OpenWebUIHydrationResolvedFile,
+    *,
+    owner_user_id: int,
+    storage_root: str | Path,
+    job_id: str | None = None,
+    process_supported_files: bool = False,
+    processing_hook: Callable[..., Any] | None = None,
+    run_dedupe_cache: MutableMapping[tuple[str, str], int] | None = None,
+) -> OpenWebUIHydrationPreviewItem:
+    """Register one resolved non-image OpenWebUI attachment in Media DB."""
+    message_id = reference.message_id
+    if not message_id:
+        return _media_result_item(reference, "message_missing", job_id=job_id)
+    if resolved_file.path is None or resolved_file.status != "resolved":
+        return _media_result_item(reference, resolved_file.status, job_id=job_id)
+    if resolved_file.file_kind == "image":
+        return _media_result_item(reference, "unsupported_file_type", job_id=job_id)
+    if not resolved_file.path.is_file():
+        return _media_result_item(reference, "missing_file", job_id=job_id)
+
+    checksum = _sha256_file(resolved_file.path)
+    source_key = _source_key_for_digest(reference, checksum)
+    existing_item = _existing_hydration_item(chacha_db, message_id, source_key)
+    if existing_item is not None and existing_item.get("media_id") is not None:
+        return _media_result_item(
+            reference,
+            "already_registered_media",
+            job_id=job_id,
+            source_key=source_key,
+            media_id=int(existing_item["media_id"]),
+            media_file_id=_coerce_optional_text(existing_item.get("media_file_id")),
+            checksum=_coerce_optional_text(existing_item.get("checksum")) or checksum,
+            storage_path=_coerce_optional_text(existing_item.get("storage_path")),
+            mime_type=_coerce_optional_text(existing_item.get("mime_type")) or resolved_file.mime_type,
+            processing_status=_coerce_optional_text(existing_item.get("processing_status")),
+        )
+
+    source_file_id = _coerce_optional_text(reference.file_id) or _coerce_optional_text(resolved_file.file_id)
+    filename = _safe_storage_filename(resolved_file.filename or resolved_file.path.name)
+    mime_type = resolved_file.mime_type or _guess_mime_type(filename)
+    media_url = _openwebui_media_url(
+        owner_user_id=owner_user_id,
+        source_file_id=source_file_id,
+        checksum=checksum,
+        job_id=job_id,
+    )
+    placeholder_content = _openwebui_placeholder_content(
+        source_file_id=source_file_id,
+        filename=filename,
+        mime_type=mime_type,
+        checksum=checksum,
+    )
+    safe_metadata = _openwebui_safe_metadata(
+        reference=reference,
+        source_file_id=source_file_id,
+        filename=filename,
+        mime_type=mime_type,
+        checksum=checksum,
+        job_id=job_id,
+    )
+
+    media_id = _deduped_media_id_from_run_cache(
+        owner_user_id=owner_user_id,
+        source_file_id=source_file_id,
+        checksum=checksum,
+        run_dedupe_cache=run_dedupe_cache,
+    )
+    if media_id is None:
+        media_id, _, _ = media_db.add_media_with_keywords(
+            url=media_url,
+            title=filename,
+            media_type=_media_type_for_file(resolved_file, mime_type, filename),
+            content=placeholder_content,
+            keywords=["openwebui", "attachment"],
+            safe_metadata=json.dumps(safe_metadata, sort_keys=True),
+            source_hash=checksum,
+            visibility="personal",
+            owner_user_id=owner_user_id,
+        )
+    if media_id is None:
+        return _media_result_item(
+            reference,
+            "media_registration_failed",
+            job_id=job_id,
+            source_key=source_key,
+            checksum=checksum,
+            mime_type=mime_type,
+        )
+    media_id = int(media_id)
+    if run_dedupe_cache is not None and not source_file_id:
+        run_dedupe_cache[(str(owner_user_id), checksum)] = media_id
+
+    media_file = media_db.get_media_file(media_id, "original")
+    status = "already_registered_media" if media_file else "registered_media"
+    if media_file:
+        media_file_id = str(media_file["uuid"])
+        storage_path = str(media_file["storage_path"])
+    else:
+        storage_path = _copy_openwebui_attachment_to_storage(
+            source_path=resolved_file.path,
+            storage_root=storage_root,
+            owner_user_id=owner_user_id,
+            media_id=media_id,
+            filename=filename,
+        )
+        media_file_id = str(
+            media_db.insert_media_file(
+                media_id=media_id,
+                file_type="original",
+                storage_path=storage_path,
+                original_filename=filename,
+                file_size=resolved_file.path.stat().st_size,
+                mime_type=mime_type,
+                checksum=checksum,
+            )
+        )
+
+    processing_status = "skipped"
+    warning_code = None
+    if process_supported_files:
+        if processing_hook is None:
+            processing_status = "not_configured"
+        else:
+            try:
+                processing_hook(
+                    media_db=media_db,
+                    media_id=media_id,
+                    media_file_id=media_file_id,
+                    storage_path=storage_path,
+                    owner_user_id=owner_user_id,
+                )
+                processing_status = "completed"
+            except Exception:
+                processing_status = "failed"
+                warning_code = "processing_failed"
+
+    item_update = {
+        "source_key": source_key,
+        "source_file_id": source_file_id,
+        "source_message_id": reference.source_message_id,
+        "status": "registered_media",
+        "media_id": media_id,
+        "media_file_id": media_file_id,
+        "checksum": checksum,
+        "storage_path": storage_path,
+        "mime_type": mime_type,
+        "job_id": job_id,
+        "processing_status": processing_status,
+    }
+    if warning_code is not None:
+        item_update["warning_code"] = warning_code
+    if not merge_openwebui_message_hydration_metadata(
+        chacha_db,
+        message_id,
+        item_update,
+        job_id=job_id,
+    ):
+        return _media_result_item(
+            reference,
+            "metadata_update_failed",
+            job_id=job_id,
+            source_key=source_key,
+            media_id=media_id,
+            media_file_id=media_file_id,
+            checksum=checksum,
+            storage_path=storage_path,
+            mime_type=mime_type,
+            processing_status=processing_status,
+        )
+
+    return _media_result_item(
+        reference,
+        status,
+        job_id=job_id,
+        source_key=source_key,
+        media_id=media_id,
+        media_file_id=media_file_id,
+        checksum=checksum,
+        storage_path=storage_path,
+        mime_type=mime_type,
+        warning_code=warning_code,
+        processing_status=processing_status,
+    )
+
+
 def _resolve_declared_file_path(raw_path: str, data_root: OpenWebUIDataRoot) -> Path | None:
     candidate = Path(raw_path)
     roots = (data_root.root_path,)
@@ -497,9 +698,13 @@ def _sniff_image_mime(data: bytes) -> str | None:
 
 
 def _source_key_for_reference(reference: OpenWebUIHydrationReference, data: bytes) -> str:
+    return _source_key_for_digest(reference, hashlib.sha256(data).hexdigest())
+
+
+def _source_key_for_digest(reference: OpenWebUIHydrationReference, digest: str) -> str:
     if reference.file_id:
         return f"openwebui:file:{reference.file_id}"
-    return f"openwebui:hash:{hashlib.sha256(data).hexdigest()}"
+    return f"openwebui:hash:{digest}"
 
 
 def _existing_hydration_item(chacha_db: Any, message_id: str, source_key: str) -> dict[str, Any] | None:
@@ -541,6 +746,177 @@ def _image_result_item(
         message_image_position=message_image_position,
         mime_type=mime_type,
     )
+
+
+def _media_result_item(
+    reference: OpenWebUIHydrationReference,
+    status: str,
+    *,
+    job_id: str | None = None,
+    source_key: str | None = None,
+    media_id: int | None = None,
+    media_file_id: str | None = None,
+    checksum: str | None = None,
+    storage_path: str | None = None,
+    mime_type: str | None = None,
+    warning_code: str | None = None,
+    processing_status: str | None = None,
+) -> OpenWebUIHydrationPreviewItem:
+    return OpenWebUIHydrationPreviewItem(
+        conversation_id=reference.conversation_id,
+        message_id=reference.message_id,
+        file_id=reference.file_id,
+        status=status,
+        warning_code=warning_code
+        if warning_code is not None
+        else None
+        if status in {"registered_media", "already_registered_media"}
+        else status,
+        raw_ref_index=reference.raw_ref_index,
+        source=reference.source,
+        job_id=job_id,
+        source_key=source_key,
+        mime_type=mime_type,
+        media_id=media_id,
+        media_file_id=media_file_id,
+        checksum=checksum,
+        storage_path=storage_path,
+        processing_status=processing_status,
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    handle = open_safe_local_path(path, path.parent, mode="rb")
+    if handle is None:
+        raise ValueError("OpenWebUI attachment source path is unsafe.")
+    with handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_storage_filename(filename: str | None) -> str:
+    safe_name = Path(filename or "attachment").name.strip().strip(".")
+    if not safe_name:
+        return "attachment"
+    return safe_name.replace("/", "_").replace("\\", "_")
+
+
+def _guess_mime_type(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".pdf":
+        return "application/pdf"
+    if suffix in {".txt", ".md", ".markdown"}:
+        return "text/plain"
+    if suffix in {".json"}:
+        return "application/json"
+    return "application/octet-stream"
+
+
+def _media_type_for_file(
+    resolved_file: OpenWebUIHydrationResolvedFile,
+    mime_type: str,
+    filename: str,
+) -> str:
+    if mime_type == "application/pdf" or filename.lower().endswith(".pdf"):
+        return "pdf"
+    if resolved_file.file_kind in {"document", "file"}:
+        return resolved_file.file_kind
+    return "file"
+
+
+def _openwebui_media_url(
+    *,
+    owner_user_id: int,
+    source_file_id: str | None,
+    checksum: str,
+    job_id: str | None,
+) -> str:
+    safe_owner = quote(str(owner_user_id), safe="")
+    if source_file_id:
+        safe_source_file_id = quote(source_file_id, safe="")
+        return f"openwebui://user/{safe_owner}/file/{safe_source_file_id}"
+    safe_job_id = quote(job_id or "manual", safe="")
+    return f"openwebui://user/{safe_owner}/run/{safe_job_id}/{checksum}"
+
+
+def _openwebui_placeholder_content(
+    *,
+    source_file_id: str | None,
+    filename: str,
+    mime_type: str,
+    checksum: str,
+) -> str:
+    return json.dumps(
+        {
+            "source": "openwebui",
+            "source_file_id": source_file_id,
+            "filename": filename,
+            "mime_type": mime_type,
+            "sha256": checksum,
+        },
+        sort_keys=True,
+    )
+
+
+def _openwebui_safe_metadata(
+    *,
+    reference: OpenWebUIHydrationReference,
+    source_file_id: str | None,
+    filename: str,
+    mime_type: str,
+    checksum: str,
+    job_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "source": "openwebui",
+        "source_file_id": source_file_id,
+        "source_chat_id": reference.source_chat_id,
+        "source_message_id": reference.source_message_id,
+        "filename": filename,
+        "mime_type": mime_type,
+        "sha256": checksum,
+        "hydration_job_id": job_id,
+    }
+
+
+def _deduped_media_id_from_run_cache(
+    *,
+    owner_user_id: int,
+    source_file_id: str | None,
+    checksum: str,
+    run_dedupe_cache: MutableMapping[tuple[str, str], int] | None,
+) -> int | None:
+    if source_file_id or run_dedupe_cache is None:
+        return None
+    return run_dedupe_cache.get((str(owner_user_id), checksum))
+
+
+def _copy_openwebui_attachment_to_storage(
+    *,
+    source_path: Path,
+    storage_root: str | Path,
+    owner_user_id: int,
+    media_id: int,
+    filename: str,
+) -> str:
+    root = Path(storage_root).expanduser().resolve()
+    relative_path = Path(str(owner_user_id)) / "media" / str(media_id) / _safe_storage_filename(filename)
+    target_path = resolve_safe_local_path(root / relative_path, root)
+    if target_path is None:
+        raise ValueError("OpenWebUI attachment storage path is unsafe.")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    source_handle = open_safe_local_path(source_path, source_path.parent, mode="rb")
+    if source_handle is None:
+        raise ValueError("OpenWebUI attachment source path is unsafe.")
+    with source_handle:
+        target_handle = open_safe_local_path(target_path, root, mode="wb")
+        if target_handle is None:
+            raise ValueError("OpenWebUI attachment storage path is unsafe.")
+        with target_handle:
+            shutil.copyfileobj(source_handle, target_handle, length=1024 * 1024)
+    return str(relative_path)
 
 
 def _default_max_image_bytes() -> int:
