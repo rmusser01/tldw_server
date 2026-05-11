@@ -4,7 +4,7 @@ title: Add optional calibrated Persona Chat judge evaluation
 status: Done
 assignee: []
 created_date: '2026-05-11 05:14'
-updated_date: '2026-05-11 05:23'
+updated_date: '2026-05-11 05:26'
 labels:
   - persona-chat
   - evaluations
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1566'
   - 'https://github.com/rmusser01/tldw_server/issues/1543'
+  - 'https://github.com/rmusser01/tldw_server/pull/1570'
 documentation:
   - Docs/Reviews/PERSONA_CHAT_TRACE_ERROR_TAXONOMY_2026_05_10.md
   - Docs/Reviews/PERSONA_CHAT_JUDGE_EVALUATION_CONTRACT_2026_05_11.md
@@ -47,6 +48,8 @@ Implement the next Persona Chat Stage 2 slice from GitHub issue #1566. Add an op
 Red/green: test_persona_chat_judge.py first failed with ModuleNotFoundError for persona_chat_judge, then passed after adding the helper. A second red/green pass tightened calibration so missing predictions are required only for dimensions represented by predictions or fixture labels. Verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Persona/test_persona_chat_quality_fixtures.py -v passed with 11 tests; python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge.py reported no issues; git diff --check passed.
 
 Self-review fix: prompt generation now excludes fixture labels so calibration ground truth is not leaked to a judge. The regression test first failed on fixture_labels appearing in the prompt, then passed after removing that field; focused pytest, Bandit, and git diff --check were rerun successfully.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1570
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
