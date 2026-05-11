@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Chatbooks import openwebui_hydration as hydration
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
@@ -80,6 +81,99 @@ def _chat_file_connection() -> sqlite3.Connection:
         """
     )
     return conn
+
+
+def _patch_allowed_roots(monkeypatch: pytest.MonkeyPatch, allowed_root: Path) -> None:
+    monkeypatch.setattr(
+        hydration,
+        "get_ingestion_source_allowed_roots",
+        lambda *, reload=False: (allowed_root.resolve(strict=False),),
+    )
+
+
+def _write_openwebui_hydration_db(data_root: Path) -> None:
+    conn = sqlite3.connect(data_root / "webui.db")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE user (
+                id TEXT,
+                name TEXT,
+                email TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE folder (
+                id TEXT,
+                parent_id TEXT,
+                user_id TEXT,
+                name TEXT,
+                items TEXT,
+                meta TEXT,
+                is_expanded INTEGER,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE chat (
+                id TEXT,
+                user_id TEXT,
+                title TEXT,
+                chat TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                share_id TEXT,
+                archived INTEGER,
+                pinned INTEGER,
+                meta TEXT,
+                folder_id TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE file (
+                id TEXT,
+                user_id TEXT,
+                hash TEXT,
+                filename TEXT,
+                path TEXT,
+                data TEXT,
+                meta TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE chat_file (
+                id TEXT,
+                chat_id TEXT,
+                file_id TEXT,
+                message_id TEXT,
+                user_id TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO file (id, user_id, hash, filename, path, data, meta, created_at, updated_at)
+            VALUES ('file-image', 'ow-user', 'hash-image', 'image.png', 'uploads/file-image_image.png', '{}', '{}', 1, 1)
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture()
@@ -586,3 +680,28 @@ def test_register_non_image_processing_hook_is_optional_and_failure_keeps_media_
     assert processed.status == "registered_media"
     assert processed.warning_code == "processing_failed"
     assert media_db.get_media_file(processed.media_id, "original") is not None
+
+
+def test_run_openwebui_attachment_hydration_hydrates_resolved_image(
+    real_hydration_db,
+    tmp_path,
+    monkeypatch,
+):
+    allowed_root = tmp_path / "allowed"
+    data_root = allowed_root / "openwebui"
+    uploads_dir = data_root / "uploads"
+    uploads_dir.mkdir(parents=True)
+    (uploads_dir / "file-image_image.png").write_bytes(PNG_BYTES)
+    _write_openwebui_hydration_db(data_root)
+    _patch_allowed_roots(monkeypatch, allowed_root)
+    service = ChatbookService("101", real_hydration_db, user_id_int=101)
+
+    result = service.run_openwebui_attachment_hydration(
+        openwebui_data_root=str(data_root),
+        scope={"conversation_ids": ["conv-a"], "source_user_id": "ow-user"},
+        job_id="job-run",
+    )
+
+    assert result["summary"]["hydrated_images"] == 1
+    assert result["summary"]["resolved_files"] == 1
+    assert len(real_hydration_db.get_message_images("msg-a")) == 2

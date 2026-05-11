@@ -36,7 +36,7 @@ import aiofiles
 import aiofiles.os
 from loguru import logger
 
-from tldw_Server_API.app.core.config import load_comprehensive_config, settings as core_settings
+from tldw_Server_API.app.core.config import ACTUAL_PROJECT_ROOT, load_comprehensive_config, settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
 from ..DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
@@ -95,8 +95,11 @@ from .openwebui_folders import (
     mirror_openwebui_folder_for_conversation,
 )
 from .openwebui_hydration import (
+    MAX_PREVIEW_WARNING_ITEMS,
     OpenWebUIHydrationScope,
     extract_openwebui_hydration_references,
+    hydrate_image_reference,
+    register_non_image_reference,
     resolve_openwebui_file_path,
     validate_openwebui_data_root,
 )
@@ -2490,6 +2493,164 @@ class ChatbookService:
             "warnings": warnings,
         }
 
+    def run_openwebui_attachment_hydration(
+        self,
+        *,
+        openwebui_data_root: str,
+        scope: dict[str, Any],
+        process_supported_files: bool = False,
+        job_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Hydrate OpenWebUI attachments into tldw message images and Media DB records."""
+        if self.user_id_int is None:
+            raise ValueError("OpenWebUI attachment hydration requires a numeric user id.")
+
+        source_user_id = scope.get("source_user_id") or scope.get("openwebui_user_id")
+        conversation_ids = tuple(str(item).strip() for item in (scope.get("conversation_ids") or []) if str(item).strip())
+        data_root = validate_openwebui_data_root(openwebui_data_root, require_uploads=True)
+        media_db = self._get_media_db()
+        storage_root = self._openwebui_attachment_storage_root()
+        run_dedupe_cache: dict[tuple[str, str], int] = {}
+
+        items: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        resolved_files = 0
+        image_files = 0
+        media_files = 0
+
+        with open_validated_openwebui_db(data_root.webui_db_path) as conn:
+            validate_openwebui_file_schema(conn)
+            preview = extract_openwebui_hydration_references(
+                self.db,
+                OpenWebUIHydrationScope(
+                    conversation_ids=conversation_ids,
+                    openwebui_user_id=str(source_user_id).strip() if source_user_id else None,
+                ),
+                openwebui_conn=conn,
+            )
+            items.extend(self._openwebui_hydration_item_to_dict(item) for item in preview.items)
+            warnings.extend(str(warning) for warning in preview.warnings)
+
+            file_rows = load_openwebui_file_rows_for_ids(
+                conn,
+                tuple(reference.file_id for reference in preview.references),
+                str(source_user_id).strip() if source_user_id else None,
+            )
+            rows_by_id = {str(row["id"]): row for row in file_rows}
+            for reference in preview.references:
+                file_row = rows_by_id.get(reference.file_id)
+                if file_row is None:
+                    items.append(
+                        {
+                            "conversation_id": reference.conversation_id,
+                            "message_id": reference.message_id,
+                            "file_id": reference.file_id,
+                            "status": "missing_source_file_row",
+                            "warning_code": "missing_source_file_row",
+                            "raw_ref_index": reference.raw_ref_index,
+                            "source": reference.source,
+                        }
+                    )
+                    continue
+
+                resolved = resolve_openwebui_file_path(file_row, data_root)
+                if resolved.status != "resolved":
+                    warning_code = resolved.warning_codes[0] if resolved.warning_codes else resolved.status
+                    items.append(
+                        {
+                            "conversation_id": reference.conversation_id,
+                            "message_id": reference.message_id,
+                            "file_id": reference.file_id,
+                            "status": resolved.status,
+                            "warning_code": warning_code,
+                            "raw_ref_index": reference.raw_ref_index,
+                            "source": reference.source,
+                            "file_kind": resolved.file_kind,
+                            "mime_type": resolved.mime_type,
+                        }
+                    )
+                    continue
+
+                resolved_files += 1
+                if resolved.file_kind == "image":
+                    image_files += 1
+                    item = hydrate_image_reference(
+                        self.db,
+                        reference,
+                        resolved,
+                        job_id=job_id,
+                    )
+                elif media_db is None:
+                    media_files += 1
+                    items.append(
+                        {
+                            "conversation_id": reference.conversation_id,
+                            "message_id": reference.message_id,
+                            "file_id": reference.file_id,
+                            "status": "media_db_unavailable",
+                            "warning_code": "media_db_unavailable",
+                            "raw_ref_index": reference.raw_ref_index,
+                            "source": reference.source,
+                            "file_kind": resolved.file_kind,
+                            "mime_type": resolved.mime_type,
+                        }
+                    )
+                    continue
+                else:
+                    media_files += 1
+                    item = register_non_image_reference(
+                        self.db,
+                        media_db,
+                        reference,
+                        resolved,
+                        owner_user_id=self.user_id_int,
+                        storage_root=storage_root,
+                        job_id=job_id,
+                        process_supported_files=bool(process_supported_files),
+                        run_dedupe_cache=run_dedupe_cache,
+                    )
+                items.append(self._openwebui_hydration_item_to_dict(item))
+
+        summary = self._openwebui_hydration_execution_summary(
+            items,
+            resolved_files=resolved_files,
+            image_files=image_files,
+            media_files=media_files,
+        )
+        item_warnings = [
+            f"{item.get('file_id') or 'unknown'}:{item.get('warning_code')}"
+            for item in items
+            if item.get("warning_code")
+        ]
+        warnings.extend(item_warnings[:MAX_PREVIEW_WARNING_ITEMS])
+        summary["warning_count"] = len(warnings)
+        return {
+            "scope": {
+                "conversation_ids": list(conversation_ids),
+                "source_user_id": str(source_user_id).strip() if source_user_id else None,
+            },
+            "process_supported_files": bool(process_supported_files),
+            "summary": summary,
+            "items": items,
+            "warnings": warnings,
+        }
+
+    def _openwebui_attachment_storage_root(self) -> Path:
+        """Return the tldw-owned storage root for hydrated non-image attachments."""
+        raw_path = (
+            os.getenv("OPENWEBUI_HYDRATION_MEDIA_STORAGE_PATH")
+            or os.getenv("MEDIA_STORAGE_PATH")
+            or ""
+        ).strip()
+        if raw_path:
+            storage_root = Path(raw_path).expanduser()
+            if not storage_root.is_absolute():
+                storage_root = (ACTUAL_PROJECT_ROOT / storage_root).resolve(strict=False)
+        else:
+            storage_root = ACTUAL_PROJECT_ROOT / "Databases" / "media_storage"
+        storage_root.mkdir(parents=True, exist_ok=True)
+        return storage_root
+
     @staticmethod
     def _openwebui_hydration_item_to_dict(item: Any) -> dict[str, Any]:
         """Convert a hydration preview item to a raw-path-free dict."""
@@ -2534,6 +2695,45 @@ class ChatbookService:
             "registered_media_files": 0,
             "already_hydrated": 0,
             "processed_files": 0,
+            "warning_count": 0,
+        }
+
+    @staticmethod
+    def _openwebui_hydration_execution_summary(
+        items: list[dict[str, Any]],
+        *,
+        resolved_files: int,
+        image_files: int,
+        media_files: int,
+    ) -> dict[str, int]:
+        """Build final hydration execution counts."""
+        statuses = [str(item.get("status") or "") for item in items]
+        failed_statuses = {
+            "media_db_unavailable",
+            "media_registration_failed",
+            "metadata_update_failed",
+            "message_missing",
+            "oversized",
+            "path_rejected",
+        }
+        return {
+            "referenced_files": len(items),
+            "resolved_files": resolved_files,
+            "image_files": image_files,
+            "media_files": media_files,
+            "missing_files": sum(
+                1 for status in statuses if status in {"missing_file", "missing_source_file_row"}
+            ),
+            "unsupported_files": sum(
+                1
+                for status in statuses
+                if status in {"unsupported_file_type", "unsupported_reference_shape"}
+            ),
+            "failed_files": sum(1 for status in statuses if status in failed_statuses),
+            "hydrated_images": statuses.count("hydrated_image"),
+            "registered_media_files": statuses.count("registered_media"),
+            "already_hydrated": statuses.count("already_hydrated") + statuses.count("already_registered_media"),
+            "processed_files": sum(1 for item in items if item.get("processing_status") == "completed"),
             "warning_count": 0,
         }
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,12 +42,17 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
+    OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 
 _CHATBOOKS_DOMAIN = "chatbooks"
+_MAX_HYDRATION_JOB_WARNINGS = 100
+_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^\s,;:)\"']+/?)+")
 
 # Ensure worker runs in core backend mode.
 if os.getenv("CHATBOOKS_JOBS_BACKEND") not in {"", "core"}:
@@ -150,6 +156,69 @@ def _mark_import_job_failed(service: ChatbookService, job_id: str, message: str)
 def _raise_import_job_failed(service: ChatbookService, job_id: str, message: str) -> None:
     _mark_import_job_failed(service, job_id, message)
     raise ChatbooksJobError(message, retryable=False)
+
+
+def _redact_hydration_warning(value: object) -> str:
+    """Redact local absolute paths before persisting hydration warnings to Jobs."""
+    return _ABSOLUTE_PATH_RE.sub("[redacted-path]", str(value))
+
+
+def _hydration_job_id(job: dict[str, Any]) -> str | None:
+    """Return a stable job identifier for hydration metadata."""
+    raw_job_id = job.get("uuid") or job.get("id") or job.get("job_id")
+    text = str(raw_job_id or "").strip()
+    return text or None
+
+
+def _openwebui_hydration_job_summary(result: Any) -> dict[str, Any]:
+    """Normalize a hydration service result into a JSON-safe core Jobs result."""
+    payload = result if isinstance(result, dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    return {
+        "referenced_files": int(summary.get("referenced_files") or 0),
+        "resolved_files": int(summary.get("resolved_files") or 0),
+        "hydrated_images": int(summary.get("hydrated_images") or 0),
+        "registered_media_files": int(summary.get("registered_media_files") or 0),
+        "already_hydrated": int(summary.get("already_hydrated") or 0),
+        "missing_files": int(summary.get("missing_files") or 0),
+        "unsupported_files": int(summary.get("unsupported_files") or 0),
+        "failed_files": int(summary.get("failed_files") or 0),
+        "processed_files": int(summary.get("processed_files") or 0),
+        "warnings": [
+            _redact_hydration_warning(warning)
+            for warning in warnings[:_MAX_HYDRATION_JOB_WARNINGS]
+        ],
+    }
+
+
+async def _handle_openwebui_attachment_hydration(
+    service: ChatbookService,
+    payload: dict[str, Any],
+    job: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one OpenWebUI attachment hydration job."""
+    openwebui_data_root = str(payload.get("openwebui_data_root") or "").strip()
+    if not openwebui_data_root:
+        raise ChatbooksJobError("Missing openwebui_data_root", retryable=False)
+    scope = payload.get("scope")
+    if scope is None:
+        scope = {}
+    if not isinstance(scope, dict):
+        raise ChatbooksJobError("OpenWebUI hydration scope must be an object", retryable=False)
+
+    try:
+        result = await asyncio.to_thread(
+            service.run_openwebui_attachment_hydration,
+            openwebui_data_root=openwebui_data_root,
+            scope=scope,
+            process_supported_files=bool(payload.get("process_supported_files", False)),
+            job_id=_hydration_job_id(job),
+        )
+    except ValueError as exc:
+        raise ChatbooksJobError(str(exc), retryable=False) from exc
+
+    return _openwebui_hydration_job_summary(result)
 
 
 async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
@@ -356,6 +425,9 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     service = _get_service(user_id)
 
     action = str(payload.get("action") or job.get("job_type") or "").lower()
+    if action == OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE:
+        return await _handle_openwebui_attachment_hydration(service, payload, job)
+
     chatbooks_job_id = str(payload.get("chatbooks_job_id") or "").strip()
     if not chatbooks_job_id:
         raise ChatbooksJobError("Missing chatbooks_job_id", retryable=False)

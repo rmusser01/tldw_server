@@ -652,7 +652,7 @@ Verification:
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py`, existing Chatbooks worker tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 6.1: Write failing worker routing tests
 
@@ -660,12 +660,12 @@ Verification:
 - Create: `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py`
 - Modify: `tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py`
 
-- [ ] Test `_handle_job()` dispatches `job_type=openwebui_attachment_hydration`.
-- [ ] Test missing `openwebui_data_root` fails non-retryably.
-- [ ] Test worker calls hydration service and returns summary.
-- [ ] Test worker revalidates data root even when endpoint accepted the job.
-- [ ] Test existing `job_type=import` and `job_type=export` tests still pass.
-- [ ] Test unsupported job type still errors.
+- [x] Test `_handle_job()` dispatches `job_type=openwebui_attachment_hydration`.
+- [x] Test missing `openwebui_data_root` fails non-retryably.
+- [x] Test worker calls hydration service and returns summary.
+- [x] Test worker revalidates data root even when endpoint accepted the job.
+- [x] Test existing `job_type=import` and `job_type=export` tests still pass.
+- [x] Test unsupported job type still errors.
 
 Run:
 
@@ -683,14 +683,15 @@ Expected: FAIL for missing hydration routing.
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py`
-- Modify: `tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py` if final result shape needs adjustment.
+- Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
+- Modify: `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py`
 
-- [ ] Import `OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE`.
-- [ ] Add `_handle_openwebui_attachment_hydration(service, payload, job)` or equivalent.
-- [ ] Normalize user id through existing `_normalize_user_id()`.
-- [ ] Validate required payload keys.
-- [ ] Call service method `run_openwebui_attachment_hydration(...)`.
-- [ ] Return JSON-safe summary:
+- [x] Import `OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE`.
+- [x] Add `_handle_openwebui_attachment_hydration(service, payload, job)` or equivalent.
+- [x] Normalize user id through existing `_normalize_user_id()`.
+- [x] Validate required payload keys.
+- [x] Call service method `run_openwebui_attachment_hydration(...)`.
+- [x] Return JSON-safe summary:
 
 ```python
 {
@@ -707,7 +708,7 @@ Expected: FAIL for missing hydration routing.
 }
 ```
 
-- [ ] Keep import/export routing unchanged.
+- [x] Keep import/export routing unchanged.
 
 Run:
 
@@ -724,15 +725,25 @@ Expected: PASS.
 
 ### Task 6.3: Commit worker slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py \
-        tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py \
+        tldw_Server_API/app/core/Chatbooks/chatbook_service.py \
+        tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py \
         tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py
 git commit -m "Run OpenWebUI hydration jobs"
 ```
+
+Verification:
+- Red run before implementation: `test_openwebui_hydration_jobs_worker.py` failed because hydration jobs still required `chatbooks_job_id`.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py -q` -> 11 passed.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_adapter.py -q` -> 13 passed.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_adapter.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py -q` -> 36 passed.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_paths.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_db_helpers.py tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_adapter.py -q` -> 61 passed.
+- `git diff --check` -> clean.
+- `python -m bandit -r tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py -f json -o /tmp/bandit_openwebui_hydration_worker.json` -> 0 findings, 0 errors.
 
 ## Stage 7: Frontend Hydration Workflow
 
