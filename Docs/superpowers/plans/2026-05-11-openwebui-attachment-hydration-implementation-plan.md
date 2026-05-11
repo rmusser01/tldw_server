@@ -193,7 +193,7 @@ git commit -m "Add OpenWebUI hydration DB helpers"
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_paths.py`, first service tests in `test_openwebui_hydration_service.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 2.1: Write failing path and preview tests
 
@@ -202,15 +202,15 @@ git commit -m "Add OpenWebUI hydration DB helpers"
 - Create: `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py`
 - Create: `tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py`
 
-- [ ] Test data root outside `INGESTION_SOURCE_ALLOWED_ROOTS` is rejected.
-- [ ] Test missing `webui.db` is a fatal preview error.
-- [ ] Test missing `uploads/` is a fatal preview error only when referenced file bytes are needed.
-- [ ] Test `file.path="../secret.txt"` is rejected as `path_rejected`.
-- [ ] Test symlink escape is rejected by canonical target checks.
-- [ ] Test fallback `uploads/{file.id}_{file.filename}` resolves when safe.
-- [ ] Test imported message metadata refs are extracted from `extra.openwebui_import.attachment_refs`.
-- [ ] Test unsupported ref shapes produce `unsupported_reference_shape`.
-- [ ] Test DB `chat_file` fallback uses preserved `openwebui_import.metadata.row_id` and skips fallback when absent.
+- [x] Test data root outside `INGESTION_SOURCE_ALLOWED_ROOTS` is rejected.
+- [x] Test missing `webui.db` is a fatal preview error.
+- [x] Test missing `uploads/` is a fatal preview error only when referenced file bytes are needed.
+- [x] Test `file.path="../secret.txt"` is rejected as `path_rejected`.
+- [x] Test symlink escape is rejected by canonical target checks.
+- [x] Test fallback `uploads/{file.id}_{file.filename}` resolves when safe.
+- [x] Test imported message metadata refs are extracted from `extra.openwebui_import.attachment_refs`.
+- [x] Test unsupported ref shapes produce `unsupported_reference_shape`.
+- [x] Test DB `chat_file` fallback uses preserved `openwebui_import.metadata.row_id` and skips fallback when absent.
 
 Run:
 
@@ -229,24 +229,24 @@ Expected: FAIL because `openwebui_hydration.py` does not exist.
 **Files:**
 - Create: `tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py`
 
-- [ ] Add dataclasses:
+- [x] Add dataclasses:
   - `OpenWebUIHydrationScope`
   - `OpenWebUIHydrationReference`
   - `OpenWebUIHydrationResolvedFile`
   - `OpenWebUIHydrationPreviewItem`
   - `OpenWebUIHydrationPreview`
   - `OpenWebUIHydrationResult`
-- [ ] Add `validate_openwebui_data_root(root: str | Path) -> OpenWebUIDataRoot`.
-- [ ] Use `get_ingestion_source_allowed_roots(reload=True)` or the same reload behavior established by ingestion-source tests.
-- [ ] Use `resolve_safe_local_path()` to confirm data root is under one allowed root.
-- [ ] Require canonical `webui.db` under data root.
-- [ ] Require canonical `uploads/` directory under data root.
-- [ ] Add `resolve_openwebui_file_path(file_row, data_root, uploads_root)`.
-- [ ] Try candidates in this order:
+- [x] Add `validate_openwebui_data_root(root: str | Path) -> OpenWebUIDataRoot`.
+- [x] Use `get_ingestion_source_allowed_roots(reload=True)` or the same reload behavior established by ingestion-source tests.
+- [x] Use `resolve_safe_local_path()` to confirm data root is under one allowed root.
+- [x] Require canonical `webui.db` under data root.
+- [x] Resolve canonical `uploads/` under data root and require it when file bytes are needed.
+- [x] Add `resolve_openwebui_file_path(file_row, data_root)`.
+- [x] Try candidates in this order:
   1. relative `file.path` under data root/uploads root
   2. absolute `file.path` only if it canonicalizes under data root/uploads root
   3. `uploads/{file.id}_{file.filename}`
-- [ ] Return structured warnings, not raw absolute paths, for user-facing preview.
+- [x] Return structured warnings, not raw absolute paths, for user-facing preview.
 
 Run:
 
@@ -262,14 +262,14 @@ Expected: PASS.
 **Files:**
 - Modify: `tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py`
 
-- [ ] Add `extract_openwebui_hydration_references(chacha_db, scope)`.
-- [ ] Query messages for the active tldw user/conversation scope using existing DB helpers where available; if no focused helper exists, add the smallest ChaCha helper needed rather than scanning raw DB files outside DB_Management.
-- [ ] Read current `message_metadata.extra.openwebui_import`.
-- [ ] Preserve the raw reference index and shape in the preview item.
-- [ ] Recognize dict ids from `id`, `file_id`, and `fileId`.
-- [ ] Recognize string refs only when non-empty.
-- [ ] Add DB fallback from `chat_file` rows only for imported conversation source chat ids.
-- [ ] Bound preview warning arrays to avoid huge responses.
+- [x] Add `extract_openwebui_hydration_references(chacha_db, scope)`.
+- [x] Query messages for the active tldw user/conversation scope using existing DB helpers where available; if no focused helper exists, add the smallest ChaCha helper needed rather than scanning raw DB files outside DB_Management.
+- [x] Read current `message_metadata.extra.openwebui_import`.
+- [x] Preserve the raw reference index and shape in the preview item.
+- [x] Recognize dict ids from `id`, `file_id`, and `fileId`.
+- [x] Recognize string refs only when non-empty.
+- [x] Add DB fallback from `chat_file` rows only for imported conversation source chat ids.
+- [x] Bound preview warning arrays to avoid huge responses.
 
 Run:
 
@@ -282,8 +282,8 @@ Expected: PASS.
 
 ### Task 2.4: Commit preview/path slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py \
