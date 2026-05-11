@@ -1490,7 +1490,7 @@ def test_scripted_story_generate_and_regenerate_persist_replayable_events(
     assert regenerated.json()["scene_version"] == 2
 
 
-def test_scripted_story_generate_without_literal_text_is_rejected(
+def test_scripted_story_generate_without_literal_text_can_pause_for_confirmation(
     client: TestClient,
     chacha_db: CharactersRAGDB,
     character_id: int,
@@ -1511,6 +1511,7 @@ def test_scripted_story_generate_without_literal_text_is_rejected(
                     "op": "generate",
                     "id": "intro-beat",
                     "prompt": "Introduce the archive door",
+                    "requires_user_confirm": True,
                 }
             ]
         },
@@ -1541,8 +1542,9 @@ def test_scripted_story_generate_without_literal_text_is_rejected(
         json={"client_scene_version": 0, "idempotency_key": "generate-intro-no-literal"},
     )
 
-    assert generated.status_code == 400
-    assert generated.json()["detail"]["code"] == "script_generation_unavailable"
+    assert generated.status_code == 200
+    payload = generated.json()
+    assert payload["script_state"]["position"]["waiting_reason"] == "generation_confirmation"
 
 
 def test_setup_options_uses_lightweight_character_selector_queries(

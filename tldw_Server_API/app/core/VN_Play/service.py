@@ -1159,7 +1159,7 @@ class VNPlayService:
         """Start a model Story session or advance a scripted story from its entry."""
         session = self.get_session(session_id)
         if session.mode == MODE_SCRIPTED_STORY:
-            return self.advance_script(
+            return await self.advance_script(
                 session_id,
                 client_scene_version=client_scene_version,
                 idempotency_key=idempotency_key,
@@ -1408,7 +1408,7 @@ class VNPlayService:
             raise
         return response
 
-    def advance_script(
+    async def advance_script(
         self,
         session_id: int,
         *,
@@ -1416,7 +1416,7 @@ class VNPlayService:
         idempotency_key: str,
     ) -> dict[str, Any]:
         """Advance a scripted story until it reaches a visible choice or end."""
-        return self._run_script_action(
+        return await self._run_script_action(
             session_id=session_id,
             action_type="script_advance",
             client_scene_version=client_scene_version,
@@ -1424,7 +1424,7 @@ class VNPlayService:
             choice_id=None,
         )
 
-    def choose_script_option(
+    async def choose_script_option(
         self,
         session_id: int,
         *,
@@ -1433,7 +1433,7 @@ class VNPlayService:
         idempotency_key: str,
     ) -> dict[str, Any]:
         """Select a visible scripted-story choice and advance the target label."""
-        return self._run_script_action(
+        return await self._run_script_action(
             session_id=session_id,
             action_type="script_choice",
             client_scene_version=client_scene_version,
@@ -1682,6 +1682,12 @@ class VNPlayService:
             )
             raise
 
+        applied_visuals, rejected_visuals = self._resolve_generated_scene_update_visuals(
+            session=session,
+            public_output=parsed.public_payload,
+            output_schema=output_schema,
+            scene_version=client_scene_version + 1,
+        )
         revision = self.repo.create_generation_revision(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
@@ -1693,6 +1699,8 @@ class VNPlayService:
             model_metadata=provider_result.response_metadata,
             usage_metadata=provider_result.usage_metadata,
             moderation_diagnostics=moderation.audit_metadata,
+            applied_visuals=applied_visuals,
+            rejected_visuals=rejected_visuals,
             source="model",
         )
         self.repo.set_active_generation_revision(
@@ -1719,6 +1727,8 @@ class VNPlayService:
             "generation_point_key": generation_point_key,
             "output_schema": output_schema,
             "public_output": parsed.public_payload,
+            "applied_visuals": applied_visuals,
+            "rejected_visuals": rejected_visuals,
         }
         self.repo.update_generation_action(
             int(action["id"]),
@@ -1731,6 +1741,88 @@ class VNPlayService:
             owner_user_id=self.owner_user_id,
         )
         return response
+
+    def _resolve_generated_scene_update_visuals(
+        self,
+        *,
+        session: VNPlaySession,
+        public_output: Mapping[str, Any],
+        output_schema: str,
+        scene_version: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Resolve scene_update visual directives for generation revision audit fields."""
+        if output_schema != "scene_update":
+            return [], []
+        directives = _list_of_dicts(public_output.get("visual_directives"))
+        if not directives:
+            return [], []
+
+        manifest: Mapping[str, Any] | None = None
+        manifest_error: str | None = None
+        default_rejection_reason = "manifest_unavailable"
+        try:
+            manifest = self._build_pack_manifest(session.vn_asset_pack_id)
+        except Exception as exc:
+            logger.exception(
+                "Failed to build VN asset manifest for generated scene_update visuals: "
+                "session_id={}, pack_id={}",
+                session.id,
+                session.vn_asset_pack_id,
+            )
+            manifest_error = exc.__class__.__name__
+
+        if manifest is not None:
+            try:
+                resolutions = resolve_scene_directives(
+                    manifest,
+                    directives,
+                    seed=session.seed or f"session-{session.id}",
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Failed to resolve generated scene_update visuals: session_id={}, pack_id={}",
+                    session.id,
+                    session.vn_asset_pack_id,
+                )
+                manifest_error = exc.__class__.__name__
+                default_rejection_reason = "resolver_error"
+                resolutions = []
+        else:
+            resolutions = []
+
+        applied_visuals: list[dict[str, Any]] = []
+        rejected_visuals: list[dict[str, Any]] = []
+        for index, directive in enumerate(directives):
+            directive_payload = dict(directive)
+            resolution = resolutions[index] if index < len(resolutions) else None
+            if resolution is not None and resolution.applied and resolution.item is not None:
+                item = dict(resolution.item)
+                applied_visuals.append(
+                    {
+                        "directive": directive_payload,
+                        "item": item,
+                        "asset_type": _visual_asset_type(directive_payload, item),
+                    }
+                )
+                continue
+
+            reason = (
+                resolution.reason
+                if resolution is not None and resolution.reason
+                else default_rejection_reason
+            )
+            rejected_visuals.append(
+                {
+                    "directive": directive_payload,
+                    **_visual_directive_warning(
+                        directive_payload,
+                        reason=reason,
+                        scene_version=scene_version,
+                        error_type=manifest_error,
+                    ),
+                }
+            )
+        return applied_visuals, rejected_visuals
 
     def _generation_call_payload_hash(
         self,
@@ -1866,7 +1958,139 @@ class VNPlayService:
             owner_user_id=self.owner_user_id,
         )
 
-    def _run_script_action(
+    async def _resolve_pending_script_generation(
+        self,
+        *,
+        session: VNPlaySession,
+        version: Mapping[str, Any],
+        execution: Mapping[str, Any],
+        pending_generation: Mapping[str, Any],
+        client_scene_version: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        profile_key = str(pending_generation.get("profile_key") or "default")
+        profile_snapshot = self._script_generation_profile_snapshot(
+            version=version,
+            profile_key=profile_key,
+        )
+        generation_point_key = _script_generation_point_key(pending_generation)
+        output_schema = str(pending_generation.get("output_schema") or "narrative_dialogue")
+        position = dict(execution.get("position") or {})
+
+        if pending_generation.get("requires_user_confirm") is True:
+            generation = self.repo.get_or_create_generation(
+                session_id=session.id,
+                owner_user_id=self.owner_user_id,
+                generation_point_key=generation_point_key,
+                output_schema=output_schema,
+                generation_profile_key=profile_key,
+                generation_profile_snapshot_id=int(profile_snapshot["id"]),
+                script_id=session.script_id,
+                script_version_id=session.script_version_id,
+                opcode_id=str(pending_generation.get("id") or ""),
+                opcode_label=str(pending_generation.get("label") or ""),
+                opcode_index=int(pending_generation.get("index") or 0),
+                status="pending_confirmation",
+            )
+            request = self.repo.create_generation_request(
+                session_id=session.id,
+                owner_user_id=self.owner_user_id,
+                generation_id=int(generation["id"]),
+                request_kind="automatic",
+                client_scene_version=client_scene_version,
+                status="pending_confirmation",
+                opcode_snapshot=_mapping_or_empty(pending_generation.get("opcode_snapshot")),
+                prompt_fingerprint=str(pending_generation.get("prompt_hash") or ""),
+            )
+            position.update(
+                {
+                    "waiting_reason": "generation_confirmation",
+                    "waiting_generation_confirmation": {
+                        "generation_id": int(generation["id"]),
+                        "generation_request_id": int(request["id"]),
+                        "generation_point_key": generation_point_key,
+                        "profile_key": profile_key,
+                        "output_schema": output_schema,
+                    },
+                }
+            )
+            return {
+                **dict(execution),
+                "position": position,
+                "generation_results": [],
+                "pending_generation": None,
+            }
+
+        response = await self.execute_script_generation_call(
+            session_id=session.id,
+            client_scene_version=client_scene_version,
+            idempotency_key=f"{idempotency_key}:generation:{generation_point_key}",
+            generation_point_key=generation_point_key,
+            output_schema=output_schema,
+            generation_profile_key=profile_key,
+            generation_profile_snapshot_id=int(profile_snapshot["id"]),
+            profile_snapshot=profile_snapshot,
+            messages=_script_generation_messages(pending_generation),
+            request_kind="automatic",
+            opcode_snapshot=_mapping_or_empty(pending_generation.get("opcode_snapshot")),
+            prompt_fingerprint=str(pending_generation.get("prompt_hash") or ""),
+        )
+        generation_result = _script_generation_result_from_response(
+            pending_generation,
+            response=response,
+        )
+        existing_narrative = str(execution.get("narrative_text") or "")
+        narrative_lines = [existing_narrative] if existing_narrative else []
+        narrative_text = str(generation_result.get("narrative_text") or "")
+        if narrative_text:
+            narrative_lines.append(narrative_text)
+        dialogue = [*(_list_of_dicts(execution.get("dialogue")))]
+        dialogue.extend(_list_of_dicts(generation_result.get("dialogue")))
+        generation_results = _list_of_dicts(execution.get("generation_results"))
+        generation_results.append(generation_result)
+        position["last_generation"] = generation_result
+        if _next_script_opcode_is_generate(version.get("program"), position):
+            position["waiting_reason"] = "generation_batch_limit"
+        else:
+            position.pop("waiting_reason", None)
+        return _script_execution_payload(
+            position=position,
+            variables=dict(execution.get("variables") or {}),
+            narrative_lines=narrative_lines,
+            dialogue=dialogue,
+            visible_choices=[],
+            selected_choice=(
+                execution.get("selected_choice")
+                if isinstance(execution.get("selected_choice"), Mapping)
+                else None
+            ),
+            random_results=_list_of_dicts(execution.get("random_results")),
+            generation_results=generation_results,
+        )
+
+    def _script_generation_profile_snapshot(
+        self,
+        *,
+        version: Mapping[str, Any],
+        profile_key: str,
+    ) -> dict[str, Any]:
+        snapshots = version.get("generation_profile_snapshots")
+        snapshot_id: int | None = None
+        if isinstance(snapshots, Mapping) and profile_key in snapshots:
+            snapshot_id = int(snapshots[profile_key])
+        elif profile_key == "default" and version.get("generation_profile_snapshot_id") is not None:
+            snapshot_id = int(version["generation_profile_snapshot_id"])
+        if snapshot_id is None:
+            raise VNPlayTurnError("script_generation_profile_missing")
+        snapshot = VNProfileSnapshotRepository.initialized(self.repo.db).get_profile_snapshot(
+            snapshot_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if snapshot is None:
+            raise VNPlayTurnError("script_generation_profile_missing")
+        return snapshot
+
+    async def _run_script_action(
         self,
         *,
         session_id: int,
@@ -1927,6 +2151,16 @@ class VNPlayService:
                 choice_id=choice_id,
                 seed=session.seed,
             )
+            pending_generation = execution.get("pending_generation")
+            if isinstance(pending_generation, Mapping):
+                execution = await self._resolve_pending_script_generation(
+                    session=session,
+                    version=version,
+                    execution=execution,
+                    pending_generation=pending_generation,
+                    client_scene_version=client_scene_version,
+                    idempotency_key=idempotency_key,
+                )
             next_scene_version = client_scene_version + 1
             events = self._append_script_events(
                 session_id=session_id,
@@ -2997,6 +3231,26 @@ def _execute_script_program(
                 label=label,
                 index=index - 1,
             )
+            if result.get("pending") is True:
+                current_position = {
+                    "label": label,
+                    "index": index,
+                    "ended": False,
+                    "variables": variables,
+                }
+                return {
+                    **_script_execution_payload(
+                        position=current_position,
+                        variables=variables,
+                        narrative_lines=narrative_lines,
+                        dialogue=dialogue,
+                        visible_choices=[],
+                        selected_choice=selected_choice,
+                        random_results=random_results,
+                        generation_results=generation_results,
+                    ),
+                    "pending_generation": result,
+                }
             generation_results.append(result)
             text = str(result.get("narrative_text") or "")
             if text:
@@ -3172,7 +3426,20 @@ def _script_generation_result(
     prompt = str(opcode.get("prompt") or opcode.get("text") or generation_id)
     narrative_text = str(opcode.get("narrative_text") or opcode.get("text") or "")
     if not narrative_text:
-        raise VNPlayTurnError("script_generation_unavailable")
+        return {
+            "id": generation_id,
+            "label": label,
+            "index": index,
+            "prompt": prompt,
+            "prompt_hash": _payload_hash({"seed": seed or "", "prompt": prompt})[:16],
+            "profile_key": str(opcode.get("profile_key") or "default"),
+            "output_schema": str(opcode.get("output_schema") or "narrative_dialogue"),
+            "requires_user_confirm": bool(opcode.get("requires_user_confirm")),
+            "opcode_snapshot": dict(opcode),
+            "source": "model",
+            "model_invoked": True,
+            "pending": True,
+        }
     speaker = str(opcode.get("speaker") or "Narrator")
     regeneration_text = str(
         opcode.get("regeneration_text")
@@ -3249,10 +3516,13 @@ def _script_public_state_payload(
             "id": position.get("waiting_choice_id"),
             "choices": waiting_choices,
         }
+    public_position = {"progress_token": _script_progress_token(position)}
+    if position.get("waiting_reason"):
+        public_position["waiting_reason"] = str(position["waiting_reason"])
     return {
         "session_id": session_id,
         "scene_version": scene_version,
-        "position": {"progress_token": _script_progress_token(position)},
+        "position": public_position,
         "variables": _script_public_variables(program, position.get("variables")),
         "waiting_choice": waiting_choice,
         "ended": bool(position.get("ended")),
@@ -3678,6 +3948,75 @@ def _generation_public_text(payload: Mapping[str, Any]) -> str:
     if lead_in:
         parts.append(str(lead_in))
     return "\n".join(parts)
+
+
+def _mapping_or_empty(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _script_generation_point_key(pending_generation: Mapping[str, Any]) -> str:
+    label = str(pending_generation.get("label") or "start")
+    index = int(pending_generation.get("index") or 0)
+    generation_id = str(pending_generation.get("id") or f"{label}:{index}")
+    return f"{label}:{index}:{generation_id}"
+
+
+def _script_generation_messages(pending_generation: Mapping[str, Any]) -> list[dict[str, str]]:
+    prompt = str(pending_generation.get("prompt") or pending_generation.get("id") or "")
+    return [{"role": "user", "content": prompt}]
+
+
+def _script_generation_result_from_response(
+    pending_generation: Mapping[str, Any],
+    *,
+    response: Mapping[str, Any],
+) -> dict[str, Any]:
+    public_output = _mapping_or_empty(response.get("public_output"))
+    narrative_lines = [
+        str(line["text"])
+        for line in _list_of_dicts(public_output.get("narrative"))
+        if line.get("text")
+    ]
+    dialogue = _list_of_dicts(public_output.get("dialogue"))
+    if not dialogue:
+        dialogue = [{"speaker": "Narrator", "text": line} for line in narrative_lines]
+    return {
+        "id": str(pending_generation.get("id") or ""),
+        "label": str(pending_generation.get("label") or ""),
+        "index": int(pending_generation.get("index") or 0),
+        "prompt_hash": str(pending_generation.get("prompt_hash") or ""),
+        "source": "model",
+        "model_invoked": True,
+        "generation_id": int(response["generation_id"]),
+        "request_id": int(response["generation_request_id"]),
+        "revision_id": int(response["generation_revision_id"]),
+        "generation_point_key": str(response["generation_point_key"]),
+        "output_schema": str(response["output_schema"]),
+        "public_output": public_output,
+        "applied_visuals": _list_of_dicts(response.get("applied_visuals")),
+        "rejected_visuals": _list_of_dicts(response.get("rejected_visuals")),
+        "narrative_text": "\n".join(narrative_lines),
+        "dialogue": dialogue,
+        "regeneration_supported": False,
+        "regenerated": False,
+    }
+
+
+def _next_script_opcode_is_generate(program: Any, position: Mapping[str, Any]) -> bool:
+    if not isinstance(program, Mapping):
+        return False
+    labels = program.get("labels")
+    if not isinstance(labels, Mapping):
+        return False
+    label = str(position.get("label") or program.get("entry_label") or "start")
+    ops = labels.get(label)
+    if not isinstance(ops, list):
+        return False
+    index = int(position.get("index") or 0)
+    if index >= len(ops):
+        return False
+    opcode = ops[index]
+    return isinstance(opcode, Mapping) and str(opcode.get("op") or "") == "generate"
 
 
 def _scene_state_payload(state: SceneState) -> dict[str, Any]:

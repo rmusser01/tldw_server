@@ -523,14 +523,14 @@ async def start_story(
     "/sessions/{session_id}/script/advance",
     response_model=VNPlayScriptActionResponse,
 )
-def advance_scripted_story(
+async def advance_scripted_story(
     session_id: int,
     request: VNPlayScriptActionRequest,
     service: VNPlayService = Depends(_service),
 ) -> VNPlayScriptActionResponse:
     try:
         return VNPlayScriptActionResponse.model_validate(
-            service.advance_script(
+            await service.advance_script(
                 session_id,
                 client_scene_version=request.client_scene_version,
                 idempotency_key=request.idempotency_key,
@@ -595,7 +595,7 @@ def get_scripted_story_debug_state(
     "/sessions/{session_id}/script/choices/{choice_id}",
     response_model=VNPlayScriptActionResponse,
 )
-def choose_scripted_story_option(
+async def choose_scripted_story_option(
     session_id: int,
     choice_id: str,
     request: VNPlayScriptActionRequest,
@@ -603,7 +603,7 @@ def choose_scripted_story_option(
 ) -> VNPlayScriptActionResponse:
     try:
         return VNPlayScriptActionResponse.model_validate(
-            service.choose_script_option(
+            await service.choose_script_option(
                 session_id,
                 choice_id=choice_id,
                 client_scene_version=request.client_scene_version,
