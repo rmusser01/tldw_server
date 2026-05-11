@@ -67,6 +67,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     GreetingSelectResponse,
     LorebookDiagnosticExportResponse,
     MessageResponse,
+    PromptPreviewResponse,
     PresetCreate,
     PresetDetail,
     PresetListResponse,
@@ -4205,6 +4206,17 @@ def _truncate_persona_preview_text(value: Any) -> str:
     return f"{text[:_PERSONA_PREVIEW_MAX_TEXT_CHARS].rstrip()}..."
 
 
+def _selected_persona_preview_reason(exemplar: dict[str, Any]) -> str:
+    """Return a bounded reason for a selected persona exemplar."""
+    bucket = _normalize_persona_preview_id(
+        exemplar.get("selection_bucket") or exemplar.get("kind"),
+        default="selected",
+    )
+    if bucket == "selected":
+        return bucket
+    return _normalize_persona_preview_id(f"{bucket}_selected")
+
+
 def _build_persona_preview_assembly(
     *,
     conversation: dict[str, Any],
@@ -4271,6 +4283,7 @@ def _build_persona_preview_context(
         return {"active": False, "reason": "missing_persona_id"}
 
     selected_exemplar_ids: list[str] = []
+    selected_exemplars: list[dict[str, str]] = []
     rejected_exemplars: list[dict[str, str]] = []
     section_names: list[str] = []
     if assembly is not None:
@@ -4280,6 +4293,14 @@ def _build_persona_preview_context(
         ]
         selected_exemplar_ids = [
             _normalize_persona_preview_id(item.get("id"))
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        selected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _selected_persona_preview_reason(item),
+            }
             for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
             if item.get("id")
         ]
@@ -4305,6 +4326,7 @@ def _build_persona_preview_context(
         "reason": "selected" if applied else "no_exemplars_selected",
         "section_names": section_names,
         "selected_exemplar_ids": selected_exemplar_ids,
+        "selected_exemplars": selected_exemplars,
         "rejected_exemplars": rejected_exemplars,
         "current_turn": {
             "source": _normalize_persona_preview_id(current_turn_source),
@@ -4371,6 +4393,8 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
 
 @router.post(
     "/{chat_id}/prompt-preview",
+    response_model=PromptPreviewResponse,
+    response_model_exclude_unset=True,
     summary="Preview assembled prompt with token budget breakdown",
     tags=["Chat Sessions"],
 )
@@ -4574,7 +4598,8 @@ async def prompt_assembly_preview(
         persona_preview_sections: list[tuple[str, str, int]] = []
         persona_preview_context: dict[str, Any] | None = None
         if conversation.get("assistant_kind") == "persona" and conversation.get("assistant_id"):
-            persona_current_turn_text = body.append_user_message or next(
+            stripped_append_user_message = str(body.append_user_message or "").strip()
+            persona_current_turn_text = stripped_append_user_message or next(
                 (
                     str(message.get("content") or "").strip()
                     for message in reversed(formatted)
@@ -4585,7 +4610,7 @@ async def prompt_assembly_preview(
             )
             persona_current_turn_source = (
                 "append_user_message"
-                if body.append_user_message
+                if stripped_append_user_message
                 else ("history" if persona_current_turn_text else "none")
             )
             persona_exemplars = db.list_persona_exemplars(

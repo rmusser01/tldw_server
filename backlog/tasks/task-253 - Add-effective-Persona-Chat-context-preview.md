@@ -4,7 +4,7 @@ title: Add effective Persona Chat context preview
 status: Done
 assignee: []
 created_date: '2026-05-11 00:44'
-updated_date: '2026-05-11 01:03'
+updated_date: '2026-05-11 04:58'
 labels:
   - persona
   - chat
@@ -54,6 +54,10 @@ Scope note: the initial combined TestClient run for selected integration cases h
 Self-review hardening: added a bounded-diagnostics regression test that first failed on raw persona_memory_mode, then normalized persona_memory_mode and current_turn.source through the same bounded ID helper.
 
 Updated verification: prompt assembly suite now passes with 9 tests after the bounding regression; the three focused prompt-preview integration tests, py_compile, Bandit, and git diff --check all pass after the scalar hardening change.
+
+Review-fix pass opened for PR #1561. Actionable items: add selected exemplar reasons, ignore whitespace-only append_user_message for current-turn source/text, and add a Pydantic response model for prompt-preview.
+
+PR #1561 review fixes: added selected_exemplars with bounded reasons while preserving selected_exemplar_ids compatibility, ignored whitespace-only append_user_message for persona current-turn classification, and declared PromptPreviewResponse for prompt-preview response validation. Verification: persona prompt assembly suite passed (10 tests); focused prompt-preview integration regressions passed individually; py_compile, Bandit on touched backend/schema files, and git diff --check passed. GitHub Frontend Lint job 75272179483 was cancelled during dependency install while the run remains queued; no frontend code changed in this review-fix pass.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -1,6 +1,7 @@
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chat_sessions_endpoint
 from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import _build_persona_preview_sections
 from tldw_Server_API.app.api.v1.endpoints.chat import _assemble_persona_runtime_guidance
+from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import PromptPreviewResponse
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
@@ -105,6 +106,10 @@ def test_persona_preview_context_summarizes_effective_persona_selection():
         "reason": "selected",
         "section_names": ["persona_boundary", "persona_exemplars"],
         "selected_exemplar_ids": ["boundary-1", "style-1"],
+        "selected_exemplars": [
+            {"id": "boundary-1", "reason": "boundary_selected"},
+            {"id": "style-1", "reason": "style_selected"},
+        ],
         "rejected_exemplars": [{"id": "boundary-2", "reason": "boundary_cap"}],
         "current_turn": {
             "source": "append_user_message",
@@ -153,12 +158,28 @@ def test_persona_preview_context_bounds_diagnostic_scalars_and_lists():
     assert context["current_turn"]["preview"].endswith("...")
     assert len(context["section_names"]) == 20
     assert len(context["selected_exemplar_ids"]) == 20
+    assert len(context["selected_exemplars"]) == 20
     assert len(context["rejected_exemplars"]) == 20
     assert all(name.startswith("hash:") for name in context["section_names"])
+    assert all(
+        item["id"].startswith("hash:")
+        and (item["reason"] == "selected" or item["reason"].endswith("_selected"))
+        for item in context["selected_exemplars"]
+    )
     assert all(
         item["id"].startswith("hash:") and item["reason"].startswith("hash:")
         for item in context["rejected_exemplars"]
     )
+
+
+def test_prompt_preview_route_declares_response_model():
+    route = next(
+        item
+        for item in chat_sessions_endpoint.router.routes
+        if getattr(item, "path", "") == "/{chat_id}/prompt-preview"
+    )
+
+    assert route.response_model is PromptPreviewResponse
 
 
 def test_persona_prompt_assembly_omits_sections_when_no_enabled_exemplars_exist():
