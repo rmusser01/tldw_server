@@ -189,7 +189,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Publishe
 - Audiobooks: parse + chapter detection, per-chapter voice settings, optional TTS provider overrides (alignment/subtitles Kokoro-only), and M4B packaging (API-only).
 - Search & retrieval (RAG): hybrid BM25 + vector (ChromaDB/pgvector), re-ranking, contextual retrieval, OpenAI-compatible embeddings, vector stores API, and media embeddings ingestion. 50+ optional parameters available for tuning.
 - Chat & providers: `/api/v1/chat/completions` (OpenAI-compatible), 16+ providers (commercial + self-hosted), character chat, budgets/allowlists, moderation endpoint.
-- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export including OpenWebUI chat JSON migration, flashcards (.apkg), reading items/highlights.
+- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export including OpenWebUI chat JSON migration and OpenWebUI webui.db migration, flashcards (.apkg), reading items/highlights.
 - Prompt Studio & evaluations: projects, prompt testing/optimization, unified evaluation APIs (G-Eval, RAG, OCR, embeddings A/B tests, batch metrics). Full evaluations and prompt management.
 - Research & web scraping: multi-provider web search, academic paper search (arXiv/PubMed/etc.), scraping jobs with cookies/progress, aggregation/final answers.
 - Connectors: Google Drive + Notion OAuth import; connector policies/quotas.
@@ -1143,7 +1143,7 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 ### Chatbook Tools Guide
 
-- User guide: `Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md` covers Chatbook backup/restore and OpenWebUI "Export Chats" JSON import.
+- User guide: `Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md` covers Chatbook backup/restore, OpenWebUI "Export Chats" JSON import, and OpenWebUI `webui.db` database import.
 - Getting started: `Docs/User_Guides/WebUI_Extension/Chatbook_Tools_Getting_Started.md`
 - Product spec (PRD): `Docs/Product/Completed/Chatbook-Tools-PRD.md`
 - API reference: `Docs/API-related/Chatbook_API_Documentation.md`

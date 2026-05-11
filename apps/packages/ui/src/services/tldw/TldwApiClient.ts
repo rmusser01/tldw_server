@@ -5504,6 +5504,7 @@ export class TldwApiClientBase {
       async_mode?: boolean
       content_selections?: Record<string, string[]>
       source_format?: string
+      selected_openwebui_user_id?: string
     }
   ): Promise<any> {
     const data = await file.arrayBuffer()

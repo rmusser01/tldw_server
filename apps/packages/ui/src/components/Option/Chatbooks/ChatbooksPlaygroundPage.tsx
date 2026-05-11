@@ -89,7 +89,7 @@ type FetchParams = {
 }
 
 type JobKind = "export" | "import"
-type ImportSourceFormat = "chatbook" | "openwebui_json"
+type ImportSourceFormat = "chatbook" | "openwebui_json" | "openwebui_db"
 
 type ChatbookJob = {
   job_id: string
@@ -111,6 +111,22 @@ type ChatbookJob = {
   skipped_items?: number
   warnings?: string[]
   conflicts?: any[]
+}
+
+type OpenWebUIDatabasePreviewUser = {
+  source_user_id: string
+  display_label: string
+  email?: string | null
+  chat_count?: number
+  folder_count?: number
+  message_count?: number
+  branched_chat_count?: number
+  duplicate_chat_count?: number
+  archived_chat_count?: number
+  pinned_chat_count?: number
+  attachment_reference_count?: number
+  warning_count?: number
+  warnings?: string[]
 }
 
 const parseIdList = (raw: string) =>
@@ -1037,6 +1053,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [importSourceFormat, setImportSourceFormat] = React.useState<ImportSourceFormat>("chatbook")
   const [previewManifest, setPreviewManifest] = React.useState<any | null>(null)
   const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
+  const [openwebuiDbPreview, setOpenwebuiDbPreview] = React.useState<any | null>(null)
+  const [selectedOpenWebUIUserId, setSelectedOpenWebUIUserId] = React.useState("")
   const [previewError, setPreviewError] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [conflictResolution, setConflictResolution] = React.useState("skip")
@@ -1061,18 +1079,22 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const previewRequestIdRef = React.useRef(0)
 
   const canUseChatbooks = capabilities?.hasChatbooks !== false
-  const isOpenWebUIImport = importSourceFormat === "openwebui_json"
+  const isOpenWebUIJsonImport = importSourceFormat === "openwebui_json"
+  const isOpenWebUIDatabaseImport = importSourceFormat === "openwebui_db"
+  const isOpenWebUIImport = isOpenWebUIJsonImport || isOpenWebUIDatabaseImport
 
   React.useEffect(() => {
     previewRequestIdRef.current += 1
     setImportFile(null)
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
+    setOpenwebuiDbPreview(null)
+    setSelectedOpenWebUIUserId("")
     setPreviewError(null)
     setPreviewLoading(false)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
-    if (importSourceFormat === "openwebui_json") {
+    if (importSourceFormat === "openwebui_json" || importSourceFormat === "openwebui_db") {
       setImportMedia(false)
       setImportEmbeddings(false)
       setConflictResolution((current) =>
@@ -1101,6 +1123,19 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       : []
     return Array.from(new Set([...fromCounts, ...fromItems]))
   }, [previewManifest, previewItemsByType])
+
+  const openwebuiDbUsers = React.useMemo<OpenWebUIDatabasePreviewUser[]>(() => {
+    const users = openwebuiDbPreview?.users
+    return Array.isArray(users) ? users : []
+  }, [openwebuiDbPreview])
+
+  const selectedOpenWebUIUser = React.useMemo(
+    () =>
+      openwebuiDbUsers.find(
+        (user) => user.source_user_id === selectedOpenWebUIUserId
+      ) || null,
+    [openwebuiDbUsers, selectedOpenWebUIUserId]
+  )
 
   const activeJobs = React.useMemo(() => {
     const exportActive = exportJobs.filter((job) => isActiveJobStatus(job.status))
@@ -1401,6 +1436,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setPreviewError(null)
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
+    setOpenwebuiDbPreview(null)
+    setSelectedOpenWebUIUserId("")
     setImportFile(file)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
@@ -1414,6 +1451,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         setPreviewError(res.error)
       } else if (sourceFormat === "openwebui_json") {
         setOpenwebuiPreview(res?.openwebui_preview || null)
+      } else if (sourceFormat === "openwebui_db") {
+        const dbPreview = res?.openwebui_db_preview || null
+        const users = Array.isArray(dbPreview?.users) ? dbPreview.users : []
+        setOpenwebuiDbPreview(dbPreview)
+        setSelectedOpenWebUIUserId(users.length === 1 ? users[0]?.source_user_id || "" : "")
       } else {
         setPreviewManifest(res?.manifest || null)
       }
@@ -1468,6 +1510,15 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       })
       return
     }
+    if (isOpenWebUIDatabaseImport && !selectedOpenWebUIUserId) {
+      notification.error({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiDbUserRequired",
+          "Select an OpenWebUI user to import."
+        )
+      })
+      return
+    }
 
     setImportSubmitting(true)
     try {
@@ -1499,7 +1550,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         import_media: isOpenWebUIImport ? false : importMedia,
         import_embeddings: isOpenWebUIImport ? false : importEmbeddings,
         async_mode: importAsync,
-        content_selections: normalizedSelections
+        content_selections: normalizedSelections,
+        selected_openwebui_user_id: isOpenWebUIDatabaseImport
+          ? selectedOpenWebUIUserId
+          : undefined
       })
 
       notification.success({
@@ -1704,6 +1758,26 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     </>
   )
 
+  const importAccept = isOpenWebUIDatabaseImport
+    ? ".db,.sqlite"
+    : isOpenWebUIJsonImport
+      ? ".json"
+      : ".zip,.chatbook"
+  const importDropText = isOpenWebUIDatabaseImport
+    ? t(
+        "settings:chatbooksPlayground.importDropOpenWebUIDb",
+        "Drop an OpenWebUI webui.db or .sqlite database or click to browse"
+      )
+    : isOpenWebUIJsonImport
+      ? t(
+          "settings:chatbooksPlayground.importDropOpenWebUI",
+          "Drop an OpenWebUI .json export or click to browse"
+        )
+      : t(
+          "settings:chatbooksPlayground.importDrop",
+          "Drop a .zip or .chatbook archive or click to browse"
+        )
+
   const importTab = (
     <>
       <Card
@@ -1730,6 +1804,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                 {
                   value: "openwebui_json",
                   label: t("settings:chatbooksPlayground.sourceOpenWebUI", "OpenWebUI JSON")
+                },
+                {
+                  value: "openwebui_db",
+                  label: t("settings:chatbooksPlayground.sourceOpenWebUIDatabase", "OpenWebUI database")
                 }
               ]}
               disabled={!canUseChatbooks || previewLoading || importSubmitting}
@@ -1737,7 +1815,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           </Space>
 
           <Upload.Dragger
-            accept={isOpenWebUIImport ? ".json" : ".zip,.chatbook"}
+            accept={importAccept}
             multiple={false}
             showUploadList={false}
             beforeUpload={(file) => {
@@ -1750,9 +1828,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               <InboxOutlined />
             </p>
             <p className="ant-upload-text">
-              {isOpenWebUIImport
-                ? t("settings:chatbooksPlayground.importDropOpenWebUI", "Drop an OpenWebUI .json export or click to browse")
-                : t("settings:chatbooksPlayground.importDrop", "Drop a .zip or .chatbook archive or click to browse")}
+              {importDropText}
             </p>
             <p className="ant-upload-hint">
               {importFile?.name || t("settings:chatbooksPlayground.importHint", "Preview before import")}
@@ -1865,6 +1941,102 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             </Card>
           )}
 
+          {openwebuiDbPreview && (
+            <Card
+              size="small"
+              className="border-border"
+              title={t(
+                "settings:chatbooksPlayground.openwebuiDbPreviewSummary",
+                "OpenWebUI database users"
+              )}
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {openwebuiDbUsers.map((user) => (
+                  <div
+                    key={user.source_user_id}
+                    className="rounded border border-border p-3"
+                  >
+                    <Text strong>{user.display_label || user.source_user_id}</Text>
+                    <div className="text-sm text-muted-foreground">
+                      {user.email || user.source_user_id}
+                    </div>
+                    <Space wrap size="small" className="mt-2">
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiChats", "Chats")} ·{" "}
+                        {user.chat_count ?? 0}
+                      </Tag>
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiMessages", "Messages")} ·{" "}
+                        {user.message_count ?? 0}
+                      </Tag>
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiFolders", "Folders")} ·{" "}
+                        {user.folder_count ?? 0}
+                      </Tag>
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiAttachments", "Attachment refs")} ·{" "}
+                        {user.attachment_reference_count ?? 0}
+                      </Tag>
+                    </Space>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3">
+                <Select
+                  placeholder={t(
+                    "settings:chatbooksPlayground.openwebuiDbUserSelect",
+                    "Select source user"
+                  )}
+                  value={selectedOpenWebUIUserId || undefined}
+                  onChange={(value) => setSelectedOpenWebUIUserId(String(value || ""))}
+                  className="min-w-[260px]"
+                  options={openwebuiDbUsers.map((user) => ({
+                    value: user.source_user_id,
+                    label: `${user.display_label || user.source_user_id} (${user.source_user_id})`
+                  }))}
+                  disabled={previewLoading || importSubmitting}
+                />
+              </div>
+
+              {selectedOpenWebUIUser && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="mt-3"
+                  title={t("settings:chatbooksPlayground.openwebuiDbDestination", "Destination")}
+                  description={`Destination: OpenWebUI / ${
+                    selectedOpenWebUIUser.display_label || selectedOpenWebUIUser.source_user_id
+                  } (${selectedOpenWebUIUser.source_user_id}) / source folders`}
+                />
+              )}
+
+              <Alert
+                type="warning"
+                showIcon
+                className="mt-3"
+                title={t(
+                  "settings:chatbooksPlayground.openwebuiDbAttachmentRefs",
+                  "Files and images"
+                )}
+                description={t(
+                  "settings:chatbooksPlayground.openwebuiDbAttachmentRefsDescription",
+                  "Files, images, and artifacts import as metadata references only; binaries are not copied."
+                )}
+              />
+
+              {Boolean(openwebuiDbPreview.warnings?.length) && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="mt-3"
+                  title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
+                  description={openwebuiDbPreview.warnings.slice(0, 3).join("\n")}
+                />
+              )}
+            </Card>
+          )}
+
           <Divider />
 
           <Space wrap>
@@ -1959,7 +2131,12 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           type="primary"
           onClick={handleImport}
           loading={importSubmitting}
-          disabled={!canUseChatbooks || !importFile || previewLoading}
+          disabled={
+            !canUseChatbooks ||
+            !importFile ||
+            previewLoading ||
+            (isOpenWebUIDatabaseImport && !selectedOpenWebUIUserId)
+          }
         >
           {t("settings:chatbooksPlayground.importCta", "Import chatbook")}
         </Button>

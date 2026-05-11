@@ -16,7 +16,8 @@ Payload fields:
 - name, description, author, tags, categories
 - content_selections: {content_type: [ids]}
 - include_media, media_quality, include_embeddings, include_generated_content
-- file_token (preferred) or file_path (legacy), conflict_resolution, prefix_imported, import_media, import_embeddings
+- file_token (preferred) or file_path (legacy), source_format, selected_openwebui_user_id,
+  conflict_resolution, prefix_imported, import_media, import_embeddings
 
 Usage:
   python -m tldw_Server_API.app.core.Chatbooks.services.jobs_worker
@@ -212,6 +213,54 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
     file_ref = payload.get("file_token") or payload.get("file_path")
     if not file_ref or not str(file_ref).strip():
         _raise_import_job_failed(service, job_id, "Missing file reference for import job")
+    if source_format == "openwebui_db":
+        selected_user_id = str(payload.get("selected_openwebui_user_id") or "").strip()
+        if not selected_user_id:
+            _raise_import_job_failed(
+                service,
+                job_id,
+                "selected_openwebui_user_id is required for OpenWebUI DB imports",
+            )
+        try:
+            resolved_path = service._resolve_import_upload_path(file_ref)
+        except Exception as exc:
+            _mark_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
+            raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False) from exc
+        resolved_file_path = str(resolved_path or "").strip()
+        if not resolved_file_path:
+            _raise_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
+        try:
+            ok, msg, result = await asyncio.to_thread(
+                service.import_openwebui_db,
+                resolved_file_path,
+                selected_user_id=selected_user_id,
+                conflict_resolution=conflict_resolution,
+                prefix_imported=bool(payload.get("prefix_imported", False)),
+            )
+        finally:
+            try:
+                if resolved_path.exists() and resolved_path.is_file():
+                    resolved_path.unlink()
+            except Exception as cleanup_err:
+                logger.debug(
+                    f"Chatbooks Jobs worker: failed to remove OpenWebUI DB import file {resolved_path}: {cleanup_err}"
+                )
+
+        ij = service._get_import_job(job_id)
+        if ok:
+            if ij and ij.status != ImportStatus.CANCELLED:
+                ij.status = ImportStatus.COMPLETED
+                ij.completed_at = datetime.now(timezone.utc)
+                service._save_import_job(ij)
+            return {"openwebui_db_result": result or {}}
+
+        if ij:
+            ij.status = ImportStatus.FAILED
+            ij.completed_at = datetime.now(timezone.utc)
+            ij.error_message = msg
+            service._save_import_job(ij)
+        raise ChatbooksJobError(str(msg), retryable=False)
+
     if source_format == "openwebui_json":
         try:
             resolved_path = service._resolve_import_upload_path(file_ref)

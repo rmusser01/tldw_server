@@ -118,14 +118,18 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Chatbook archive to import, or OpenWebUI JSON when source_format is openwebui_json
+                  description: Chatbook archive to import, OpenWebUI JSON when source_format is openwebui_json, or OpenWebUI SQLite database when source_format is openwebui_db
                 source_format:
                   type: string
                   enum:
                     - chatbook
                     - openwebui_json
+                    - openwebui_db
                   default: chatbook
-                  description: Import source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files.
+                  description: Import source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files and openwebui_db for uploaded webui.db or .sqlite databases.
+                selected_openwebui_user_id:
+                  type: string
+                  description: Required when source_format is openwebui_db. Use a source_user_id returned by the preview endpoint.
                 content_selections:
                   type: string
                   format: json
@@ -189,14 +193,15 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Chatbook archive to preview, or OpenWebUI JSON when source_format is openwebui_json
+                  description: Chatbook archive to preview, OpenWebUI JSON when source_format is openwebui_json, or OpenWebUI SQLite database when source_format is openwebui_db
                 source_format:
                   type: string
                   enum:
                     - chatbook
                     - openwebui_json
+                    - openwebui_db
                   default: chatbook
-                  description: Preview source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files.
+                  description: Preview source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files and openwebui_db for uploaded webui.db or .sqlite databases.
       responses:
         '200':
           description: Chatbook preview retrieved
@@ -626,6 +631,17 @@ components:
     ImportChatbookRequest:
       type: object
       properties:
+        source_format:
+          type: string
+          enum:
+            - chatbook
+            - openwebui_json
+            - openwebui_db
+          default: chatbook
+        selected_openwebui_user_id:
+          type: string
+          nullable: true
+          description: Required for OpenWebUI database imports.
         content_selections:
           type: object
           additionalProperties:
@@ -716,6 +732,50 @@ components:
           type: array
           items:
             type: string
+        source_format:
+          type: string
+          enum:
+            - chatbook
+            - openwebui_json
+            - openwebui_db
+        openwebui_result:
+          $ref: '#/components/schemas/OpenWebUIImportResult'
+        openwebui_db_result:
+          $ref: '#/components/schemas/OpenWebUIDatabaseImportResult'
+
+    OpenWebUIImportResult:
+      type: object
+      properties:
+        imported_chats:
+          type: integer
+        skipped_chats:
+          type: integer
+        failed_chats:
+          type: integer
+        imported_messages:
+          type: integer
+        skipped_messages:
+          type: integer
+        duplicate_chats:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIDatabaseImportResult:
+      allOf:
+        - $ref: '#/components/schemas/OpenWebUIImportResult'
+        - type: object
+          properties:
+            selected_user_id:
+              type: string
+            selected_user_label:
+              type: string
+            mirrored_folders:
+              type: integer
+            folder_links:
+              type: integer
 
     ContentItemResponse:
       type: object
@@ -856,11 +916,93 @@ components:
     PreviewChatbookResponse:
       type: object
       properties:
+        source_format:
+          type: string
+          enum:
+            - chatbook
+            - openwebui_json
+            - openwebui_db
         manifest:
           $ref: '#/components/schemas/ChatbookManifestResponse'
+        openwebui_preview:
+          $ref: '#/components/schemas/OpenWebUIPreview'
+        openwebui_db_preview:
+          $ref: '#/components/schemas/OpenWebUIDatabasePreview'
         error:
           type: string
           nullable: true
+
+    OpenWebUIPreview:
+      type: object
+      properties:
+        chat_count:
+          type: integer
+        message_count:
+          type: integer
+        branched_chat_count:
+          type: integer
+        duplicate_chat_count:
+          type: integer
+        attachment_reference_count:
+          type: integer
+        malformed_chat_count:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    OpenWebUIDatabaseUserPreview:
+      type: object
+      properties:
+        source_user_id:
+          type: string
+        display_label:
+          type: string
+        email:
+          type: string
+          nullable: true
+        chat_count:
+          type: integer
+        folder_count:
+          type: integer
+        message_count:
+          type: integer
+        branched_chat_count:
+          type: integer
+        duplicate_chat_count:
+          type: integer
+        archived_chat_count:
+          type: integer
+        pinned_chat_count:
+          type: integer
+        attachment_reference_count:
+          type: integer
+        warning_count:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIDatabasePreview:
+      type: object
+      properties:
+        user_count:
+          type: integer
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenWebUIDatabaseUserPreview'
+        warnings:
+          type: array
+          items:
+            type: string
 
     ExportJobResponse:
       type: object

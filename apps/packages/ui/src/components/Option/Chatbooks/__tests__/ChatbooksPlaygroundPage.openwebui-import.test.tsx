@@ -197,6 +197,106 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     expect(container.querySelector(".ant-upload-drag input[type=\"file\"]")).toHaveAttribute("accept", ".json")
   })
 
+  it("previews OpenWebUI database users and submits the selected source user", async () => {
+    tldwClientMock.previewChatbook.mockResolvedValueOnce({
+      openwebui_db_preview: {
+        user_count: 2,
+        users: [
+          {
+            source_user_id: "user-a",
+            display_label: "Alice",
+            email: "alice@example.test",
+            chat_count: 2,
+            folder_count: 1,
+            message_count: 12,
+            branched_chat_count: 1,
+            duplicate_chat_count: 0,
+            archived_chat_count: 0,
+            pinned_chat_count: 1,
+            attachment_reference_count: 3,
+            warning_count: 0,
+            warnings: []
+          },
+          {
+            source_user_id: "user-b",
+            display_label: "Bob",
+            email: "bob@example.test",
+            chat_count: 1,
+            folder_count: 0,
+            message_count: 4,
+            branched_chat_count: 0,
+            duplicate_chat_count: 0,
+            archived_chat_count: 0,
+            pinned_chat_count: 0,
+            attachment_reference_count: 0,
+            warning_count: 0,
+            warnings: []
+          }
+        ],
+        warnings: []
+      }
+    })
+    tldwClientMock.importChatbook.mockResolvedValueOnce({ success: true })
+
+    const { container } = render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    expect(screen.getByRole("option", { name: "OpenWebUI database" })).toBeInTheDocument()
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_db" } })
+
+    await waitFor(() => {
+      expect(screen.getByText("Drop an OpenWebUI webui.db or .sqlite database or click to browse")).toBeInTheDocument()
+    })
+    expect(container.querySelector(".ant-upload-drag input[type=\"file\"]")).toHaveAttribute("accept", ".db,.sqlite")
+    expect(screen.queryByText("Import media")).not.toBeInTheDocument()
+    expect(screen.queryByText("Import embeddings")).not.toBeInTheDocument()
+
+    const uploadInput = container.querySelector(".ant-upload-drag input[type=\"file\"]") as HTMLInputElement
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(["SQLite format 3"], "webui.db", { type: "application/vnd.sqlite3" })]
+      }
+    })
+
+    await waitFor(() => {
+      expect(tldwClientMock.previewChatbook).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "webui.db" }),
+        { source_format: "openwebui_db" }
+      )
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument()
+      expect(screen.getByText("alice@example.test")).toBeInTheDocument()
+    })
+
+    const importButton = screen.getByRole("button", { name: "Import chatbook" })
+    expect(importButton).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText("Select source user"), {
+      target: { value: "user-a" }
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText("Destination: OpenWebUI / Alice (user-a) / source folders")).toBeInTheDocument()
+    })
+    fireEvent.click(importButton)
+
+    await waitFor(() => {
+      expect(tldwClientMock.importChatbook).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "webui.db" }),
+        expect.objectContaining({
+          source_format: "openwebui_db",
+          selected_openwebui_user_id: "user-a",
+          import_media: false,
+          import_embeddings: false
+        })
+      )
+    })
+  })
+
   it("ignores stale OpenWebUI preview responses when a newer file is selected", async () => {
     const firstPreview = deferred<any>()
     const secondPreview = deferred<any>()

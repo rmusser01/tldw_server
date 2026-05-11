@@ -39,6 +39,7 @@ class ChatbookValidator:
     SAFE_FILENAME_PATTERN = re.compile(r'^[a-zA-Z0-9._\-]+$')
     VALID_EXTENSIONS = {'.zip', '.chatbook'}
     VALID_JSON_EXTENSIONS = {'.json'}
+    VALID_SQLITE_EXTENSIONS = {'.db', '.sqlite'}
 
     # Security patterns
     PATH_TRAVERSAL_PATTERN = re.compile(r'(\.\./|\.\.\\|^/|^~)')
@@ -114,6 +115,19 @@ class ChatbookValidator:
             Tuple of (is_valid, error_message, sanitized_filename)
         """
         return cls._validate_filename_for_extensions(filename, cls.VALID_JSON_EXTENSIONS)
+
+    @classmethod
+    def validate_sqlite_filename(cls, filename: str) -> tuple[bool, Optional[str], str]:
+        """
+        Validate and sanitize an OpenWebUI SQLite database import filename.
+
+        Args:
+            filename: The filename to validate
+
+        Returns:
+            Tuple of (is_valid, error_message, sanitized_filename)
+        """
+        return cls._validate_filename_for_extensions(filename, cls.VALID_SQLITE_EXTENSIONS)
 
     @classmethod
     def _validate_filename_for_extensions(

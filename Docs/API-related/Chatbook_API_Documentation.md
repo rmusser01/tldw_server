@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Chatbook API provides functionality for exporting and importing collections of content (conversations, notes, characters, etc.) in a portable archive format. It also supports importing OpenWebUI chat export JSON through the same import and preview endpoints. This enables users to backup, share, and migrate their data between instances or users.
+The Chatbook API provides functionality for exporting and importing collections of content (conversations, notes, characters, etc.) in a portable archive format. It also supports importing OpenWebUI chat export JSON and uploaded OpenWebUI `webui.db` database files through the same import and preview endpoints. This enables users to backup, share, and migrate their data between instances or users.
 
 Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 
@@ -64,6 +64,7 @@ Import (sync/async)
          → Save temp → Branch by source_format
          → Chatbook archive: Validate ZIP → Secure extract → Import selections
          → OpenWebUI JSON: Parse export JSON → Import chat trees
+         → OpenWebUI DB: Preview users → Require selected user → Import that user's chat trees and mirror folders
          ← Sync: { success, imported_items, warnings } or Async: { job_id }
 ```
 
@@ -139,11 +140,12 @@ Implementation notes:
 
 **Endpoint**: `POST /api/v1/chatbooks/import`
 
-**Description**: Import content from an uploaded chatbook archive or OpenWebUI chat export JSON.
+**Description**: Import content from an uploaded chatbook archive, OpenWebUI chat export JSON, or OpenWebUI webui.db database.
 
 **Request**: Multipart form data
 - `file` (form field): The import file (required)
-- `source_format` (form field): `chatbook` (default) or `openwebui_json`
+- `source_format` (form field): `chatbook` (default), `openwebui_json`, or `openwebui_db`
+- `selected_openwebui_user_id` (form field): required when `source_format=openwebui_db`; use a source user id returned by preview
 - `conflict_resolution` (form field): `skip` (default) or `rename` for current import flows
 - `prefix_imported` (form field): boolean, default `false`
 - `content_selections` (form field): optional JSON object encoded as a string; unsupported content types are rejected
@@ -153,6 +155,7 @@ Supported multipart fields:
 ```json
 {
   "source_format": "chatbook",
+  "selected_openwebui_user_id": "user_abc123",
   "content_selections": "{\"conversation\":[\"conv_123\"],\"note\":[]}",
   "content_selections_json_shape": {
     "conversation": ["conv_123"],  // Only import specific items
@@ -166,9 +169,11 @@ Supported multipart fields:
 }
 ```
 
-For `source_format=chatbook`, the upload must be a `.zip` or `.chatbook` archive. For `source_format=openwebui_json`, the upload must be a safe `.json` filename and the server does not run ZIP validation or Chatbook manifest extraction.
+For `source_format=chatbook`, the upload must be a `.zip` or `.chatbook` archive. For `source_format=openwebui_json`, the upload must be a safe `.json` filename and the server does not run ZIP validation or Chatbook manifest extraction. For `source_format=openwebui_db`, the upload must be a safe `.db` or `.sqlite` filename and a valid SQLite database.
 
-OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It imports every valid chat as one tldw conversation and preserves all valid message branches through `parent_message_id`. Duplicate detection uses `source=openwebui` and a deterministic external reference. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, direct `webui.db` import, admin export import, live OpenWebUI server import, attachment hydration, media import, embeddings import, or content selections.
+OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It imports every valid chat as one tldw conversation and preserves all valid message branches through `parent_message_id`.
+
+OpenWebUI webui.db database import supports uploaded SQLite databases copied from an OpenWebUI instance. Preview first, choose exactly one `selected_openwebui_user_id`, then import with `source_format=openwebui_db`. The import reads only chats owned by the selected source user. Source folders are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`, and folder links are attached to imported conversations. Duplicate detection uses `source=openwebui` and a deterministic external reference for both JSON and DB imports. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, admin export import, live OpenWebUI server import, attachment hydration, media import, embeddings import, or content selections. Files, images, and artifacts import as metadata references only.
 
 **Response**:
 ```json
@@ -202,15 +207,34 @@ OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It im
 }
 ```
 
+**OpenWebUI Database Response**:
+```json
+{
+  "source_format": "openwebui_db",
+  "success": true,
+  "message": "OpenWebUI database chats imported successfully",
+  "openwebui_db_result": {
+    "imported_chats": 4,
+    "skipped_chats": 1,
+    "failed_chats": 0,
+    "imported_messages": 128,
+    "duplicate_chats": 1,
+    "mirrored_folders": 3,
+    "folder_links": 4,
+    "warnings": []
+  }
+}
+```
+
 ### 3. Preview Chatbook
 
 **Endpoint**: `POST /api/v1/chatbooks/preview`
 
-**Description**: Preview chatbook archive or OpenWebUI JSON contents without importing.
+**Description**: Preview chatbook archive, OpenWebUI JSON contents, or OpenWebUI database users without importing.
 
 **Request**: Multipart form data
 - `file`: The file to preview
-- `source_format`: `chatbook` (default) or `openwebui_json`
+- `source_format`: `chatbook` (default), `openwebui_json`, or `openwebui_db`
 
 **Response**:
 ```json
@@ -253,6 +277,34 @@ OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It im
         "warning_count": 0
       }
     ]
+  }
+}
+```
+
+**OpenWebUI Database Preview Response**:
+```json
+{
+  "source_format": "openwebui_db",
+  "openwebui_db_preview": {
+    "user_count": 2,
+    "users": [
+      {
+        "source_user_id": "user_abc123",
+        "display_label": "Alice",
+        "email": "alice@example.test",
+        "chat_count": 12,
+        "message_count": 344,
+        "folder_count": 5,
+        "branched_chat_count": 3,
+        "duplicate_chat_count": 1,
+        "archived_chat_count": 2,
+        "pinned_chat_count": 4,
+        "attachment_reference_count": 8,
+        "warning_count": 0,
+        "warnings": []
+      }
+    ],
+    "warnings": []
   }
 }
 ```
@@ -454,7 +506,7 @@ Lightweight liveness check for the Chatbooks subsystem.
 - merge: Combine with existing (future feature)
 ```
 
-OpenWebUI JSON imports support `skip` and `rename` in v1.
+OpenWebUI JSON and database imports support `skip` and `rename` in v1.
 
 ### ExportStatus Enum
 ```
