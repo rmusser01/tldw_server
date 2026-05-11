@@ -68,12 +68,29 @@ passed; CLI JSON manifest emitted for `stub-smoke`; `py_compile` passed;
 
 Draft PR created: https://github.com/rmusser01/tldw_server/pull/1555.
 
+Review sweep for PR #1555: actionable feedback covers shell-safe Markdown
+rendering, run_manifest missing-dependency handling, run_manifest tests, test
+return type hints, and _command_env docstring. Reopening task for review fixes.
+
+Review fixes for PR #1555 implemented: shell-safe Markdown rendering with
+placeholder-preserving env quoting; optional missing executable/cwd handling for
+safe-to-run manifest commands; _command_env docstring; type hints for test
+helper/tests; run_manifest tests for live env refusal, nonzero propagation, and
+optional missing executable skip.
+
+Review-fix verification: `python -m pytest
+tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q`
+passed; `stub-smoke` JSON emitted; Markdown output quotes `TLDW_WEB_CMD` and
+`--grep` pattern; `live-e2e --run` refuses without required env with exit 2;
+`py_compile` passed; `git diff --check` passed; Bandit JSON at
+`/tmp/bandit_acp_certification_smoke_review.json` has zero results.
+
 ## Final Summary
 
-Added a reproducible ACP downstream-agent certification workflow for #1539 PR2.
-The new checklist distinguishes stub-smoke, live-E2E, and sandbox evidence; the
-helper emits/runs static command manifests that reuse existing backend ACP
-suites, mocked browser setup/run/diagnose coverage, and Go runner verification;
-and ACP protocol/readiness/matrix docs now link to the workflow. Verified with
-focused pytest, CLI JSON output, py_compile, git diff --check, and Bandit on the
-new helper with zero findings.
+Added a reproducible ACP downstream-agent certification workflow for #1539 PR2
+and addressed PR #1555 review feedback. The helper now renders shell-safe
+Markdown command lines, preserves live env placeholders, skips missing optional
+prerequisites with explicit reasons, and has focused tests for manifest shape,
+Markdown rendering, live safety refusal, nonzero return propagation, and
+optional missing executable behavior. Verified with focused pytest, CLI manifest
+checks, py_compile, git diff --check, and Bandit with zero findings.

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 # subprocess is intentionally used to run static manifest argv with shell=False.
 import subprocess  # nosec B404
 import sys
@@ -93,6 +94,7 @@ _MANIFESTS: dict[str, dict[str, Any]] = {
                     "mcp_injection",
                 ],
                 "safe_to_run_by_default": True,
+                "optional": True,
             },
         ],
     },
@@ -188,9 +190,10 @@ def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
     lines.append("## Commands")
     for command in manifest["commands"]:
         env_prefix = " ".join(
-            f"{key}={value}" for key, value in sorted(command.get("env", {}).items())
+            f"{key}={_quote_shell_env_value(str(value))}"
+            for key, value in sorted(command.get("env", {}).items())
         )
-        rendered_command = " ".join(command["argv"])
+        rendered_command = shlex.join(str(arg) for arg in command["argv"])
         if env_prefix:
             rendered_command = f"{env_prefix} {rendered_command}"
         lines.extend(
@@ -201,6 +204,7 @@ def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
                 "",
                 f"- cwd: `{command['cwd']}`",
                 f"- safe_to_run_by_default: `{str(command['safe_to_run_by_default']).lower()}`",
+                f"- optional: `{str(command.get('optional', False)).lower()}`",
                 f"- capabilities: `{', '.join(command['capabilities'])}`",
                 "",
                 "```bash",
@@ -212,7 +216,20 @@ def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _quote_shell_env_value(value: str) -> str:
+    """Return a shell-safe env value while preserving ${VAR} placeholders."""
+    if value.startswith("${") and value.endswith("}"):
+        return value
+    return shlex.quote(value)
+
+
 def _command_env(command: dict[str, Any]) -> dict[str, str]:
+    """Merge manifest env overrides into the process environment.
+
+    Values of the form `${NAME}` are resolved from the current process
+    environment so live-E2E manifests can declare required variables without
+    copying secret values into the manifest itself.
+    """
     env = os.environ.copy()
     for key, value in command.get("env", {}).items():
         text = str(value)
@@ -222,6 +239,36 @@ def _command_env(command: dict[str, Any]) -> dict[str, str]:
         else:
             env[key] = text
     return env
+
+
+def _missing_executable_reason(command: dict[str, Any], cwd: Path) -> str | None:
+    """Return a skip/fail reason when a path-like executable is unavailable."""
+    argv = command.get("argv", [])
+    if not argv:
+        return "command argv is empty"
+
+    executable = str(argv[0])
+    if "/" not in executable and not executable.startswith("."):
+        return None
+
+    executable_path = Path(executable)
+    if not executable_path.is_absolute():
+        executable_path = cwd / executable_path
+    if not executable_path.exists():
+        return f"executable not found: {executable_path}"
+    if not os.access(executable_path, os.X_OK):
+        return f"executable is not runnable: {executable_path}"
+    return None
+
+
+def _handle_missing_prerequisite(command: dict[str, Any], reason: str) -> int | None:
+    """Print skip/fail output for missing command prerequisites."""
+    command_id = command.get("id", "<unknown>")
+    if command.get("optional", False):
+        print(f"SKIP {command_id}: {reason}")
+        return None
+    print(f"FAIL {command_id}: {reason}", file=sys.stderr)
+    return 127
 
 
 def run_manifest(profile: str) -> int:
@@ -244,13 +291,30 @@ def run_manifest(profile: str) -> int:
         if not command["safe_to_run_by_default"] and not manifest["requires_live_agent"]:
             continue
         cwd = ROOT / command["cwd"]
+        if not cwd.exists():
+            handled = _handle_missing_prerequisite(command, f"cwd not found: {cwd}")
+            if handled is None:
+                continue
+            return handled
+        missing_executable = _missing_executable_reason(command, cwd)
+        if missing_executable:
+            handled = _handle_missing_prerequisite(command, missing_executable)
+            if handled is None:
+                continue
+            return handled
         print(f"==> {command['id']} ({cwd})")
-        result = subprocess.run(  # nosec B603
-            command["argv"],
-            cwd=str(cwd),
-            env=_command_env(command),
-            check=False,
-        )
+        try:
+            result = subprocess.run(  # nosec B603
+                command["argv"],
+                cwd=str(cwd),
+                env=_command_env(command),
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            handled = _handle_missing_prerequisite(command, str(exc))
+            if handled is None:
+                continue
+            return handled
         if result.returncode != 0:
             return int(result.returncode)
     return 0
