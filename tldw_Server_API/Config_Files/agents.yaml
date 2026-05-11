@@ -62,7 +62,7 @@ agents:
     docs_url: "https://aider.chat"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Aider ACP compatibility is not certified yet."
+    compatibility_notes: "Configured-agent setup is documented, but live Aider ACP compatibility remains blocked until an ACP-compatible Aider command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: goose
@@ -76,7 +76,7 @@ agents:
     docs_url: "https://github.com/block/goose"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Goose ACP compatibility is not certified yet."
+    compatibility_notes: "Configured-agent setup is documented, but live Goose ACP compatibility remains blocked until an ACP-compatible Goose command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: continue_dev
@@ -90,7 +90,7 @@ agents:
     default: false
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Continue ACP compatibility is not certified yet."
+    compatibility_notes: "Configured-agent setup is documented, but live Continue ACP compatibility remains blocked until an ACP-compatible Continue command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: opencode
@@ -106,7 +106,7 @@ agents:
     default: false
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live OpenCode ACP compatibility is not certified yet."
+    compatibility_notes: "Configured-agent setup is documented, but live OpenCode ACP compatibility remains blocked until an ACP-compatible OpenCode command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: custom
@@ -119,5 +119,5 @@ agents:
     default: false
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Custom ACP profiles require certification evidence before release claims."
+    compatibility_notes: "Custom ACP profiles require a named command, workspace policy, and certification evidence before release claims."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
