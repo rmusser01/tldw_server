@@ -82,6 +82,16 @@ def get_persona_telemetry_metrics_summary(registry: MetricsRegistry | None = Non
         },
         "ior_out_of_band_by_band": ior_band_totals,
         "safety_flags": safety_flag_totals,
+        "samples_by_assistant_kind": metrics_registry.get_metric_sample_counts_by_label(
+            "chat_persona_ioo_ratio",
+            "assistant_kind",
+            missing_label="unknown",
+        ),
+        "samples_by_assistant_id": metrics_registry.get_metric_sample_counts_by_label(
+            "chat_persona_ioo_ratio",
+            "assistant_id",
+            missing_label="none",
+        ),
     }
 
 

@@ -2115,6 +2115,31 @@ class MetricsRegistry:
             "latest_timestamp": values[-1].timestamp
         }
 
+    def get_metric_sample_counts_by_label(
+        self,
+        metric_name: str,
+        label_name: str,
+        *,
+        missing_label: str,
+    ) -> dict[str, int]:
+        """Return sample counts grouped by a normalized label key."""
+        metric_name = self._normalize_metric_name(metric_name)
+        normalized_label = self._normalize_label_name(label_name)
+        totals: dict[str, int] = defaultdict(int)
+        with self._lock:
+            histogram_series = dict(self._cumulative_histograms.get(metric_name, {}))
+            if histogram_series:
+                for label_key, histogram in histogram_series.items():
+                    label_value = dict(label_key).get(normalized_label) or missing_label
+                    totals[str(label_value)] += int(histogram.get("count", 0))
+                return dict(sorted(totals.items()))
+            values = list(self.values.get(metric_name, ()))
+
+        for metric_value in values:
+            label_value = metric_value.labels.get(normalized_label) or missing_label
+            totals[str(label_value)] += 1
+        return dict(sorted(totals.items()))
+
     def get_all_metrics(self) -> dict[str, dict[str, Any]]:
         """
         Get all current metric values and statistics.
