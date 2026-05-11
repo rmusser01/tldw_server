@@ -114,7 +114,7 @@ Modify:
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_db_helpers.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1.1: Write failing DB helper tests
 
@@ -122,7 +122,7 @@ Modify:
 - Create: `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_db_helpers.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py`
 
-- [ ] Add a temporary SQLite fixture with `user`, `chat`, `folder`, `file`, and `chat_file` tables:
+- [x] Add a temporary SQLite fixture with `user`, `chat`, `folder`, `file`, and `chat_file` tables:
 
 ```python
 def write_openwebui_hydration_db(path: Path) -> Path:
@@ -135,12 +135,12 @@ def write_openwebui_hydration_db(path: Path) -> Path:
     ...
 ```
 
-- [ ] Test `validate_openwebui_file_schema(conn)` fails when `file` is missing.
-- [ ] Test `validate_openwebui_file_schema(conn)` fails when `file.id`, `file.user_id`, or `file.filename` is missing.
-- [ ] Test baseline `validate_openwebui_schema(conn)` still passes without `file` and `chat_file`.
-- [ ] Test `load_openwebui_file_rows_for_ids(conn, ["file-a"], user_id="owui-user")` returns only that user's row.
-- [ ] Test `load_openwebui_chat_file_rows_for_chats(conn, ["chat-a"], user_id="owui-user")` ignores unrelated chats/users.
-- [ ] Test helpers use bound parameters by checking ids containing quotes are treated as literal values.
+- [x] Test `validate_openwebui_file_schema(conn)` fails when `file` is missing.
+- [x] Test `validate_openwebui_file_schema(conn)` fails when `file.id`, `file.user_id`, or `file.filename` is missing.
+- [x] Test baseline `validate_openwebui_schema(conn)` still passes without `file` and `chat_file`.
+- [x] Test `load_openwebui_file_rows_for_ids(conn, ["file-a"], user_id="owui-user")` returns only that user's row.
+- [x] Test `load_openwebui_chat_file_rows_for_chats(conn, ["chat-a"], user_id="owui-user")` ignores unrelated chats/users.
+- [x] Test helpers use bound parameters by checking ids containing quotes are treated as literal values.
 
 Run:
 
@@ -156,13 +156,13 @@ Expected: FAIL because the helper functions do not exist.
 **Files:**
 - Modify: `tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py`
 
-- [ ] Add `HYDRATION_FILE_SCHEMA` and `HYDRATION_CHAT_FILE_SCHEMA` constants separate from `REQUIRED_SCHEMA`.
-- [ ] Add `validate_openwebui_file_schema(conn: sqlite3.Connection) -> None`.
-- [ ] Add `load_openwebui_file_rows_for_ids(conn, file_ids, user_id=None)`.
-- [ ] Add `load_openwebui_chat_file_rows_for_chats(conn, chat_ids, user_id=None)`.
-- [ ] Add `iter_openwebui_files_for_user(conn, user_id)` only for future/full-library support; do not use it for v1 default hydration scope.
-- [ ] Keep all SQL parameterized.
-- [ ] Return `sqlite3.Row` objects for consistency with the existing OpenWebUI DB helpers.
+- [x] Add `HYDRATION_FILE_SCHEMA` and `HYDRATION_CHAT_FILE_SCHEMA` constants separate from `REQUIRED_SCHEMA`.
+- [x] Add `validate_openwebui_file_schema(conn: sqlite3.Connection) -> None`.
+- [x] Add `load_openwebui_file_rows_for_ids(conn, file_ids, user_id=None)`.
+- [x] Add `load_openwebui_chat_file_rows_for_chats(conn, chat_ids, user_id=None)`.
+- [x] Add `iter_openwebui_files_for_user(conn, user_id)` only for future/full-library support; do not use it for v1 default hydration scope.
+- [x] Keep all SQL parameterized.
+- [x] Return `sqlite3.Row` objects for consistency with the existing OpenWebUI DB helpers.
 
 Run:
 
@@ -176,8 +176,8 @@ Expected: PASS. The second command proves text-only DB import validation was not
 
 ### Task 1.3: Commit DB helper slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py \
