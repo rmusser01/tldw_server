@@ -1029,13 +1029,14 @@ git commit -m "Add Backlog.md document and milestone parity"
 - Modify: `tools/backlog-py/src/backlog_py/compat/inventory.py`
 - Modify: `tools/backlog-py/tests/fixtures/oracle/manifest.yml`
 - Modify: `tools/backlog-py/README.md`
-- Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
+- Modify: `Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md`
+- Modify: `backlog/tasks/task-244.10 - Implement-Backlog.md-Python-clone-agent-cutover-candidate-validation.md`
 
-- [ ] **Step 1: Write parity matrix doc**
+- [x] **Step 1: Write parity matrix doc**
 
 Document every agent-critical CLI/MCP operation, expected command/tool/resource, status, and fixture coverage.
 
-- [ ] **Step 2: Expand inventory and manifest coverage**
+- [x] **Step 2: Expand inventory and manifest coverage**
 
 Update `tools/backlog-py/src/backlog_py/compat/inventory.py` and
 `tools/backlog-py/tests/fixtures/oracle/manifest.yml` so every operation in the
@@ -1044,7 +1045,7 @@ a fixture or as an explicit later-milestone blocker. The matrix must not silentl
 ignore task create/edit, document operations, milestone operations, or Definition
 of Done tools.
 
-- [ ] **Step 3: Write matrix test**
+- [x] **Step 3: Write matrix test**
 
 The test should fail if any agent-critical item lacks fixture coverage or implementation status:
 
@@ -1068,7 +1069,7 @@ def test_agent_critical_inventory_has_fixture_coverage():
     assert missing == []
 ```
 
-- [ ] **Step 4: Run full local validation**
+- [x] **Step 4: Run full local validation**
 
 Run:
 
@@ -1081,7 +1082,7 @@ git diff --check
 
 Expected: all checks pass.
 
-- [ ] **Step 5: Run copied-repo mutation smoke**
+- [x] **Step 5: Run copied-repo mutation smoke**
 
 Run against a temporary copy only:
 
@@ -1095,10 +1096,12 @@ backlog-py --cwd "$tmpdir" task list --plain
 
 Expected: commands exit 0 and no live repository files change.
 
-- [ ] **Step 6: Commit Task 9**
+- [x] **Step 6: Commit Task 9**
 
 ```bash
-git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
+git add tools/backlog-py \
+  Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md \
+  "backlog/tasks/task-244.10 - Implement-Backlog.md-Python-clone-agent-cutover-candidate-validation.md"
 git commit -m "Document Backlog.md agent parity gate"
 ```
 
