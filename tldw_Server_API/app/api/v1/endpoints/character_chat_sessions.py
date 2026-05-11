@@ -67,6 +67,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     GreetingSelectResponse,
     LorebookDiagnosticExportResponse,
     MessageResponse,
+    PromptPreviewResponse,
     PresetCreate,
     PresetDetail,
     PresetListResponse,
@@ -128,6 +129,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
+    PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
 )
 
@@ -4154,6 +4156,10 @@ _TOKEN_BUDGET_PRESET = 180
 _TOKEN_BUDGET_STEERING = 120
 _TOKEN_BUDGET_LOREBOOK = 420
 _TOKEN_BUDGET_WORLD_BOOK = 240
+_PERSONA_PREVIEW_MAX_ID_CHARS = 128
+_PERSONA_PREVIEW_MAX_TEXT_CHARS = 160
+_PERSONA_PREVIEW_MAX_ITEMS = 20
+_PERSONA_PREVIEW_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 # Priority order for truncation (highest priority first)
 _TRUNCATION_PRIORITY = [
@@ -4178,6 +4184,66 @@ _CONTRADICTORY_DIRECTIVE_PAIRS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _normalize_persona_preview_id(value: Any, *, default: str = "none") -> str:
+    """Return a bounded identifier for persona prompt-preview diagnostics."""
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return default
+    if (
+        len(raw_value) <= _PERSONA_PREVIEW_MAX_ID_CHARS
+        and _PERSONA_PREVIEW_SAFE_ID_RE.fullmatch(raw_value)
+    ):
+        return raw_value
+    digest = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+    return f"hash:{digest}"
+
+
+def _truncate_persona_preview_text(value: Any) -> str:
+    """Return a compact text preview for prompt-preview diagnostics."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= _PERSONA_PREVIEW_MAX_TEXT_CHARS:
+        return text
+    return f"{text[:_PERSONA_PREVIEW_MAX_TEXT_CHARS].rstrip()}..."
+
+
+def _selected_persona_preview_reason(exemplar: dict[str, Any]) -> str:
+    """Return a bounded reason for a selected persona exemplar."""
+    bucket = _normalize_persona_preview_id(
+        exemplar.get("selection_bucket") or exemplar.get("kind"),
+        default="selected",
+    )
+    if bucket == "selected":
+        return bucket
+    return _normalize_persona_preview_id(f"{bucket}_selected")
+
+
+def _build_persona_preview_assembly(
+    *,
+    conversation: dict[str, Any],
+    exemplars: list[dict[str, Any]],
+    requested_scenario_tags: list[str] | None = None,
+    requested_tone: str | None = None,
+    current_turn_text: str | None = None,
+    conflicting_capability_tags: list[str] | None = None,
+) -> PersonaExemplarPromptAssembly | None:
+    """Build shared persona exemplar preview assembly for persona-backed chats."""
+    if conversation.get("assistant_kind") != "persona":
+        return None
+
+    persona_id = str(conversation.get("assistant_id") or "").strip()
+    if not persona_id:
+        return None
+
+    return assemble_persona_exemplar_prompt(
+        persona_id=persona_id,
+        exemplars=exemplars,
+        requested_scenario_tags=requested_scenario_tags,
+        requested_tone=requested_tone,
+        current_turn_text=current_turn_text,
+        conflicting_capability_tags=conflicting_capability_tags,
+    )
+
+
 def _build_persona_preview_sections(
     *,
     conversation: dict[str, Any],
@@ -4188,22 +4254,86 @@ def _build_persona_preview_sections(
     conflicting_capability_tags: list[str] | None = None,
 ) -> list[tuple[str, str, int]]:
     """Build persona exemplar preview sections using the shared assembly helper."""
-    if conversation.get("assistant_kind") != "persona":
-        return []
-
-    persona_id = str(conversation.get("assistant_id") or "").strip()
-    if not persona_id:
-        return []
-
-    assembly = assemble_persona_exemplar_prompt(
-        persona_id=persona_id,
+    assembly = _build_persona_preview_assembly(
+        conversation=conversation,
         exemplars=exemplars,
         requested_scenario_tags=requested_scenario_tags,
         requested_tone=requested_tone,
         current_turn_text=current_turn_text,
         conflicting_capability_tags=conflicting_capability_tags,
     )
+    if assembly is None:
+        return []
     return assembly.sections
+
+
+def _build_persona_preview_context(
+    *,
+    conversation: dict[str, Any],
+    assembly: PersonaExemplarPromptAssembly | None,
+    current_turn_source: str,
+    current_turn_text: str | None,
+) -> dict[str, Any]:
+    """Build a bounded effective-context preview for persona-backed prompt assembly."""
+    if conversation.get("assistant_kind") != "persona":
+        return {"active": False, "reason": "not_persona_chat"}
+
+    persona_id = str(conversation.get("assistant_id") or "").strip()
+    if not persona_id:
+        return {"active": False, "reason": "missing_persona_id"}
+
+    selected_exemplar_ids: list[str] = []
+    selected_exemplars: list[dict[str, str]] = []
+    rejected_exemplars: list[dict[str, str]] = []
+    section_names: list[str] = []
+    if assembly is not None:
+        section_names = [
+            _normalize_persona_preview_id(name)
+            for name, _, _ in assembly.sections[:_PERSONA_PREVIEW_MAX_ITEMS]
+        ]
+        selected_exemplar_ids = [
+            _normalize_persona_preview_id(item.get("id"))
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        selected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _selected_persona_preview_reason(item),
+            }
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        rejected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _normalize_persona_preview_id(item.get("reason"), default="unspecified"),
+            }
+            for item in assembly.rejected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+
+    applied = bool(section_names)
+    return {
+        "active": True,
+        "assistant_kind": "persona",
+        "assistant_id": _normalize_persona_preview_id(persona_id),
+        "persona_memory_mode": _normalize_persona_preview_id(
+            conversation.get("persona_memory_mode"),
+            default="read_only",
+        ),
+        "applied": applied,
+        "reason": "selected" if applied else "no_exemplars_selected",
+        "section_names": section_names,
+        "selected_exemplar_ids": selected_exemplar_ids,
+        "selected_exemplars": selected_exemplars,
+        "rejected_exemplars": rejected_exemplars,
+        "current_turn": {
+            "source": _normalize_persona_preview_id(current_turn_source),
+            "has_text": bool(str(current_turn_text or "").strip()),
+            "preview": _truncate_persona_preview_text(current_turn_text),
+        },
+    }
 
 
 def _estimate_tokens(text: str) -> int:
@@ -4263,6 +4393,8 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
 
 @router.post(
     "/{chat_id}/prompt-preview",
+    response_model=PromptPreviewResponse,
+    response_model_exclude_unset=True,
     summary="Preview assembled prompt with token budget breakdown",
     tags=["Chat Sessions"],
 )
@@ -4464,26 +4596,43 @@ async def prompt_assembly_preview(
             pass
 
         persona_preview_sections: list[tuple[str, str, int]] = []
+        persona_preview_context: dict[str, Any] | None = None
         if conversation.get("assistant_kind") == "persona" and conversation.get("assistant_id"):
-            persona_preview_sections = _build_persona_preview_sections(
+            stripped_append_user_message = str(body.append_user_message or "").strip()
+            persona_current_turn_text = stripped_append_user_message or next(
+                (
+                    str(message.get("content") or "").strip()
+                    for message in reversed(formatted)
+                    if str(message.get("role") or "").strip().lower() == "user"
+                    and str(message.get("content") or "").strip()
+                ),
+                "",
+            )
+            persona_current_turn_source = (
+                "append_user_message"
+                if stripped_append_user_message
+                else ("history" if persona_current_turn_text else "none")
+            )
+            persona_exemplars = db.list_persona_exemplars(
+                user_id=str(current_user.id),
+                persona_id=str(conversation.get("assistant_id")),
+                include_disabled=False,
+                include_deleted=False,
+                limit=50,
+                offset=0,
+            )
+            persona_preview_assembly = _build_persona_preview_assembly(
                 conversation=conversation,
-                exemplars=db.list_persona_exemplars(
-                    user_id=str(current_user.id),
-                    persona_id=str(conversation.get("assistant_id")),
-                    include_disabled=False,
-                    include_deleted=False,
-                    limit=50,
-                    offset=0,
-                ),
-                current_turn_text=body.append_user_message or next(
-                    (
-                        str(message.get("content") or "").strip()
-                        for message in reversed(formatted)
-                        if str(message.get("role") or "").strip().lower() == "user"
-                        and str(message.get("content") or "").strip()
-                    ),
-                    "",
-                ),
+                exemplars=persona_exemplars,
+                current_turn_text=persona_current_turn_text,
+            )
+            if persona_preview_assembly is not None:
+                persona_preview_sections = persona_preview_assembly.sections
+            persona_preview_context = _build_persona_preview_context(
+                conversation=conversation,
+                assembly=persona_preview_assembly,
+                current_turn_source=persona_current_turn_source,
+                current_turn_text=persona_current_turn_text,
             )
 
         sections_raw: list[tuple[str, str, int]] = [
@@ -4545,7 +4694,7 @@ async def prompt_assembly_preview(
         conflicts = _extract_scalar_conflicts(conflict_source_sections)
         conflicts.extend(_extract_directive_conflicts(conflict_text))
 
-        return {
+        response_payload = {
             "chat_id": chat_id,
             "character_id": turn_context.get("active_character_id") or conversation.get("character_id"),
             "character_name": char_name,
@@ -4560,6 +4709,9 @@ async def prompt_assembly_preview(
             "conflicts": conflicts or None,
             "examples": _PREVIEW_CONFLICT_EXAMPLES,
         }
+        if persona_preview_context is not None:
+            response_payload["persona_context"] = persona_preview_context
+        return response_payload
 
     except HTTPException:
         raise
