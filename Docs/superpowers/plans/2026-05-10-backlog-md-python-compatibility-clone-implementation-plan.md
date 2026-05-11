@@ -1111,9 +1111,10 @@ git commit -m "Document Backlog.md agent parity gate"
 - Create: `tools/backlog-py/docs/browser-parity.md`
 - Create: `tools/backlog-py/docs/interactive-deferrals.md`
 - Modify: `tools/backlog-py/README.md`
-- Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
+- Modify: `Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md`
+- Modify: `backlog/tasks/task-244.11 - Document-Backlog.md-Python-clone-browser-and-interactive-deferrals.md`
 
-- [ ] **Step 1: Document browser parity requirements**
+- [x] **Step 1: Document browser parity requirements**
 
 Cover:
 
@@ -1129,7 +1130,7 @@ Cover:
 - service mode
 - mobile behavior
 
-- [ ] **Step 2: Classify each browser item**
+- [x] **Step 2: Classify each browser item**
 
 Classify each as:
 
@@ -1138,7 +1139,7 @@ Classify each as:
 - intentionally deferred
 - rejected with reason
 
-- [ ] **Step 3: Document interactive CLI/TUI deferrals**
+- [x] **Step 3: Document interactive CLI/TUI deferrals**
 
 Cover:
 
@@ -1151,7 +1152,7 @@ Cover:
 - auto-commit and hook bypass
 - remote operations
 
-- [ ] **Step 4: Run docs verification**
+- [x] **Step 4: Run docs verification**
 
 Run:
 
@@ -1162,10 +1163,12 @@ git diff --check
 
 Expected: search finds documented decisions and diff check passes.
 
-- [ ] **Step 5: Commit Task 10**
+- [x] **Step 5: Commit Task 10**
 
 ```bash
-git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
+git add tools/backlog-py \
+  Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md \
+  "backlog/tasks/task-244.11 - Document-Backlog.md-Python-clone-browser-and-interactive-deferrals.md"
 git commit -m "Document Backlog.md browser parity deferrals"
 ```
 

@@ -37,3 +37,11 @@ python -m pytest tools/backlog-py/tests/test_agent_critical_matrix.py -v
 Before cutover, also run the full local validation and copied-repo mutation
 smoke documented in the implementation plan. Mutation smoke commands must use a
 temporary copy, not the live repository backlog.
+
+Browser and interactive behavior is tracked separately from the first agent
+cutover candidate:
+
+- `docs/browser-parity.md` records browser requirements such as drag-and-drop,
+  service mode, rich Markdown editing, and mobile behavior.
+- `docs/interactive-deferrals.md` records CLI/TUI, `onStatusChange`,
+  auto-commit, hook bypass, and remote-operation deferrals.
