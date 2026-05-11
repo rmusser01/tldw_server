@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.VN_Play.constants import MODE_SCRIPTED_STORY
 from tldw_Server_API.app.core.VN_Play.models import VisualDirectiveResolution
 from tldw_Server_API.app.core.VN_Play.service import (
     DeterministicVNPlayTurnAdapter,
+    VNPlayConflictError,
     VNPlayService,
     VNPlayTurnError,
 )
@@ -279,6 +280,148 @@ async def test_confirmation_gated_generation_pauses_without_model_call(
     assert request["status"] == "pending_confirmation"
 
 
+def _waiting_generation_request_id(service: VNPlayService, session_id: int) -> int:
+    position = service.get_session(session_id).script_position
+    waiting = position.get("waiting_generation_confirmation")
+    assert isinstance(waiting, Mapping)
+    return int(waiting["generation_request_id"])
+
+
+@pytest.mark.asyncio
+async def test_cancel_generation_confirmation_with_on_cancel_runs_authored_branch(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service, session, adapter, _ = _scripted_service(
+        chacha_db,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "confirm-me",
+                        "prompt": "Write after confirmation",
+                        "requires_user_confirm": True,
+                        "on_cancel": "cancelled",
+                    }
+                ],
+                "cancelled": [
+                    {"op": "narrate", "text": "The generation was cancelled."},
+                    {"op": "end"},
+                ],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="cancel-with-branch-pause",
+    )
+    request_id = _waiting_generation_request_id(service, session.id)
+
+    response = service.cancel_script_generation_request(
+        session.id,
+        generation_request_id=request_id,
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="cancel-with-branch",
+    )
+
+    assert adapter.calls == []
+    assert response["scene_version"] == 2
+    assert response["script_state"]["ended"] is True
+    model_event = next(event for event in response["events"] if event["event_type"] == "model_turn")
+    assert model_event["event_payload"]["narrative_text"] == "The generation was cancelled."
+    request = service.repo.get_generation_request(request_id, owner_user_id=42)
+    assert request is not None
+    assert request["status"] == "canceled"
+    assert request["cancel_action_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_generation_confirmation_without_on_cancel_leaves_stable_state(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service, session, adapter, _ = _scripted_service(
+        chacha_db,
+        program=_program_with_generates(
+            {
+                "op": "generate",
+                "id": "confirm-me",
+                "prompt": "Write after confirmation",
+                "requires_user_confirm": True,
+            }
+        ),
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="cancel-no-branch-pause",
+    )
+    request_id = _waiting_generation_request_id(service, session.id)
+
+    response = service.cancel_script_generation_request(
+        session.id,
+        generation_request_id=request_id,
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="cancel-no-branch",
+    )
+
+    assert adapter.calls == []
+    assert response["scene_version"] == 2
+    assert response["script_state"]["position"]["waiting_reason"] == "generation_canceled"
+    assert "waiting_generation_confirmation" not in service.get_session(session.id).script_position
+    request = service.repo.get_generation_request(request_id, owner_user_id=42)
+    assert request is not None
+    assert request["status"] == "canceled"
+
+    with pytest.raises(VNPlayConflictError, match="script_advance_blocked"):
+        await service.advance_script(
+            session.id,
+            client_scene_version=int(response["scene_version"]),
+            idempotency_key="advance-after-canceled-generation",
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_generation_invalid_on_cancel_does_not_mutate_request(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service, session, adapter, _ = _scripted_service(
+        chacha_db,
+        program=_program_with_generates(
+            {
+                "op": "generate",
+                "id": "pending",
+                "prompt": "Wait for confirmation",
+                "requires_user_confirm": True,
+                "on_cancel": "missing_label",
+            }
+        ),
+    )
+    await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="cancel-invalid-branch-start",
+    )
+    request_id = _waiting_generation_request_id(service, session.id)
+
+    with pytest.raises(VNPlayTurnError):
+        service.cancel_script_generation_request(
+            session.id,
+            generation_request_id=request_id,
+            client_scene_version=1,
+            idempotency_key="cancel-invalid-branch",
+        )
+
+    assert adapter.calls == []
+    request = service.repo.get_generation_request(request_id, owner_user_id=42)
+    assert request is not None
+    assert request["status"] == "pending_confirmation"
+
+
 @pytest.mark.asyncio
 async def test_generation_batch_cap_pauses_before_second_auto_generation(
     chacha_db: CharactersRAGDB,
@@ -342,6 +485,361 @@ async def test_generation_model_failure_persists_failed_revision_without_advanci
     )
     assert revisions[0]["status"] == "failed"
     assert revisions[0]["public_error_code"] == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_generation_creates_revision_history_and_activates_new_revision(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"narrative_dialogue","narrative":[{"text":"First beat."}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program=_program_with_generates(
+            {"op": "generate", "id": "intro", "prompt": "Write the intro"}
+        ),
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="regen-first",
+    )
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:intro",
+    )
+    assert generation is not None
+    first_revision_id = int(generation["active_revision_id"])
+    adapter.raw_content = '{"schema":"narrative_dialogue","narrative":[{"text":"Second beat."}]}'
+
+    response = await service.regenerate_script_generation(
+        session.id,
+        generation_id=int(generation["id"]),
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="regen-second",
+    )
+
+    updated_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert updated_generation is not None
+    assert int(updated_generation["active_revision_id"]) != first_revision_id
+    revisions = service.repo.list_generation_revisions(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_id=int(generation["id"]),
+    )
+    assert [revision["status"] for revision in revisions] == ["succeeded", "succeeded"]
+    assert int(revisions[0]["id"]) == int(updated_generation["active_revision_id"])
+    model_event = next(event for event in response["events"] if event["event_type"] == "model_turn")
+    assert model_event["event_payload"]["narrative_text"] == "Second beat."
+    assert response["script_state"]["position"]["progress_token"]
+
+
+@pytest.mark.asyncio
+async def test_activate_generation_revision_switches_active_output_without_rewriting_history(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"first","text":"First choice"}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "end"}],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="activate-first",
+    )
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:choice",
+    )
+    assert generation is not None
+    first_revision_id = int(generation["active_revision_id"])
+    adapter.raw_content = '{"schema":"choice_set","choices":[{"id":"second","text":"Second choice"}]}'
+    second = await service.regenerate_script_generation(
+        session.id,
+        generation_id=int(generation["id"]),
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="activate-second",
+    )
+    updated_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert updated_generation is not None
+    second_revision_id = int(updated_generation["active_revision_id"])
+
+    response = service.activate_script_generation_revision(
+        session.id,
+        generation_id=int(generation["id"]),
+        revision_id=first_revision_id,
+        client_scene_version=int(second["scene_version"]),
+        idempotency_key="activate-first-revision",
+    )
+
+    assert second_revision_id != first_revision_id
+    reactivated_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert reactivated_generation is not None
+    assert int(reactivated_generation["active_revision_id"]) == first_revision_id
+    assert response["script_state"]["waiting_choice"]["choices"][0]["id"] == "first"
+    event_types = [event["event_type"] for event in service.repo.list_events(session.id)]
+    assert event_types.count("model_turn") == 2
+    assert "script_generation_revision_activated" in event_types
+
+
+@pytest.mark.asyncio
+async def test_activate_generation_revision_is_blocked_after_downstream_material_events(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"first","text":"First choice"}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "narrate", "text": "Committed downstream text."}, {"op": "end"}],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="block-activate-first",
+    )
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:choice",
+    )
+    assert generation is not None
+    first_revision_id = int(generation["active_revision_id"])
+    adapter.raw_content = '{"schema":"choice_set","choices":[{"id":"second","text":"Second choice"}]}'
+    second = await service.regenerate_script_generation(
+        session.id,
+        generation_id=int(generation["id"]),
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="block-activate-second",
+    )
+    selected = await service.choose_script_option(
+        session.id,
+        choice_id="second",
+        client_scene_version=int(second["scene_version"]),
+        idempotency_key="commit-generated-choice",
+    )
+
+    with pytest.raises(VNPlayConflictError, match="revision_activation_blocked"):
+        service.activate_script_generation_revision(
+            session.id,
+            generation_id=int(generation["id"]),
+            revision_id=first_revision_id,
+            client_scene_version=int(selected["scene_version"]),
+            idempotency_key="blocked-activate-first",
+        )
+
+    unchanged_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert unchanged_generation is not None
+    assert int(unchanged_generation["active_revision_id"]) != first_revision_id
+
+
+@pytest.mark.asyncio
+async def test_regenerate_generation_is_blocked_after_downstream_material_events(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"choice_set","choices":[{"id":"first","text":"First choice"}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": 10,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {
+                        "op": "generate",
+                        "id": "choice",
+                        "prompt": "Choice",
+                        "output_schema": "choice_set",
+                        "on_generated_choice": "after",
+                    }
+                ],
+                "after": [{"op": "narrate", "text": "Committed downstream text."}, {"op": "end"}],
+            },
+        },
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="block-regen-first",
+    )
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:choice",
+    )
+    assert generation is not None
+    active_revision_id = int(generation["active_revision_id"])
+    selected = await service.choose_script_option(
+        session.id,
+        choice_id="first",
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="commit-before-regen",
+    )
+
+    with pytest.raises(VNPlayConflictError, match="revision_activation_blocked"):
+        await service.regenerate_script_generation(
+            session.id,
+            generation_id=int(generation["id"]),
+            client_scene_version=int(selected["scene_version"]),
+            idempotency_key="blocked-regenerate",
+        )
+
+    assert len(adapter.calls) == 1
+    unchanged_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert unchanged_generation is not None
+    assert int(unchanged_generation["active_revision_id"]) == active_revision_id
+
+
+@pytest.mark.asyncio
+async def test_activate_narrative_revision_exposes_active_public_output(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"narrative_dialogue","narrative":[{"text":"First public beat."}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program=_program_with_generates({"op": "generate", "id": "intro", "prompt": "Intro"}),
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="narrative-activate-first",
+    )
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:intro",
+    )
+    assert generation is not None
+    first_revision_id = int(generation["active_revision_id"])
+    adapter.raw_content = (
+        '{"schema":"narrative_dialogue","narrative":[{"text":"Second public beat."}]}'
+    )
+    second = await service.regenerate_script_generation(
+        session.id,
+        generation_id=int(generation["id"]),
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="narrative-activate-second",
+    )
+
+    response = service.activate_script_generation_revision(
+        session.id,
+        generation_id=int(generation["id"]),
+        revision_id=first_revision_id,
+        client_scene_version=int(second["scene_version"]),
+        idempotency_key="narrative-reactivate-first",
+    )
+
+    active_generation = response["script_state"]["active_generation"]
+    assert active_generation["revision_id"] == first_revision_id
+    assert active_generation["public_output"]["narrative"][0]["text"] == "First public beat."
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_restore_restores_active_generation_revision_map(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    adapter = ScriptedGenerationAdapter(
+        raw_content='{"schema":"narrative_dialogue","narrative":[{"text":"First checkpoint beat."}]}'
+    )
+    service, session, _, _ = _scripted_service(
+        chacha_db,
+        adapter=adapter,
+        program=_program_with_generates(
+            {"op": "generate", "id": "checkpointed", "prompt": "Checkpoint this"}
+        ),
+    )
+    first = await service.advance_script(
+        session.id,
+        client_scene_version=0,
+        idempotency_key="checkpoint-first",
+    )
+    generation = service.repo.get_generation_by_point(
+        session_id=session.id,
+        owner_user_id=42,
+        generation_point_key="start:0:checkpointed",
+    )
+    assert generation is not None
+    first_revision_id = int(generation["active_revision_id"])
+    checkpoint = service.create_checkpoint(session.id, label="Before regen")
+    adapter.raw_content = (
+        '{"schema":"narrative_dialogue","narrative":[{"text":"Second checkpoint beat."}]}'
+    )
+    second = await service.regenerate_script_generation(
+        session.id,
+        generation_id=int(generation["id"]),
+        client_scene_version=int(first["scene_version"]),
+        idempotency_key="checkpoint-second",
+    )
+    changed_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert changed_generation is not None
+    assert int(changed_generation["active_revision_id"]) != first_revision_id
+
+    service.restore_checkpoint(
+        session.id,
+        int(checkpoint["id"]),
+        client_scene_version=int(second["scene_version"]),
+        idempotency_key="restore-checkpoint-revision-map",
+    )
+
+    restored_generation = service.repo.get_generation(int(generation["id"]), owner_user_id=42)
+    assert restored_generation is not None
+    assert int(restored_generation["active_revision_id"]) == first_revision_id
+    first_revision = service.repo.get_generation_revision(first_revision_id, owner_user_id=42)
+    assert first_revision is not None
+    assert int(restored_generation["latest_request_id"]) == int(
+        first_revision["generation_request_id"]
+    )
 
 
 @pytest.mark.asyncio

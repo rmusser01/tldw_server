@@ -1076,6 +1076,7 @@ class VNPlayRepository:
         response_payload_factory: Callable[[Mapping[str, Any]], Mapping[str, Any]],
         branch_node_id: int | None = None,
         script_position: Mapping[str, Any] | None = None,
+        active_generation_revisions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically persist a restore event, scene state, session state, and action response."""
         self._ensure_schema_initialized()
@@ -1191,6 +1192,13 @@ class VNPlayRepository:
             )
             if session_cursor.rowcount != 1:
                 raise RuntimeError("session_action_lock_not_active")
+            if active_generation_revisions is not None:
+                _apply_active_generation_revision_map(
+                    conn,
+                    session_id=session_id,
+                    owner_user_id=owner_user_id,
+                    active_generation_revisions=active_generation_revisions,
+                )
 
             restore_event_row = conn.execute(
                 "SELECT * FROM vn_play_events WHERE id = ?",
@@ -1607,6 +1615,25 @@ class VNPlayRepository:
         row = cursor.fetchone()
         return _decode_generation(row) if row is not None else None
 
+    def list_generations(
+        self,
+        session_id: int,
+        *,
+        owner_user_id: int,
+    ) -> list[dict[str, Any]]:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generations
+            WHERE session_id = ?
+              AND owner_user_id = ?
+            ORDER BY id ASC
+            """,
+            (session_id, owner_user_id),
+        )
+        return [_decode_generation(row) for row in cursor.fetchall()]
+
     def get_generation_by_point(
         self,
         *,
@@ -1627,6 +1654,42 @@ class VNPlayRepository:
         )
         row = cursor.fetchone()
         return _decode_generation(row) if row is not None else None
+
+    def update_generation(
+        self,
+        generation_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        update_values = _mapped_update_values(
+            fields,
+            {
+                "active_revision_id": "active_revision_id",
+                "latest_request_id": "latest_request_id",
+                "status": "status",
+            },
+            json_fields=set(),
+        )
+        if not update_values:
+            return self.get_generation(generation_id, owner_user_id=owner_user_id)
+        with self.db.transaction() as conn:
+            for field_name, value in update_values:
+                column_name = {
+                    "active_revision_id": "active_revision_id",
+                    "latest_request_id": "latest_request_id",
+                    "status": "status",
+                }[field_name]
+                conn.execute(
+                    f"""
+                    UPDATE vn_play_generations
+                    SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+                    """,  # nosec B608 - column name is from a fixed local map.
+                    (value, generation_id, owner_user_id, owner_user_id),
+                )
+        return self.get_generation(generation_id, owner_user_id=owner_user_id)
 
     def create_generation_request(
         self,
@@ -3374,6 +3437,77 @@ def _insert_event(
         ),
     )
     return int(cursor.lastrowid)
+
+
+def _apply_active_generation_revision_map(
+    conn: Any,
+    *,
+    session_id: int,
+    owner_user_id: int,
+    active_generation_revisions: Mapping[str, Any],
+) -> None:
+    normalized_map = {
+        str(point_key): (None if revision_id is None else int(revision_id))
+        for point_key, revision_id in active_generation_revisions.items()
+        if str(point_key)
+    }
+    generation_rows = conn.execute(
+        """
+        SELECT *
+        FROM vn_play_generations
+        WHERE session_id = ? AND owner_user_id = ?
+        """,
+        (session_id, owner_user_id),
+    ).fetchall()
+    for generation_row in generation_rows:
+        generation_id = int(generation_row["id"])
+        point_key = str(generation_row["generation_point_key"])
+        revision_id = normalized_map.get(point_key)
+        if revision_id is None:
+            conn.execute(
+                """
+                UPDATE vn_play_generations
+                SET active_revision_id = NULL,
+                    latest_request_id = NULL,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                ("not_started", generation_id, owner_user_id),
+            )
+            continue
+        revision_row = conn.execute(
+            """
+            SELECT id, generation_id, generation_request_id, session_id, owner_user_id, status
+            FROM vn_play_generation_revisions
+            WHERE id = ?
+              AND generation_id = ?
+              AND session_id = ?
+              AND owner_user_id = ?
+            """,
+            (revision_id, generation_id, session_id, owner_user_id),
+        ).fetchone()
+        if revision_row is None:
+            raise ValueError("generation_revision_not_found")
+        if revision_row["status"] != "succeeded":
+            raise ValueError("active_revision_not_succeeded")
+        conn.execute(
+            """
+            UPDATE vn_play_generations
+            SET active_revision_id = ?,
+                latest_request_id = ?,
+                status = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND owner_user_id = ?
+            """,
+            (
+                revision_id,
+                int(revision_row["generation_request_id"]),
+                "completed",
+                generation_id,
+                owner_user_id,
+            ),
+        )
 
 
 def _mapped_update_values(
