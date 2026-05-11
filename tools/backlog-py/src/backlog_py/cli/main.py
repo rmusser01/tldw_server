@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from backlog_py.core.repository import ReadOnlyRepository, TaskRecord
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
 from backlog_py.storage.project import discover_project
 
 
@@ -19,9 +19,57 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @main.command("task")
 @click.argument("args", nargs=-1)
 @click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.option("--id", "task_id", default=None, help="Task id for task creation.")
+@click.option("--status", default=None, help="Task status for create/edit.")
+@click.option("--description", default=None, help="Description for task creation.")
+@click.option("--append-notes", default=None, help="Append text to implementation notes.")
+@click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
+@click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
+@click.option("--uncheck-ac", multiple=True, type=int, help="Mark acceptance criteria index incomplete.")
+@click.option("--uncheck-dod", multiple=True, type=int, help="Mark Definition of Done index incomplete.")
+@click.option("--final-summary", default=None, help="Replace the final summary section.")
 @click.pass_context
-def task_command(ctx: click.Context, args: tuple[str, ...], plain: bool) -> None:
+def task_command(
+    ctx: click.Context,
+    args: tuple[str, ...],
+    plain: bool,
+    task_id: str | None,
+    status: str | None,
+    description: str | None,
+    append_notes: str | None,
+    check_ac: tuple[int, ...],
+    check_dod: tuple[int, ...],
+    uncheck_ac: tuple[int, ...],
+    uncheck_dod: tuple[int, ...],
+    final_summary: str | None,
+) -> None:
     """View tasks."""
+    if args and args[0] == "create":
+        if len(args) != 2:
+            raise click.UsageError("Usage: task create TITLE")
+        task_record = _mutable_repository(ctx).create_task(
+            title=args[1],
+            task_id=task_id,
+            status=status,
+            description=description or "",
+        )
+        click.echo(_format_task_line(task_record, plain=plain))
+        return
+    if args and args[0] == "edit":
+        if len(args) != 2:
+            raise click.UsageError("Usage: task edit TASK_ID")
+        task_record = _mutable_repository(ctx).edit_task(
+            args[1],
+            status=status,
+            append_notes=append_notes,
+            check_ac=check_ac,
+            check_dod=check_dod,
+            uncheck_ac=uncheck_ac,
+            uncheck_dod=uncheck_dod,
+            final_summary=final_summary,
+        )
+        click.echo(_format_task_line(task_record, plain=plain))
+        return
     if args == ("list",):
         for task_record in _repository(ctx).list_tasks():
             click.echo(_format_task_line(task_record, plain=plain))
@@ -88,6 +136,10 @@ def _project(ctx: click.Context):
 
 def _repository(ctx: click.Context) -> ReadOnlyRepository:
     return ReadOnlyRepository(_project(ctx))
+
+
+def _mutable_repository(ctx: click.Context) -> MutableRepository:
+    return MutableRepository(_project(ctx))
 
 
 def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:

@@ -835,7 +835,7 @@ git commit -m "Add Backlog.md read-only MCP registry"
 - Modify: `tools/backlog-py/src/backlog_py/mcp/tools.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing mutation/security tests**
+- [x] **Step 1: Write failing mutation/security tests**
 
 Test:
 
@@ -849,7 +849,7 @@ Test:
 - write atomically without partial file on validation error
 - `onStatusChange` disabled by default
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -860,7 +860,7 @@ python -m pytest tools/backlog-py/tests/test_security_paths.py tools/backlog-py/
 
 Expected: FAIL with missing mutation/security functions.
 
-- [ ] **Step 3: Implement safe writes**
+- [x] **Step 3: Implement safe writes**
 
 Implement:
 
@@ -871,7 +871,7 @@ Implement:
 - section-scoped mutations
 - disabled-by-default `onStatusChange` path with explicit not-implemented/disabled behavior
 
-- [ ] **Step 4: Add CLI/MCP mutation adapters**
+- [x] **Step 4: Add CLI/MCP mutation adapters**
 
 Implement only after core tests pass:
 
@@ -879,7 +879,11 @@ Implement only after core tests pass:
 - CLI `task edit --append-notes`, `--check-ac`, `--check-dod`, `--final-summary`
 - MCP task create/edit equivalents
 
-- [ ] **Step 5: Run mutation and regression tests**
+- [x] **Step 5: Run mutation and regression tests**
+
+Worker implementation note: focused mutation/security tests and the full
+`tools/backlog-py/tests` suite passed on 2026-05-10. Bandit, diff checks, and
+two-stage review remain controller-owned gates for TASK-244.8.
 
 Run:
 
@@ -892,7 +896,7 @@ git diff --check
 
 Expected: pytest PASS, Bandit has no new findings, diff check clean.
 
-- [ ] **Step 6: Commit Task 7**
+- [x] **Step 6: Commit Task 7**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
