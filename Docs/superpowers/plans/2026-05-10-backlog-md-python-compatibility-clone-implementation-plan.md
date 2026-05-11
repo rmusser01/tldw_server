@@ -912,11 +912,13 @@ git commit -m "Add Backlog.md safe task mutations"
 - Create: `tools/backlog-py/tests/test_milestones.py`
 - Create: `tools/backlog-py/tests/test_definition_of_done.py`
 - Modify: `tools/backlog-py/src/backlog_py/core/repository.py`
+- Modify: `tools/backlog-py/src/backlog_py/storage/config.py`
 - Modify: `tools/backlog-py/src/backlog_py/cli/main.py`
 - Modify: `tools/backlog-py/src/backlog_py/mcp/tools.py`
-- Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
+- Modify: `Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md`
+- Modify: `backlog/tasks/task-244.9 - Implement-Backlog.md-Python-clone-documents-milestones-and-Definition-of-Done-parity.md`
 
-- [ ] **Step 1: Write failing document tests**
+- [x] **Step 1: Write failing document tests**
 
 Test:
 
@@ -926,7 +928,7 @@ Test:
 - document update preserves omitted metadata
 - absolute paths and `..` traversal are rejected
 
-- [ ] **Step 2: Write failing milestone tests**
+- [x] **Step 2: Write failing milestone tests**
 
 Test:
 
@@ -936,7 +938,7 @@ Test:
 - milestone remove can clear task references
 - milestone archive moves the milestone to the archive path
 
-- [ ] **Step 3: Write failing Definition of Done tests**
+- [x] **Step 3: Write failing Definition of Done tests**
 
 Test:
 
@@ -945,7 +947,7 @@ Test:
 - new task creation inherits defaults unless disabled
 - task-specific DoD append does not mutate project defaults
 
-- [ ] **Step 4: Run tests to verify failure**
+- [x] **Step 4: Run tests to verify failure**
 
 Run:
 
@@ -960,18 +962,18 @@ python -m pytest \
 
 Expected: FAIL with missing document/milestone/DoD implementations.
 
-- [ ] **Step 5: Implement document and milestone services**
+- [x] **Step 5: Implement document and milestone services**
 
 Implement:
 
-- document ID allocation scoped globally under `backlog/docs`
+- document ID/path lookup scoped globally under `backlog/docs`
 - docs-relative path validation
 - decision/document frontmatter preservation
 - milestone file operations
 - task milestone reference updates through the task parser
 - DoD defaults get/upsert through config writes
 
-- [ ] **Step 6: Add CLI/MCP adapters**
+- [x] **Step 6: Add CLI/MCP adapters**
 
 Implement:
 
@@ -982,7 +984,7 @@ Implement:
 - MCP milestone tools
 - MCP Definition of Done defaults get/upsert tools
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -997,7 +999,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Run security regression checks**
+- [x] **Step 8: Run security regression checks**
 
 Run:
 
@@ -1010,10 +1012,12 @@ git diff --check
 
 Expected: tests PASS, Bandit has no new findings, diff check clean.
 
-- [ ] **Step 9: Commit Task 8**
+- [x] **Step 9: Commit Task 8**
 
 ```bash
-git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
+git add tools/backlog-py \
+  Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md \
+  "backlog/tasks/task-244.9 - Implement-Backlog.md-Python-clone-documents-milestones-and-Definition-of-Done-parity.md"
 git commit -m "Add Backlog.md document and milestone parity"
 ```
 

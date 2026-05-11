@@ -14,6 +14,7 @@ from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.search.simple import contains_query
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.storage.config import load_config
 from backlog_py.storage.project import discover_project
 
 
@@ -100,6 +101,8 @@ class MutableRepository(ReadOnlyRepository):
         description: str = "",
         acceptance_criteria: Sequence[str] | None = None,
         definition_of_done: Sequence[str] | None = None,
+        definition_of_done_add: Sequence[str] | None = None,
+        disable_definition_of_done_defaults: bool = False,
         dependencies: Sequence[str] | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
@@ -111,18 +114,25 @@ class MutableRepository(ReadOnlyRepository):
         normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies or ()]
         _reject_missing_dependencies(normalized_dependencies, tasks)
         _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
-        task_status = status or self.project.config.default_status
-        _reject_unknown_status(task_status, self.project.config.statuses)
+        current_config = load_config(self.project.config_path)
+        task_status = status or current_config.default_status
+        _reject_unknown_status(task_status, current_config.statuses)
         target = self._task_path(normalized_id, title)
         if target.exists():
             raise TaskMutationError(f"Task path already exists: {target.name}")
+        task_definition_of_done = _definition_of_done_for_create(
+            explicit=definition_of_done,
+            additions=definition_of_done_add,
+            defaults=current_config.definition_of_done,
+            disable_defaults=disable_definition_of_done_defaults,
+        )
         content = _new_task_source(
             task_id=normalized_id,
             title=title,
             status=task_status,
             description=description,
             acceptance_criteria=acceptance_criteria or (),
-            definition_of_done=definition_of_done or self.project.config.definition_of_done or (),
+            definition_of_done=task_definition_of_done,
             dependencies=normalized_dependencies,
         )
         parse_task_markdown(content)
@@ -364,6 +374,20 @@ def _set_checklist_line(line: str, *, checked: bool) -> str:
 
 def _render_checklist(items: Sequence[str]) -> str:
     return "".join(f"- [ ] #{index} {item}\n" for index, item in enumerate(items, start=1))
+
+
+def _definition_of_done_for_create(
+    *,
+    explicit: Sequence[str] | None,
+    additions: Sequence[str] | None,
+    defaults: Sequence[str] | None,
+    disable_defaults: bool,
+) -> list[str]:
+    if explicit is not None:
+        return list(explicit)
+    inherited = [] if disable_defaults else list(defaults or ())
+    inherited.extend(additions or ())
+    return inherited
 
 
 def _normalize_block(content: str) -> str:

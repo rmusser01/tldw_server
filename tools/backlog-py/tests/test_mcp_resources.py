@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import backlog_py.mcp as mcp
 from backlog_py.mcp.resources import read_resource
 from backlog_py.mcp.server import is_mcp_sdk_available, main
 from backlog_py.mcp.tools import task_edit, task_search, task_view
@@ -20,7 +21,10 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
 
     assert "Backlog.md" in content
     assert "task" in content.casefold()
-    assert "read-only" in content.casefold()
+    assert "safe mutation" in content.casefold()
+    assert "document_create" in content
+    assert "milestone_add" in content
+    assert "definition_of_done_defaults_get" in content
 
 
 def test_task_workflow_resource_alias_matches_overview():
@@ -80,3 +84,9 @@ def test_server_stub_reports_missing_sdk_without_importing_mcp():
 
     with pytest.raises(RuntimeError, match=expected_message):
         main()
+
+
+def test_mcp_package_exports_document_milestone_and_dod_tools():
+    assert mcp.document_create.__name__ == "document_create"
+    assert mcp.milestone_add.__name__ == "milestone_add"
+    assert mcp.definition_of_done_defaults_get.__name__ == "definition_of_done_defaults_get"

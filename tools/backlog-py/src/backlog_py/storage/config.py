@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from backlog_py.core.models import BacklogConfig
+from backlog_py.core.models import BacklogConfig, BacklogProject
+from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 
 
 _KEY_ALIASES = {
@@ -39,11 +42,58 @@ def load_config(path: Path) -> BacklogConfig:
     )
 
 
+def get_definition_of_done_defaults(project: BacklogProject) -> list[str]:
+    return list(load_config(project.config_path).definition_of_done or [])
+
+
+def replace_definition_of_done_defaults(project: BacklogProject, items: list[str]) -> list[str]:
+    normalized = [str(item) for item in items]
+    raw = _load_raw_config(project.config_path)
+    key = "definition_of_done" if "definition_of_done" in raw else "definitionOfDone"
+    raw[key] = normalized
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
+    _atomic_write_text(project.config_path, f"{yaml_text}\n")
+    return normalized
+
+
 def _get(raw: dict[Any, Any], normalized_key: str, default: Any) -> Any:
     for key in _KEY_ALIASES[normalized_key]:
         if key in raw:
             return raw[key]
     return default
+
+
+def _load_raw_config(path: Path) -> dict[Any, Any]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Backlog config must contain a mapping: {path}")
+    return raw
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    try:
+        safe_path = assert_path_within_base(path.parent, path)
+    except PathContainmentError as exc:
+        raise ValueError(str(exc)) from exc
+    temp_name: str | None = None
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=safe_path.parent,
+        prefix=f".{safe_path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temp_file:
+        temp_name = temp_file.name
+        temp_file.write(content)
+        temp_file.flush()
+        os.fsync(temp_file.fileno())
+    try:
+        os.replace(temp_name, safe_path)
+    except Exception:
+        if temp_name is not None:
+            Path(temp_name).unlink(missing_ok=True)
+        raise
 
 
 def _optional_string_list(value: Any) -> list[str] | None:

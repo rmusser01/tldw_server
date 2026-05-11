@@ -4,7 +4,10 @@ from pathlib import Path
 
 import click
 
+from backlog_py.core.documents import DocumentRecord, DocumentService
+from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
 
 
@@ -129,6 +132,128 @@ def config_list(ctx: click.Context) -> None:
             click.echo(f"  - {item}")
 
 
+@config_group.command("dod-defaults-get")
+@click.pass_context
+def config_dod_defaults_get(ctx: click.Context) -> None:
+    """Print project Definition of Done defaults."""
+    for item in get_definition_of_done_defaults(_project(ctx)):
+        click.echo(item)
+
+
+@config_group.command("dod-defaults-upsert")
+@click.argument("items", nargs=-1, required=False)
+@click.pass_context
+def config_dod_defaults_upsert(ctx: click.Context, items: tuple[str, ...]) -> None:
+    """Replace project Definition of Done defaults."""
+    for item in replace_definition_of_done_defaults(_project(ctx), list(items)):
+        click.echo(item)
+
+
+@main.group("doc")
+def document_group() -> None:
+    """Create and inspect Backlog.md documents."""
+
+
+@document_group.command("list")
+@click.argument("query", required=False)
+@click.pass_context
+def document_list_command(ctx: click.Context, query: str | None) -> None:
+    """List documents, optionally filtered by query."""
+    service = _document_service(ctx)
+    documents = service.list_documents() if query is None else service.search_documents(query)
+    for document in documents:
+        click.echo(_format_document_line(document))
+
+
+@document_group.command("view")
+@click.argument("path_or_id")
+@click.pass_context
+def document_view_command(ctx: click.Context, path_or_id: str) -> None:
+    """Print a document by docs-relative path or frontmatter id."""
+    document = _document_service(ctx).view_document(path_or_id)
+    click.echo(document.raw_source.rstrip())
+
+
+@document_group.command("create")
+@click.argument("path")
+@click.option("--title", required=True, help="Document title.")
+@click.option("--content", required=True, help="Document body content.")
+@click.pass_context
+def document_create_command(ctx: click.Context, path: str, title: str, content: str) -> None:
+    """Create a document under backlog/docs."""
+    document = _document_service(ctx).create_document(path, title=title, content=content)
+    click.echo(_format_document_line(document))
+
+
+@document_group.command("update")
+@click.argument("path_or_id")
+@click.option("--title", default=None, help="Replacement document title.")
+@click.option("--content", default=None, help="Replacement document body content.")
+@click.pass_context
+def document_update_command(
+    ctx: click.Context,
+    path_or_id: str,
+    title: str | None,
+    content: str | None,
+) -> None:
+    """Update a document while preserving omitted metadata."""
+    document = _document_service(ctx).update_document(path_or_id, title=title, content=content)
+    click.echo(_format_document_line(document))
+
+
+@main.group("milestone")
+def milestone_group() -> None:
+    """Create and inspect milestone files."""
+
+
+@milestone_group.command("list")
+@click.pass_context
+def milestone_list_command(ctx: click.Context) -> None:
+    """List active milestones."""
+    for milestone in _milestone_service(ctx).list_milestones():
+        click.echo(_format_milestone_line(milestone))
+
+
+@milestone_group.command("add")
+@click.argument("name")
+@click.option("--description", default="", help="Milestone body content.")
+@click.pass_context
+def milestone_add_command(ctx: click.Context, name: str, description: str) -> None:
+    """Create a milestone file."""
+    milestone = _milestone_service(ctx).add_milestone(name, description=description)
+    click.echo(_format_milestone_line(milestone))
+
+
+@milestone_group.command("rename")
+@click.argument("old_name")
+@click.argument("new_name")
+@click.option("--update-tasks", is_flag=True, help="Update task milestone frontmatter references.")
+@click.pass_context
+def milestone_rename_command(ctx: click.Context, old_name: str, new_name: str, update_tasks: bool) -> None:
+    """Rename a milestone file."""
+    milestone = _milestone_service(ctx).rename_milestone(old_name, new_name, update_tasks=update_tasks)
+    click.echo(_format_milestone_line(milestone))
+
+
+@milestone_group.command("remove")
+@click.argument("name")
+@click.option("--clear-tasks", is_flag=True, help="Clear matching task milestone frontmatter references.")
+@click.pass_context
+def milestone_remove_command(ctx: click.Context, name: str, clear_tasks: bool) -> None:
+    """Remove a milestone file."""
+    milestone = _milestone_service(ctx).remove_milestone(name, clear_tasks=clear_tasks)
+    click.echo(_format_milestone_line(milestone))
+
+
+@milestone_group.command("archive")
+@click.argument("name")
+@click.pass_context
+def milestone_archive_command(ctx: click.Context, name: str) -> None:
+    """Move a milestone file to backlog/archive/milestones."""
+    milestone = _milestone_service(ctx).archive_milestone(name)
+    click.echo(f"{_format_milestone_line(milestone)} archived")
+
+
 def _project(ctx: click.Context):
     cwd = ctx.obj.get("cwd") if ctx.obj else None
     return discover_project(Path.cwd(), explicit_cwd=cwd)
@@ -140,6 +265,14 @@ def _repository(ctx: click.Context) -> ReadOnlyRepository:
 
 def _mutable_repository(ctx: click.Context) -> MutableRepository:
     return MutableRepository(_project(ctx))
+
+
+def _document_service(ctx: click.Context) -> DocumentService:
+    return DocumentService(_project(ctx))
+
+
+def _milestone_service(ctx: click.Context) -> MilestoneService:
+    return MilestoneService(_project(ctx))
 
 
 def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:
@@ -157,6 +290,14 @@ def _format_task_detail(task_record: TaskRecord, *, plain: bool) -> str:
         ]
         return "\n".join(parts).rstrip()
     return task_record.raw_source
+
+
+def _format_document_line(document: DocumentRecord) -> str:
+    return f"{document.path_relative} {document.title}".rstrip()
+
+
+def _format_milestone_line(milestone: MilestoneRecord) -> str:
+    return f"{milestone.name} {milestone.path_relative}".rstrip()
 
 
 def _bool_text(value: bool) -> str:
