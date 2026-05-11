@@ -169,7 +169,7 @@ def _ensure_collection_segment(
             "parent_id": parent_id,
             "path": path_segments,
             "source_folder_id": source_folder_id,
-            "metadata": metadata,
+            "source_user_id": metadata.get("source_user_id"),
         }
     )
     for suffix in (base_hash, *[f"{base_hash}-{counter}" for counter in range(1, 100)]):
@@ -230,7 +230,7 @@ def _keyword_text_for_path(
             "collection_ids": collection_ids,
             "path": path_segments,
             "source_folder_id": source_folder_id,
-            "metadata": metadata,
+            "source_user_id": metadata.get("source_user_id"),
         },
         length=12,
     )

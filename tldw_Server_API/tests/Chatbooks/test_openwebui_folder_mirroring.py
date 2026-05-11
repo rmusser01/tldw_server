@@ -94,3 +94,64 @@ def test_mirror_openwebui_folder_disambiguates_global_collection_name_collision(
     final_collection = db.get_keyword_collection_by_id(result.final_collection_id)
     assert final_collection["name"].startswith("Research ")
     assert any("disambiguated" in warning for warning in result.warnings)
+
+
+def test_mirror_openwebui_folder_reuses_keyword_across_chats_in_same_folder(folder_db):
+    db, first_conversation_id = folder_db
+    character_id = db.add_character_card({"name": "Second Folder Assistant"})
+    second_conversation_id = db.add_conversation(
+        {"character_id": character_id, "title": "Second Foldered Chat"}
+    )
+    namespace = build_openwebui_namespace_segments("Alice", "user-a")
+
+    first = mirror_openwebui_folder_for_conversation(
+        db,
+        conversation_id=first_conversation_id,
+        namespace_segments=namespace,
+        source_path_segments=["Research", "Papers"],
+        source_folder_id="folder-papers",
+        metadata={"source_user_id": "user-a", "external_ref": "chat-a"},
+    )
+    second = mirror_openwebui_folder_for_conversation(
+        db,
+        conversation_id=second_conversation_id,
+        namespace_segments=namespace,
+        source_path_segments=["Research", "Papers"],
+        source_folder_id="folder-papers",
+        metadata={"source_user_id": "user-a", "external_ref": "chat-b"},
+    )
+
+    assert second.final_collection_id == first.final_collection_id
+    assert second.keyword_id == first.keyword_id
+
+
+def test_mirror_openwebui_folder_collision_reuses_disambiguated_collection_for_same_folder(folder_db):
+    db, first_conversation_id = folder_db
+    character_id = db.add_character_card({"name": "Second Collision Assistant"})
+    second_conversation_id = db.add_conversation(
+        {"character_id": character_id, "title": "Second Collision Chat"}
+    )
+    existing_id = db.add_keyword_collection("Research")
+    assert existing_id is not None
+    namespace = build_openwebui_namespace_segments("Alice", "user-a")
+
+    first = mirror_openwebui_folder_for_conversation(
+        db,
+        conversation_id=first_conversation_id,
+        namespace_segments=namespace,
+        source_path_segments=["Research"],
+        source_folder_id="folder-research",
+        metadata={"source_user_id": "user-a", "external_ref": "chat-a"},
+    )
+    second = mirror_openwebui_folder_for_conversation(
+        db,
+        conversation_id=second_conversation_id,
+        namespace_segments=namespace,
+        source_path_segments=["Research"],
+        source_folder_id="folder-research",
+        metadata={"source_user_id": "user-a", "external_ref": "chat-b"},
+    )
+
+    assert first.final_collection_id != existing_id
+    assert second.final_collection_id == first.final_collection_id
+    assert second.keyword_id == first.keyword_id

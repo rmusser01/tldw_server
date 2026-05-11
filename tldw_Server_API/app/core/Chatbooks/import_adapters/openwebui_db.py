@@ -9,7 +9,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import quote
 
 from .openwebui import (
     OpenWebUIConversationPlan,
@@ -144,37 +143,47 @@ def preview_openwebui_db(
         warnings: list[str] = []
         for user in users:
             user_id = str(user["id"])
-            chats = _load_chats_for_user(conn, user_id)
             folders = _load_folders_for_user(conn, user_id)
-            parsed_chats: list[OpenWebUIConversationPlan] = []
             user_warnings: list[str] = []
+            chat_count = 0
+            message_count = 0
+            branched_chat_count = 0
+            duplicate_chat_count = 0
+            archived_chat_count = 0
+            pinned_chat_count = 0
+            attachment_reference_count = 0
 
-            for chat_row in chats:
+            for chat_row in _iter_chats_for_user(conn, user_id):
+                if _sqlite_truthy(chat_row["archived"]):
+                    archived_chat_count += 1
+                if _sqlite_truthy(chat_row["pinned"]):
+                    pinned_chat_count += 1
                 chat_plan, chat_warnings = _conversation_plan_from_chat_row(chat_row)
                 if chat_plan is None:
                     user_warnings.extend(chat_warnings)
                     continue
-                parsed_chats.append(chat_plan)
                 user_warnings.extend(chat_warnings)
                 folder_plan = _folder_plan_for_chat(chat_row, folders)
                 user_warnings.extend(folder_plan.warnings)
+                chat_count += 1
+                message_count += len(chat_plan.messages)
+                branched_chat_count += int(chat_plan.is_branched)
+                duplicate_chat_count += int(duplicate_lookup(chat_plan.external_ref))
+                attachment_reference_count += chat_plan.attachment_reference_count
 
-            duplicate_chat_count = sum(1 for chat in parsed_chats if duplicate_lookup(chat.external_ref))
             user_previews.append(
                 OpenWebUIDatabaseUserPreview(
                     source_user_id=user_id,
                     display_label=_display_label_for_user(user),
                     email=_optional_str(user["email"]),
-                    chat_count=len(parsed_chats),
+                    chat_count=chat_count,
                     folder_count=len(folders),
-                    message_count=sum(len(chat.messages) for chat in parsed_chats),
-                    branched_chat_count=sum(1 for chat in parsed_chats if chat.is_branched),
+                    message_count=message_count,
+                    branched_chat_count=branched_chat_count,
                     duplicate_chat_count=duplicate_chat_count,
-                    archived_chat_count=sum(1 for row in chats if _sqlite_truthy(row["archived"])),
-                    pinned_chat_count=sum(1 for row in chats if _sqlite_truthy(row["pinned"])),
-                    attachment_reference_count=sum(
-                        chat.attachment_reference_count for chat in parsed_chats
-                    ),
+                    archived_chat_count=archived_chat_count,
+                    pinned_chat_count=pinned_chat_count,
+                    attachment_reference_count=attachment_reference_count,
                     warning_count=len(user_warnings),
                     warnings=user_warnings,
                 )
@@ -203,7 +212,7 @@ def extract_openwebui_db_user(
         folder_plans_by_external_ref: dict[str, OpenWebUIDatabaseFolderPlan] = {}
         warnings: list[str] = []
 
-        for chat_row in _load_chats_for_user(conn, selected_user_id):
+        for chat_row in _iter_chats_for_user(conn, selected_user_id):
             chat_plan, chat_warnings = _conversation_plan_from_chat_row(
                 chat_row,
                 source_user_id=selected_user_id,
@@ -239,7 +248,7 @@ def _open_validated_db(file_path: str | Path) -> Iterator[sqlite3.Connection]:
         raise ValueError("Unable to read OpenWebUI SQLite database") from exc
 
     resolved = path.resolve()
-    uri = f"file:{quote(str(resolved), safe='/:')}?mode=ro"
+    uri = f"{resolved.as_uri()}?mode=ro"
     conn: sqlite3.Connection | None = None
     try:
         conn = sqlite3.connect(uri, uri=True)
@@ -303,7 +312,11 @@ def _load_user(conn: sqlite3.Connection, user_id: str) -> sqlite3.Row | None:
 
 
 def _load_chats_for_user(conn: sqlite3.Connection, user_id: str) -> list[sqlite3.Row]:
-    return list(
+    return list(_iter_chats_for_user(conn, user_id))
+
+
+def _iter_chats_for_user(conn: sqlite3.Connection, user_id: str) -> Iterator[sqlite3.Row]:
+    return iter(
         conn.execute(
             """
             SELECT id, user_id, title, chat, created_at, updated_at, share_id, archived, pinned, meta, folder_id
@@ -312,7 +325,7 @@ def _load_chats_for_user(conn: sqlite3.Connection, user_id: str) -> list[sqlite3
             ORDER BY COALESCE(updated_at, created_at, 0), id
             """,
             (user_id,),
-        ).fetchall()
+        )
     )
 
 

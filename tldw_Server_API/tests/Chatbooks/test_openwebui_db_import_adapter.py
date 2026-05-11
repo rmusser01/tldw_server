@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Chatbooks.import_adapters import openwebui_db as openwebui_db_adapter
 from tldw_Server_API.app.core.Chatbooks.import_adapters.openwebui_db import (
     extract_openwebui_db_user,
     preview_openwebui_db,
@@ -215,6 +216,46 @@ def test_preview_openwebui_db_rejects_missing_required_schema(tmp_path):
 
     with pytest.raises(ValueError, match="missing required OpenWebUI table"):
         preview_openwebui_db(db_path)
+
+
+def test_open_validated_db_uses_path_as_uri_for_read_only_connection(tmp_path, monkeypatch):
+    db_path = tmp_path / "webui with spaces.db"
+    db_path.write_bytes(b"SQLite format 3\x00")
+    connect_calls: list[tuple[str, bool]] = []
+
+    class FakeConnection:
+        row_factory = None
+
+        def enable_load_extension(self, _enabled):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_connect(database, *, uri=False):
+        connect_calls.append((database, uri))
+        return FakeConnection()
+
+    monkeypatch.setattr(openwebui_db_adapter.sqlite3, "connect", fake_connect)
+    monkeypatch.setattr(openwebui_db_adapter, "_validate_schema", lambda _conn: None)
+
+    with openwebui_db_adapter._open_validated_db(db_path):
+        pass
+
+    assert connect_calls == [(f"{db_path.resolve().as_uri()}?mode=ro", True)]
+
+
+def test_iter_chats_for_user_returns_lazy_rows(tmp_path):
+    db_path = _standard_db(tmp_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = openwebui_db_adapter._iter_chats_for_user(conn, "user-a")
+
+        assert not isinstance(rows, list)
+        assert [row["id"] for row in rows] == ["chat-a"]
+    finally:
+        conn.close()
 
 
 def test_preview_openwebui_db_lists_users_counts_and_hides_content(tmp_path):
