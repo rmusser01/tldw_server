@@ -509,7 +509,7 @@ If no Media DB helper files changed, omit them from `git add`.
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 5.1: Write failing API contract and auth tests
 
@@ -518,15 +518,15 @@ If no Media DB helper files changed, omit them from `git add`.
 - Modify: `tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
 
-- [ ] Test `POST /api/v1/chatbooks/openwebui/hydration/preview` validates `openwebui_data_root`.
-- [ ] Test preview request passes `source_user_id`, `conversation_ids`, and `process_supported_files`.
-- [ ] Test preview response includes counts and warning totals.
-- [ ] Test multi-user non-admin receives 403.
-- [ ] Test single-user principal is allowed.
-- [ ] Test admin role/claim in multi-user mode is allowed.
-- [ ] Test response warnings redact full absolute paths.
-- [ ] Test `POST /api/v1/chatbooks/openwebui/hydration/jobs` enqueues a core Jobs row with job type `openwebui_attachment_hydration`.
-- [ ] Test `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}` rejects jobs not owned by the current user unless admin access is explicitly intended.
+- [x] Test `POST /api/v1/chatbooks/openwebui/hydration/preview` validates `openwebui_data_root`.
+- [x] Test preview request passes `source_user_id`, `conversation_ids`, and `process_supported_files`.
+- [x] Test preview response includes counts and warning totals.
+- [x] Test multi-user non-admin receives 403.
+- [x] Test single-user principal is allowed.
+- [x] Test admin role/claim in multi-user mode is allowed.
+- [x] Test response warnings redact full absolute paths.
+- [x] Test `POST /api/v1/chatbooks/openwebui/hydration/jobs` enqueues a core Jobs row with job type `openwebui_attachment_hydration`.
+- [x] Test `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}` rejects jobs not owned by the current user unless admin access is explicitly intended.
 
 Run:
 
@@ -542,16 +542,16 @@ Expected: FAIL because schemas/endpoints do not exist.
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py`
 
-- [ ] Add `OpenWebUIHydrationScopeRequest`.
-- [ ] Add `OpenWebUIHydrationPreviewRequest`.
-- [ ] Add `OpenWebUIHydrationJobRequest`.
-- [ ] Add `OpenWebUIHydrationItemResponse`.
-- [ ] Add `OpenWebUIHydrationSummaryResponse`.
-- [ ] Add `OpenWebUIHydrationPreviewResponse`.
-- [ ] Add `OpenWebUIHydrationJobResponse`.
-- [ ] Constrain `conversation_ids` to a bounded list of non-empty strings.
-- [ ] Keep `process_supported_files` default `False`.
-- [ ] Do not include raw source path fields in response schemas.
+- [x] Add `OpenWebUIHydrationScopeRequest`.
+- [x] Add `OpenWebUIHydrationPreviewRequest`.
+- [x] Add `OpenWebUIHydrationJobRequest`.
+- [x] Add `OpenWebUIHydrationItemResponse`.
+- [x] Add `OpenWebUIHydrationSummaryResponse`.
+- [x] Add `OpenWebUIHydrationPreviewResponse`.
+- [x] Add `OpenWebUIHydrationJobResponse`.
+- [x] Constrain `conversation_ids` to a bounded list of non-empty strings.
+- [x] Keep `process_supported_files` default `False`.
+- [x] Do not include raw source path fields in response schemas.
 
 Run:
 
@@ -568,14 +568,14 @@ Expected: schema-specific tests progress, endpoint tests still fail.
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
 
-- [ ] Add `_require_openwebui_hydration_access(user)`:
+- [x] Add `_require_openwebui_hydration_access(user)`:
   - allow single-user principal/current user as configured by existing auth helpers
   - require admin-style claims/role in multi-user mode
-- [ ] Prefer existing auth helper patterns in `auth_deps.py`, `setup_deps.py`, or `chat_workflows_deps.py`.
-- [ ] Add service method `preview_openwebui_attachment_hydration(...)`.
-- [ ] Add endpoint `POST /api/v1/chatbooks/openwebui/hydration/preview`.
-- [ ] Convert service preview dataclasses to Pydantic response models.
-- [ ] Map validation/security errors to 400/403 without stack traces.
+- [x] Prefer existing auth helper patterns in `auth_deps.py`, `setup_deps.py`, or `chat_workflows_deps.py`.
+- [x] Add service method `preview_openwebui_attachment_hydration(...)`.
+- [x] Add endpoint `POST /api/v1/chatbooks/openwebui/hydration/preview`.
+- [x] Convert service preview dataclasses to Pydantic response models.
+- [x] Map validation/security errors to 400/403 without stack traces.
 
 Run:
 
@@ -593,24 +593,24 @@ Expected: PASS for preview/auth subset.
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
 
-- [ ] Add constants:
+- [x] Add constants:
 
 ```python
 CHATBOOKS_DOMAIN = "chatbooks"
 OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE = "openwebui_attachment_hydration"
 ```
 
-- [ ] Add `create_openwebui_hydration_job(jobs_manager, payload, owner_user_id)`.
-- [ ] Service job payload includes:
+- [x] Add `create_openwebui_hydration_job(jobs_manager, payload, owner_user_id)`.
+- [x] Service job payload includes:
   - `user_id`
   - `openwebui_data_root`
   - `scope`
   - `process_supported_files`
   - preview confirmation token or preview summary hash if implemented
-- [ ] Revalidate authorization and roots in the worker, not only in endpoint.
-- [ ] Add endpoint `POST /api/v1/chatbooks/openwebui/hydration/jobs`.
-- [ ] Add endpoint `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}`.
-- [ ] Status endpoint reads core Jobs by uuid/id and filters by domain/job_type/owner.
+- [ ] Revalidate authorization and roots in the worker, not only in endpoint. Deferred to Stage 6 worker execution.
+- [x] Add endpoint `POST /api/v1/chatbooks/openwebui/hydration/jobs`.
+- [x] Add endpoint `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}`.
+- [x] Status endpoint reads core Jobs by uuid/id and filters by domain/job_type/owner.
 
 Run:
 
@@ -623,8 +623,8 @@ Expected: PASS.
 
 ### Task 5.5: Commit API slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py \
@@ -634,6 +634,15 @@ git add tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py \
         tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py
 git commit -m "Expose OpenWebUI attachment hydration API"
 ```
+
+Verification:
+- Red run before implementation: focused API tests failed because schemas/routes did not exist.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py -q` -> 7 passed.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_paths.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_db_helpers.py tldw_Server_API/tests/Chatbooks/test_openwebui_db_import_adapter.py -q` -> 47 passed.
+- `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_path_traversal.py -q` -> 3 passed.
+- `git diff --check` -> clean.
+- `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/openwebui_hydration_jobs.py -f json -o /tmp/bandit_openwebui_hydration_api.json` -> 0 findings, 0 errors.
+- Known non-gating check: `test_chatbooks_api_path_guard.py` with the path-traversal suite timed out during full `app.main` `TestClient` teardown after unrelated lifespan workers started.
 
 ## Stage 6: Jobs Worker Execution
 

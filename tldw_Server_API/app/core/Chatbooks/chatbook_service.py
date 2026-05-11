@@ -85,9 +85,20 @@ from .import_adapters.openwebui_db import (
     extract_openwebui_db_user,
     preview_openwebui_db as build_openwebui_db_preview,
 )
+from ..DB_Management.OpenWebUI_DB import (
+    load_openwebui_file_rows_for_ids,
+    open_validated_openwebui_db,
+    validate_openwebui_file_schema,
+)
 from .openwebui_folders import (
     build_openwebui_namespace_segments,
     mirror_openwebui_folder_for_conversation,
+)
+from .openwebui_hydration import (
+    OpenWebUIHydrationScope,
+    extract_openwebui_hydration_references,
+    resolve_openwebui_file_path,
+    validate_openwebui_data_root,
 )
 
 _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -2399,6 +2410,132 @@ class ChatbookService:
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"OpenWebUI DB preview rejected file path: {exc}")
             return None, "Invalid or potentially malicious import file"
+
+    def preview_openwebui_attachment_hydration(
+        self,
+        *,
+        openwebui_data_root: str,
+        scope: dict[str, Any],
+        process_supported_files: bool = False,
+    ) -> dict[str, Any]:
+        """Preview OpenWebUI attachment hydration for already imported conversations."""
+        source_user_id = scope.get("source_user_id") or scope.get("openwebui_user_id")
+        conversation_ids = tuple(str(item).strip() for item in (scope.get("conversation_ids") or []) if str(item).strip())
+        data_root = validate_openwebui_data_root(openwebui_data_root, require_uploads=False)
+
+        items: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        with open_validated_openwebui_db(data_root.webui_db_path) as conn:
+            validate_openwebui_file_schema(conn)
+            preview = extract_openwebui_hydration_references(
+                self.db,
+                OpenWebUIHydrationScope(
+                    conversation_ids=conversation_ids,
+                    openwebui_user_id=str(source_user_id).strip() if source_user_id else None,
+                ),
+                openwebui_conn=conn,
+            )
+            items.extend(self._openwebui_hydration_item_to_dict(item) for item in preview.items)
+            warnings.extend(str(warning) for warning in preview.warnings)
+
+            file_rows = load_openwebui_file_rows_for_ids(
+                conn,
+                tuple(reference.file_id for reference in preview.references),
+                str(source_user_id).strip() if source_user_id else None,
+            )
+            rows_by_id = {str(row["id"]): row for row in file_rows}
+            for reference in preview.references:
+                file_row = rows_by_id.get(reference.file_id)
+                if file_row is None:
+                    items.append(
+                        {
+                            "conversation_id": reference.conversation_id,
+                            "message_id": reference.message_id,
+                            "file_id": reference.file_id,
+                            "status": "missing_source_file_row",
+                            "warning_code": "missing_source_file_row",
+                            "raw_ref_index": reference.raw_ref_index,
+                            "source": reference.source,
+                        }
+                    )
+                    continue
+
+                resolved = resolve_openwebui_file_path(file_row, data_root)
+                warning_code = resolved.warning_codes[0] if resolved.warning_codes else None
+                items.append(
+                    {
+                        "conversation_id": reference.conversation_id,
+                        "message_id": reference.message_id,
+                        "file_id": reference.file_id,
+                        "status": resolved.status,
+                        "warning_code": warning_code,
+                        "raw_ref_index": reference.raw_ref_index,
+                        "source": reference.source,
+                        "file_kind": resolved.file_kind,
+                        "mime_type": resolved.mime_type,
+                    }
+                )
+
+        summary = self._openwebui_hydration_summary(items)
+        summary["referenced_files"] = len(items)
+        summary["warning_count"] = len(warnings) + sum(1 for item in items if item.get("warning_code"))
+        return {
+            "scope": {
+                "conversation_ids": list(conversation_ids),
+                "source_user_id": str(source_user_id).strip() if source_user_id else None,
+            },
+            "process_supported_files": bool(process_supported_files),
+            "summary": summary,
+            "items": items,
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _openwebui_hydration_item_to_dict(item: Any) -> dict[str, Any]:
+        """Convert a hydration preview item to a raw-path-free dict."""
+        return {
+            "conversation_id": item.conversation_id,
+            "message_id": item.message_id,
+            "file_id": item.file_id,
+            "status": item.status,
+            "warning_code": item.warning_code,
+            "raw_ref_index": item.raw_ref_index,
+            "source": item.source,
+            "raw_ref_shape": item.raw_ref_shape,
+            "job_id": item.job_id,
+            "source_key": item.source_key,
+            "message_image_position": item.message_image_position,
+            "mime_type": item.mime_type,
+            "media_id": item.media_id,
+            "media_file_id": item.media_file_id,
+            "checksum": item.checksum,
+            "processing_status": item.processing_status,
+        }
+
+    @staticmethod
+    def _openwebui_hydration_summary(items: list[dict[str, Any]]) -> dict[str, int]:
+        """Build user-facing hydration preview counts."""
+        resolved = [item for item in items if item.get("status") == "resolved"]
+        return {
+            "referenced_files": len(items),
+            "resolved_files": len(resolved),
+            "image_files": sum(1 for item in resolved if item.get("file_kind") == "image"),
+            "media_files": sum(1 for item in resolved if item.get("file_kind") != "image"),
+            "missing_files": sum(
+                1 for item in items if item.get("status") in {"missing_file", "missing_source_file_row"}
+            ),
+            "unsupported_files": sum(
+                1
+                for item in items
+                if item.get("status") in {"unsupported_file_type", "unsupported_reference_shape"}
+            ),
+            "failed_files": sum(1 for item in items if item.get("status") in {"path_rejected"}),
+            "hydrated_images": 0,
+            "registered_media_files": 0,
+            "already_hydrated": 0,
+            "processed_files": 0,
+            "warning_count": 0,
+        }
 
     @staticmethod
     def _openwebui_timestamp_to_iso(value: Any) -> tuple[str, str | None]:
