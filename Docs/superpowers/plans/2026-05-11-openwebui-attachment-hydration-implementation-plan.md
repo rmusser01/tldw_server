@@ -300,7 +300,7 @@ git commit -m "Add OpenWebUI hydration preview service"
 
 **Tests:** `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 3.1: Write failing image and metadata merge tests
 
@@ -309,7 +309,7 @@ git commit -m "Add OpenWebUI hydration preview service"
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/message_store.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 
-- [ ] Test a message with existing metadata:
+- [x] Test a message with existing metadata:
 
 ```python
 original = {
@@ -325,12 +325,13 @@ original = {
 }
 ```
 
-- [ ] Hydrate one PNG ref and assert all original keys remain.
-- [ ] Assert `hydration.items[0].status == "hydrated_image"`.
-- [ ] Assert image position is appended after any existing `message_images` positions.
-- [ ] Run hydration twice and assert one image row, with second item status `already_hydrated` or unchanged existing item.
-- [ ] Test oversized image returns `oversized`.
-- [ ] Test extension says `.png` but bytes are not image-like and returns `unsupported_file_type`.
+- [x] Hydrate one PNG ref and assert all original keys remain.
+- [x] Assert `hydration.items[0].status == "hydrated_image"`.
+- [x] Assert image position is appended after any existing `message_images` positions.
+- [x] Run hydration twice and assert one image row, with second item status `already_hydrated` or unchanged existing item.
+- [x] Test oversized image returns `oversized`.
+- [x] Test extension says `.png` but bytes are not image-like and returns `unsupported_file_type`.
+- [x] Test metadata update failure rolls back the appended image row.
 
 Run:
 
@@ -347,13 +348,13 @@ Expected: FAIL because append/idempotency helpers are missing.
 - Modify: `tldw_Server_API/app/core/DB_Management/chacha/message_store.py`
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
 
-- [ ] Add `append_message_image(message_id: str, image_bytes: bytes, mime_type: str) -> int`.
-- [ ] Validate max image size using the same `MAX_MESSAGE_IMAGE_BYTES` setting used by `add_message()`.
-- [ ] Select `COALESCE(MAX(position), -1) + 1` for the message.
-- [ ] Insert a new row at that position.
-- [ ] Return the inserted position.
-- [ ] Keep transaction boundaries compatible with service-level calls; if service manages a larger transaction, expose a helper that accepts `commit=False` or uses existing DB transaction conventions.
-- [ ] Do not change `_insert_message_images()` behavior for normal chatbook import.
+- [x] Add `append_message_image(message_id: str, image_bytes: bytes, mime_type: str) -> int`.
+- [x] Validate max image size using the same `MAX_MESSAGE_IMAGE_BYTES` setting used by `add_message()`.
+- [x] Select `COALESCE(MAX(position), -1) + 1` for the message.
+- [x] Insert a new row at that position.
+- [x] Return the inserted position.
+- [x] Keep transaction boundaries compatible with service-level calls; if service manages a larger transaction, expose a helper that accepts `commit=False` or uses existing DB transaction conventions.
+- [x] Do not change `_insert_message_images()` behavior for normal chatbook import.
 
 Run:
 
@@ -369,16 +370,17 @@ Expected: still FAIL until service code calls the helper.
 **Files:**
 - Modify: `tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py`
 
-- [ ] Add `merge_openwebui_message_hydration_metadata(chacha_db, message_id, item_update)`.
-- [ ] Read `get_message_metadata(message_id)`.
-- [ ] Copy the full `extra.openwebui_import` object.
-- [ ] Add or update `hydration.version`, `last_job_id`, and `items`.
-- [ ] Preserve original `attachment_refs`, source ids, role, model, and metadata.
-- [ ] Add `hydrate_image_reference(...)`.
-- [ ] Derive `source_key = f"openwebui:file:{source_file_id}"` when file id exists, else `openwebui:hash:{sha256}`.
-- [ ] If `source_key` already appears in hydration items with `message_image_position`, return `already_hydrated` without inserting.
-- [ ] Sniff image bytes with a small allowlist for PNG, JPEG, GIF, and WebP signatures.
-- [ ] Append the image and record position.
+- [x] Add `merge_openwebui_message_hydration_metadata(chacha_db, message_id, item_update)`.
+- [x] Read `get_message_metadata(message_id)`.
+- [x] Copy the full `extra.openwebui_import` object.
+- [x] Add or update `hydration.version`, `last_job_id`, and `items`.
+- [x] Preserve original `attachment_refs`, source ids, role, model, and metadata.
+- [x] Add `hydrate_image_reference(...)`.
+- [x] Derive `source_key = f"openwebui:file:{source_file_id}"` when file id exists, else `openwebui:hash:{sha256}`.
+- [x] If `source_key` already appears in hydration items with `message_image_position`, return `already_hydrated` without inserting.
+- [x] Sniff image bytes with a small allowlist for PNG, JPEG, GIF, and WebP signatures.
+- [x] Append the image and record position.
+- [x] Wrap image insert plus metadata update in one transaction when the DB exposes transaction support.
 
 Run:
 
@@ -391,8 +393,8 @@ Expected: PASS.
 
 ### Task 3.4: Commit image hydration slice
 
-- [ ] Run `git diff --check`.
-- [ ] Commit:
+- [x] Run `git diff --check`.
+- [x] Commit:
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py \

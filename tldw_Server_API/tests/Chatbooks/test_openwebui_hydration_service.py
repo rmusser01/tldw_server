@@ -1,12 +1,16 @@
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Chatbooks import openwebui_hydration as hydration
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
 pytestmark = pytest.mark.unit
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-png"
 
 
 class FakeChaChaDB:
@@ -72,6 +76,65 @@ def _chat_file_connection() -> sqlite3.Connection:
         """
     )
     return conn
+
+
+@pytest.fixture()
+def real_hydration_db(tmp_path):
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "openwebui-hydration.sqlite"),
+        client_id="openwebui-hydration-test",
+    )
+    character_id = db.add_character_card({"name": "Hydration Assistant"})
+    conversation_id = db.add_conversation({"id": "conv-a", "character_id": character_id, "title": "Hydration"})
+    message_id = db.add_message(
+        {
+            "id": "msg-a",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "message with existing image",
+            "images": [{"data": PNG_BYTES, "mime": "image/png"}],
+        }
+    )
+    db.add_message_metadata(
+        message_id,
+        extra={
+            "openwebui_import": {
+                "source_message_id": "source-msg-a",
+                "source_parent_id": None,
+                "source_children_ids": [],
+                "role": "user",
+                "model": "model-a",
+                "attachment_refs": [{"id": "file-image"}],
+                "metadata": {"done": True},
+            }
+        },
+    )
+    return db
+
+
+def _resolved_file(path: Path, *, file_id: str = "file-image") -> hydration.OpenWebUIHydrationResolvedFile:
+    file_kind, mime_type = hydration.classify_openwebui_file(path)
+    return hydration.OpenWebUIHydrationResolvedFile(
+        file_id=file_id,
+        filename=path.name,
+        path=path,
+        status="resolved",
+        source="file_path",
+        file_kind=file_kind,
+        mime_type=mime_type,
+    )
+
+
+def _reference(*, file_id: str = "file-image") -> hydration.OpenWebUIHydrationReference:
+    return hydration.OpenWebUIHydrationReference(
+        conversation_id="conv-a",
+        message_id="msg-a",
+        file_id=file_id,
+        raw_ref_index=0,
+        raw_ref={"id": file_id},
+        source="message_metadata",
+        source_message_id="source-msg-a",
+    )
 
 
 def test_imported_message_metadata_refs_are_extracted_from_openwebui_extra():
@@ -198,3 +261,113 @@ def test_db_chat_file_fallback_skips_conversations_without_source_row_id():
 
     assert preview.references == ()
     assert preview.items == ()
+
+
+def test_hydrate_png_ref_appends_image_and_preserves_openwebui_metadata(real_hydration_db, tmp_path):
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(PNG_BYTES)
+
+    item = hydration.hydrate_image_reference(
+        real_hydration_db,
+        _reference(),
+        _resolved_file(image_path),
+        job_id="job-a",
+    )
+
+    images = real_hydration_db.get_message_images("msg-a")
+    metadata = real_hydration_db.get_message_metadata("msg-a")
+    openwebui_import = metadata["extra"]["openwebui_import"]
+
+    assert item.status == "hydrated_image"
+    assert item.file_id == "file-image"
+    assert item.job_id == "job-a"
+    assert images[1]["position"] == 1
+    assert images[1]["image_data"] == PNG_BYTES
+    assert openwebui_import["source_message_id"] == "source-msg-a"
+    assert openwebui_import["source_parent_id"] is None
+    assert openwebui_import["source_children_ids"] == []
+    assert openwebui_import["role"] == "user"
+    assert openwebui_import["model"] == "model-a"
+    assert openwebui_import["attachment_refs"] == [{"id": "file-image"}]
+    assert openwebui_import["metadata"] == {"done": True}
+    assert openwebui_import["hydration"]["last_job_id"] == "job-a"
+    assert openwebui_import["hydration"]["items"][0]["status"] == "hydrated_image"
+    assert openwebui_import["hydration"]["items"][0]["message_image_position"] == 1
+
+
+def test_hydrate_png_ref_is_idempotent_for_existing_source_key(real_hydration_db, tmp_path):
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(PNG_BYTES)
+    resolved = _resolved_file(image_path)
+    reference = _reference()
+
+    first = hydration.hydrate_image_reference(real_hydration_db, reference, resolved, job_id="job-a")
+    second = hydration.hydrate_image_reference(real_hydration_db, reference, resolved, job_id="job-b")
+
+    images = real_hydration_db.get_message_images("msg-a")
+    metadata = real_hydration_db.get_message_metadata("msg-a")
+    hydration_items = metadata["extra"]["openwebui_import"]["hydration"]["items"]
+
+    assert first.status == "hydrated_image"
+    assert second.status == "already_hydrated"
+    assert len(images) == 2
+    assert len(hydration_items) == 1
+    assert hydration_items[0]["message_image_position"] == 1
+
+
+def test_hydrate_image_ref_rolls_back_when_metadata_update_fails(real_hydration_db, tmp_path, monkeypatch):
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(PNG_BYTES)
+
+    def fail_metadata_update(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(real_hydration_db, "add_message_metadata", fail_metadata_update)
+
+    item = hydration.hydrate_image_reference(
+        real_hydration_db,
+        _reference(file_id="file-rollback"),
+        _resolved_file(image_path, file_id="file-rollback"),
+        job_id="job-a",
+    )
+
+    assert item.status == "metadata_update_failed"
+    assert len(real_hydration_db.get_message_images("msg-a")) == 1
+
+
+def test_append_message_image_enforces_existing_message_image_byte_cap(real_hydration_db):
+    oversized = b"x" * ((5 * 1024 * 1024) + 1)
+
+    with pytest.raises(InputError, match="maximum size"):
+        real_hydration_db.append_message_image("msg-a", oversized, "image/png")
+
+
+def test_hydrate_image_ref_reports_oversized_without_inserting(real_hydration_db, tmp_path):
+    image_path = tmp_path / "large.png"
+    image_path.write_bytes(PNG_BYTES + b"x" * 32)
+
+    item = hydration.hydrate_image_reference(
+        real_hydration_db,
+        _reference(file_id="file-large"),
+        _resolved_file(image_path, file_id="file-large"),
+        job_id="job-a",
+        max_image_bytes=8,
+    )
+
+    assert item.status == "oversized"
+    assert len(real_hydration_db.get_message_images("msg-a")) == 1
+
+
+def test_hydrate_image_ref_rejects_png_extension_with_non_image_bytes(real_hydration_db, tmp_path):
+    image_path = tmp_path / "fake.png"
+    image_path.write_bytes(b"not actually an image")
+
+    item = hydration.hydrate_image_reference(
+        real_hydration_db,
+        _reference(file_id="file-fake"),
+        _resolved_file(image_path, file_id="file-fake"),
+        job_id="job-a",
+    )
+
+    assert item.status == "unsupported_file_type"
+    assert len(real_hydration_db.get_message_images("msg-a")) == 1

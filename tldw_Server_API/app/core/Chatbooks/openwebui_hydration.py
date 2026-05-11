@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +16,10 @@ from tldw_Server_API.app.core.config import get_ingestion_source_allowed_roots
 
 
 MAX_PREVIEW_WARNING_ITEMS = 1000
+
+
+class _OpenWebUIHydrationMetadataError(RuntimeError):
+    """Raised internally to roll back image hydration when metadata cannot be recorded."""
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,10 @@ class OpenWebUIHydrationPreviewItem:
     raw_ref_index: int | None = None
     source: str | None = None
     raw_ref_shape: str | None = None
+    job_id: str | None = None
+    source_key: str | None = None
+    message_image_position: int | None = None
+    mime_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +196,11 @@ def resolve_openwebui_file_path(
     )
 
 
+def classify_openwebui_file(path: Path) -> tuple[str, str | None]:
+    """Classify a resolved OpenWebUI source file from conservative byte signatures."""
+    return _classify_file_path(path)
+
+
 def extract_openwebui_hydration_references(
     chacha_db: Any,
     scope: OpenWebUIHydrationScope,
@@ -264,6 +278,162 @@ def extract_openwebui_hydration_references(
     )
 
 
+def merge_openwebui_message_hydration_metadata(
+    chacha_db: Any,
+    message_id: str,
+    item_update: dict[str, Any],
+    *,
+    job_id: str | None = None,
+) -> bool:
+    """Deep-merge one hydration item into message metadata without replacing import metadata."""
+    current = chacha_db.get_message_metadata(message_id) or {}
+    current_extra = current.get("extra") if isinstance(current, dict) else {}
+    if not isinstance(current_extra, dict):
+        current_extra = {}
+    openwebui_import = current_extra.get("openwebui_import")
+    if not isinstance(openwebui_import, dict):
+        openwebui_import = {}
+    merged_openwebui_import = dict(openwebui_import)
+
+    hydration = merged_openwebui_import.get("hydration")
+    if not isinstance(hydration, dict):
+        hydration = {}
+    merged_hydration = dict(hydration)
+    items = merged_hydration.get("items")
+    if not isinstance(items, list):
+        items = []
+    merged_items = [dict(item) for item in items if isinstance(item, dict)]
+
+    source_key = _coerce_optional_text(item_update.get("source_key"))
+    replaced = False
+    if source_key:
+        for index, existing_item in enumerate(merged_items):
+            if existing_item.get("source_key") == source_key:
+                merged_items[index] = {**existing_item, **item_update}
+                replaced = True
+                break
+    if not replaced:
+        merged_items.append(dict(item_update))
+
+    merged_hydration["version"] = 1
+    if job_id is not None:
+        merged_hydration["last_job_id"] = job_id
+    merged_hydration["items"] = merged_items
+    merged_openwebui_import["hydration"] = merged_hydration
+
+    new_extra = dict(current_extra)
+    new_extra["openwebui_import"] = merged_openwebui_import
+    return bool(
+        chacha_db.add_message_metadata(
+            message_id,
+            tool_calls=current.get("tool_calls") if isinstance(current, dict) else None,
+            extra=new_extra,
+        )
+    )
+
+
+def hydrate_image_reference(
+    chacha_db: Any,
+    reference: OpenWebUIHydrationReference,
+    resolved_file: OpenWebUIHydrationResolvedFile,
+    *,
+    job_id: str | None = None,
+    max_image_bytes: int | None = None,
+) -> OpenWebUIHydrationPreviewItem:
+    """Hydrate one resolved image reference into a tldw message image slot."""
+    message_id = reference.message_id
+    if not message_id:
+        return _image_result_item(reference, "message_missing", job_id=job_id)
+    if resolved_file.path is None or resolved_file.status != "resolved":
+        return _image_result_item(reference, resolved_file.status, job_id=job_id)
+
+    try:
+        image_bytes = resolved_file.path.read_bytes()
+    except OSError:
+        return _image_result_item(reference, "missing_file", job_id=job_id)
+
+    image_limit = max_image_bytes if max_image_bytes is not None else _default_max_image_bytes()
+    if len(image_bytes) > image_limit:
+        return _image_result_item(reference, "oversized", job_id=job_id)
+
+    mime_type = _sniff_image_mime(image_bytes)
+    if mime_type is None:
+        return _image_result_item(reference, "unsupported_file_type", job_id=job_id)
+
+    source_key = _source_key_for_reference(reference, image_bytes)
+    existing_item = _existing_hydration_item(chacha_db, message_id, source_key)
+    if existing_item is not None and existing_item.get("message_image_position") is not None:
+        return _image_result_item(
+            reference,
+            "already_hydrated",
+            job_id=job_id,
+            source_key=source_key,
+            message_image_position=int(existing_item["message_image_position"]),
+            mime_type=str(existing_item.get("mime_type") or mime_type),
+        )
+
+    item_update = {
+        "source_key": source_key,
+        "source_file_id": reference.file_id,
+        "source_message_id": reference.source_message_id,
+        "status": "hydrated_image",
+        "message_image_position": None,
+        "mime_type": mime_type,
+        "job_id": job_id,
+    }
+    try:
+        if hasattr(chacha_db, "transaction"):
+            with chacha_db.transaction():
+                position = int(
+                    chacha_db.append_message_image(
+                        message_id,
+                        image_bytes,
+                        mime_type,
+                        commit=False,
+                    )
+                )
+                item_update["message_image_position"] = position
+                if not merge_openwebui_message_hydration_metadata(
+                    chacha_db,
+                    message_id,
+                    item_update,
+                    job_id=job_id,
+                ):
+                    raise _OpenWebUIHydrationMetadataError("Failed to record OpenWebUI hydration metadata.")
+        else:
+            position = int(chacha_db.append_message_image(message_id, image_bytes, mime_type))
+            item_update["message_image_position"] = position
+            if not merge_openwebui_message_hydration_metadata(
+                chacha_db,
+                message_id,
+                item_update,
+                job_id=job_id,
+            ):
+                return _image_result_item(
+                    reference,
+                    "metadata_update_failed",
+                    job_id=job_id,
+                    source_key=source_key,
+                    mime_type=mime_type,
+                )
+    except _OpenWebUIHydrationMetadataError:
+        return _image_result_item(
+            reference,
+            "metadata_update_failed",
+            job_id=job_id,
+            source_key=source_key,
+            mime_type=mime_type,
+        )
+    return _image_result_item(
+        reference,
+        "hydrated_image",
+        job_id=job_id,
+        source_key=source_key,
+        message_image_position=position,
+        mime_type=mime_type,
+    )
+
+
 def _resolve_declared_file_path(raw_path: str, data_root: OpenWebUIDataRoot) -> Path | None:
     candidate = Path(raw_path)
     roots = (data_root.root_path,)
@@ -312,6 +482,74 @@ def _classify_file_path(path: Path) -> tuple[str, str | None]:
     if header.startswith(b"%PDF"):
         return "document", "application/pdf"
     return "file", None
+
+
+def _sniff_image_mime(data: bytes) -> str | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _source_key_for_reference(reference: OpenWebUIHydrationReference, data: bytes) -> str:
+    if reference.file_id:
+        return f"openwebui:file:{reference.file_id}"
+    return f"openwebui:hash:{hashlib.sha256(data).hexdigest()}"
+
+
+def _existing_hydration_item(chacha_db: Any, message_id: str, source_key: str) -> dict[str, Any] | None:
+    metadata = chacha_db.get_message_metadata(message_id) or {}
+    openwebui_import = _openwebui_import_metadata(metadata)
+    if not openwebui_import:
+        return None
+    hydration = openwebui_import.get("hydration")
+    if not isinstance(hydration, dict):
+        return None
+    items = hydration.get("items")
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("source_key") == source_key:
+            return item
+    return None
+
+
+def _image_result_item(
+    reference: OpenWebUIHydrationReference,
+    status: str,
+    *,
+    job_id: str | None = None,
+    source_key: str | None = None,
+    message_image_position: int | None = None,
+    mime_type: str | None = None,
+) -> OpenWebUIHydrationPreviewItem:
+    return OpenWebUIHydrationPreviewItem(
+        conversation_id=reference.conversation_id,
+        message_id=reference.message_id,
+        file_id=reference.file_id,
+        status=status,
+        warning_code=None if status in {"hydrated_image", "already_hydrated"} else status,
+        raw_ref_index=reference.raw_ref_index,
+        source=reference.source,
+        job_id=job_id,
+        source_key=source_key,
+        message_image_position=message_image_position,
+        mime_type=mime_type,
+    )
+
+
+def _default_max_image_bytes() -> int:
+    try:
+        from tldw_Server_API.app.core.config import settings  # noqa: E402
+
+        return int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024))
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return 5 * 1024 * 1024
 
 
 def _load_conversation_messages(chacha_db: Any, conversation_id: str) -> list[dict[str, Any]]:
