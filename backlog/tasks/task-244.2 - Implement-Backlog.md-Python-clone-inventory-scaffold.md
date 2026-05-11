@@ -13,6 +13,7 @@ references:
   - 'https://github.com/MrLesk/Backlog.md'
   - 'https://raw.githubusercontent.com/MrLesk/Backlog.md/main/CLI-INSTRUCTIONS.md'
   - 'https://raw.githubusercontent.com/MrLesk/Backlog.md/main/package.json'
+  - 'https://github.com/rmusser01/tldw_server/pull/1565'
 documentation:
   - >-
     Docs/superpowers/specs/2026-05-10-backlog-md-python-compatibility-clone-design.md
@@ -56,6 +57,7 @@ Implementation update 2026-05-10:
 - Verification: backlog-py --help exits 0; python -m pytest tools/backlog-py/tests/test_inventory.py -v reports 2 passed; Bandit JSON at /tmp/bandit_backlog_py_task1.json reports 0 findings; git diff --check exits 0.
 - TDD note: original implementer red-phase output was unavailable after subagent shutdown, so controller performed a controlled red/green check by temporarily removing mcp:task-search, observing test_inventory_starts_with_agent_critical_commands fail, restoring the item, and rerunning the focused tests green.
 - No live backlog command cutover or live Backlog.md mutation path was added; only the local task record was updated through the Backlog CLI fallback because MCP has no worktree selector.
+- Draft PR opened for the completed branch: https://github.com/rmusser01/tldw_server/pull/1565. Merge readiness still requires the human-written Change summary required by repo policy.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
