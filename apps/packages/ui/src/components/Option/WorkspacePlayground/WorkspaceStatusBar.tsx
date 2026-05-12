@@ -2,6 +2,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { Tooltip, Modal, Button } from "antd"
 import { Loader2, Trash2 } from "lucide-react"
+import { getDesignSystemState } from "@/design-system"
 import { useConnectionStore } from "@/store/connection"
 import { deriveConnectionUxState, type ConnectionUxState } from "@/types/connection"
 import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
@@ -44,8 +45,10 @@ const deriveConnectionTone = (
     ux === "connected_degraded" ||
     ux === "demo_mode"
   ) {
+    const degradedState = getDesignSystemState("degraded")
+
     return {
-      label: "Degraded",
+      label: degradedState.label,
       detail: "Connection degraded",
       description: "",
       toneClass: "text-warning",

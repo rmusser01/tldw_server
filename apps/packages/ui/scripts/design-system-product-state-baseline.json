@@ -5335,17 +5335,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Option/WorkspacePlayground/WorkspaceStatusBar.tsx:Degraded",
-    "path": "src/components/Option/WorkspacePlayground/WorkspaceStatusBar.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Degraded",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Degraded\" state label in src/components/Option/WorkspacePlayground/WorkspaceStatusBar.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Option/WritingPlayground/index.tsx:Ready",
     "path": "src/components/Option/WritingPlayground/index.tsx",
     "rule": "canonical-state-label",

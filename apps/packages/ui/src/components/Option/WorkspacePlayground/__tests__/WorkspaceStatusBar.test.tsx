@@ -1,8 +1,13 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { ConnectionPhase } from "@/types/connection"
+import { getDesignSystemState } from "@/design-system"
+import { ConnectionPhase, type ConnectionState } from "@/types/connection"
 import { WorkspaceStatusBar } from "../WorkspaceStatusBar"
+
+const registryLabels = vi.hoisted(() => ({
+  degraded: "Registry Degraded"
+}))
 
 const connectionStoreState = {
   state: {
@@ -24,7 +29,7 @@ const connectionStoreState = {
     userPersona: null,
     lastConfigUpdatedAt: null,
     checksSinceConfigChange: 0,
-  },
+  } as ConnectionState,
   checkOnce: vi.fn(),
 }
 
@@ -50,6 +55,24 @@ vi.mock("@/store/connection", () => ({
     selector: (state: typeof connectionStoreState) => unknown
   ) => selector(connectionStoreState),
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "degraded" ? registryLabels.degraded : state.label
+        }
+      }
+    )
+  }
+})
 
 describe("WorkspaceStatusBar", () => {
   beforeEach(() => {
@@ -89,7 +112,7 @@ describe("WorkspaceStatusBar", () => {
   it("shows retry for authentication errors", () => {
     connectionStoreState.state.phase = ConnectionPhase.ERROR
     connectionStoreState.state.isConnected = false
-    connectionStoreState.state.errorKind = "error_auth"
+    connectionStoreState.state.errorKind = "auth"
 
     render(<WorkspaceStatusBar />)
 
@@ -104,5 +127,16 @@ describe("WorkspaceStatusBar", () => {
     render(<WorkspaceStatusBar />)
 
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+  })
+
+  it("uses the design-system registry label for degraded connection status", () => {
+    connectionStoreState.state.errorKind = "partial"
+
+    render(<WorkspaceStatusBar />)
+
+    expect(screen.getByTestId("workspace-statusbar-connection")).toHaveTextContent(
+      registryLabels.degraded
+    )
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 })
