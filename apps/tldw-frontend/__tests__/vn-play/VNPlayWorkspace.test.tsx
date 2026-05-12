@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type {
   VNPlayBranch,
+  VNPlayBranchNavigationResponse,
   VNPlayCheckpoint,
   VNPlayGenerationHistoryResponse,
   VNPlayGenerationRevisionDebugResponse,
@@ -14,6 +15,7 @@ import type {
 const mocks = vi.hoisted(() => ({
   createVNPlayCheckpoint: vi.fn(),
   createVNPlaySession: vi.fn(),
+  getVNPlayBranchNavigation: vi.fn(),
   getVNPlayGenerationRevisionDebug: vi.fn(),
   getVNPlaySession: vi.fn(),
   getVNAssetReadiness: vi.fn(),
@@ -27,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   listCharacters: vi.fn(),
   listVNAssetPacks: vi.fn(),
   regenerateVNPlayGeneration: vi.fn(),
+  restoreVNPlayBranch: vi.fn(),
   restoreVNPlaySession: vi.fn(),
   retryLastVNPlayTurn: vi.fn(),
   submitVNPlayTurn: vi.fn(),
@@ -44,6 +47,7 @@ vi.mock('@web/lib/api/vnPlay', () => ({
     mocks.confirmVNPlayGenerationRequest(...args),
   createVNPlayCheckpoint: (...args: unknown[]) => mocks.createVNPlayCheckpoint(...args),
   createVNPlaySession: (...args: unknown[]) => mocks.createVNPlaySession(...args),
+  getVNPlayBranchNavigation: (...args: unknown[]) => mocks.getVNPlayBranchNavigation(...args),
   getVNPlayGenerationRevisionDebug: (...args: unknown[]) =>
     mocks.getVNPlayGenerationRevisionDebug(...args),
   getVNPlaySession: (...args: unknown[]) => mocks.getVNPlaySession(...args),
@@ -56,6 +60,7 @@ vi.mock('@web/lib/api/vnPlay', () => ({
   listVNPlaySessions: (...args: unknown[]) => mocks.listVNPlaySessions(...args),
   listVNPlaySetupOptions: (...args: unknown[]) => mocks.listVNPlaySetupOptions(...args),
   regenerateVNPlayGeneration: (...args: unknown[]) => mocks.regenerateVNPlayGeneration(...args),
+  restoreVNPlayBranch: (...args: unknown[]) => mocks.restoreVNPlayBranch(...args),
   restoreVNPlaySession: (...args: unknown[]) => mocks.restoreVNPlaySession(...args),
   retryLastVNPlayTurn: (...args: unknown[]) => mocks.retryLastVNPlayTurn(...args),
   submitVNPlayTurn: (...args: unknown[]) => mocks.submitVNPlayTurn(...args),
@@ -161,6 +166,17 @@ const defaultGenerationHistory: VNPlayGenerationHistoryResponse = {
   },
 };
 
+const emptyBranchNavigation: VNPlayBranchNavigationResponse = {
+  session_id: 1,
+  mode: 'story',
+  scene_version: 0,
+  last_event_id: null,
+  active_branch_node_id: null,
+  active_path: [],
+  branches: [],
+  warnings: [],
+};
+
 function setupPack(overrides: Partial<VNPlaySetupAssetPackOption> = {}): VNPlaySetupAssetPackOption {
   return {
     ...defaultSetupOptions.asset_packs[0],
@@ -217,11 +233,13 @@ function createDeferred<T>() {
 }
 
 function mockVNPlayApi({
+  branchNavigation = emptyBranchNavigation,
   branches = [],
   checkpoints = [],
   generations = defaultGenerationHistory,
   sessions = [],
 }: {
+  branchNavigation?: VNPlayBranchNavigationResponse | null;
   branches?: VNPlayBranch[];
   checkpoints?: VNPlayCheckpoint[];
   generations?: VNPlayGenerationHistoryResponse;
@@ -231,6 +249,7 @@ function mockVNPlayApi({
   mocks.listVNPlayEvents.mockResolvedValue([]);
   mocks.listVNPlayCheckpoints.mockResolvedValue(checkpoints);
   mocks.listVNPlayBranches.mockResolvedValue(branches);
+  mocks.getVNPlayBranchNavigation.mockResolvedValue(branchNavigation);
   mocks.listVNPlayGenerations.mockResolvedValue(generations);
   mocks.listVNPlayGenerationRevisions.mockResolvedValue(defaultGenerationHistory);
   mocks.getVNPlayGenerationRevisionDebug.mockResolvedValue({
@@ -294,6 +313,21 @@ function mockVNPlayApi({
   mocks.restoreVNPlaySession.mockImplementation(async (sessionId: number) =>
     sessions.find((session) => session.id === sessionId) ?? sessions[0]
   );
+  mocks.restoreVNPlayBranch.mockImplementation(async (sessionId: number, branchId: number, request) => {
+    const session = sessions.find((candidate) => candidate.id === sessionId) ?? sessions[0];
+    return {
+      status: 'completed',
+      replayed: false,
+      restore_event_id: 51,
+      target_event_id: request.target === 'choice_point' ? 41 : 50,
+      scene_version: session?.scene_version ?? 0,
+      session,
+      current_scene: session?.scene_state ?? session?.current_scene ?? { scene_version: 0 },
+      branch_navigation: branchNavigation ?? emptyBranchNavigation,
+      branch_id: branchId,
+      target: request.target,
+    };
+  });
   mocks.retryLastVNPlayTurn.mockResolvedValue({
     turn_request_id: 11,
     status: 'completed',
@@ -817,6 +851,351 @@ describe('VNPlayWorkspace', () => {
     expect(screen.getByText('Door branch')).toBeInTheDocument();
     expect(mocks.listVNPlayCheckpoints).toHaveBeenCalledWith(1);
     expect(mocks.listVNPlayBranches).toHaveBeenCalledWith(1);
+  });
+
+  it('renders player-facing branch navigation for story sessions', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      session_id: 1,
+      mode: 'story',
+      scene_version: 6,
+      last_event_id: 26,
+      active_branch_node_id: 12,
+      active_path: [
+        {
+          branch_id: 12,
+          branch_label: 'Step inside',
+          choice_id: 'open-door',
+          choice_text: 'Open the archive door',
+          depth: 1,
+        },
+      ],
+      branches: [
+        {
+          branch_id: 12,
+          parent_branch_id: null,
+          parent_event_id: 17,
+          choice_selected_event_id: 18,
+          branch_label: 'Step inside',
+          choice_id: 'open-door',
+          choice_text: 'Open the archive door',
+          branch_path: [],
+          depth: 1,
+          status: 'active',
+          is_active: true,
+          is_on_active_path: true,
+          event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          subtree_event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          restore: {
+            supported: true,
+            default_target: 'branch_latest',
+            target_names: ['branch_latest', 'choice_point'],
+            targets: {
+              branch_latest: { event_id: 26, scene_version: 6 },
+              choice_point: { event_id: 17, scene_version: 5 },
+            },
+          },
+          warnings: [],
+        },
+      ],
+      warnings: [],
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Branch timeline')).toBeInTheDocument();
+    expect(screen.getAllByText('Open the archive door').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /resume branch: step inside/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /return to choice: step inside/i })).toBeInTheDocument();
+    expect(mocks.getVNPlayBranchNavigation).toHaveBeenCalledWith(1);
+  });
+
+  it('restores a story branch using the selected backend target', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const restoredSession: VNPlaySession = {
+      ...session,
+      scene_version: 7,
+      scene_state: undefined,
+      current_scene: undefined,
+    };
+    const restoredScene = { scene_version: 7, location_key: 'restored-branch' };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      session_id: 1,
+      mode: 'story',
+      scene_version: 6,
+      last_event_id: 26,
+      active_branch_node_id: 12,
+      active_path: [],
+      branches: [
+        {
+          branch_id: 12,
+          parent_branch_id: null,
+          parent_event_id: 17,
+          choice_selected_event_id: 18,
+          branch_label: 'Step inside',
+          choice_id: 'open-door',
+          choice_text: 'Open the archive door',
+          branch_path: [],
+          depth: 1,
+          status: 'active',
+          is_active: true,
+          is_on_active_path: true,
+          event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          subtree_event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          restore: {
+            supported: true,
+            default_target: 'branch_latest',
+            target_names: ['branch_latest', 'choice_point'],
+            targets: {
+              branch_latest: { event_id: 26, scene_version: 6 },
+              choice_point: { event_id: 17, scene_version: 5 },
+            },
+          },
+          warnings: [],
+        },
+      ],
+      warnings: [],
+    };
+    const restoredNavigation: VNPlayBranchNavigationResponse = {
+      ...branchNavigation,
+      scene_version: 7,
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+    mocks.restoreVNPlayBranch.mockResolvedValue({
+      status: 'completed',
+      replayed: false,
+      restore_event_id: 51,
+      target_event_id: 17,
+      scene_version: 7,
+      session: restoredSession,
+      current_scene: restoredScene,
+      branch_navigation: restoredNavigation,
+      branch_id: 12,
+      target: 'choice_point',
+    });
+    mocks.getVNPlaySession.mockResolvedValue(restoredSession);
+    mocks.getVNPlayBranchNavigation.mockResolvedValueOnce(branchNavigation).mockResolvedValueOnce(restoredNavigation);
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /return to choice: step inside/i }));
+
+    await waitFor(() => {
+      expect(mocks.restoreVNPlayBranch).toHaveBeenCalledWith(1, 12, {
+        client_scene_version: 6,
+        idempotency_key: expect.stringMatching(/^restore-branch-/),
+        target: 'choice_point',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('Scene 7').length).toBeGreaterThan(0);
+    });
+    expect(await screen.findByText('restored-branch')).toBeInTheDocument();
+  });
+
+  it('surfaces branch restore in-progress conflicts as recoverable play state', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      session_id: 1,
+      mode: 'story',
+      scene_version: 6,
+      last_event_id: 26,
+      active_branch_node_id: 12,
+      active_path: [],
+      branches: [
+        {
+          branch_id: 12,
+          parent_branch_id: null,
+          parent_event_id: 17,
+          choice_selected_event_id: 18,
+          branch_label: 'Step inside',
+          choice_id: 'open-door',
+          choice_text: 'Open the archive door',
+          branch_path: [],
+          depth: 1,
+          status: 'active',
+          is_active: true,
+          is_on_active_path: true,
+          event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          subtree_event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          restore: {
+            supported: true,
+            default_target: 'branch_latest',
+            target_names: ['branch_latest'],
+            targets: {
+              branch_latest: { event_id: 26, scene_version: 6 },
+            },
+          },
+          warnings: [],
+        },
+      ],
+      warnings: [],
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+    mocks.restoreVNPlayBranch.mockRejectedValueOnce(
+      Object.assign(new Error('restore_action_in_progress'), {
+        code: 'restore_action_in_progress',
+        status: 409,
+      })
+    );
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /resume branch: step inside/i }));
+
+    expect(await screen.findByText(/branch restore is already in progress/i)).toBeInTheDocument();
+    expect(screen.queryByText('restore_action_in_progress')).not.toBeInTheDocument();
+    expect(mocks.getVNPlaySession).toHaveBeenCalledWith(1);
+  });
+
+  it('does not submit overlapping branch restore requests', async () => {
+    const deferred = createDeferred<{
+      status: 'completed';
+      replayed: false;
+      restore_event_id: number;
+      target_event_id: number;
+      scene_version: number;
+      session: VNPlaySession;
+      current_scene: { scene_version: number };
+      branch_navigation: VNPlayBranchNavigationResponse;
+      branch_id: number;
+      target: 'branch_latest';
+    }>();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      session_id: 1,
+      mode: 'story',
+      scene_version: 6,
+      last_event_id: 26,
+      active_branch_node_id: 12,
+      active_path: [],
+      branches: [
+        {
+          branch_id: 12,
+          parent_branch_id: null,
+          parent_event_id: 17,
+          choice_selected_event_id: 18,
+          branch_label: 'Step inside',
+          choice_id: 'open-door',
+          choice_text: 'Open the archive door',
+          branch_path: [],
+          depth: 1,
+          status: 'active',
+          is_active: true,
+          is_on_active_path: true,
+          event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          subtree_event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          restore: {
+            supported: true,
+            default_target: 'branch_latest',
+            target_names: ['branch_latest'],
+            targets: {
+              branch_latest: { event_id: 26, scene_version: 6 },
+            },
+          },
+          warnings: [],
+        },
+      ],
+      warnings: [],
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+    mocks.restoreVNPlayBranch.mockReturnValue(deferred.promise);
+
+    render(<VNPlayWorkspace />);
+
+    const restoreButton = await screen.findByRole('button', { name: /resume branch: step inside/i });
+    fireEvent.click(restoreButton);
+    fireEvent.click(restoreButton);
+
+    expect(mocks.restoreVNPlayBranch).toHaveBeenCalledTimes(1);
+    deferred.resolve({
+      status: 'completed',
+      replayed: false,
+      restore_event_id: 51,
+      target_event_id: 26,
+      scene_version: 7,
+      session: { ...session, scene_version: 7 },
+      current_scene: { scene_version: 7 },
+      branch_navigation: { ...branchNavigation, scene_version: 7 },
+      branch_id: 12,
+      target: 'branch_latest',
+    });
+    await waitFor(() => expect(screen.getAllByText('Scene 7').length).toBeGreaterThan(0));
   });
 
   it('renders scripted generation history without raw debug payloads', async () => {

@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MessageSquarePlus } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
+import BranchTimelinePanel from '@web/components/vn-play/BranchTimelinePanel';
 import ChoicePanel from '@web/components/vn-play/ChoicePanel';
 import DialoguePanel from '@web/components/vn-play/DialoguePanel';
 import GenerationInspector from '@web/components/vn-play/GenerationInspector';
@@ -18,6 +19,7 @@ import SessionList, { VNPlayModeFilter } from '@web/components/vn-play/SessionLi
 import {
   createVNPlayCheckpoint,
   createVNPlaySession,
+  getVNPlayBranchNavigation,
   getVNPlaySession,
   activateVNPlayGenerationRevision,
   cancelVNPlayGenerationRequest,
@@ -28,12 +30,15 @@ import {
   listVNPlayGenerations,
   listVNPlaySessions,
   regenerateVNPlayGeneration,
+  restoreVNPlayBranch,
   restoreVNPlaySession,
   retryLastVNPlayTurn,
 } from '@web/lib/api/vnPlay';
 import { isAdmin } from '@web/lib/authz';
 import type {
   VNPlayBranch,
+  VNPlayBranchNavigationResponse,
+  VNPlayBranchRestoreTarget,
   VNPlayCheckpoint,
   VNPlayChoice,
   VNPlayEvent,
@@ -68,10 +73,46 @@ function recoveryCopy(status: string | null): string | null {
   if (status === 'turn_in_progress') {
     return 'A turn is already in progress for this session. Wait for it to finish, then reload if needed.';
   }
+  if (status === 'restore_action_in_progress') {
+    return 'A branch restore is already in progress for this session. Wait for it to finish, then reload if needed.';
+  }
   if (status === 'turn_failed') {
     return 'The last turn failed before completion. You can retry the stored turn request without duplicating the user input.';
   }
   return null;
+}
+
+function recoverableConflictStatus(errorInfo: ReturnType<typeof getVNPlayErrorInfo>): string {
+  if (errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)) {
+    return 'turn_in_progress';
+  }
+  if (
+    errorInfo.code === 'restore_action_in_progress' ||
+    /restore_action_in_progress/i.test(errorInfo.message)
+  ) {
+    return 'restore_action_in_progress';
+  }
+  return 'stale_scene_version';
+}
+
+function mergeSessionScene(
+  session: VNPlaySession,
+  scene: VNPlaySceneState | null | undefined,
+  sceneVersion?: number
+): VNPlaySession {
+  const nextSceneVersion = sceneVersion ?? scene?.scene_version ?? session.scene_version;
+  if (!scene) {
+    return {
+      ...session,
+      scene_version: nextSceneVersion,
+    };
+  }
+  return {
+    ...session,
+    scene_version: nextSceneVersion,
+    scene_state: scene,
+    current_scene: scene,
+  };
 }
 
 function canViewDebugForCurrentUser(): boolean {
@@ -101,6 +142,8 @@ export default function VNPlayWorkspace({
   const [events, setEvents] = useState<VNPlayEvent[]>([]);
   const [checkpoints, setCheckpoints] = useState<VNPlayCheckpoint[]>([]);
   const [branches, setBranches] = useState<VNPlayBranch[]>([]);
+  const [branchNavigation, setBranchNavigation] = useState<VNPlayBranchNavigationResponse | null>(null);
+  const [branchTimelineError, setBranchTimelineError] = useState<string | null>(null);
   const [generations, setGenerations] = useState<VNPlayGenerationHistoryItem[]>([]);
   const [generationPagination, setGenerationPagination] = useState<VNPlayOffsetPagination | null>(null);
   const [modeFilter, setModeFilter] = useState<VNPlayModeFilter>('all');
@@ -110,12 +153,64 @@ export default function VNPlayWorkspace({
   const [isCreatingCheckpoint, setIsCreatingCheckpoint] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingGenerations, setIsLoadingGenerations] = useState(false);
+  const [isLoadingBranchNavigation, setIsLoadingBranchNavigation] = useState(false);
   const [isRetryingTurn, setIsRetryingTurn] = useState(false);
   const [restoringCheckpointId, setRestoringCheckpointId] = useState<number | null>(null);
+  const [restoringBranchId, setRestoringBranchId] = useState<number | null>(null);
+  const [restoringBranchTarget, setRestoringBranchTarget] = useState<VNPlayBranchRestoreTarget | null>(null);
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selectedSessionId = selectedSession?.id;
+  const selectedSessionIdRef = useRef<number | null>(selectedSessionId ?? null);
+  const restoreOperationRef = useRef(0);
+  const restoreInFlightRef = useRef(false);
   const canViewGenerationDebug = useMemo(() => canViewDebugForCurrentUser(), []);
+
+  useEffect(() => {
+    const nextSelectedSessionId = selectedSessionId ?? null;
+    if (selectedSessionIdRef.current !== nextSelectedSessionId) {
+      restoreOperationRef.current += 1;
+      restoreInFlightRef.current = false;
+      setRestoringBranchId(null);
+      setRestoringBranchTarget(null);
+    }
+    selectedSessionIdRef.current = nextSelectedSessionId;
+  }, [selectedSessionId]);
+
+  const fetchBranchNavigation = useCallback(async (
+    sessionId: number,
+    mode?: VNPlayMode | null
+  ): Promise<{ error: string | null; navigation: VNPlayBranchNavigationResponse | null }> => {
+    if (mode !== 'story') {
+      return { error: null, navigation: null };
+    }
+
+    try {
+      const nextBranchNavigation = await getVNPlayBranchNavigation(sessionId);
+      return { error: null, navigation: nextBranchNavigation };
+    } catch (branchError) {
+      return {
+        error: branchError instanceof Error ? branchError.message : 'Failed to load branch timeline',
+        navigation: null,
+      };
+    }
+  }, []);
+
+  const reloadBranchNavigation = useCallback(async (
+    sessionId: number,
+    mode?: VNPlayMode | null
+  ): Promise<VNPlayBranchNavigationResponse | null> => {
+    setIsLoadingBranchNavigation(mode === 'story');
+    try {
+      const result = await fetchBranchNavigation(sessionId, mode);
+      setBranchTimelineError(result.error);
+      const nextBranchNavigation = result.navigation;
+      setBranchNavigation(nextBranchNavigation);
+      return nextBranchNavigation;
+    } finally {
+      setIsLoadingBranchNavigation(false);
+    }
+  }, [fetchBranchNavigation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,6 +257,9 @@ export default function VNPlayWorkspace({
       setEvents([]);
       setCheckpoints([]);
       setBranches([]);
+      setBranchNavigation(null);
+      setBranchTimelineError(null);
+      setIsLoadingBranchNavigation(false);
       setGenerations([]);
       setGenerationPagination(null);
       return;
@@ -170,17 +268,27 @@ export default function VNPlayWorkspace({
     let cancelled = false;
     async function loadSessionCollections() {
       setIsLoadingGenerations(true);
+      setIsLoadingBranchNavigation(selectedSession?.mode === 'story');
       try {
-        const [nextEvents, nextCheckpoints, nextBranches, nextGenerations] = await Promise.all([
+        const [
+          nextEvents,
+          nextCheckpoints,
+          nextBranches,
+          nextGenerations,
+          nextBranchNavigation,
+        ] = await Promise.all([
           listVNPlayEvents(selectedSessionId),
           listVNPlayCheckpoints(selectedSessionId),
           listVNPlayBranches(selectedSessionId),
           listVNPlayGenerations(selectedSessionId, { limit: GENERATION_HISTORY_PAGE_SIZE, offset: 0 }),
+          fetchBranchNavigation(selectedSessionId, selectedSession?.mode),
         ]);
         if (!cancelled) {
           setEvents(nextEvents);
           setCheckpoints(nextCheckpoints);
           setBranches(nextBranches);
+          setBranchNavigation(nextBranchNavigation.navigation);
+          setBranchTimelineError(nextBranchNavigation.error);
           setGenerations(nextGenerations.items ?? []);
           setGenerationPagination(nextGenerations.pagination ?? null);
         }
@@ -189,12 +297,15 @@ export default function VNPlayWorkspace({
           setEvents([]);
           setCheckpoints([]);
           setBranches([]);
+          setBranchNavigation(null);
+          setBranchTimelineError(null);
           setGenerations([]);
           setGenerationPagination(null);
         }
       } finally {
         if (!cancelled) {
           setIsLoadingGenerations(false);
+          setIsLoadingBranchNavigation(false);
         }
       }
     }
@@ -203,7 +314,7 @@ export default function VNPlayWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionId]);
+  }, [fetchBranchNavigation, selectedSession?.mode, selectedSessionId]);
 
   const filteredSessions = useMemo(() => {
     if (modeFilter === 'all') return sessions;
@@ -225,6 +336,8 @@ export default function VNPlayWorkspace({
       setEvents([]);
       setCheckpoints([]);
       setBranches([]);
+      setBranchNavigation(null);
+      setBranchTimelineError(null);
       setGenerations([]);
       setGenerationPagination(null);
       setModeFilter('all');
@@ -236,19 +349,30 @@ export default function VNPlayWorkspace({
     }
   }, []);
 
-  const reloadSessionCollections = useCallback(async (sessionId: number) => {
+  const reloadSessionCollections = useCallback(async (
+    sessionId: number,
+    mode?: VNPlayMode | null,
+    nextBranchNavigation?: VNPlayBranchNavigationResponse | null
+  ) => {
     const [nextEvents, nextCheckpoints, nextBranches, nextGenerations] = await Promise.all([
       listVNPlayEvents(sessionId),
       listVNPlayCheckpoints(sessionId),
       listVNPlayBranches(sessionId),
       listVNPlayGenerations(sessionId, { limit: GENERATION_HISTORY_PAGE_SIZE, offset: 0 }),
     ]);
+    if (nextBranchNavigation !== undefined) {
+      setBranchNavigation(nextBranchNavigation);
+      setBranchTimelineError(null);
+      setIsLoadingBranchNavigation(false);
+    } else {
+      await reloadBranchNavigation(sessionId, mode ?? selectedSession?.mode);
+    }
     setEvents(nextEvents);
     setCheckpoints(nextCheckpoints);
     setBranches(nextBranches);
     setGenerations(nextGenerations.items ?? []);
     setGenerationPagination(nextGenerations.pagination ?? null);
-  }, []);
+  }, [reloadBranchNavigation, selectedSession?.mode]);
 
   const loadMoreGenerations = useCallback(async () => {
     if (!selectedSessionId || !generationPagination?.has_more) return;
@@ -272,7 +396,7 @@ export default function VNPlayWorkspace({
     setSessions((previous) =>
       previous.map((session) => (session.id === nextSession.id ? nextSession : session))
     );
-    await reloadSessionCollections(sessionId);
+    await reloadSessionCollections(sessionId, nextSession.mode);
     return nextSession;
   }, [reloadSessionCollections]);
 
@@ -299,7 +423,7 @@ export default function VNPlayWorkspace({
         previous.map((session) => (session.id === response.session?.id ? response.session : session))
       );
       try {
-        await reloadSessionCollections(response.session.id);
+        await reloadSessionCollections(response.session.id, response.session.mode);
       } catch {
         // Keep response-derived session state when the follow-up collection refresh is unavailable.
       }
@@ -352,11 +476,7 @@ export default function VNPlayWorkspace({
     const isConflict = isRecoverableVNPlayConflict(turnError);
 
     if (isConflict && selectedSession) {
-      setTurnStatus(
-        errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)
-          ? 'turn_in_progress'
-          : 'stale_scene_version'
-      );
+      setTurnStatus(recoverableConflictStatus(errorInfo));
       setError(null);
       try {
         await reloadSelectedSession(selectedSession.id);
@@ -410,13 +530,75 @@ export default function VNPlayWorkspace({
       setSessions((previous) =>
         previous.map((session) => (session.id === restored.id ? restored : session))
       );
-      await reloadSessionCollections(selectedSession.id);
+      await reloadSessionCollections(selectedSession.id, restored.mode);
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : 'Failed to restore checkpoint');
     } finally {
       setRestoringCheckpointId(null);
     }
   }, [reloadSessionCollections, sceneVersion, selectedSession]);
+
+  const handleRestoreBranch = useCallback(async (
+    branchId: number,
+    target: VNPlayBranchRestoreTarget
+  ) => {
+    if (!selectedSession || restoringBranchId !== null || restoreInFlightRef.current) return;
+
+    const sessionId = selectedSession.id;
+    const operationId = restoreOperationRef.current + 1;
+    restoreOperationRef.current = operationId;
+    restoreInFlightRef.current = true;
+    const isCurrentRestore = () =>
+      restoreOperationRef.current === operationId && selectedSessionIdRef.current === sessionId;
+    setRestoringBranchId(branchId);
+    setRestoringBranchTarget(target);
+    setError(null);
+    try {
+      const restored = await restoreVNPlayBranch(sessionId, branchId, {
+        client_scene_version: sceneVersion,
+        idempotency_key: createVNPlayIdempotencyKey('restore-branch'),
+        target,
+      });
+      if (!isCurrentRestore()) return;
+      const nextSession = mergeSessionScene(restored.session, restored.current_scene, restored.scene_version);
+      setTurnStatus(restored.status);
+      setSelectedSession(nextSession);
+      setSessions((previous) =>
+        previous.map((session) => (session.id === nextSession.id ? nextSession : session))
+      );
+      setBranchNavigation(restored.branch_navigation);
+      await reloadSessionCollections(nextSession.id, nextSession.mode, restored.branch_navigation);
+    } catch (restoreError) {
+      const errorInfo = getVNPlayErrorInfo(restoreError);
+      if (isRecoverableVNPlayConflict(restoreError)) {
+        if (!isCurrentRestore()) return;
+        setTurnStatus(recoverableConflictStatus(errorInfo));
+        setError(null);
+        try {
+          await reloadSelectedSession(sessionId);
+          if (!isCurrentRestore()) return;
+        } catch {
+          if (!isCurrentRestore()) return;
+          setError(errorInfo.message);
+        }
+        return;
+      }
+      if (!isCurrentRestore()) return;
+      setError(errorInfo.message);
+    } finally {
+      if (isCurrentRestore()) {
+        restoreInFlightRef.current = false;
+        setRestoringBranchId(null);
+        setRestoringBranchTarget(null);
+      }
+    }
+  }, [
+    reloadSelectedSession,
+    reloadSessionCollections,
+    restoringBranchId,
+    sceneVersion,
+    selectedSession,
+  ]);
 
   const handleRetryLastTurn = useCallback(async () => {
     if (!selectedSession) return;
@@ -524,35 +706,54 @@ export default function VNPlayWorkspace({
           />
 
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
-            <div className="rounded-md border border-border bg-surface p-4">
-              <h2 className="mb-4 text-lg font-semibold">Scene</h2>
-              {selectedSession && sceneState ? (
-                <div className="grid gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-normal text-text-muted">Selected session</p>
-                    <p className="font-medium">Selected session: {selectedSession.title}</p>
-                  </div>
-                  <SceneStage events={events} sceneState={sceneState} showDialogue={false} />
-                  <DialoguePanel
-                    events={events}
-                    mode={selectedSession.mode}
-                    sceneVersion={sceneVersion}
-                    sessionId={selectedSession.id}
-                    onError={handleTurnError}
-                    onTurn={(response) => void handleTurn(response)}
-                  />
-                  {selectedSession.mode === 'story' && (
-                    <ChoicePanel
-                      choices={choices}
+            <div className="grid gap-4">
+              <div className="rounded-md border border-border bg-surface p-4">
+                <h2 className="mb-4 text-lg font-semibold">Scene</h2>
+                {selectedSession && sceneState ? (
+                  <div className="grid gap-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-normal text-text-muted">Selected session</p>
+                      <p className="font-medium">Selected session: {selectedSession.title}</p>
+                    </div>
+                    <SceneStage events={events} sceneState={sceneState} showDialogue={false} />
+                    <DialoguePanel
+                      events={events}
+                      mode={selectedSession.mode}
                       sceneVersion={sceneVersion}
                       sessionId={selectedSession.id}
                       onError={handleTurnError}
                       onTurn={(response) => void handleTurn(response)}
                     />
+                    {selectedSession.mode === 'story' && (
+                      <ChoicePanel
+                        choices={choices}
+                        sceneVersion={sceneVersion}
+                        sessionId={selectedSession.id}
+                        onError={handleTurnError}
+                        onTurn={(response) => void handleTurn(response)}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-text-muted">No session selected.</p>
+                )}
+              </div>
+
+              {selectedSession?.mode === 'story' && (
+                <>
+                  {branchTimelineError && (
+                    <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
+                      {branchTimelineError}
+                    </div>
                   )}
-                </div>
-              ) : (
-                <p className="text-sm text-text-muted">No session selected.</p>
+                  <BranchTimelinePanel
+                    isLoading={isLoadingBranchNavigation}
+                    navigation={branchNavigation}
+                    onRestoreBranch={handleRestoreBranch}
+                    restoringBranchId={restoringBranchId}
+                    restoreTarget={restoringBranchTarget}
+                  />
+                </>
               )}
             </div>
 

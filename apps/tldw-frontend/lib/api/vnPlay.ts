@@ -1,6 +1,9 @@
 import { apiClient } from '@web/lib/api';
 import type {
   VNPlayBranch,
+  VNPlayBranchNavigationResponse,
+  VNPlayBranchRestoreRequest,
+  VNPlayBranchRestoreResponse,
   VNPlayCheckpoint,
   VNPlayCheckpointCreate,
   VNPlayEvent,
@@ -97,6 +100,20 @@ export function restoreVNPlaySession(
 
 export function listVNPlayBranches(sessionId: number): Promise<VNPlayBranch[]> {
   return apiClient.get(`${VN_PLAY_BASE}/sessions/${sessionId}/branches`);
+}
+
+export function getVNPlayBranchNavigation(
+  sessionId: number
+): Promise<VNPlayBranchNavigationResponse> {
+  return apiClient.get(`${VN_PLAY_BASE}/sessions/${sessionId}/branch-navigation`);
+}
+
+export function restoreVNPlayBranch(
+  sessionId: number,
+  branchId: number,
+  request: VNPlayBranchRestoreRequest
+): Promise<VNPlayBranchRestoreResponse> {
+  return apiClient.post(`${VN_PLAY_BASE}/sessions/${sessionId}/branches/${branchId}/restore`, request);
 }
 
 export function listVNPlayGenerations(

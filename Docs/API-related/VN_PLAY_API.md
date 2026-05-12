@@ -521,3 +521,5 @@ Recognized metadata fields include `safety_metadata.age_status`, `safety_metadat
 ## Frontend Workspace
 
 The Next.js workspace is available at `/vn-play`. It can create Freeform and Story sessions, list sessions, submit Freeform turns, submit Story choices, render returned dialogue/events, and show current scene metadata.
+
+For Story/CYOA sessions, the workspace uses `GET /api/v1/vn/vn-play/sessions/{session_id}/branch-navigation` for the player-facing branch timeline and `POST /api/v1/vn/vn-play/sessions/{session_id}/branches/{branch_id}/restore` for guarded branch resume/restore controls. Frontends should treat branch labels, active-path state, warnings, and restore target availability as backend-owned data instead of reconstructing branch state from raw events.

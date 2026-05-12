@@ -7,6 +7,8 @@ export type VNPlaySetupTrustSource = 'local_pack' | 'latest_import_journal' | 'u
 export type VNPlaySetupWarningSeverity = 'info' | 'warning' | 'high_risk';
 export type VNPlaySetupCompatibilityStatus = 'compatible' | 'different_character' | 'unknown';
 export type VNPlaySetupEmptyStateScope = 'global' | 'filter' | 'page';
+export type VNPlayBranchRestoreTarget = 'branch_latest' | 'choice_point';
+export type VNPlayBranchWarningSeverity = 'info' | 'warning' | 'high_risk';
 export type VNPlayTurnStatus =
   | 'pending'
   | 'model_calling'
@@ -361,4 +363,94 @@ export interface VNPlayBranch {
   status?: string;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+export interface VNPlayBranchWarning {
+  code: string;
+  severity: VNPlayBranchWarningSeverity;
+  recoverable: boolean;
+  message?: string | null;
+  branch_id?: number | null;
+  event_id?: number | null;
+}
+
+export interface VNPlayBranchEventRange {
+  start_event_id?: number | null;
+  start_sequence_number?: number | null;
+  latest_event_id?: number | null;
+  latest_sequence_number?: number | null;
+}
+
+export interface VNPlayBranchRestoreCapability {
+  supported: boolean;
+  default_target?: VNPlayBranchRestoreTarget | null;
+  target_names: VNPlayBranchRestoreTarget[];
+  targets: Partial<Record<VNPlayBranchRestoreTarget, Record<string, number | null> | null>>;
+}
+
+export interface VNPlayGeneratedChoiceRef {
+  generation_id: number;
+  revision_id: number;
+  choice_id: string;
+}
+
+export interface VNPlayBranchPathStep {
+  branch_id: number;
+  branch_label?: string | null;
+  choice_id?: string | null;
+  choice_text?: string | null;
+  generated_choice?: VNPlayGeneratedChoiceRef | null;
+  depth: number;
+}
+
+export interface VNPlayBranchNavigationNode {
+  branch_id: number;
+  parent_branch_id?: number | null;
+  parent_event_id?: number | null;
+  choice_selected_event_id?: number | null;
+  branch_label?: string | null;
+  choice_id?: string | null;
+  choice_text?: string | null;
+  generated_choice?: VNPlayGeneratedChoiceRef | null;
+  branch_path: Record<string, unknown>[];
+  depth: number;
+  status: string;
+  is_active: boolean;
+  is_on_active_path: boolean;
+  event_range: VNPlayBranchEventRange;
+  subtree_event_range: VNPlayBranchEventRange;
+  restore: VNPlayBranchRestoreCapability;
+  warnings: VNPlayBranchWarning[];
+}
+
+export interface VNPlayBranchNavigationResponse {
+  session_id: number;
+  mode: VNPlayMode;
+  scene_version: number;
+  last_event_id?: number | null;
+  active_branch_node_id?: number | null;
+  active_path: VNPlayBranchPathStep[];
+  branches: VNPlayBranchNavigationNode[];
+  warnings: VNPlayBranchWarning[];
+}
+
+export interface VNPlayBranchRestoreRequest {
+  client_scene_version: number;
+  idempotency_key: string;
+  target: VNPlayBranchRestoreTarget;
+}
+
+export interface VNPlayBranchRestoreResponse {
+  status: string;
+  replayed: boolean;
+  restore_event_id: number;
+  target_event_id?: number | null;
+  scene_version: number;
+  session: VNPlaySession;
+  current_scene: VNPlaySceneState;
+  branch_navigation: VNPlayBranchNavigationResponse;
+  branch_id?: number | null;
+  checkpoint_id?: number | null;
+  save_slot_id?: number | null;
+  target?: VNPlayBranchRestoreTarget | null;
 }
