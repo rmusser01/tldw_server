@@ -124,7 +124,7 @@ See: [Reading List API](Reading_List_API.md)
 
 #### Chatbooks - `/api/v1/chatbooks`
 
-Chatbooks provide portable backup, restore, sharing, and migration workflows. The same import and preview endpoints also support OpenWebUI "Export Chats" JSON files when `source_format=openwebui_json` and uploaded OpenWebUI `webui.db` databases when `source_format=openwebui_db`.
+Chatbooks provide portable backup, restore, sharing, and migration workflows. The same import and preview endpoints also support OpenWebUI "Export Chats" JSON files when `source_format=openwebui_json` and uploaded OpenWebUI `webui.db` databases when `source_format=openwebui_db`. After OpenWebUI import, the dedicated hydration endpoints preview and run server-local attachment hydration to restore referenced images/files from an allowed OpenWebUI data root.
 
 - `POST /api/v1/chatbooks/export` - create a `.chatbook` archive
 - `POST /api/v1/chatbooks/import` - import a `.chatbook` archive, OpenWebUI chat export JSON, or OpenWebUI database. Database imports require `selected_openwebui_user_id`.
