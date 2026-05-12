@@ -1,5 +1,9 @@
 import pytest
 
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    get_persona_visual_renderer_capability,
+    list_persona_visual_renderer_capabilities,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     MAX_FRAMES_PER_ANIMATION,
     PersonaVisualManifestError,
@@ -33,6 +37,29 @@ def _activatable_manifest() -> dict:
     }
 
 
+def test_renderer_capability_registry_lists_only_sprite_frames_in_v1() -> None:
+    capabilities = list_persona_visual_renderer_capabilities()
+
+    assert [cap.renderer_type for cap in capabilities] == ["sprite_frames"]
+    capability = capabilities[0]
+    assert capability.display_name == "Sprite frames"
+    assert capability.manifest_versions == (1,)
+    assert capability.can_validate is True
+    assert capability.can_activate is True
+    assert capability.buddy_runtime_supported is True
+    assert capability.import_supported is True
+    assert capability.export_supported is True
+    assert capability.disabled_reason is None
+
+
+def test_renderer_capability_lookup_rejects_unknown_or_future_renderers() -> None:
+    assert get_persona_visual_renderer_capability("sprite_frames") is not None
+    assert get_persona_visual_renderer_capability(" sprite_frames ") is None
+    assert get_persona_visual_renderer_capability("live2d") is None
+    assert get_persona_visual_renderer_capability("sprite_sheet") is None
+    assert get_persona_visual_renderer_capability("not_real") is None
+
+
 def test_valid_manifest_resolves_required_states_and_normalizes_frames() -> None:
     result = validate_visual_manifest(
         _activatable_manifest(),
@@ -50,6 +77,43 @@ def test_valid_manifest_resolves_required_states_and_normalizes_frames() -> None
     assert result.manifest["animations"]["idle"]["frames"] == [
         {"asset_id": "asset-idle"}
     ]
+
+
+@pytest.mark.parametrize("renderer_type", ["live2d", "static_image", "sprite_sheet", "not_real"])
+def test_manifest_rejects_unsupported_renderer_types(renderer_type: str) -> None:
+    manifest = _activatable_manifest()
+    manifest["renderer_type"] = renderer_type
+
+    with pytest.raises(PersonaVisualManifestError, match="unsupported renderer_type"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+def test_manifest_rejects_whitespace_padded_renderer_type() -> None:
+    manifest = _activatable_manifest()
+    manifest["renderer_type"] = " sprite_frames "
+
+    with pytest.raises(PersonaVisualManifestError, match="unsupported renderer_type"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
 
 
 def test_activation_rejects_missing_required_state() -> None:

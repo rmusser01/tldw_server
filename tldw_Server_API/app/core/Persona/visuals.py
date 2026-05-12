@@ -4,6 +4,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    get_persona_visual_renderer_capability,
+)
+
 
 VISUAL_STATE_IDS = {
     "idle",
@@ -17,7 +21,6 @@ VISUAL_STATE_IDS = {
     "offline",
 }
 REQUIRED_VISUAL_STATES = {"idle", "listening", "thinking", "speaking", "error"}
-SUPPORTED_RENDERER_TYPES = {"sprite_frames"}
 SUPPORTED_TRIGGER_SOURCES = {"live_state", "tool_category", "mcp_runtime"}
 
 MAX_FRAMES_PER_ANIMATION = 240
@@ -87,10 +90,15 @@ def _normalize_manifest_shape(manifest: dict[str, Any]) -> dict[str, Any]:
         raise PersonaVisualManifestError("Manifest must be an object")
 
     normalized = deepcopy(manifest)
-    if normalized.get("manifest_version") != 1:
-        raise PersonaVisualManifestError("manifest_version must be 1")
-    if normalized.get("renderer_type") not in SUPPORTED_RENDERER_TYPES:
-        raise PersonaVisualManifestError("renderer_type must be sprite_frames")
+    renderer_type = normalized.get("renderer_type")
+    capability = get_persona_visual_renderer_capability(str(renderer_type or ""))
+    if capability is None or not capability.can_validate:
+        raise PersonaVisualManifestError(f"unsupported renderer_type: {renderer_type}")
+    if normalized.get("manifest_version") not in capability.manifest_versions:
+        raise PersonaVisualManifestError(
+            "manifest_version must be one of "
+            f"{', '.join(str(version) for version in capability.manifest_versions)}"
+        )
 
     states = normalized.setdefault("states", {})
     animations = normalized.setdefault("animations", {})
@@ -385,7 +393,6 @@ def _resolve_state(
 __all__ = [
     "MAX_FRAMES_PER_ANIMATION",
     "REQUIRED_VISUAL_STATES",
-    "SUPPORTED_RENDERER_TYPES",
     "VISUAL_STATE_IDS",
     "PersonaVisualManifestError",
     "PersonaVisualManifestValidation",
