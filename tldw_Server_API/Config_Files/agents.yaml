@@ -19,6 +19,10 @@
 #     stub_smoke_tested, live_e2e_tested, sandbox_tested, production_supported
 #   compatibility_notes: Release-facing compatibility caveat
 #   compatibility_docs_url: Compatibility matrix or evidence document
+#   entrypoint_strategy: ACP entrypoint strategy; one of native_acp,
+#     adapter_acp, documented_candidate, custom_template
+#   acp_command: ACP stdio command to probe; not inferred from command
+#   acp_args: ACP stdio command arguments
 
 agents:
   - type: claude_code
@@ -36,6 +40,10 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Configured-agent setup is documented, but live Claude Code ACP compatibility remains blocked until credentials and an ACP-compatible stdio command are verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: documented_candidate
+    acp_command: ""
+    acp_args: []
+    certification_blocker: adapter_required
 
   - type: codex
     name: OpenAI Codex CLI
@@ -51,6 +59,10 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Configured-agent setup is documented, but live Codex ACP compatibility remains blocked until an ACP-compatible stdio command and provider credentials are verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: documented_candidate
+    acp_command: ""
+    acp_args: []
+    certification_blocker: adapter_required
 
   - type: aider
     name: Aider
@@ -64,6 +76,10 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Configured-agent setup is documented, but live Aider ACP compatibility remains blocked until an ACP-compatible Aider command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: documented_candidate
+    acp_command: ""
+    acp_args: []
+    certification_blocker: entrypoint_strategy_missing
 
   - type: goose
     name: Goose
@@ -78,6 +94,10 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Configured-agent setup is documented, but live Goose ACP compatibility remains blocked until an ACP-compatible Goose command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: native_acp
+    acp_command: goose
+    acp_args:
+      - acp
 
   - type: continue_dev
     name: Continue
@@ -92,6 +112,10 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Configured-agent setup is documented, but live Continue ACP compatibility remains blocked until an ACP-compatible Continue command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: documented_candidate
+    acp_command: ""
+    acp_args: []
+    certification_blocker: entrypoint_strategy_missing
 
   - type: opencode
     name: OpenCode
@@ -108,6 +132,10 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Configured-agent setup is documented, but live OpenCode ACP compatibility remains blocked until an ACP-compatible OpenCode command is installed and verified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: native_acp
+    acp_command: opencode
+    acp_args:
+      - acp
 
   - type: custom
     name: Custom Agent
@@ -121,3 +149,6 @@ agents:
     verification_level: documented_only
     compatibility_notes: "Custom ACP profiles require a named command, workspace policy, and certification evidence before release claims."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: custom_template
+    acp_command: ""
+    acp_args: []

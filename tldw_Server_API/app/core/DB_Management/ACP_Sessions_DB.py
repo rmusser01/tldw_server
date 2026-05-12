@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 14
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -91,6 +91,12 @@ CREATE TABLE IF NOT EXISTS agent_registry (
     mcp_llm_model TEXT,
     mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
     mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+    entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+    acp_command TEXT NOT NULL DEFAULT '',
+    acp_args TEXT NOT NULL DEFAULT '[]',
+    adapter_source TEXT,
+    adapter_docs_url TEXT,
+    certification_blocker TEXT,
     source TEXT NOT NULL DEFAULT 'api',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -203,6 +209,12 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "mcp_llm_model": "mcp_llm_model TEXT",
         "mcp_max_iterations": "mcp_max_iterations INTEGER NOT NULL DEFAULT 20",
         "mcp_refresh_tools": "mcp_refresh_tools INTEGER NOT NULL DEFAULT 0",
+        "entrypoint_strategy": "entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate'",
+        "acp_command": "acp_command TEXT NOT NULL DEFAULT ''",
+        "acp_args": "acp_args TEXT NOT NULL DEFAULT '[]'",
+        "adapter_source": "adapter_source TEXT",
+        "adapter_docs_url": "adapter_docs_url TEXT",
+        "certification_blocker": "certification_blocker TEXT",
     },
     "permission_policies": {
         "conditions_json": "conditions_json TEXT",
@@ -321,6 +333,12 @@ class ACPSessionsDB:
                         mcp_llm_model TEXT,
                         mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
                         mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+                        entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+                        acp_command TEXT NOT NULL DEFAULT '',
+                        acp_args TEXT NOT NULL DEFAULT '[]',
+                        adapter_source TEXT,
+                        adapter_docs_url TEXT,
+                        certification_blocker TEXT,
                         source TEXT NOT NULL DEFAULT 'api',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
@@ -529,6 +547,43 @@ class ACPSessionsDB:
                 )
             if current_version < 13:
                 _ensure_config_template_unique_index(conn)
+            if current_version < 14:
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "entrypoint_strategy",
+                    "entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "acp_command",
+                    "acp_command TEXT NOT NULL DEFAULT ''",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "acp_args",
+                    "acp_args TEXT NOT NULL DEFAULT '[]'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_source",
+                    "adapter_source TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_docs_url",
+                    "adapter_docs_url TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "certification_blocker",
+                    "certification_blocker TEXT",
+                )
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -1555,6 +1610,12 @@ class ACPSessionsDB:
         mcp_llm_model = entry_dict.get("mcp_llm_model")
         mcp_max_iterations = int(entry_dict.get("mcp_max_iterations", 20))
         mcp_refresh_tools = int(bool(entry_dict.get("mcp_refresh_tools", 0)))
+        entrypoint_strategy = entry_dict.get("entrypoint_strategy", "documented_candidate")
+        acp_command = entry_dict.get("acp_command", "")
+        acp_args = entry_dict.get("acp_args", "[]")
+        adapter_source = entry_dict.get("adapter_source")
+        adapter_docs_url = entry_dict.get("adapter_docs_url")
+        certification_blocker = entry_dict.get("certification_blocker")
         source = entry_dict.get("source", "api")
 
         conn.execute(
@@ -1564,8 +1625,10 @@ class ACPSessionsDB:
                 requires_api_key, is_default, install_instructions, docs_url,
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
+                entrypoint_strategy, acp_command, acp_args,
+                adapter_source, adapter_docs_url, certification_blocker,
                 source, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_type) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -1583,6 +1646,12 @@ class ACPSessionsDB:
                 mcp_llm_model = excluded.mcp_llm_model,
                 mcp_max_iterations = excluded.mcp_max_iterations,
                 mcp_refresh_tools = excluded.mcp_refresh_tools,
+                entrypoint_strategy = excluded.entrypoint_strategy,
+                acp_command = excluded.acp_command,
+                acp_args = excluded.acp_args,
+                adapter_source = excluded.adapter_source,
+                adapter_docs_url = excluded.adapter_docs_url,
+                certification_blocker = excluded.certification_blocker,
                 source = excluded.source,
                 updated_at = excluded.updated_at
             """,
@@ -1591,6 +1660,8 @@ class ACPSessionsDB:
                 requires_api_key, is_default, install_instructions, docs_url,
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
+                entrypoint_strategy, acp_command, acp_args,
+                adapter_source, adapter_docs_url, certification_blocker,
                 source, now, now,
             ),
         )

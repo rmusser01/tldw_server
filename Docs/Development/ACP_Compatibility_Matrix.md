@@ -185,8 +185,13 @@ language later:
 | Caveat | Meaning |
 | --- | --- |
 | `protocol_incompatibility` | Agent does not satisfy ACP stdio contract or required JSON-RPC behavior. |
+| `entrypoint_strategy_missing` | Registry row has no verified ACP stdio entrypoint strategy or command. |
 | `binary_missing` | Expected command is not installed or not on PATH. |
 | `credentials_missing` | Provider/API key or account login is unavailable. |
+| `adapter_required` | Agent needs a separate ACP adapter before live ACP certification can run. |
+| `adapter_missing` | Adapter-backed strategy is configured but the adapter command is unavailable. |
+| `acp_initialize_failed` | ACP stdio command started but failed the bounded initialize probe. |
+| `shell_builtin_collision` | Configured ACP command resolves to a shell builtin or alias-like value instead of an executable. |
 | `workspace_config_missing` | Workspace allowlist, cwd, or root policy is not configured. |
 | `host_runtime_missing` | Docker/Lima/VZ or other required host runtime is unavailable. |
 | `sandbox_unverified` | Host mode works or is documented, but sandbox mode has no current evidence. |

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal, Union
+from typing import Any, ClassVar, Literal, Union
 
 from pydantic import BaseModel, Field, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
@@ -37,6 +37,26 @@ ACPVerificationLevel = Literal[
     "sandbox_tested",
     "production_supported",
 ]
+ACPEntryPointStrategy = Literal[
+    "native_acp",
+    "adapter_acp",
+    "documented_candidate",
+    "custom_template",
+]
+ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+
+
+class ACPAgentEntrypointStatus(BaseModel):
+    """ACP stdio entrypoint readiness metadata for one downstream agent."""
+    profile_key: str = Field(..., description="Registry profile key this metadata describes")
+    entrypoint_strategy: ACPEntryPointStrategy = Field(default="documented_candidate")
+    probe_state: ACPProbeState = Field(default="documented_only")
+    acp_command: str = Field(default="")
+    acp_args: list[str] = Field(default_factory=list)
+    primary_blocker: str | None = Field(default=None)
+    blockers: list[str] = Field(default_factory=list)
+    status_message: str = Field(default="")
+    docs_url: str | None = Field(default=ACP_COMPATIBILITY_DOCS_URL)
 
 
 class ACPAgentInfo(BaseModel):
@@ -66,6 +86,10 @@ class ACPAgentInfo(BaseModel):
     compatibility_docs_url: str | None = Field(
         default=ACP_COMPATIBILITY_DOCS_URL,
         description="Documentation path or URL for compatibility details.",
+    )
+    entrypoint: ACPAgentEntrypointStatus = Field(
+        ...,
+        description="ACP stdio entrypoint readiness metadata.",
     )
 
 
@@ -113,6 +137,10 @@ class ACPSetupGuideAgent(BaseModel):
     )
     steps: list[str] = Field(default_factory=list, description="Actionable setup or certification steps")
     docs_url: str | None = Field(default=None, description="Agent documentation URL")
+    entrypoint: ACPAgentEntrypointStatus = Field(
+        ...,
+        description="ACP stdio entrypoint readiness metadata.",
+    )
 
 
 class ACPSetupGuideResponse(BaseModel):
@@ -133,6 +161,12 @@ class ACPAgentRegisterRequest(BaseModel):
     requires_api_key: str | None = Field(default=None, description="Required API key env var")
     install_instructions: list[str] = Field(default_factory=list, description="Installation steps")
     docs_url: str | None = Field(default=None, description="Documentation URL")
+    entrypoint_strategy: ACPEntryPointStrategy = Field(default="documented_candidate")
+    acp_command: str = Field(default="")
+    acp_args: list[str] = Field(default_factory=list)
+    adapter_source: str | None = Field(default=None)
+    adapter_docs_url: str | None = Field(default=None)
+    certification_blocker: str | None = Field(default=None)
     mcp_orchestration: Literal["agent_driven", "llm_driven"] = Field(
         default="agent_driven",
         description="MCP orchestration mode when protocol='mcp'",
@@ -153,6 +187,19 @@ class ACPAgentRegisterRequest(BaseModel):
 
 class ACPAgentUpdateRequest(BaseModel):
     """Request to update an existing agent."""
+    NON_NULLABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({
+        "name",
+        "description",
+        "command",
+        "entrypoint_strategy",
+        "acp_command",
+        "mcp_orchestration",
+        "mcp_entry_tool",
+        "mcp_structured_response",
+        "mcp_max_iterations",
+        "mcp_refresh_tools",
+    })
+
     name: str | None = None
     description: str | None = None
     command: str | None = None
@@ -161,6 +208,12 @@ class ACPAgentUpdateRequest(BaseModel):
     requires_api_key: str | None = None
     install_instructions: list[str] | None = None
     docs_url: str | None = None
+    entrypoint_strategy: ACPEntryPointStrategy | None = None
+    acp_command: str | None = None
+    acp_args: list[str] | None = None
+    adapter_source: str | None = None
+    adapter_docs_url: str | None = None
+    certification_blocker: str | None = None
     mcp_orchestration: Literal["agent_driven", "llm_driven"] | None = None
     mcp_entry_tool: str | None = None
     mcp_structured_response: bool | None = None
@@ -168,6 +221,21 @@ class ACPAgentUpdateRequest(BaseModel):
     mcp_llm_model: str | None = None
     mcp_max_iterations: int | None = None
     mcp_refresh_tools: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_for_non_nullable_fields(cls, data: Any) -> Any:
+        """Reject explicit null for scalar fields that are non-null at runtime."""
+        if not isinstance(data, dict):
+            return data
+        null_fields = sorted(
+            field for field in cls.NON_NULLABLE_FIELDS
+            if field in data and data[field] is None
+        )
+        if null_fields:
+            joined = ", ".join(null_fields)
+            raise ValueError(f"Explicit null is not allowed for: {joined}")
+        return data
 
 
 # -----------------------------------------------------------------------------
