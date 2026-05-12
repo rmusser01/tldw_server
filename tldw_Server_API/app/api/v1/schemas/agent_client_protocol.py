@@ -46,6 +46,19 @@ ACPEntryPointStrategy = Literal[
 ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
 
 
+class ACPAgentEntrypointStatus(BaseModel):
+    """ACP stdio entrypoint readiness metadata for one downstream agent."""
+    profile_key: str = Field(..., description="Registry profile key this metadata describes")
+    entrypoint_strategy: ACPEntryPointStrategy = Field(default="documented_candidate")
+    probe_state: ACPProbeState = Field(default="documented_only")
+    acp_command: str = Field(default="")
+    acp_args: list[str] = Field(default_factory=list)
+    primary_blocker: str | None = Field(default=None)
+    blockers: list[str] = Field(default_factory=list)
+    status_message: str = Field(default="")
+    docs_url: str | None = Field(default=ACP_COMPATIBILITY_DOCS_URL)
+
+
 class ACPAgentInfo(BaseModel):
     """Information about an available agent."""
     type: ACPAgentType = Field(..., description="Agent type identifier")
@@ -73,6 +86,10 @@ class ACPAgentInfo(BaseModel):
     compatibility_docs_url: str | None = Field(
         default=ACP_COMPATIBILITY_DOCS_URL,
         description="Documentation path or URL for compatibility details.",
+    )
+    entrypoint: ACPAgentEntrypointStatus = Field(
+        ...,
+        description="ACP stdio entrypoint readiness metadata.",
     )
 
 
@@ -120,6 +137,10 @@ class ACPSetupGuideAgent(BaseModel):
     )
     steps: list[str] = Field(default_factory=list, description="Actionable setup or certification steps")
     docs_url: str | None = Field(default=None, description="Agent documentation URL")
+    entrypoint: ACPAgentEntrypointStatus = Field(
+        ...,
+        description="ACP stdio entrypoint readiness metadata.",
+    )
 
 
 class ACPSetupGuideResponse(BaseModel):

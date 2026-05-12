@@ -4,7 +4,7 @@ title: Implement ACP downstream entrypoint strategy stages 1-3
 status: In Progress
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 06:19'
+updated_date: '2026-05-12 06:46'
 labels:
   - ACP
   - implementation
@@ -33,7 +33,7 @@ Implement the approved ACP downstream entrypoint strategy design for the first p
 - [ ] #1 Registry entries, YAML rows, API registration/update schemas, and DB-backed dynamic registrations preserve entrypoint strategy metadata with conservative defaults for legacy rows.
 - [ ] #2 A deterministic classifier reports probe state, ACP command/args, primary blocker, blockers, status message, and docs URL without running live agent commands.
 - [x] #3 Certification smoke helper can render profile-specific dry-run manifests for native, adapter-backed, documented-candidate, and custom-template profiles and refuses unsafe live runs without required env.
-- [ ] #4 ACP agents, health, and setup-guide surfaces expose strategy and blocker metadata consistently for YAML, API-backed, runner, and static fallback rows.
+- [x] #4 ACP agents, health, and setup-guide surfaces expose strategy and blocker metadata consistently for YAML, API-backed, runner, and static fallback rows.
 - [ ] #5 Focused unit, helper, integration, docs, and security checks pass for the touched scope.
 <!-- AC:END -->
 
@@ -63,6 +63,10 @@ Task 3 code-quality follow-up red evidence: helper pytest failed 3 tests for par
 Task 3 final robustness follow-up red evidence: helper pytest failed 4 tests before implementation for bounded stdout queue behavior, write OSError cleanup, flush ValueError cleanup, and success cleanup ordering. Final green evidence: helper pytest reports 22 passed and 5 warnings in 38.12s. Bandit on acp_certification_smoke.py reports 0 findings. git diff --check is clean. Implementation bounds stdout line and queue size, drops notifications and wrong-id responses before enqueueing, pauses read-ahead after matching the expected id, handles OSError and ValueError write or flush failures through centralized cleanup, and closes stdin before waiting on successful probe shutdown.
 
 Task 3 custom-template blocker follow-up red evidence: requested pytest failed 2 tests after updating expectations because custom-template classification and manifests omitted explicit blocker metadata. Final green evidence: requested pytest reports 45 passed and 5 warnings. git diff --check is clean. Bandit on acp_certification_smoke.py and agent_registry.py reports 0 findings. Implementation now uses custom_template as the explicit blocker and lists the required named custom profile evidence bundle in the classifier status.
+
+Task 4 execution plan recorded before edits: add failing ACP endpoint tests for agents, setup-guide, health, dynamic register forwarding, and runner/static entrypoint normalization; run focused pytest for red evidence; implement only schema and endpoint classifier wiring needed to pass; re-run focused pytest, git diff --check, scoped Bandit, and commit the Task 4 slice.
+
+Task 4 red evidence: focused ACP endpoint pytest failed 5 tests for missing entrypoint metadata in health, setup-guide, /agents registry, runner normalization, and static fallback. Task 4 green evidence: focused ACP endpoint pytest reports 41 passed and 5 warnings. git diff --check is clean. Scoped Bandit on agent_client_protocol endpoint and schema reports 0 findings. Implementation exposes classifier-backed entrypoint readiness metadata across health, setup-guide, registry/static/runner agent listing, and preserves dynamic registration forwarding.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

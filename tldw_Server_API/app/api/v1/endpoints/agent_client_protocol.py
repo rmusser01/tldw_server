@@ -58,6 +58,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     ACPGovernanceDeniedError,
     get_runner_client,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import classify_agent_entrypoint
 from tldw_Server_API.app.services.acp_runtime_policy_service import ACPRuntimePolicyService
 from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
@@ -1593,6 +1594,140 @@ def _check_runner_binary() -> dict[str, Any]:
     }
 
 
+_ACP_ENTRYPOINT_STRATEGIES = frozenset({
+    "native_acp",
+    "adapter_acp",
+    "documented_candidate",
+    "custom_template",
+})
+_ACP_PROBE_STATES = frozenset({
+    "ready_to_probe",
+    "blocked",
+    "custom_template",
+    "documented_only",
+})
+_ACP_ENTRYPOINT_STEP_MAP = {
+    "adapter_required": "Select and install a concrete ACP adapter command before live certification.",
+    "adapter_missing": "Select and install a concrete ACP adapter command before live certification.",
+    "binary_missing": "Install the ACP entrypoint command and ensure it is on PATH.",
+    "credentials_missing": "Set the required provider credential before live certification.",
+    "entrypoint_strategy_missing": "Identify and configure a concrete ACP stdio entrypoint before live certification.",
+    "shell_builtin_collision": "Use an executable ACP command, not a shell builtin or alias.",
+    "custom_template": "Create a named custom ACP profile with command, args, env, workspace policy, and evidence bundle.",
+}
+
+
+def _normalize_docs_url(value: Any) -> str | None:
+    """Return a docs URL using the served docs-static path for repo docs."""
+    if value is None:
+        return ACP_COMPATIBILITY_DOCS_URL
+    docs_url = str(value)
+    if docs_url.startswith("Docs/"):
+        return f"/docs-static/{docs_url.removeprefix('Docs/')}"
+    return docs_url
+
+
+def _string_list(value: Any) -> list[str]:
+    """Normalize arbitrary list-like values into strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return []
+
+
+def _entrypoint_status_from_entry(reg_entry: Any) -> dict[str, Any]:
+    """Build ACP entrypoint status from a registry entry classifier."""
+    return classify_agent_entrypoint(reg_entry).as_dict()
+
+
+def _entrypoint_status_from_dict(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize runner/static ACP entrypoint metadata with conservative defaults."""
+    raw_entrypoint = item.get("entrypoint")
+    source = raw_entrypoint if isinstance(raw_entrypoint, dict) else item
+    profile_key = str(
+        source.get("profile_key")
+        or item.get("profile_key")
+        or item.get("type")
+        or item.get("agent_type")
+        or ""
+    )
+
+    strategy = str(
+        source.get("entrypoint_strategy")
+        or item.get("entrypoint_strategy")
+        or "documented_candidate"
+    )
+    if strategy not in _ACP_ENTRYPOINT_STRATEGIES:
+        strategy = "documented_candidate"
+
+    default_probe_state = "custom_template" if strategy == "custom_template" else "documented_only"
+    if strategy in {"native_acp", "adapter_acp"}:
+        default_probe_state = "blocked"
+    probe_state = str(source.get("probe_state") or item.get("probe_state") or default_probe_state)
+    if probe_state not in _ACP_PROBE_STATES:
+        probe_state = default_probe_state
+
+    primary_blocker_raw = (
+        source.get("primary_blocker")
+        if source.get("primary_blocker") is not None
+        else item.get("primary_blocker")
+    )
+    if primary_blocker_raw is None:
+        primary_blocker_raw = source.get("certification_blocker") or item.get("certification_blocker")
+    if primary_blocker_raw is None and strategy == "custom_template":
+        primary_blocker_raw = "custom_template"
+    primary_blocker = str(primary_blocker_raw) if primary_blocker_raw else None
+
+    blockers = _string_list(source.get("blockers") or item.get("blockers"))
+    if not blockers and primary_blocker:
+        blockers = [primary_blocker]
+
+    status_message = str(source.get("status_message") or item.get("status_message") or "")
+    if not status_message:
+        if primary_blocker == "custom_template":
+            status_message = _ACP_ENTRYPOINT_STEP_MAP["custom_template"]
+        elif strategy == "documented_candidate":
+            status_message = "Agent is documented as a candidate and is not eligible for live ACP probing yet."
+        elif probe_state == "blocked":
+            status_message = "ACP entrypoint readiness is blocked until setup is complete."
+        elif probe_state == "ready_to_probe":
+            status_message = "Configured ACP entrypoint is ready for a bounded initialize probe."
+
+    return {
+        "profile_key": profile_key,
+        "entrypoint_strategy": strategy,
+        "probe_state": probe_state,
+        "acp_command": str(source.get("acp_command") or item.get("acp_command") or ""),
+        "acp_args": _string_list(source.get("acp_args") or item.get("acp_args")),
+        "primary_blocker": primary_blocker,
+        "blockers": blockers,
+        "status_message": status_message,
+        "docs_url": _normalize_docs_url(
+            source.get("docs_url")
+            or item.get("docs_url")
+            or item.get("compatibility_docs_url")
+            or ACP_COMPATIBILITY_DOCS_URL
+        ),
+    }
+
+
+def _entrypoint_setup_steps(entrypoint: dict[str, Any]) -> list[str]:
+    """Return setup guide steps for ACP entrypoint readiness blockers."""
+    keys = []
+    primary_blocker = entrypoint.get("primary_blocker")
+    if primary_blocker:
+        keys.append(str(primary_blocker))
+    keys.extend(_string_list(entrypoint.get("blockers")))
+    if entrypoint.get("entrypoint_strategy") == "custom_template":
+        keys.append("custom_template")
+
+    steps: list[str] = []
+    for key in keys:
+        step = _ACP_ENTRYPOINT_STEP_MAP.get(key)
+        if step and step not in steps:
+            steps.append(step)
+    return steps
+
+
 def _check_agent_availability(agent_type: str) -> dict[str, Any]:
     """Check if a downstream agent binary and API keys are available."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import get_agent_registry
@@ -1609,9 +1744,11 @@ def _check_agent_availability(agent_type: str) -> dict[str, Any]:
             "verification_level": "documented_only",
             "compatibility_notes": "Agent is not present in the registry; live-agent ACP compatibility has not been certified.",
             "compatibility_docs_url": ACP_COMPATIBILITY_DOCS_URL,
+            "entrypoint": _entrypoint_status_from_dict({"agent_type": agent_type}),
         }
     result = entry.check_availability()
     result["agent_type"] = agent_type
+    result["entrypoint"] = _entrypoint_status_from_entry(entry)
     return result
 
 
@@ -1629,9 +1766,7 @@ def _build_agent_compatibility_status(source: Any) -> ACPAgentCompatibilityStatu
         get_value("compatibility_notes")
         or "Configured locally; live-agent ACP compatibility has not been certified."
     )
-    docs_url = get_value("compatibility_docs_url") or ACP_COMPATIBILITY_DOCS_URL
-    if str(docs_url).startswith("Docs/"):
-        docs_url = f"/docs-static/{str(docs_url).removeprefix('Docs/')}"
+    docs_url = _normalize_docs_url(get_value("compatibility_docs_url") or ACP_COMPATIBILITY_DOCS_URL)
     return ACPAgentCompatibilityStatus(
         support_state=support_state,
         verification_level=verification_level,
@@ -1698,6 +1833,7 @@ async def acp_health(
             "verification_level": avail.get("verification_level", "documented_only"),
             "compatibility_notes": avail.get("compatibility_notes", ""),
             "compatibility_docs_url": avail.get("compatibility_docs_url"),
+            "entrypoint": _entrypoint_status_from_entry(entry),
         })
     result["agents"] = agents_status
 
@@ -1808,11 +1944,13 @@ async def acp_setup_guide(
 
     for reg_entry in target_entries:
         avail = reg_entry.check_availability()
+        entrypoint = _entrypoint_status_from_entry(reg_entry)
         guide_item: dict[str, Any] = {
             "agent_type": reg_entry.type,
             "name": reg_entry.name,
             "status": avail.get("status", "unknown"),
             "compatibility": _build_agent_compatibility_status(reg_entry),
+            "entrypoint": entrypoint,
             "steps": [],
         }
 
@@ -1825,6 +1963,7 @@ async def acp_setup_guide(
         if not avail.get("api_key_set", True) and reg_entry.requires_api_key:
             guide_item["steps"].append(f"Set {reg_entry.requires_api_key} environment variable or add to .env file")
 
+        guide_item["steps"].extend(_entrypoint_setup_steps(entrypoint))
         guide_item["steps"].extend(_compatibility_setup_steps(guide_item["compatibility"]))
 
         if not guide_item["steps"]:
@@ -1856,6 +1995,11 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             support_state="documented_unverified",
             verification_level="documented_only",
             compatibility_notes="Static fallback only; live Claude Code ACP compatibility has not been certified.",
+            entrypoint=_entrypoint_status_from_dict({
+                "type": "claude_code",
+                "entrypoint_strategy": "documented_candidate",
+                "certification_blocker": "adapter_required",
+            }),
         )
     )
 
@@ -1870,6 +2014,11 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             support_state="documented_unverified",
             verification_level="documented_only",
             compatibility_notes="Static fallback only; live Codex ACP compatibility has not been certified.",
+            entrypoint=_entrypoint_status_from_dict({
+                "type": "codex",
+                "entrypoint_strategy": "documented_candidate",
+                "certification_blocker": "adapter_required",
+            }),
         )
     )
 
@@ -1883,6 +2032,13 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             support_state="documented_unverified",
             verification_level="documented_only",
             compatibility_notes="Static fallback only; live OpenCode ACP compatibility has not been certified.",
+            entrypoint=_entrypoint_status_from_dict({
+                "type": "opencode",
+                "entrypoint_strategy": "native_acp",
+                "acp_command": "opencode",
+                "acp_args": ["acp"],
+                "primary_blocker": "binary_missing",
+            }),
         )
     )
 
@@ -1896,6 +2052,10 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             support_state="documented_unverified",
             verification_level="documented_only",
             compatibility_notes="Custom agent profiles require certification evidence before release claims.",
+            entrypoint=_entrypoint_status_from_dict({
+                "type": "custom",
+                "entrypoint_strategy": "custom_template",
+            }),
         )
     )
 
@@ -1913,6 +2073,12 @@ def _get_registry_agents() -> tuple[list[ACPAgentInfo], str] | None:
         agents: list[ACPAgentInfo] = []
         for item in available:
             compatibility = _build_agent_compatibility_status(item)
+            reg_entry = registry.get_entry(str(item["type"]))
+            entrypoint = (
+                _entrypoint_status_from_entry(reg_entry)
+                if reg_entry is not None
+                else _entrypoint_status_from_dict(item)
+            )
             agents.append(
                 ACPAgentInfo(
                     type=str(item["type"]),
@@ -1924,6 +2090,7 @@ def _get_registry_agents() -> tuple[list[ACPAgentInfo], str] | None:
                     verification_level=compatibility.verification_level,
                     compatibility_notes=compatibility.notes,
                     compatibility_docs_url=compatibility.docs_url,
+                    entrypoint=entrypoint,
                 )
             )
         return agents, registry.default_type
@@ -1974,6 +2141,7 @@ async def _get_available_agents() -> tuple[list[ACPAgentInfo], str]:
                 verification_level=compatibility.verification_level,
                 compatibility_notes=compatibility.notes,
                 compatibility_docs_url=compatibility.docs_url,
+                entrypoint=_entrypoint_status_from_dict(item),
             )
         except ValidationError:
             logger.warning("Skipping invalid ACP runner agent entry: {}", agent_type)
