@@ -16,8 +16,6 @@ dependencies:
 documentation:
   - >-
     Docs/superpowers/specs/2026-05-12-persona-buddy-renderer-capability-registry-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-12-persona-buddy-renderer-capability-registry-implementation-plan.md
 priority: medium
 ---
 
@@ -40,7 +38,7 @@ Implement the approved Persona/Buddy renderer capability registry thin slice. Th
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Execute the reviewed implementation plan in Docs/superpowers/plans/2026-05-12-persona-buddy-renderer-capability-registry-implementation-plan.md using subagent-driven development.
+Implementation completed from the reviewed staged plan. The transient plan file was removed after completion per repository process; execution evidence is recorded in this task.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
