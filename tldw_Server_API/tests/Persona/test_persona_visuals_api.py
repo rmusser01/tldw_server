@@ -119,6 +119,42 @@ def _create_visual_pack(client: TestClient, persona_id: str, *, title: str = "Pa
     return response.json()
 
 
+def test_list_persona_visual_renderer_capabilities(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-renderers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "renderers": [
+            {
+                "renderer_type": "sprite_frames",
+                "display_name": "Sprite frames",
+                "manifest_versions": [1],
+                "can_validate": True,
+                "can_activate": True,
+                "buddy_runtime_supported": True,
+                "import_supported": True,
+                "export_supported": True,
+                "disabled_reason": None,
+            }
+        ]
+    }
+
+
+def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-renderers")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Persona disabled"}
+
+
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     response = client.post(
         f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets",

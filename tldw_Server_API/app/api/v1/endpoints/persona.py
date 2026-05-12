@@ -103,6 +103,8 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualPackDuplicateRequest,
     PersonaVisualPackResponse,
     PersonaVisualPortabilityJobResponse,
+    PersonaVisualRendererCapabilitiesResponse,
+    PersonaVisualRendererCapabilityResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
@@ -146,6 +148,9 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Persona.buddy import (
     build_persona_buddy_summary,
     ensure_persona_buddy_for_profile,
+)
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    list_persona_visual_renderer_capabilities,
 )
 from tldw_Server_API.app.core.Persona.visual_jobs import (
     create_generate_candidate_job,
@@ -3644,6 +3649,38 @@ async def get_persona_buddy(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona buddy") from exc
+
+
+@router.get(
+    "/visual-renderers",
+    response_model=PersonaVisualRendererCapabilitiesResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_renderers(
+    _current_user: User = Depends(get_request_user),
+) -> PersonaVisualRendererCapabilitiesResponse:
+    """List enabled Persona/Buddy visual renderer capabilities for this server."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    _require_current_user_id(_current_user)
+    return PersonaVisualRendererCapabilitiesResponse(
+        renderers=[
+            PersonaVisualRendererCapabilityResponse(
+                renderer_type=capability.renderer_type,
+                display_name=capability.display_name,
+                manifest_versions=list(capability.manifest_versions),
+                can_validate=capability.can_validate,
+                can_activate=capability.can_activate,
+                buddy_runtime_supported=capability.buddy_runtime_supported,
+                import_supported=capability.import_supported,
+                export_supported=capability.export_supported,
+                disabled_reason=capability.disabled_reason,
+            )
+            for capability in list_persona_visual_renderer_capabilities()
+        ]
+    )
 
 
 @router.get(

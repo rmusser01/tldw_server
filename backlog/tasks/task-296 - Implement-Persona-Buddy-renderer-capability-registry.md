@@ -4,7 +4,7 @@ title: Implement Persona Buddy renderer capability registry
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:15'
-updated_date: '2026-05-12 05:15'
+updated_date: '2026-05-12 05:29'
 labels:
   - persona
   - buddy
@@ -14,8 +14,10 @@ dependencies:
   - TASK-293
   - TASK-294
 documentation:
-  - Docs/superpowers/specs/2026-05-12-persona-buddy-renderer-capability-registry-design.md
-  - Docs/superpowers/plans/2026-05-12-persona-buddy-renderer-capability-registry-implementation-plan.md
+  - >-
+    Docs/superpowers/specs/2026-05-12-persona-buddy-renderer-capability-registry-design.md
+  - >-
+    Docs/superpowers/plans/2026-05-12-persona-buddy-renderer-capability-registry-implementation-plan.md
 priority: medium
 ---
 
@@ -28,7 +30,7 @@ Implement the approved Persona/Buddy renderer capability registry thin slice. Th
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Backend registry exposes only enabled sprite_frames in V1 and validator uses it for renderer/version checks.
-- [ ] #2 Persona API exposes authenticated visual-renderer capabilities without requiring a persona-specific lookup.
+- [x] #2 Persona API exposes authenticated visual-renderer capabilities without requiring a persona-specific lookup.
 - [ ] #3 Draft manifest save remains permissive while activation and import-preview reject unsupported renderers.
 - [ ] #4 Frontend service types/helper can fetch renderer capabilities and Buddy runtime uses a local renderer registry for renderability.
 - [ ] #5 Buddy diagnostics and dock rendering use the same frontend registry and preserve text fallback for unsupported renderers.
@@ -47,6 +49,12 @@ Execute the reviewed implementation plan in Docs/superpowers/plans/2026-05-12-pe
 Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-buddy-renderer-capability-spec
 
 Branch: codex/persona-buddy-renderer-capability-spec
+
+Task 1 backend registry/core validation completed in commit 5a4b44775. Focused core tests passed with 16 passed and 5 warnings. Spec compliance review passed. Code quality review found one whitespace-padded renderer fail-closed regression, fixed in the amended commit, and final code quality review approved with no findings.
+
+Task 2 backend API slice plan: add requested visual-renderer capability API tests, run targeted tests to confirm the missing route/schema failure, add Persona visual renderer capability response schemas, add authenticated GET /api/v1/persona/visual-renderers using the existing Persona feature flag, request-user auth, rate limit, and registry helper, rerun the targeted tests, run git diff --check, and commit the assigned files.
+
+Task 2 backend API verification: red run produced expected 404 on test_list_persona_visual_renderer_capabilities before route/schema implementation; green run passed 2 targeted tests. git diff --check passed. Bandit on tldw_Server_API/app/api/v1/schemas/persona.py and tldw_Server_API/app/api/v1/endpoints/persona.py wrote /tmp/bandit_task296_task2.json with zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
