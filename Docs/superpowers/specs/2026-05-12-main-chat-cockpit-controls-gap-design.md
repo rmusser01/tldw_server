@@ -25,11 +25,31 @@ Treat the work as two tiers:
 
 This avoids merging a shell that looks like a cockpit while leaving the real work surface hidden in the composer.
 
+The implementation plan should not attempt every cockpit maturity idea in one oversized patch. Use a narrow first implementation slice:
+
+1. Make cockpit rails control the highest-risk existing state directly: web search, context entry, temporary/saved session state, model/provider summary, model settings, character/persona entry, streaming/error status, and the existing degraded warning.
+2. Add independent rail collapse only after the direct controls have one shared source of truth with existing composer state.
+3. Keep deeper workflows in the existing dialogs/panels until the cockpit control path is proven by tests.
+
+## Shared Control Contract
+
+Cockpit controls must not create parallel state. Each rail/status control should call the same handlers or stores already used by the composer and dialogs. If a state cannot be updated through an existing handler, the first implementation task should expose a shared handler rather than duplicating behavior in the rail.
+
+This applies especially to:
+
+- Model/provider selection and provider:model scoped settings.
+- Web search and Search & Context state.
+- Attached research context actions.
+- Temporary versus saved chat state.
+- Character/persona selection and actor settings.
+- MCP/tool availability and selected tool mode.
+- Streaming, stop, retry, and regenerate actions.
+
 ## Merge-Blocking Parity Gaps
 
 ### P1: Real-server tests prove reachability more than behavior
 
-Current real-server coverage opens important controls, but it does not prove that the workflows complete. Before merge, add tests that verify behavior for the main `/chat` page against the real running server or an explicitly justified integration harness.
+Current real-server coverage opens important controls, but it does not prove that the workflows complete. Before merge, add tests that verify behavior for the main `/chat` page against the real running server for merge-critical smoke coverage. Unit and component tests may mock component dependencies, but the merge-critical browser path must not use mocked server data, `page.route`, synthetic server payloads, or sidepanel/sidebar routes.
 
 Required coverage:
 
@@ -37,10 +57,10 @@ Required coverage:
 - Toggle cockpit/focus mode before and after a send and verify the conversation state survives.
 - Select a configured provider:model entry and verify the outgoing chat request uses the model id and provider routing expected by provider-qualified selection.
 - Open model settings for two distinct provider:model keys with the same model id where possible and verify settings remain scoped independently.
-- Open Search & Context, select or apply real context where feasible, then verify the context indicator and send path reflect it.
+- Open Search & Context, select or apply real context where the running server has available data, then verify the context indicator and send path reflect it. If the real server has no usable context corpus, verify the empty/recoverable state and keep a component/integration test for the populated state.
 - Toggle web search from the main chat UI and verify the state is reflected in the active context/cockpit surface.
 - Exercise attachment flow enough to prove file/image selection still reaches the composer state, even if the test uses a small fixture.
-- Verify MCP controls in both available and unavailable states. If MCP is available, include a harmless tool selection/execution or request construction check.
+- Verify MCP controls in both available and unavailable states. If MCP is available on the real server, include a harmless tool selection/execution or request construction check. If not, verify the disabled/offline state and cover the available state in a component/integration test without pretending it is real-server evidence.
 - Verify prompt selector, character/persona selector, tools menu, thread search, artifacts trigger, compare mode, dictation/voice availability messaging, and advanced controls remain accessible in both cockpit and focus layouts.
 - Verify mobile focus-first behavior plus opening cockpit controls without losing composer usability.
 
@@ -52,18 +72,26 @@ Recommended design:
 
 - Keep degraded entry for non-chat-critical checks.
 - Display a specific warning that names degraded checks.
-- Define a small chat-critical check list or backend-provided capability flag before blocking chat.
+- Prefer a backend-provided chat readiness/capability flag if available. If not available in this PR, define a small client-side interim allow/block list.
 - Test both unrelated degradation and chat-critical degradation behavior.
+
+Interim default:
+
+- Warning-only degraded checks: subsystems unrelated to opening `/chat`, choosing a model, submitting a turn, or rendering the conversation.
+- Chat-critical checks: inability to reach the server, auth failure, provider/model metadata unavailable when no cached usable model exists, selected provider unusable, or the chat completion path unavailable.
+- Persistence-related degradation should warn but not block temporary chat unless it prevents the conversation from rendering or sending.
 
 ### P1: Side rails must control main chat state, not only open old controls
 
 The current rails use summary text and event dispatchers. For merge readiness under the clarified target, rails should include direct controls for the most important active states, with dialogs used for deeper editing only.
 
-Minimum direct cockpit controls before merge:
+Minimum direct cockpit controls for the first implementation slice:
 
 - Context rail: web search toggle, Search & Context open/apply affordance, visible counts for files/knowledge/media, remove or clear actions for active context types where the existing state supports it, and temporary/saved session toggle or status with action.
 - Runtime rail: selected model display, model selector entry point, model settings entry point, provider route/status display, character/persona selector entry point, streaming/stop/regenerate state where available, and last error/status recovery action where available.
 - Status strip: visible ready/streaming/error/degraded state, active model/provider, context-active state, session persistence state, and message count.
+
+Do not move every old composer action at once. Compare mode, full image generation, voice conversation, and advanced parameter presets can remain composer/dialog workflows in the first slice if they remain reachable and the cockpit exposes accurate status or availability.
 
 ## True Cockpit-Control Design Gaps
 
@@ -75,7 +103,7 @@ Recommended design:
 
 - Keep `Cockpit` and `Focus` as simple presets.
 - Add independent left/right rail collapse controls in cockpit mode.
-- Persist the rail visibility state separately from the overall preset.
+- Persist the rail visibility state separately from the overall preset in browser storage for the first implementation slice.
 - Keep focus mode as the fast chat-only preset.
 - Avoid draggable/resizable panels in the first completion pass unless needed after usability testing.
 
@@ -101,7 +129,7 @@ Recommended direct controls:
 
 - Provider and model as separate readable fields, not only raw selected model.
 - Configured/catalog model selector entry point.
-- Provider route warning when provider-qualified routing is inferred or ambiguous.
+- Provider route warning when provider-qualified routing is inferred, ambiguous, or falling back.
 - Model settings button scoped to current provider:model.
 - Character/persona selector and actor settings button.
 - Streaming state with stop action if a stop hook is available.
@@ -140,6 +168,8 @@ Recommended design:
 - `PlaygroundStatusStrip`: ready/streaming/error/degraded states, context-active state, session state, model/provider labels.
 - Model selector utilities: configured default scope, catalog search scope, recent/frequent ordering, provider:model duplicate model ids, provider-specific settings isolation.
 
+These tests may use mocks for stores, hooks, and component handlers. They should prove the rail controls call the shared control contract, not just render labels.
+
 ### Main /chat integration tests
 
 - Cockpit and focus render the same active conversation and composer state.
@@ -147,6 +177,8 @@ Recommended design:
 - No sidepanel/sidebar route is used in the main `/chat` tests.
 - Keyboard focus returns correctly after rail actions open and close dialogs/panels.
 - Mobile starts in focus and can expose direct cockpit controls without losing composer access.
+
+These tests should prefer the main `/chat` route and real shared components. Mocks are acceptable only for narrow browser-host APIs or expensive dependencies that are not the server contract under test.
 
 ### Real-server Playwright tests
 
@@ -160,6 +192,8 @@ Use the real server already expected by the project, not mocked data, for merge-
 
 For expensive or environment-sensitive paths such as MCP execution, voice, image generation, and external providers, tests may assert availability/disabled/error recovery if the running server lacks the dependency. The important requirement is that the user-facing state is correct and recoverable.
 
+The real-server submit test should accept either a successful assistant response or a real provider/server error shown in the chat UI, as long as the request path is real and the user gets a recoverable state. It should not replace the real server with fixture responses.
+
 ## Implementation Boundaries For The Future Plan
 
 - Do not touch extension sidepanel/sidebar routes for this work.
@@ -167,6 +201,7 @@ For expensive or environment-sensitive paths such as MCP execution, voice, image
 - Do not introduce net-new product workflows. Rehouse and harden existing main `/chat` capabilities into true cockpit controls.
 - Do not remove the existing composer controls until the cockpit equivalent is proven and keyboard-accessible.
 - Do not rely on mocked data for the merge-critical real-server verification path.
+- Do not treat reachability-only assertions as proof of cockpit functionality.
 
 ## Likely Files
 
@@ -185,7 +220,7 @@ For expensive or environment-sensitive paths such as MCP execution, voice, image
 
 ## Open Questions
 
-- Which degraded health checks are chat-critical versus warning-only?
-- Should rail collapse state be per-browser, per-user, or per-chat-session?
-- Should the cockpit show full provider health, or only model/provider route state relevant to the current turn?
-- Which real-server path is acceptable for a deterministic chat submit test when local provider availability varies?
+- Backend readiness: can `/api/v1/health` or a chat-specific endpoint expose chat-critical readiness directly? If not, use the interim client-side classification above.
+- Persistence scope: browser-local rail visibility is the default for the first slice. Revisit per-user or per-chat persistence only if users need device/session sync.
+- Runtime scope: show model/provider route state relevant to the current turn first. Full provider health belongs outside this slice unless required to explain a current chat failure.
+- Real-server submit determinism: use the configured model path when available. If provider credentials or local model availability vary, assert the real request plus recoverable UI response rather than requiring a successful model completion in every environment.
