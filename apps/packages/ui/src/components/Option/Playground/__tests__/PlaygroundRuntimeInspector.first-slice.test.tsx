@@ -1,0 +1,133 @@
+// @vitest-environment jsdom
+import React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { PlaygroundRuntimeInspector } from "../PlaygroundRuntimeInspector";
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback,
+  }),
+}));
+
+const renderInspector = (
+  overrides: Partial<React.ComponentProps<typeof PlaygroundRuntimeInspector>> = {},
+) => {
+  const props = {
+    streaming: false,
+    selectedProvider: "openai",
+    selectedModel: "gpt-4.1-mini",
+    providerRouteLabel: "openai:gpt-4.1-mini",
+    runtimeStatus: "ready" as const,
+    runtimeStatusDetail: null,
+    messageCount: 2,
+    threadSearchOpen: false,
+    selectedCharacterName: "Mira Vale",
+    onOpenModelSettings: vi.fn(),
+    onOpenCharacterSettings: vi.fn(),
+    ...overrides,
+  };
+
+  render(<PlaygroundRuntimeInspector {...props} />);
+
+  return props;
+};
+
+describe("PlaygroundRuntimeInspector first-slice controls", () => {
+  it("renders provider and model as separate fields", () => {
+    renderInspector();
+
+    expect(screen.getByText("Provider")).toBeInTheDocument();
+    expect(screen.getByText("openai")).toBeInTheDocument();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByText("gpt-4.1-mini")).toBeInTheDocument();
+    expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument();
+  });
+
+  it("derives provider and model display from provider-qualified selected model when provider is missing", () => {
+    renderInspector({
+      selectedProvider: null,
+      selectedModel: "anthropic:claude-sonnet-4",
+      providerRouteLabel: null,
+    });
+
+    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.getByText("claude-sonnet-4")).toBeInTheDocument();
+    expect(
+      screen.getByText("Route anthropic:claude-sonnet-4"),
+    ).toBeInTheDocument();
+  });
+
+  it("opens model and character settings through supplied callbacks", () => {
+    const props = renderInspector();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open model settings" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open character settings" }),
+    );
+
+    expect(props.onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(props.onOpenCharacterSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders streaming, degraded, and error details through explicit status props", () => {
+    const { rerender } = render(
+      <PlaygroundRuntimeInspector
+        streaming
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        providerRouteLabel="openai:gpt-4.1-mini"
+        runtimeStatus="streaming"
+        runtimeStatusDetail={null}
+        messageCount={2}
+        threadSearchOpen={false}
+        selectedCharacterName={null}
+        onOpenModelSettings={vi.fn()}
+        onOpenCharacterSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Streaming")).toBeInTheDocument();
+
+    rerender(
+      <PlaygroundRuntimeInspector
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        providerRouteLabel="openai:gpt-4.1-mini"
+        runtimeStatus="degraded"
+        runtimeStatusDetail="Provider metadata degraded"
+        messageCount={2}
+        threadSearchOpen={false}
+        selectedCharacterName={null}
+        onOpenModelSettings={vi.fn()}
+        onOpenCharacterSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Degraded")).toBeInTheDocument();
+    expect(screen.getByText("Provider metadata degraded")).toBeInTheDocument();
+
+    rerender(
+      <PlaygroundRuntimeInspector
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        providerRouteLabel="openai:gpt-4.1-mini"
+        runtimeStatus="error"
+        runtimeStatusDetail="Provider failed"
+        messageCount={2}
+        threadSearchOpen={false}
+        selectedCharacterName={null}
+        onOpenModelSettings={vi.fn()}
+        onOpenCharacterSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Provider failed")).toBeInTheDocument();
+  });
+});

@@ -157,7 +157,48 @@ const assertHealthResponse = (health: { status: number; body: any }) => {
   expect(['healthy', 'degraded']).toContain(health.body?.status);
 };
 
+const waitForChatCompletionAttempt = (page: Page) =>
+  page.waitForResponse(
+    (response) => {
+      if (!response.url().startsWith(serverUrl)) return false;
+      const url = new URL(response.url());
+      return (
+        url.pathname === '/api/v1/chat/completions' &&
+        response.request().method() === 'POST'
+      );
+    },
+    { timeout: 60_000 }
+  );
+
+const assertChatCompletionRenderedOrRecoverable = async (
+  page: Page,
+  response: Response
+) => {
+  const chatLog = page.getByRole('log', { name: /chat messages/i });
+  if (response.status() < 400) {
+    await expect(
+      page
+        .locator(
+          "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
+        )
+        .last()
+    ).toBeVisible({ timeout: 60_000 });
+    return;
+  }
+
+  await expect(chatLog).toContainText(/error|failed|unable|provider|request/i, {
+    timeout: 30_000,
+  });
+};
+
 test.describe('/chat cockpit real-server parity', () => {
+  test('does not intercept backend routes in this real-server spec', async ({}, testInfo) => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(testInfo.file, 'utf8');
+    const forbiddenCall = ['page', 'route'].join('.') + '(';
+    expect(source).not.toContain(forbiddenCall);
+  });
+
   test('uses the running server and keeps cockpit/focus controls working', async ({
     page,
     request,
@@ -195,6 +236,20 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    const contextRail = page.getByTestId('playground-context-rail');
+    const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
+    const webSearchControl = contextRail.getByRole('button', { name: 'Web search' });
+    const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
+    expect(['true', 'false']).toContain(initialWebSearchState);
+
+    await webSearchControl.click();
+    const toggledWebSearchState = initialWebSearchState === 'true' ? 'false' : 'true';
+    await expect(webSearchControl).toHaveAttribute('aria-pressed', toggledWebSearchState);
+    if (toggledWebSearchState === 'true') {
+      await expect(cockpitStatus).toContainText('Web search on');
+    } else {
+      await expect(cockpitStatus).not.toContainText('Web search on');
+    }
 
     await closeSearchContextIfOpen(page);
     await page.getByRole('button', { name: 'Open Search & Context' }).click();
@@ -214,7 +269,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('composer-options-panel')).toBeVisible();
 
     await page.getByTestId('model-selector').first().click();
-    await expect(page.getByText(/Provider|OpenAI|Anthropic|Ollama/i).first()).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /OpenAI \/|Anthropic \/|Ollama \/|Select a model/i }).first()
+    ).toBeVisible();
     await page.keyboard.press('Escape');
 
     await page.getByRole('button', { name: /Select a Prompt/i }).click();
@@ -263,6 +320,17 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(
+      page.getByTestId('playground-context-rail').getByRole('button', { name: 'Web search' })
+    ).toHaveAttribute('aria-pressed', toggledWebSearchState);
+
+    const smokePrompt = `cockpit smoke ${Date.now()}`;
+    await page.getByTestId('chat-input').fill(smokePrompt);
+    const chatCompletionAttempt = waitForChatCompletionAttempt(page);
+    await page.getByRole('button', { name: /send message/i }).click();
+    const chatCompletionResponse = await chatCompletionAttempt;
+    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
+    await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
 
     const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
     expect(failingApiHits).toEqual([]);
@@ -307,6 +375,15 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(mobileRails).toBeVisible();
     await mobileRails.locator('summary', { hasText: 'Context' }).click();
     await expect(page.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
+    const mobileWebSearchControl = mobileRails.getByRole('button', { name: 'Web search' });
+    const initialMobileWebSearchState =
+      await mobileWebSearchControl.getAttribute('aria-pressed');
+    await mobileWebSearchControl.click();
+    await expect(mobileWebSearchControl).toHaveAttribute(
+      'aria-pressed',
+      initialMobileWebSearchState === 'true' ? 'false' : 'true'
+    );
+    await expect(page.getByTestId('chat-input')).toBeVisible();
     await mobileRails.locator('summary', { hasText: 'Runtime' }).click();
     await expect(page.getByRole('button', { name: 'Open model settings' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open character settings' })).toBeVisible();

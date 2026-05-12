@@ -4,6 +4,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import {
+  SET_TEMPORARY_CHAT_EVENT,
+  TOGGLE_WEB_SEARCH_EVENT,
+} from "../playground-cockpit-actions";
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -227,9 +231,13 @@ describe("Playground cockpit controls", () => {
     const openKnowledgePanel = vi.fn();
     const openModelSettings = vi.fn();
     const openActorSettings = vi.fn();
+    const toggleWebSearch = vi.fn();
+    const setTemporaryChat = vi.fn();
     window.addEventListener("tldw:open-knowledge-panel", openKnowledgePanel);
     window.addEventListener("tldw:open-model-settings", openModelSettings);
     window.addEventListener("tldw:open-actor-settings", openActorSettings);
+    window.addEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
+    window.addEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
 
     try {
       render(<Playground />);
@@ -237,15 +245,20 @@ describe("Playground cockpit controls", () => {
       const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
       const contextRail = within(leftRail).getByTestId("playground-context-rail");
       expect(within(contextRail).getByText("Context active")).toBeInTheDocument();
-      expect(within(contextRail).getByText("Web search")).toBeInTheDocument();
-      expect(within(contextRail).getByText("1 file(s)")).toBeInTheDocument();
+      expect(within(contextRail).getByText("1 file")).toBeInTheDocument();
       expect(
-        within(contextRail).getByText("1 knowledge item(s)"),
+        within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
-      expect(within(contextRail).getByText("2 media scope(s)")).toBeInTheDocument();
+      expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
-      expect(within(contextRail).queryByTestId("web-search-toggle")).toBeNull();
+      expect(within(contextRail).queryByText("1 file(s)")).toBeNull();
+      const webSearchControl = within(contextRail).getByRole("button", {
+        name: "Web search",
+      });
+      expect(webSearchControl).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(webSearchControl);
+      expect(toggleWebSearch).toHaveBeenCalledTimes(1);
 
       fireEvent.click(
         within(contextRail).getByRole("button", {
@@ -253,14 +266,28 @@ describe("Playground cockpit controls", () => {
         }),
       );
       expect(openKnowledgePanel).toHaveBeenCalledTimes(1);
+      fireEvent.click(
+        within(contextRail).getByRole("button", {
+          name: /save conversation/i,
+        }),
+      );
+      expect(setTemporaryChat).toHaveBeenCalledTimes(1);
+      expect(
+        (setTemporaryChat.mock.calls[0]?.[0] as CustomEvent<{ next: boolean }>)
+          .detail,
+      ).toEqual({ next: false });
 
       const rightRail = screen.getByTestId("playground-cockpit-right-rail");
       const runtimeInspector = within(rightRail).getByTestId(
         "playground-runtime-inspector",
       );
       expect(within(runtimeInspector).getByText("Streaming")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("Provider")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("openai")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("Model")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("gpt-4.1-mini")).toBeInTheDocument();
       expect(
-        within(runtimeInspector).getByText("openai:gpt-4.1-mini"),
+        within(runtimeInspector).getByText("Route openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("2 messages")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Mira Vale")).toBeInTheDocument();
@@ -282,6 +309,8 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener("tldw:open-knowledge-panel", openKnowledgePanel);
       window.removeEventListener("tldw:open-model-settings", openModelSettings);
       window.removeEventListener("tldw:open-actor-settings", openActorSettings);
+      window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
+      window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }
   });
 

@@ -12,15 +12,17 @@ export type PlaygroundContextRailProps = {
   contextSummary: string[];
   sessionLabel: string;
   historyLinked: boolean;
-};
-
-const openSearchAndContext = () => {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent("tldw:open-knowledge-panel", {
-      detail: { tab: "search" },
-    }),
-  );
+  webSearch: boolean;
+  onToggleWebSearch: () => void;
+  temporaryChat: boolean;
+  onToggleTemporaryChat: (next: boolean) => void;
+  contextCounts: {
+    files: number;
+    knowledge: number;
+    media: number;
+    research: number;
+  };
+  onOpenSearchContext: () => void;
 };
 
 export const PlaygroundContextRail = ({
@@ -28,8 +30,45 @@ export const PlaygroundContextRail = ({
   contextSummary,
   sessionLabel,
   historyLinked,
+  webSearch,
+  onToggleWebSearch,
+  temporaryChat,
+  onToggleTemporaryChat,
+  contextCounts,
+  onOpenSearchContext,
 }: PlaygroundContextRailProps) => {
   const { t } = useTranslation("playground");
+  const countLabels = [
+    contextCounts.research > 0
+      ? contextCounts.research === 1
+        ? t("cockpit.contextResearchCountOne", "1 research attachment")
+        : t(
+            "cockpit.contextResearchCountMany",
+            `${contextCounts.research} research attachments`,
+          )
+      : null,
+    contextCounts.files > 0
+      ? contextCounts.files === 1
+        ? t("cockpit.contextFilesCountOne", "1 file")
+        : t("cockpit.contextFilesCountMany", `${contextCounts.files} files`)
+      : null,
+    contextCounts.knowledge > 0
+      ? contextCounts.knowledge === 1
+        ? t("cockpit.contextKnowledgeCountOne", "1 knowledge item")
+        : t(
+            "cockpit.contextKnowledgeCountMany",
+            `${contextCounts.knowledge} knowledge items`,
+          )
+      : null,
+    contextCounts.media > 0
+      ? contextCounts.media === 1
+        ? t("cockpit.contextMediaCountOne", "1 media scope")
+        : t(
+            "cockpit.contextMediaCountMany",
+            `${contextCounts.media} media scopes`,
+          )
+      : null,
+  ].filter((item): item is string => Boolean(item));
 
   return (
     <div
@@ -46,16 +85,30 @@ export const PlaygroundContextRail = ({
             ? t("cockpit.contextActive", "Context active")
             : t("cockpit.noExtraContext", "No extra context")}
         </p>
-        {contextSummary.length > 0 ? (
+        {contextSummary.length > 0 || countLabels.length > 0 ? (
           <ul className="mt-2 space-y-1 text-xs text-text-muted">
             {contextSummary.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+            {countLabels.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
         ) : null}
         <button
           type="button"
-          onClick={openSearchAndContext}
+          onClick={onToggleWebSearch}
+          className={railActionClass}
+          aria-label={t("cockpit.webSearch", "Web search")}
+          aria-pressed={webSearch}
+        >
+          {webSearch
+            ? t("cockpit.webSearchOn", "Web search on")
+            : t("cockpit.webSearchOff", "Web search off")}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSearchContext}
           className={railActionClass}
           aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
         >
@@ -74,6 +127,21 @@ export const PlaygroundContextRail = ({
             ? t("cockpit.historyLinked", "History linked")
             : t("cockpit.noSavedHistory", "No saved history yet")}
         </p>
+        <button
+          type="button"
+          onClick={() => onToggleTemporaryChat(!temporaryChat)}
+          className={railActionClass}
+          aria-pressed={temporaryChat}
+          aria-label={
+            temporaryChat
+              ? t("cockpit.saveConversation", "Save conversation")
+              : t("cockpit.useTemporaryChat", "Use temporary chat")
+          }
+        >
+          {temporaryChat
+            ? t("cockpit.saveConversation", "Save conversation")
+            : t("cockpit.useTemporaryChat", "Use temporary chat")}
+        </button>
       </section>
     </div>
   );

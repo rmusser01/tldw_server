@@ -8,6 +8,13 @@ import {
 import { PlaygroundContextRail } from "./PlaygroundContextRail";
 import { PlaygroundRuntimeInspector } from "./PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
+import {
+  openActorSettings,
+  openModelSettings,
+  openSearchAndContext,
+  setTemporaryChatFromCockpit,
+  toggleWebSearchFromCockpit,
+} from "./playground-cockpit-actions";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
@@ -1381,25 +1388,47 @@ export const Playground = () => {
     : serverChatId
       ? toText(t("playground:cockpit.sessionServer", "Server chat"))
       : toText(t("playground:cockpit.sessionLocal", "Local chat"));
-  const contextSummary = [
-    attachedResearchContext
-      ? toText(t("playground:cockpit.contextResearch", "Research attachment"))
-      : null,
-    webSearch ? toText(t("playground:cockpit.contextWeb", "Web search")) : null,
+  const contextSummary: string[] = [];
+  const selectedModelProvider = selectedModel?.includes(":")
+    ? selectedModel.split(":")[0]
+    : null;
+  const selectedModelName =
+    selectedModelProvider && selectedModel
+      ? selectedModel.slice(selectedModelProvider.length + 1)
+      : selectedModel;
+  const statusContextSummary = [
+    webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
     contextFileCount > 0
-      ? `${contextFileCount} ${toText(
-          t("playground:cockpit.contextFiles", "file(s)"),
-        )}`
+      ? contextFileCount === 1
+        ? toText(t("playground:cockpit.contextFilesCountOne", "1 file"))
+        : toText(
+            t(
+              "playground:cockpit.contextFilesCountMany",
+              `${contextFileCount} files`,
+            ),
+          )
       : null,
     selectedKnowledgeCount > 0
-      ? `${selectedKnowledgeCount} ${toText(
-          t("playground:cockpit.contextKnowledge", "knowledge item(s)"),
-        )}`
+      ? selectedKnowledgeCount === 1
+        ? toText(
+            t("playground:cockpit.contextKnowledgeCountOne", "1 knowledge item"),
+          )
+        : toText(
+            t(
+              "playground:cockpit.contextKnowledgeCountMany",
+              `${selectedKnowledgeCount} knowledge items`,
+            ),
+          )
       : null,
     ragMediaIdCount > 0
-      ? `${ragMediaIdCount} ${toText(
-          t("playground:cockpit.contextMedia", "media scope(s)"),
-        )}`
+      ? ragMediaIdCount === 1
+        ? toText(t("playground:cockpit.contextMediaCountOne", "1 media scope"))
+        : toText(
+            t(
+              "playground:cockpit.contextMediaCountMany",
+              `${ragMediaIdCount} media scopes`,
+            ),
+          )
       : null,
   ].filter((item): item is string => Boolean(item));
   const cockpitLeftRail = (
@@ -1408,25 +1437,47 @@ export const Playground = () => {
       contextSummary={contextSummary}
       sessionLabel={sessionLabel}
       historyLinked={Boolean(historyId)}
+      webSearch={webSearch}
+      onToggleWebSearch={toggleWebSearchFromCockpit}
+      temporaryChat={temporaryChat}
+      onToggleTemporaryChat={setTemporaryChatFromCockpit}
+      contextCounts={{
+        files: contextFileCount,
+        knowledge: selectedKnowledgeCount,
+        media: ragMediaIdCount,
+        research: attachedResearchContext ? 1 : 0,
+      }}
+      onOpenSearchContext={() => openSearchAndContext({ tab: "search" })}
     />
   );
   const cockpitRightRail = (
     <PlaygroundRuntimeInspector
       streaming={streaming}
-      selectedModel={selectedModel}
+      selectedProvider={selectedModelProvider}
+      selectedModel={selectedModelName}
+      providerRouteLabel={selectedModel || null}
+      runtimeStatus={streaming ? "streaming" : "ready"}
+      runtimeStatusDetail={null}
       messageCount={messages.length}
       threadSearchOpen={threadSearchOpen}
       selectedCharacterName={selectedCharacter?.name || null}
+      onOpenModelSettings={openModelSettings}
+      onOpenCharacterSettings={openActorSettings}
     />
   );
   const cockpitStatusStrip = (
     <PlaygroundStatusStrip
       mode={normalizedChatLayoutMode}
       streaming={streaming}
-      selectedModel={selectedModel}
+      selectedProvider={selectedModelProvider}
+      selectedModel={selectedModelName}
       messageCount={messages.length}
       sessionLabel={sessionLabel}
       hasContext={hasChatContext}
+      contextSummary={statusContextSummary}
+      temporaryChat={temporaryChat}
+      degradedChecks={[]}
+      errorMessage={null}
     />
   );
 

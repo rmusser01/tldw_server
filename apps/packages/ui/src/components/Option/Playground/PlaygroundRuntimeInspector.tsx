@@ -9,15 +9,16 @@ const railActionClass =
 
 export type PlaygroundRuntimeInspectorProps = {
   streaming: boolean;
+  selectedProvider?: string | null | undefined;
   selectedModel: string | null | undefined;
+  providerRouteLabel?: string | null;
+  runtimeStatus?: "ready" | "streaming" | "error" | "degraded";
+  runtimeStatusDetail?: string | null;
   messageCount: number;
   threadSearchOpen: boolean;
   selectedCharacterName: string | null | undefined;
-};
-
-const dispatchEvent = (eventName: string) => {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(eventName));
+  onOpenModelSettings: () => void;
+  onOpenCharacterSettings: () => void;
 };
 
 const interpolateCountFallback = (value: string, count: number) =>
@@ -25,12 +26,46 @@ const interpolateCountFallback = (value: string, count: number) =>
 
 export const PlaygroundRuntimeInspector = ({
   streaming,
+  selectedProvider,
   selectedModel,
+  providerRouteLabel,
+  runtimeStatus,
+  runtimeStatusDetail,
   messageCount,
   threadSearchOpen,
   selectedCharacterName,
+  onOpenModelSettings,
+  onOpenCharacterSettings,
 }: PlaygroundRuntimeInspectorProps) => {
   const { t } = useTranslation("playground");
+  const selectedModelParts =
+    !selectedProvider && selectedModel && selectedModel.includes(":")
+      ? selectedModel.split(":")
+      : null;
+  const displayProvider =
+    selectedProvider || selectedModelParts?.[0] || null;
+  const displayModel =
+    selectedModelParts && selectedModelParts.length > 1
+      ? selectedModelParts.slice(1).join(":")
+      : selectedProvider && selectedModel?.startsWith(`${selectedProvider}:`)
+        ? selectedModel.slice(selectedProvider.length + 1)
+        : selectedModel || null;
+  const routeLabel =
+    providerRouteLabel ||
+    (selectedModel?.includes(":")
+      ? selectedModel
+      : displayProvider && displayModel
+        ? `${displayProvider}:${displayModel}`
+        : selectedModel || null);
+  const status = runtimeStatus || (streaming ? "streaming" : "ready");
+  const statusLabel =
+    status === "streaming"
+      ? t("cockpit.streaming", "Streaming")
+      : status === "degraded"
+        ? t("cockpit.degraded", "Degraded")
+        : status === "error"
+          ? t("cockpit.error", "Error")
+          : t("cockpit.ready", "Ready");
   const messageLabel = interpolateCountFallback(
     t("cockpit.messageCount", "{{count}} messages", {
       count: messageCount,
@@ -49,14 +84,26 @@ export const PlaygroundRuntimeInspector = ({
         aria-label={t("cockpit.runtimeState", "Runtime state")}
       >
         <h2 className={railHeadingClass}>{t("cockpit.runtime", "Runtime")}</h2>
-        <p className={railValueClass}>
-          {streaming
-            ? t("cockpit.streaming", "Streaming")
-            : t("cockpit.ready", "Ready")}
-        </p>
-        <p className={railMutedClass}>
-          {selectedModel || t("cockpit.noModelSelected", "No model selected")}
-        </p>
+        <p className={railValueClass}>{statusLabel}</p>
+        {runtimeStatusDetail ? (
+          <p className={railMutedClass}>{runtimeStatusDetail}</p>
+        ) : null}
+        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs text-text-muted">
+          <dt>{t("cockpit.provider", "Provider")}</dt>
+          <dd className="truncate text-text">
+            {displayProvider ||
+              t("cockpit.noProviderSelected", "No provider selected")}
+          </dd>
+          <dt>{t("cockpit.model", "Model")}</dt>
+          <dd className="truncate text-text">
+            {displayModel || t("cockpit.noModelSelected", "No model selected")}
+          </dd>
+        </dl>
+        {routeLabel ? (
+          <p className={railMutedClass}>
+            {t("cockpit.route", `Route ${routeLabel}`)}
+          </p>
+        ) : null}
       </section>
 
       <section
@@ -69,7 +116,7 @@ export const PlaygroundRuntimeInspector = ({
         <div className="mt-2 flex flex-col gap-2">
           <button
             type="button"
-            onClick={() => dispatchEvent("tldw:open-model-settings")}
+            onClick={onOpenModelSettings}
             className={railActionClass}
             aria-label={t("cockpit.openModelSettings", "Open model settings")}
           >
@@ -77,7 +124,7 @@ export const PlaygroundRuntimeInspector = ({
           </button>
           <button
             type="button"
-            onClick={() => dispatchEvent("tldw:open-actor-settings")}
+            onClick={onOpenCharacterSettings}
             className={railActionClass}
             aria-label={t(
               "cockpit.openCharacterSettings",

@@ -1,0 +1,72 @@
+// @vitest-environment jsdom
+import { describe, expect, it } from "vitest";
+
+import {
+  OPEN_ACTOR_SETTINGS_EVENT,
+  OPEN_KNOWLEDGE_PANEL_EVENT,
+  OPEN_MODEL_SETTINGS_EVENT,
+  SET_TEMPORARY_CHAT_EVENT,
+  TOGGLE_WEB_SEARCH_EVENT,
+  openActorSettings,
+  openModelSettings,
+  openSearchAndContext,
+  setTemporaryChatFromCockpit,
+  toggleWebSearchFromCockpit,
+} from "../playground-cockpit-actions";
+
+const nextCustomEvent = <TDetail = unknown>(eventName: string) =>
+  new Promise<CustomEvent<TDetail>>((resolve) => {
+    const handler = (event: Event) => {
+      window.removeEventListener(eventName, handler);
+      resolve(event as CustomEvent<TDetail>);
+    };
+    window.addEventListener(eventName, handler);
+  });
+
+describe("playground cockpit actions", () => {
+  it("opens Search & Context with the existing knowledge-panel event shape", async () => {
+    const event = nextCustomEvent<{ tab: "search" }>(
+      OPEN_KNOWLEDGE_PANEL_EVENT,
+    );
+
+    openSearchAndContext({ tab: "search" });
+
+    await expect(event).resolves.toMatchObject({
+      detail: { tab: "search" },
+    });
+  });
+
+  it("opens model settings through the existing model-settings event", async () => {
+    const event = nextCustomEvent(OPEN_MODEL_SETTINGS_EVENT);
+
+    openModelSettings();
+
+    await expect(event).resolves.toMatchObject({ type: OPEN_MODEL_SETTINGS_EVENT });
+  });
+
+  it("opens actor settings through the existing actor-settings event", async () => {
+    const event = nextCustomEvent(OPEN_ACTOR_SETTINGS_EVENT);
+
+    openActorSettings();
+
+    await expect(event).resolves.toMatchObject({ type: OPEN_ACTOR_SETTINGS_EVENT });
+  });
+
+  it("toggles web search through the cockpit bridge event", async () => {
+    const event = nextCustomEvent(TOGGLE_WEB_SEARCH_EVENT);
+
+    toggleWebSearchFromCockpit();
+
+    await expect(event).resolves.toMatchObject({ type: TOGGLE_WEB_SEARCH_EVENT });
+  });
+
+  it("sets temporary-chat state through the cockpit bridge event", async () => {
+    const event = nextCustomEvent<{ next: boolean }>(SET_TEMPORARY_CHAT_EVENT);
+
+    setTemporaryChatFromCockpit(true);
+
+    await expect(event).resolves.toMatchObject({
+      detail: { next: true },
+    });
+  });
+});

@@ -173,6 +173,13 @@ import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
 import { TokenProgressBar } from "./TokenProgressBar";
 import { VoiceChatIndicator } from "./VoiceChatIndicator";
 import { buildConversationSummaryCheckpointPrompt } from "./conversation-summary-checkpoint";
+import {
+  OPEN_ACTOR_SETTINGS_EVENT,
+  OPEN_KNOWLEDGE_PANEL_EVENT,
+  OPEN_MODEL_SETTINGS_EVENT,
+  SET_TEMPORARY_CHAT_EVENT,
+  TOGGLE_WEB_SEARCH_EVENT,
+} from "./playground-cockpit-actions";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
 // QueuedRequest moved to usePlaygroundQueueManagement
 // WeightedImagePromptContextEntry moved to usePlaygroundImageGen
@@ -1081,18 +1088,18 @@ export const PlaygroundForm = ({
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = () => setOpenActorSettings(true);
-    window.addEventListener("tldw:open-actor-settings", handler);
+    window.addEventListener(OPEN_ACTOR_SETTINGS_EVENT, handler);
     return () => {
-      window.removeEventListener("tldw:open-actor-settings", handler);
+      window.removeEventListener(OPEN_ACTOR_SETTINGS_EVENT, handler);
     };
   }, []);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = () => setOpenModelSettings(true);
-    window.addEventListener("tldw:open-model-settings", handler);
+    window.addEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     return () => {
-      window.removeEventListener("tldw:open-model-settings", handler);
+      window.removeEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     };
   }, []);
 
@@ -2857,6 +2864,28 @@ export const PlaygroundForm = ({
     handleDismissServerPersistenceHint,
   } = persistence;
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => handleToggleWebSearch();
+    window.addEventListener(TOGGLE_WEB_SEARCH_EVENT, handler);
+    return () => {
+      window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, handler);
+    };
+  }, [handleToggleWebSearch]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const next = (event as CustomEvent<{ next?: unknown }>).detail?.next;
+      if (typeof next !== "boolean") return;
+      handleToggleTemporaryChat(next);
+    };
+    window.addEventListener(SET_TEMPORARY_CHAT_EVENT, handler);
+    return () => {
+      window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, handler);
+    };
+  }, [handleToggleTemporaryChat]);
+
   const handleClearContext = React.useCallback(() => {
     // Only show confirmation if there's history to clear
     if (history.length === 0) {
@@ -2933,12 +2962,12 @@ export const PlaygroundForm = ({
       );
     };
     window.addEventListener(
-      "tldw:open-knowledge-panel",
+      OPEN_KNOWLEDGE_PANEL_EVENT,
       handler as EventListener,
     );
     return () => {
       window.removeEventListener(
-        "tldw:open-knowledge-panel",
+        OPEN_KNOWLEDGE_PANEL_EVENT,
         handler as EventListener,
       );
     };
