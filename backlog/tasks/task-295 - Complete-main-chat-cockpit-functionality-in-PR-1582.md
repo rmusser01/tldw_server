@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-12 15:27'
+updated_date: '2026-05-12 19:30'
 labels:
   - webui
   - chat
@@ -77,6 +77,8 @@ CI failure follow-up fix: added SKIP_WXT_PREPARE=1 at the UI Playground Quality 
 Extended CI install fix after Onboarding E2E Gate failed with the same root cause: install-time cancellation before tests, with sibling UX Smoke stuck in Install frontend dependencies. Applying SKIP_WXT_PREPARE=1 to non-extension frontend/e2e CI jobs that run bun install from apps.
 
 Extended non-extension frontend CI workflows now set SKIP_WXT_PREPARE=1: ci frontend lint, frontend-required, frontend UX gates, frontend e2e tiers, plus the already-pushed Playground quality gate. Verification: SKIP_WXT_PREPARE=1 bun install --frozen-lockfile from apps completed with no changes; exact Playground gate scripts had already passed locally; git diff --check passed. actionlint is validated by GitHub CI because it is not installed locally.
+
+CI closeout refresh: PR #1582 is still open and draft on codex/chat-degraded-health. Live checks now show targeted frontend/build/lint/e2e/security/required aggregate gates passing after the SKIP_WXT_PREPARE workflow fixes. Remaining red checks are only the broad Full Suite matrix jobs. Representative Full Suite Ubuntu/Python 3.11 job 75624023692 was cancelled at the one-hour job limit during Run tests (Audio); earlier root-level/Admin steps passed, later modules were skipped due cancellation, and the job's Fail if any module failed step itself succeeded. Review threads are all resolved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -89,6 +91,8 @@ Review follow-up fixed the remaining active scoped-settings defect and revalidat
 CI follow-up scoped the Playground gate install away from extension WXT preparation and verified the exact gate scripts locally before pushing.
 
 Extended the install-time WXT prepare skip across non-extension frontend/e2e workflows after the same install-time timeout affected onboarding/UX checks.
+
+Closeout refresh confirmed all actionable PR review threads are resolved and the PR remains draft. The remaining red GitHub status is the broad Full Suite matrix timing out/cancelling in non-chat test coverage, not a targeted /chat or frontend gate regression from this PR.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
