@@ -23738,6 +23738,7 @@ for _character_store_method in (
 for _message_store_method in (
     "add_message",
     "_insert_message_images",
+    "append_message_image",
     "get_message_images",
     "get_message_conversation_id",
     "get_message_by_id",

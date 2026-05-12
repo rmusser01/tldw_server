@@ -339,6 +339,130 @@ class OpenWebUIDatabaseImportResult(OpenWebUIImportResult):
     folder_links: int = Field(default=0, ge=0)
 
 
+class OpenWebUIHydrationScopeRequest(BaseModel):
+    """Scope for OpenWebUI attachment hydration over imported tldw conversations."""
+    conversation_ids: list[str] = Field(
+        default_factory=list,
+        max_length=1000,
+        description="Imported tldw conversation ids to scan. Empty means no conversations are selected.",
+    )
+    source_user_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Optional OpenWebUI source user id used for chat_file fallback lookups.",
+    )
+
+    @field_validator("conversation_ids")
+    @classmethod
+    def validate_conversation_ids(cls, value: list[str]) -> list[str]:
+        """Trim and reject empty conversation ids."""
+        cleaned: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                raise ValueError("conversation_ids must not contain empty values")
+            cleaned.append(text)
+        return cleaned
+
+    @field_validator("source_user_id")
+    @classmethod
+    def validate_source_user_id(cls, value: Optional[str]) -> Optional[str]:
+        """Trim and reject blank OpenWebUI source user ids."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            raise ValueError("source_user_id must not be empty")
+        return text
+
+
+class OpenWebUIHydrationPreviewRequest(BaseModel):
+    """Request to preview OpenWebUI attachment hydration."""
+    openwebui_data_root: str = Field(..., min_length=1, max_length=4096)
+    scope: OpenWebUIHydrationScopeRequest = Field(default_factory=OpenWebUIHydrationScopeRequest)
+    process_supported_files: bool = Field(
+        default=False,
+        description="Preview whether supported non-image files would be processed after registration.",
+    )
+
+    @field_validator("openwebui_data_root")
+    @classmethod
+    def validate_openwebui_data_root(cls, value: str) -> str:
+        """Trim and reject empty roots."""
+        text = str(value).strip()
+        if not text:
+            raise ValueError("openwebui_data_root must not be empty")
+        return text
+
+
+class OpenWebUIHydrationJobRequest(OpenWebUIHydrationPreviewRequest):
+    """Request to enqueue an OpenWebUI attachment hydration job."""
+
+
+class OpenWebUIHydrationItemResponse(BaseModel):
+    """One user-safe OpenWebUI attachment hydration preview/status item."""
+    conversation_id: Optional[str] = None
+    message_id: Optional[str] = None
+    file_id: Optional[str] = None
+    status: str
+    warning_code: Optional[str] = None
+    raw_ref_index: Optional[int] = None
+    source: Optional[str] = None
+    raw_ref_shape: Optional[str] = None
+    job_id: Optional[str] = None
+    source_key: Optional[str] = None
+    message_image_position: Optional[int] = None
+    file_kind: Optional[str] = None
+    mime_type: Optional[str] = None
+    media_id: Optional[int] = None
+    media_file_id: Optional[str] = None
+    checksum: Optional[str] = None
+    processing_status: Optional[str] = None
+
+
+class OpenWebUIHydrationSummaryResponse(BaseModel):
+    """Counts for an OpenWebUI attachment hydration preview or job result."""
+    referenced_files: int = Field(default=0, ge=0)
+    returned_items: int = Field(default=0, ge=0)
+    omitted_items: int = Field(default=0, ge=0)
+    resolved_files: int = Field(default=0, ge=0)
+    image_files: int = Field(default=0, ge=0)
+    media_files: int = Field(default=0, ge=0)
+    missing_files: int = Field(default=0, ge=0)
+    unsupported_files: int = Field(default=0, ge=0)
+    failed_files: int = Field(default=0, ge=0)
+    hydrated_images: int = Field(default=0, ge=0)
+    registered_media_files: int = Field(default=0, ge=0)
+    already_hydrated: int = Field(default=0, ge=0)
+    processed_files: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+
+
+class OpenWebUIHydrationPreviewResponse(BaseModel):
+    """Response for OpenWebUI attachment hydration preview."""
+    scope: OpenWebUIHydrationScopeRequest
+    process_supported_files: bool = False
+    summary: OpenWebUIHydrationSummaryResponse
+    items: list[OpenWebUIHydrationItemResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIHydrationJobResponse(BaseModel):
+    """Response for OpenWebUI attachment hydration job creation/status."""
+    job_id: str
+    job_uuid: Optional[str] = None
+    status: str
+    domain: str = "chatbooks"
+    queue: str = "default"
+    job_type: str = "openwebui_attachment_hydration"
+    owner_user_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    result: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 class CreateChatbookResponse(BaseModel):
     """Response for chatbook creation."""
     success: bool

@@ -129,6 +129,33 @@ type OpenWebUIDatabasePreviewUser = {
   warnings?: string[]
 }
 
+type OpenWebUIHydrationSummary = {
+  referenced_files?: number
+  resolved_files?: number
+  image_files?: number
+  media_files?: number
+  missing_files?: number
+  unsupported_files?: number
+  failed_files?: number
+  hydrated_images?: number
+  registered_media_files?: number
+  already_hydrated?: number
+  processed_files?: number
+  warning_count?: number
+}
+
+type OpenWebUIHydrationPreviewState = {
+  summary?: OpenWebUIHydrationSummary
+  warnings?: string[]
+}
+
+type OpenWebUIHydrationJobState = {
+  job_id?: string
+  status?: string
+  result?: any
+  error?: string | null
+}
+
 const parseIdList = (raw: string) =>
   raw
     .split(/[\n,]+/)
@@ -1051,6 +1078,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
   const [importFile, setImportFile] = React.useState<File | null>(null)
   const [importSourceFormat, setImportSourceFormat] = React.useState<ImportSourceFormat>("chatbook")
+  const [importPreviewVersion, setImportPreviewVersion] = React.useState(0)
   const [previewManifest, setPreviewManifest] = React.useState<any | null>(null)
   const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
   const [openwebuiDbPreview, setOpenwebuiDbPreview] = React.useState<any | null>(null)
@@ -1069,6 +1097,18 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     buildSelectionState(() => true)
   )
   const [importSubmitting, setImportSubmitting] = React.useState(false)
+  const [hydrationDataRoot, setHydrationDataRoot] = React.useState("")
+  const [hydrationConversationIdsRaw, setHydrationConversationIdsRaw] = React.useState("")
+  const [hydrationSourceUserId, setHydrationSourceUserId] = React.useState("")
+  const [hydrationProcessSupportedFiles, setHydrationProcessSupportedFiles] = React.useState(false)
+  const [hydrationPreview, setHydrationPreview] =
+    React.useState<OpenWebUIHydrationPreviewState | null>(null)
+  const [hydrationPreviewSignature, setHydrationPreviewSignature] = React.useState("")
+  const [hydrationPreviewError, setHydrationPreviewError] = React.useState<string | null>(null)
+  const [hydrationPreviewLoading, setHydrationPreviewLoading] = React.useState(false)
+  const [hydrationJob, setHydrationJob] = React.useState<OpenWebUIHydrationJobState | null>(null)
+  const [hydrationJobError, setHydrationJobError] = React.useState<string | null>(null)
+  const [hydrationJobLoading, setHydrationJobLoading] = React.useState(false)
 
   const [exportJobs, setExportJobs] = React.useState<ChatbookJob[]>([])
   const [importJobs, setImportJobs] = React.useState<ChatbookJob[]>([])
@@ -1089,11 +1129,18 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
     setOpenwebuiDbPreview(null)
+    setImportPreviewVersion(0)
     setSelectedOpenWebUIUserId("")
     setPreviewError(null)
     setPreviewLoading(false)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
+    setHydrationPreview(null)
+    setHydrationPreviewSignature("")
+    setHydrationPreviewError(null)
+    setHydrationPreviewLoading(false)
+    setHydrationJob(null)
+    setHydrationJobError(null)
     if (importSourceFormat === "openwebui_json" || importSourceFormat === "openwebui_db") {
       setImportMedia(false)
       setImportEmbeddings(false)
@@ -1135,6 +1182,52 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         (user) => user.source_user_id === selectedOpenWebUIUserId
       ) || null,
     [openwebuiDbUsers, selectedOpenWebUIUserId]
+  )
+
+  const effectiveHydrationSourceUserId =
+    isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
+      ? selectedOpenWebUIUserId
+      : hydrationSourceUserId.trim()
+
+  const hydrationPayload = React.useMemo(() => {
+    const scope: {
+      conversation_ids: string[]
+      source_user_id?: string
+    } = {
+      conversation_ids: parseIdList(hydrationConversationIdsRaw)
+    }
+    if (effectiveHydrationSourceUserId) {
+      scope.source_user_id = effectiveHydrationSourceUserId
+    }
+    return {
+      openwebui_data_root: hydrationDataRoot.trim(),
+      scope,
+      process_supported_files: hydrationProcessSupportedFiles
+    }
+  }, [
+    effectiveHydrationSourceUserId,
+    hydrationConversationIdsRaw,
+    hydrationDataRoot,
+    hydrationProcessSupportedFiles
+  ])
+
+  const hydrationPayloadSignature = React.useMemo(
+    () =>
+      JSON.stringify({
+        hydrationPayload,
+        import_preview: {
+          source_format: importSourceFormat,
+          version: importPreviewVersion,
+          file_name: importFile?.name || "",
+          file_size: importFile?.size || 0,
+          file_last_modified: importFile?.lastModified || 0
+        }
+      }),
+    [hydrationPayload, importFile, importPreviewVersion, importSourceFormat]
+  )
+
+  const hydrationPreviewIsCurrent = Boolean(
+    hydrationPreview && hydrationPreviewSignature === hydrationPayloadSignature
   )
 
   const activeJobs = React.useMemo(() => {
@@ -1437,10 +1530,16 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
     setOpenwebuiDbPreview(null)
+    setImportPreviewVersion(requestId)
     setSelectedOpenWebUIUserId("")
     setImportFile(file)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
+    setHydrationPreview(null)
+    setHydrationPreviewSignature("")
+    setHydrationPreviewError(null)
+    setHydrationJob(null)
+    setHydrationJobError(null)
     try {
       await tldwClient.initialize().catch(() => null)
       const res = await tldwClient.previewChatbook(file, {
@@ -1571,6 +1670,81 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       })
     } finally {
       setImportSubmitting(false)
+    }
+  }
+
+  const handleHydrationPreview = async () => {
+    if (!hydrationPayload.openwebui_data_root) {
+      notification.error({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiHydrationRootRequired",
+          "OpenWebUI data root is required."
+        )
+      })
+      return
+    }
+
+    setHydrationPreviewLoading(true)
+    setHydrationPreviewError(null)
+    setHydrationJob(null)
+    setHydrationJobError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.previewOpenWebUIHydration(hydrationPayload)
+      setHydrationPreview(res || null)
+      setHydrationPreviewSignature(hydrationPayloadSignature)
+    } catch (error) {
+      setHydrationPreview(null)
+      setHydrationPreviewSignature("")
+      setHydrationPreviewError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHydrationPreviewLoading(false)
+    }
+  }
+
+  const handleCreateHydrationJob = async () => {
+    if (!hydrationPreviewIsCurrent) {
+      notification.error({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiHydrationPreviewRequired",
+          "Preview attachments before creating a hydration job."
+        )
+      })
+      return
+    }
+
+    setHydrationJobLoading(true)
+    setHydrationJobError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.createOpenWebUIHydrationJob(hydrationPayload)
+      setHydrationJob(res || null)
+      notification.success({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiHydrationJobQueued",
+          "Hydration job created"
+        )
+      })
+    } catch (error) {
+      setHydrationJobError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHydrationJobLoading(false)
+    }
+  }
+
+  const handleRefreshHydrationJob = async () => {
+    if (!hydrationJob?.job_id) return
+
+    setHydrationJobLoading(true)
+    setHydrationJobError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.getOpenWebUIHydrationJob(hydrationJob.job_id)
+      setHydrationJob(res || null)
+    } catch (error) {
+      setHydrationJobError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHydrationJobLoading(false)
     }
   }
 
@@ -1777,6 +1951,16 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           "settings:chatbooksPlayground.importDrop",
           "Drop a .zip or .chatbook archive or click to browse"
         )
+
+  const hydrationSummary = hydrationPreview?.summary || {}
+  const hydrationWarnings = Array.isArray(hydrationPreview?.warnings)
+    ? hydrationPreview.warnings
+    : []
+  const hydrationJobResult = hydrationJob?.result
+  const hydrationJobSummary =
+    hydrationJobResult && typeof hydrationJobResult === "object"
+      ? (hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary
+      : undefined
 
   const importTab = (
     <>
@@ -2021,7 +2205,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                 )}
                 description={t(
                   "settings:chatbooksPlayground.openwebuiDbAttachmentRefsDescription",
-                  "Files, images, and artifacts import as metadata references only; binaries are not copied."
+                  "Files, images, and artifacts import as metadata references first. Use attachment hydration below to copy images and register supported files from your OpenWebUI data root."
                 )}
               />
 
@@ -2032,6 +2216,320 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
                   description={openwebuiDbPreview.warnings.slice(0, 3).join("\n")}
+                />
+              )}
+            </Card>
+          )}
+
+          {isOpenWebUIImport && (
+            <Card
+              size="small"
+              className="border-border"
+              title={t(
+                "settings:chatbooksPlayground.openwebuiHydrationTitle",
+                "OpenWebUI attachment hydration"
+              )}
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationRoot",
+                      "Data root"
+                    )}
+                  </Text>
+                  <Input
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationRootLabel",
+                      "OpenWebUI data root"
+                    ) as string}
+                    value={hydrationDataRoot}
+                    onChange={(event) => setHydrationDataRoot(event.target.value)}
+                    placeholder="/app/backend/data"
+                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                  />
+                </div>
+                <div>
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationSourceUser",
+                      "Source user"
+                    )}
+                  </Text>
+                  <Input
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserLabel",
+                      "OpenWebUI source user id"
+                    ) as string}
+                    value={
+                      isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
+                        ? selectedOpenWebUIUserId
+                        : hydrationSourceUserId
+                    }
+                    onChange={(event) => setHydrationSourceUserId(event.target.value)}
+                    placeholder={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserPlaceholder",
+                      "Optional source user id"
+                    ) as string}
+                    disabled={
+                      !canUseChatbooks ||
+                      hydrationPreviewLoading ||
+                      hydrationJobLoading ||
+                      (isOpenWebUIDatabaseImport && Boolean(selectedOpenWebUIUserId))
+                    }
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationConversationIds",
+                      "Imported conversation IDs"
+                    )}
+                  </Text>
+                  <Input.TextArea
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsLabel",
+                      "Imported conversation IDs"
+                    ) as string}
+                    value={hydrationConversationIdsRaw}
+                    onChange={(event) => setHydrationConversationIdsRaw(event.target.value)}
+                    autoSize={{ minRows: 2, maxRows: 4 }}
+                    placeholder={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsPlaceholder",
+                      "Paste tldw conversation ids, one per line or comma-separated"
+                    ) as string}
+                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Space>
+                  <Switch
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationProcessFiles",
+                      "Process supported files"
+                    ) as string}
+                    checked={hydrationProcessSupportedFiles}
+                    onChange={setHydrationProcessSupportedFiles}
+                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                  />
+                  <Text>
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationProcessFiles",
+                      "Process supported files"
+                    )}
+                  </Text>
+                </Space>
+                <Button
+                  aria-label={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreview",
+                    "Preview attachments"
+                  ) as string}
+                  onClick={() => void handleHydrationPreview()}
+                  loading={hydrationPreviewLoading}
+                  disabled={
+                    !canUseChatbooks ||
+                    !hydrationPayload.openwebui_data_root ||
+                    hydrationJobLoading
+                  }
+                >
+                  {t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreview",
+                    "Preview attachments"
+                  )}
+                </Button>
+                <Button
+                  aria-label={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationRun",
+                    "Run hydration job"
+                  ) as string}
+                  type="primary"
+                  onClick={() => void handleCreateHydrationJob()}
+                  loading={hydrationJobLoading}
+                  disabled={
+                    !canUseChatbooks ||
+                    !hydrationPreviewIsCurrent ||
+                    hydrationPreviewLoading
+                  }
+                >
+                  {t(
+                    "settings:chatbooksPlayground.openwebuiHydrationRun",
+                    "Run hydration job"
+                  )}
+                </Button>
+              </div>
+
+              {hydrationPreview && !hydrationPreviewIsCurrent && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreviewStale",
+                    "Preview needs refresh"
+                  )}
+                />
+              )}
+
+              {hydrationPreviewError && (
+                <Alert
+                  type="error"
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreviewError",
+                    "Attachment preview failed"
+                  )}
+                  description={hydrationPreviewError}
+                />
+              )}
+
+              {hydrationPreview && (
+                <div className="mt-3">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationReferenced",
+                          "Referenced files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.referenced_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationResolved",
+                          "Resolved files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.resolved_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationImages",
+                          "Image files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.image_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationMedia",
+                          "Media files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.media_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationMissing",
+                          "Missing files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.missing_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationUnsupported",
+                          "Unsupported files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.unsupported_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationHydratedImages",
+                          "Hydrated images"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.hydrated_images ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationRegisteredMedia",
+                          "Registered media"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.registered_media_files ?? 0}</div>
+                    </div>
+                  </div>
+
+                  {Boolean(hydrationWarnings.length) && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      className="mt-3"
+                      title={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationWarnings",
+                        "Hydration warnings"
+                      )}
+                      description={hydrationWarnings.slice(0, 3).join("\n")}
+                    />
+                  )}
+                </div>
+              )}
+
+              {hydrationJobError && (
+                <Alert
+                  type="error"
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationJobError",
+                    "Hydration job failed"
+                  )}
+                  description={hydrationJobError}
+                />
+              )}
+
+              {hydrationJob && (
+                <Alert
+                  type={hydrationJob.status === "failed" ? "error" : "info"}
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationJobStatus",
+                    "Hydration job"
+                  )}
+                  description={
+                    <div className="flex flex-col gap-1">
+                      <Space wrap>
+                        {hydrationJob.job_id && <Tag>{hydrationJob.job_id}</Tag>}
+                        {hydrationJob.status && <Tag>{hydrationJob.status}</Tag>}
+                        <Button
+                          size="small"
+                          onClick={() => void handleRefreshHydrationJob()}
+                          loading={hydrationJobLoading}
+                        >
+                          {t(
+                            "settings:chatbooksPlayground.refresh",
+                            "Refresh"
+                          )}
+                        </Button>
+                      </Space>
+                      {hydrationJobSummary && (
+                        <Text type="secondary">
+                          {t(
+                            "settings:chatbooksPlayground.openwebuiHydrationJobSummary",
+                            {
+                              defaultValue:
+                                "Hydrated {{images}} images and registered {{media}} files.",
+                              images: hydrationJobSummary.hydrated_images ?? 0,
+                              media: hydrationJobSummary.registered_media_files ?? 0
+                            }
+                          )}
+                        </Text>
+                      )}
+                    </div>
+                  }
                 />
               )}
             </Card>

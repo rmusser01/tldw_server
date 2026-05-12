@@ -204,6 +204,69 @@ class MessageStore:
         )
         self._db.execute_many(query, params, commit=False)
 
+    def append_message_image(
+        self,
+        message_id: str,
+        image_bytes: bytes,
+        mime_type: str,
+        *,
+        commit: bool = True,
+    ) -> int:
+        """Append one image to a message after the current maximum image position."""
+        if isinstance(image_bytes, memoryview):
+            image_bytes = image_bytes.tobytes()
+        if not isinstance(image_bytes, (bytes, bytearray)):
+            raise InputError("image_bytes must be bytes-like.")  # noqa: TRY003
+        if not mime_type:
+            raise InputError("mime_type is required for message images.")  # noqa: TRY003
+
+        try:
+            from tldw_Server_API.app.core.config import settings  # noqa: E402
+
+            max_image_bytes = int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024))
+        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+            max_image_bytes = 5 * 1024 * 1024
+        if len(image_bytes) > max_image_bytes:
+            raise InputError(  # noqa: TRY003
+                f"Message image attachment exceeds maximum size of {max_image_bytes} bytes"
+            )
+
+        def _append_once() -> int:
+            cursor = self._db.execute_query(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM message_images WHERE message_id = ?",
+                (message_id,),
+            )
+            row = cursor.fetchone()
+            position = int(row[0] if row is not None else 0)
+            self._db.execute_query(
+                """
+                INSERT INTO message_images (message_id, position, image_data, image_mime_type)
+                VALUES (?, ?, ?, ?)
+                """,
+                (message_id, position, bytes(image_bytes), str(mime_type)),
+                commit=False,
+            )
+            return position
+
+        def _append_with_retries(*, transactional: bool) -> int:
+            last_error: Exception | None = None
+            for _ in range(5):
+                try:
+                    if transactional:
+                        with self._db.transaction():
+                            return _append_once()
+                    return _append_once()
+                except sqlite3.IntegrityError as exc:
+                    last_error = exc
+                    continue
+            raise ConflictError(  # noqa: TRY003
+                f"Concurrent append conflict for message image positions on message_id={message_id}",
+            ) from last_error
+
+        if not commit:
+            return _append_with_retries(transactional=False)
+        return _append_with_retries(transactional=True)
+
     def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
         """Fetch all images associated with a message, ordered by position."""
         try:

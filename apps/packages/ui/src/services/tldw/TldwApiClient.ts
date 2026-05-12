@@ -249,6 +249,17 @@ export interface OpenAICredentialSourceSwitchResponse {
   updated_at?: string | null
 }
 
+export type OpenWebUIHydrationScopeRequest = {
+  conversation_ids?: string[]
+  source_user_id?: string | null
+}
+
+export type OpenWebUIHydrationRequest = {
+  openwebui_data_root: string
+  scope?: OpenWebUIHydrationScopeRequest
+  process_supported_files?: boolean
+}
+
 const getCurrentBrowserSurface = (): BrowserSurface => {
   if (typeof window === "undefined") {
     return "extension"
@@ -5526,6 +5537,32 @@ export class TldwApiClientBase {
       method: "POST",
       fields: normalized,
       file: { name, type, data }
+    })
+  }
+
+  async previewOpenWebUIHydration(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async createOpenWebUIHydrationJob(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getOpenWebUIHydrationJob(job_id: string): Promise<any> {
+    const id = encodeURIComponent(String(job_id))
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/openwebui/hydration/jobs/${id}`,
+      method: "GET"
     })
   }
 
