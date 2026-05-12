@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Evaluations.cli.persona_chat_judge_cli import (
     PERSONA_CHAT_JUDGE_FIXTURE_RESOURCE,
 )
 from tldw_Server_API.app.core.Evaluations.persona_chat_judge_harness import (
+    VERDICT_ORDER,
     build_persona_chat_judge_report,
     expected_candidate_outputs_from_fixture,
 )
@@ -32,7 +33,9 @@ def _load_fixture() -> dict[str, Any]:
 
 def _candidate_outputs() -> dict[str, Any]:
     """Return independent candidate outputs copied from fixture expectations."""
-    return json.loads(json.dumps(expected_candidate_outputs_from_fixture(_load_fixture())))
+    return json.loads(
+        json.dumps(expected_candidate_outputs_from_fixture(_load_fixture()))
+    )
 
 
 def test_clean_fixture_report_remains_advisory_until_sample_threshold() -> None:
@@ -97,7 +100,10 @@ def test_low_agreement_blocks_report_even_when_candidate_schema_is_valid() -> No
 
 def test_policy_accepts_dict_report_input_and_serializes_stable_shape() -> None:
     """The CLI-facing report dict should classify the same as the dataclass report."""
-    report = build_persona_chat_judge_report(_load_fixture(), _candidate_outputs()).to_dict()
+    report = build_persona_chat_judge_report(
+        _load_fixture(),
+        _candidate_outputs(),
+    ).to_dict()
 
     policy = evaluate_persona_chat_judge_report_policy(report)
     payload = policy.to_dict()
@@ -109,8 +115,73 @@ def test_policy_accepts_dict_report_input_and_serializes_stable_shape() -> None:
         "reason_keys",
         "case_issues",
     }
-    assert json.loads(json.dumps(payload, sort_keys=True)) == payload  # nosec B101
+    assert (
+        json.loads(json.dumps(payload, sort_keys=True)) == payload
+    )  # nosec B101
     assert policy.status == "advisory"  # nosec B101
+
+
+def test_policy_blocks_dict_report_with_malformed_case_rows() -> None:
+    """Malformed case rows should fail closed instead of being skipped."""
+    report = build_persona_chat_judge_report(
+        _load_fixture(),
+        _candidate_outputs(),
+    ).to_dict()
+    report["cases"] = ["not-a-dict"]
+
+    policy = evaluate_persona_chat_judge_report_policy(report)
+
+    assert policy.status == "blocked"  # nosec B101
+    assert policy.production_calibrated is False  # nosec B101
+    assert policy.reason_keys == ("invalid_report",)  # nosec B101
+    assert policy.case_issues == ()  # nosec B101
+
+
+def test_policy_blocks_dict_report_with_unbounded_case_fields() -> None:
+    """Unbounded ids and mismatch text should not enter policy output."""
+    report = build_persona_chat_judge_report(
+        _load_fixture(),
+        _candidate_outputs(),
+    ).to_dict()
+    report["cases"][0]["status"] = "mismatched"
+    report["cases"][0]["mismatches"] = ["assistant_text: raw response"]
+
+    policy = evaluate_persona_chat_judge_report_policy(report)
+    serialized = json.dumps(policy.to_dict(), sort_keys=True)
+
+    assert policy.status == "blocked"  # nosec B101
+    assert policy.reason_keys == ("invalid_report",)  # nosec B101
+    assert "assistant_text: raw response" not in serialized  # nosec B101
+
+
+def test_policy_needs_dimension_counts_for_production_calibration() -> None:
+    """Aggregate pass/fail counts alone should not claim dimension calibration."""
+    report = build_persona_chat_judge_report(
+        _load_fixture(),
+        _candidate_outputs(),
+    ).to_dict()
+    report["total_cases"] = 40
+    report["matched_cases"] = 40
+    report["verdict_counts"] = dict(zip(VERDICT_ORDER, (20, 20, 0), strict=True))
+    report["cases"] = [
+        {
+            "case_id": f"PC-JUDGE-{case_number:03d}",
+            "source_case_id": f"PC-CASE-{case_number:03d}",
+            "status": "matched",
+            "mismatches": [],
+            "verdict_match": True,
+            "flag_match": True,
+            "score_schema_valid": True,
+        }
+        for case_number in range(1, 41)
+    ]
+
+    policy = evaluate_persona_chat_judge_report_policy(report)
+
+    assert policy.status == "advisory"  # nosec B101
+    assert policy.production_calibrated is False  # nosec B101
+    assert "sample_too_small" not in policy.reason_keys  # nosec B101
+    assert "dimension_sample_counts_unavailable" in policy.reason_keys  # nosec B101
 
 
 def test_malformed_report_is_blocked_as_invalid_report() -> None:

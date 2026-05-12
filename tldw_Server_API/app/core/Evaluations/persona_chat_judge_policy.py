@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 from typing import Any, Literal
 
 from tldw_Server_API.app.core.Evaluations.persona_chat_judge_harness import (
@@ -19,6 +20,22 @@ from tldw_Server_API.app.core.Evaluations.persona_chat_judge_harness import (
 
 PolicyStatus = Literal["advisory", "blocked"]
 _VERDICT_CLASSES_FOR_SAMPLE_SIZE = ("pass", "fail")
+_CASE_ID_RE = re.compile(r"^PC-JUDGE-\d{3}$")
+_SOURCE_CASE_ID_RE = re.compile(r"^PC-CASE-\d{3}$")
+_ALLOWED_CASE_STATUSES = frozenset(
+    {"matched", "mismatched", "missing_candidate", "invalid_candidate"}
+)
+_ALLOWED_CASE_REASON_KEYS = frozenset(
+    {
+        "expected_flags",
+        "invalid_candidate",
+        "invalid_expected_flags",
+        "invalid_scores",
+        "invalid_verdict",
+        "missing_candidate",
+        "verdict",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -73,16 +90,25 @@ def evaluate_persona_chat_judge_report_policy(
 
     invalid_report = False
     total_cases = _non_negative_int(report_payload.get("total_cases"))
-    invalid_candidate_count = _non_negative_int(report_payload.get("invalid_candidate_count"))
-    missing_candidate_count = _non_negative_int(report_payload.get("missing_candidate_count"))
+    matched_cases = _non_negative_int(report_payload.get("matched_cases"))
+    mismatched_cases = _non_negative_int(report_payload.get("mismatched_cases"))
+    invalid_candidate_count = _non_negative_int(
+        report_payload.get("invalid_candidate_count")
+    )
+    missing_candidate_count = _non_negative_int(
+        report_payload.get("missing_candidate_count")
+    )
     verdict_agreement = _bounded_float(report_payload.get("verdict_agreement"))
     flag_agreement = _bounded_float(report_payload.get("flag_agreement"))
     extra_candidate_ids = report_payload.get("extra_candidate_ids")
     verdict_counts = report_payload.get("verdict_counts")
+    dimension_verdict_counts = report_payload.get("dimension_verdict_counts")
     raw_cases = report_payload.get("cases")
 
     if (
         total_cases is None
+        or matched_cases is None
+        or mismatched_cases is None
         or invalid_candidate_count is None
         or missing_candidate_count is None
         or verdict_agreement is None
@@ -94,6 +120,18 @@ def evaluate_persona_chat_judge_report_policy(
         invalid_report = True
 
     if invalid_report:
+        return _invalid_report()
+
+    case_rows = _valid_case_rows(raw_cases=raw_cases, total_cases=total_cases)
+    if case_rows is None:
+        return _invalid_report()
+    status_counts = _case_status_counts(case_rows)
+    if (
+        status_counts["matched"] != matched_cases
+        or status_counts["mismatched"] != mismatched_cases
+        or status_counts["missing_candidate"] != missing_candidate_count
+        or status_counts["invalid_candidate"] != invalid_candidate_count
+    ):
         return _invalid_report()
 
     reason_keys: list[str] = []
@@ -119,17 +157,28 @@ def evaluate_persona_chat_judge_report_policy(
         verdict_counts=verdict_counts,
         min_cases_per_verdict=min_cases_per_verdict,
     )
+    dimension_sample_reason = _dimension_sample_reason(
+        dimension_verdict_counts=dimension_verdict_counts,
+        min_cases_per_verdict=min_cases_per_verdict,
+    )
     if sample_too_small:
         reason_keys.append("sample_too_small")
+    if dimension_sample_reason is not None:
+        reason_keys.append(dimension_sample_reason)
 
     status: PolicyStatus = "blocked" if blocked_reason_keys else "advisory"
-    production_calibrated = status == "advisory" and not sample_too_small and total_cases > 0
+    production_calibrated = (
+        status == "advisory"
+        and not sample_too_small
+        and dimension_sample_reason is None
+        and total_cases > 0
+    )
     return PersonaChatJudgePolicyResult(
         status=status,
         production_calibrated=production_calibrated,
         runtime_gating_allowed=False,
         reason_keys=tuple(dict.fromkeys(reason_keys)),
-        case_issues=_case_issues(raw_cases),
+        case_issues=_case_issues(case_rows),
     )
 
 
@@ -189,41 +238,140 @@ def _sample_too_small(
     return False
 
 
-def _case_issues(raw_cases: list[Any]) -> tuple[PersonaChatJudgePolicyIssue, ...]:
+def _dimension_sample_reason(
+    *,
+    dimension_verdict_counts: Any,
+    min_cases_per_verdict: int,
+) -> str | None:
+    """Return why dimension sample counts are not production-ready."""
+    if min_cases_per_verdict <= 0:
+        return None
+    if (
+        not isinstance(dimension_verdict_counts, Mapping)
+        or not dimension_verdict_counts
+    ):
+        return "dimension_sample_counts_unavailable"
+    for verdict_counts in dimension_verdict_counts.values():
+        if not isinstance(verdict_counts, Mapping):
+            return "dimension_sample_too_small"
+        if _sample_too_small(
+            verdict_counts=verdict_counts,
+            min_cases_per_verdict=min_cases_per_verdict,
+        ):
+            return "dimension_sample_too_small"
+    return None
+
+
+def _valid_case_rows(
+    *,
+    raw_cases: list[Any],
+    total_cases: int,
+) -> list[Mapping[str, Any]] | None:
+    """Validate report case rows before policy classification."""
+    if len(raw_cases) != total_cases:
+        return None
+    case_rows: list[Mapping[str, Any]] = []
+    for raw_case in raw_cases:
+        if not isinstance(raw_case, Mapping):
+            return None
+        case_id = _safe_case_id(raw_case.get("case_id"))
+        source_case_id = _safe_source_case_id(raw_case.get("source_case_id"))
+        status = _case_status(raw_case.get("status"))
+        reason_keys = _reason_keys(raw_case.get("mismatches"))
+        if not case_id or not source_case_id or status is None:
+            return None
+        if reason_keys is None:
+            return None
+        if status == "matched" and reason_keys:
+            return None
+        if status != "matched" and not reason_keys:
+            return None
+        case_rows.append(raw_case)
+    return case_rows
+
+
+def _case_status_counts(raw_cases: list[Mapping[str, Any]]) -> dict[str, int]:
+    """Count validated case rows by harness status."""
+    status_counts = {status: 0 for status in _ALLOWED_CASE_STATUSES}
+    for raw_case in raw_cases:
+        status = _case_status(raw_case.get("status"))
+        if status is not None:
+            status_counts[status] += 1
+    return status_counts
+
+
+def _case_issues(
+    raw_cases: list[Mapping[str, Any]],
+) -> tuple[PersonaChatJudgePolicyIssue, ...]:
     """Extract bounded issue summaries from harness case rows."""
     issues: list[PersonaChatJudgePolicyIssue] = []
     for raw_case in raw_cases:
-        if not isinstance(raw_case, Mapping):
+        status = _case_status(raw_case.get("status"))
+        reason_keys = _reason_keys(raw_case.get("mismatches"))
+        if status == "matched":
             continue
-        status = _string_or_empty(raw_case.get("status"))
-        raw_mismatches = raw_case.get("mismatches")
-        reason_keys = _reason_keys(raw_mismatches)
-        if status == "matched" and not reason_keys:
+        if status is None or reason_keys is None:
             continue
-        if not reason_keys and status:
-            reason_keys = (status,)
         issues.append(
             PersonaChatJudgePolicyIssue(
-                case_id=_string_or_empty(raw_case.get("case_id")),
-                source_case_id=_string_or_empty(raw_case.get("source_case_id")),
+                case_id=_safe_case_id(raw_case.get("case_id")),
+                source_case_id=_safe_source_case_id(raw_case.get("source_case_id")),
                 reason_keys=reason_keys,
             )
         )
     return tuple(issues)
 
 
-def _reason_keys(value: Any) -> tuple[str, ...]:
+def _reason_keys(value: Any) -> tuple[str, ...] | None:
     """Return bounded string reason keys from a harness mismatch list."""
     if not isinstance(value, list):
-        return ()
-    return tuple(
-        dict.fromkeys(str(item) for item in value if isinstance(item, str) and item.strip())
-    )
+        return None
+    keys: list[str] = []
+    for item in value:
+        key = _safe_reason_key(item)
+        if key is None:
+            return None
+        keys.append(key)
+    return tuple(dict.fromkeys(keys))
+
+
+def _safe_reason_key(value: Any) -> str | None:
+    """Return allowlisted case mismatch keys only."""
+    if not isinstance(value, str):
+        return None
+    key = value.strip()
+    if key in _ALLOWED_CASE_REASON_KEYS:
+        return key
+    return None
+
+
+def _case_status(value: Any) -> str | None:
+    """Return allowlisted case status values only."""
+    status = _string_or_empty(value)
+    if status in _ALLOWED_CASE_STATUSES:
+        return status
+    return None
+
+
+def _safe_case_id(value: Any) -> str:
+    """Return bounded Persona Chat judge case ids only."""
+    case_id = _string_or_empty(value)
+    if _CASE_ID_RE.fullmatch(case_id):
+        return case_id
+    return ""
+
+
+def _safe_source_case_id(value: Any) -> str:
+    """Return bounded source fixture case ids only."""
+    source_case_id = _string_or_empty(value)
+    if _SOURCE_CASE_ID_RE.fullmatch(source_case_id):
+        return source_case_id
+    return ""
 
 
 def _string_or_empty(value: Any) -> str:
-    """Normalize optional identifier values to stripped strings."""
-    return "" if value is None else str(value).strip()
+    """Return stripped string values and normalize non-strings to an empty string."""
+    return value.strip() if isinstance(value, str) else ""
 
 
 __all__ = [

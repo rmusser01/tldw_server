@@ -76,7 +76,9 @@ The default production threshold is 20 pass and 20 fail cases per dimension. The
 
 `evaluate_persona_chat_judge_report_policy()` classifies offline harness reports as `advisory` or `blocked` before any report is treated as a calibration signal. The helper accepts the harness dataclass or the JSON object produced by the offline review command.
 
-The policy blocks reports with malformed report fields, invalid candidate envelopes, missing candidates, extra candidate ids, verdict agreement below the configured threshold, or flag agreement below the configured threshold. Reports that otherwise match the fixture can still be `advisory` rather than production-calibrated when the pass/fail sample counts are below threshold. The current synthetic fixture remains advisory because it is a smoke/contract surface, not a statistically meaningful held-out calibration set.
+The policy blocks reports with malformed report fields, malformed case rows, invalid candidate envelopes, missing candidates, extra candidate ids, verdict agreement below the configured threshold, or flag agreement below the configured threshold. Reports that otherwise match the fixture can still be `advisory` rather than production-calibrated when aggregate pass/fail sample counts are below threshold or when per-dimension sample counts are unavailable. The current synthetic fixture remains advisory because it is a smoke/contract surface, not a statistically meaningful held-out calibration set.
+
+The existing `calibrate_persona_chat_judge_predictions()` report is still the source of per-dimension calibration evidence. The V1 offline review-command report only exposes aggregate `verdict_counts`; therefore the policy helper must not mark a report `production_calibrated` unless a future report shape also supplies per-dimension pass/fail counts that meet threshold.
 
 The policy result is intentionally trace-safe. It contains status fields, stable reason keys, and per-case `case_id` / `source_case_id` links only. It does not echo prompts, assistant text, exemplar bodies, memory content, RAG snippets, candidate payloads, rationales, filesystem paths, secrets, or database content.
 
@@ -88,7 +90,7 @@ The policy result is intentionally trace-safe. It contains status fields, stable
 - Invalid judge result parsing: only exact `Pass` and `Fail` values are accepted. Parser or model drift that emits variants such as `PASS`, `fail`, or explanatory prose must be treated as invalid output.
 - Unknown prediction scope: unregistered dimensions and unknown case IDs are reported as unknown predictions rather than counted as calibration evidence.
 - Model and prompt drift: any model, prompt, dimension, or fixture-schema change requires a fresh calibration run before comparing results across revisions.
-- Report trust drift: review-command reports can be generated from malformed or partial candidate files. The policy blocks malformed, missing, extra, invalid, and low-agreement reports before maintainers treat them as calibrated.
+- Report trust drift: review-command reports can be generated from malformed or partial candidate files. The policy blocks malformed reports, malformed case rows, missing candidates, extra candidates, invalid candidates, and low-agreement reports before maintainers treat them as calibrated.
 - Trace leakage: judge review artifacts can become privacy risks if they copy raw prompt or response content. The policy result is restricted to bounded identifiers and reason keys.
 - Subjective boundary cases: the V1 dimensions cover selected Persona Chat failure families only. They do not replace human review for nuanced style, safety, or intent disagreements outside the registered dimensions.
 - Grounding and factuality limits: this judge evaluates observed Persona Chat behavior against fixture evidence. It does not prove factual correctness, retrieval grounding, or broader RAG quality.

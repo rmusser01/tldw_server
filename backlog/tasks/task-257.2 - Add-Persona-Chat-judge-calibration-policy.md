@@ -60,22 +60,22 @@ Draft PR: https://github.com/rmusser01/tldw_server/pull/1588
 
 Implemented `tldw_Server_API/app/core/Evaluations/persona_chat_judge_policy.py` as a review-only policy layer over the existing Persona Chat judge harness report. The helper accepts the harness dataclass or bounded report dict, classifies reports as `advisory` or `blocked`, always keeps `runtime_gating_allowed` false, marks the current synthetic fixture as `sample_too_small`, and emits only case ids, source case ids, and reason/mismatch keys.
 
-Added `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py` with TDD coverage for advisory clean reports, invalid/missing/extra candidates, low agreement, dict report input, stable JSON serialization, malformed report blocking, and raw prompt/assistant text exclusion.
+Added `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py` with TDD coverage for advisory clean reports, invalid/missing/extra candidates, low agreement, dict report input, stable JSON serialization, malformed report blocking, malformed case-row blocking, per-dimension sample-count requirements, and raw prompt/assistant text exclusion.
 
 Updated Persona Chat judge review docs with policy status values, thresholds, trace-safe output semantics, V1 non-goals, failure modes, and residual risks.
 
 Verification:
 
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_contract.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -q` passed: 43 passed, 5 warnings.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge_policy.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py -s B101 -f json -o /tmp/bandit_persona_chat_judge_policy.json` passed: 0 findings.
+- `python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_contract.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -q` passed: 46 passed, 5 warnings.
+- `python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge_policy.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py -s B101 -f json -o /tmp/bandit_persona_chat_judge_policy_review.json` passed: 0 findings.
 - Placeholder scan over touched docs, plan, and Backlog task passed with no matches.
 - `git diff --check` passed.
 
 Known failure modes and residual risks:
 
-- The current packaged fixture is intentionally too small for production calibration; policy results remain advisory until a reviewed held-out set meets threshold.
+- The current packaged fixture is intentionally too small for production calibration; policy results remain advisory until a reviewed held-out set meets aggregate and per-dimension thresholds.
 - The policy classifies already-produced reports only. It does not parse model output, execute providers, persist reports, or prove future adapter behavior.
-- Trace-safe output depends on future callers continuing to pass bounded harness reports rather than raw candidate payloads into user-facing surfaces.
+- The V1 review-command report does not yet include per-dimension sample counts, so aggregate pass/fail counts alone cannot produce a production-calibrated policy result.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

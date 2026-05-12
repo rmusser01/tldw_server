@@ -87,12 +87,12 @@ This file output is the V1 offline report persistence location. It is intentiona
 The review-only policy helper in `tldw_Server_API/app/core/Evaluations/persona_chat_judge_policy.py` classifies offline harness reports before maintainers treat them as useful calibration signals. It consumes either a `PersonaChatJudgeHarnessReport` or the bounded JSON shape emitted by the review command, then returns:
 
 - `status`: `advisory` or `blocked`.
-- `production_calibrated`: `false` unless the report is clean and pass/fail fixture counts meet the configured threshold.
+- `production_calibrated`: `false` unless the report is clean, aggregate pass/fail fixture counts meet the configured threshold, and per-dimension pass/fail counts are available and meet the same threshold.
 - `runtime_gating_allowed`: always `false` in V1.
-- `reason_keys`: stable machine-readable reasons such as `sample_too_small`, `invalid_candidates`, `missing_candidates`, `extra_candidates`, `verdict_agreement_below_threshold`, `flag_agreement_below_threshold`, and `invalid_report`.
+- `reason_keys`: stable machine-readable reasons such as `sample_too_small`, `dimension_sample_counts_unavailable`, `dimension_sample_too_small`, `invalid_candidates`, `missing_candidates`, `extra_candidates`, `verdict_agreement_below_threshold`, `flag_agreement_below_threshold`, and `invalid_report`.
 - `case_issues`: bounded case summaries containing only `case_id`, `source_case_id`, and mismatch/reason keys.
 
-The default policy keeps the current synthetic fixture advisory because it has fewer than 20 pass and 20 fail cases. Invalid candidate envelopes, missing candidates, extra candidates, malformed reports, or agreement below configured thresholds block trust in the report. Blocked status means the report cannot be used as a calibrated quality signal; it still does not gate live Persona Chat behavior.
+The default policy keeps the current synthetic fixture advisory because it has fewer than 20 pass and 20 fail cases and because the V1 review-command report has no per-dimension sample counts. Invalid candidate envelopes, missing candidates, extra candidates, malformed reports, malformed case rows, or agreement below configured thresholds block trust in the report. Blocked status means the report cannot be used as a calibrated quality signal; it still does not gate live Persona Chat behavior.
 
 Policy output must stay trace-safe. It must not include raw prompts, assistant responses, exemplar text, memory bodies, RAG snippets, filesystem paths, secrets, candidate payloads, database content, or rationale text. Linkage is limited to bounded fixture identifiers and reason keys.
 

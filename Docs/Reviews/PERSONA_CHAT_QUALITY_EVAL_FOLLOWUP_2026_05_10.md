@@ -204,7 +204,7 @@ This update defines judge input/output shape, calibration expectations, privacy 
 
 [Issue #1586](https://github.com/rmusser01/tldw_server/issues/1586) adds the next review-only guardrail for Slice 5. The policy helper classifies offline harness/review-command reports as `advisory` or `blocked` before maintainers treat report output as a calibration signal.
 
-The policy keeps the current synthetic fixture advisory because the sample count is below the production threshold, and it blocks malformed, missing, extra, invalid, or low-agreement reports. Its output is trace-safe: status, reason keys, `case_id`, and `source_case_id` only. It still does not add provider calls, persistence, Jobs, API/WebUI state, runtime gating, or Persona Chat response mutation.
+The policy keeps the current synthetic fixture advisory because the sample count is below the production threshold and the V1 review-command report has no per-dimension sample counts. It blocks malformed reports, malformed case rows, missing candidates, extra candidates, invalid candidates, or low-agreement reports. Its output is trace-safe: status, reason keys, `case_id`, and `source_case_id` only. It still does not add provider calls, persistence, Jobs, API/WebUI state, runtime gating, or Persona Chat response mutation.
 
 ## Verification
 
