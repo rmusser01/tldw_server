@@ -1,10 +1,10 @@
 ---
 id: TASK-192
 title: Design persona visual pack duplicate-to-persona workflow
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 21:18'
-updated_date: '2026-05-09 21:26'
+updated_date: '2026-05-12 05:57'
 labels:
   - persona
   - buddy
@@ -41,12 +41,18 @@ Spec review iteration 1 found one blocking ambiguity: same-persona duplication w
 Design self-review before implementation planning found and patched three issues: public API response is now the existing PersonaVisualPackResponse with asset_id_map kept internal only; idempotency keys are explicitly out of V1; duplicate now copies only manifest-referenced assets so unaccepted generated candidates and stale uploads are not copied. Also tightened preflight/cleanup guidance for source asset membership, checksum, file existence, and partial target draft failures.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the duplicate-to-persona design for issue #1450. The spec documents same-user cross-persona draft duplication, physical asset copy/remap behavior, explicit same-persona rejection, V1 non-goals, API/service/frontend/test expectations, and implementation review corrections. The follow-up implementation shipped through PR #1467, and issue #1450 is closed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

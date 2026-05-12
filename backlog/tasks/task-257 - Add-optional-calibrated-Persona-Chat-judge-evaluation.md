@@ -1,10 +1,10 @@
 ---
 id: TASK-257
 title: Add optional calibrated Persona Chat judge evaluation
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-11 05:14'
-updated_date: '2026-05-12 03:02'
+updated_date: '2026-05-12 05:59'
 labels:
   - persona-chat
   - evaluations
@@ -60,6 +60,8 @@ Docstring follow-up: added concise helper docstrings in persona_chat_judge.py to
 Additional review follow-up: added a focused regression test proving calibrate_persona_chat_judge_predictions rejects invalid result values even when a prediction object bypasses dataclass post-init validation.
 
 Reopened on 2026-05-12 because #1566 remains open for the next PR-sized optional judge execution slice. New subtask TASK-257.3 tracks GitHub issue #1591 for the offline executable adapter boundary.
+
+Stage 2 closeout update: issue #1566 and tracker #1543 were closed after PR #1603 merged the offline artifact CLI slice. TASK-257 remains the parent Backlog record for the optional Persona Chat judge V1 and now reflects the closed GitHub tracker state; later judge persistence/review surfaces should use new tasks/issues.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -68,6 +70,8 @@ Reopened on 2026-05-12 because #1566 remains open for the next PR-sized optional
 Added an optional/offline Persona Chat judge contract and calibration helper tied to existing deterministic quality fixtures. The implementation defines binary judge dimensions, fixture-derived judge inputs, structured prompt generation, and label-based calibration metrics without changing runtime Persona Chat behavior or adding a live eval service.
 
 PR review follow-up hardened the calibration contract by rejecting missing identity fields, duplicate input/prediction keys, and invalid judge result values before metric calculation. The contract documentation now records known judge failure modes, residual V1 risks, and the offline/runtime boundary.
+
+Stage 2 closeout: the optional judge V1 now includes the follow-up no-provider harness, offline review command, calibration policy, executable adapter boundary, trace-safe execution artifacts, and artifact CLI through PR #1603. Issues #1566 and #1543 are closed, with runtime Persona Chat behavior unchanged.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
