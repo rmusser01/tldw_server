@@ -1,9 +1,10 @@
 ---
 id: TASK-286
 title: Design ACP downstream entrypoint strategy architecture
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 03:35'
+updated_date: '2026-05-12 03:51'
 labels:
   - ACP
   - design
@@ -37,6 +38,12 @@ Create a design spec for an architecture-first ACP downstream entrypoint strateg
 - [x] #6 Design spec is reviewed and committed on an isolated branch.
 <!-- AC:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created and reviewed the ACP downstream entrypoint strategy design. The spec defines native ACP, adapter ACP, documented candidate, and custom template strategies; requires explicit `acp_command` for certifiable native/adapter rows; scopes the first implementation to registry strategy metadata, classifier, profile manifests, and setup/status alignment; and keeps live certification, agent installation, adapter implementation, and issue closeout as follow-on work. The spec review loop approved the final revision.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
@@ -58,9 +65,3 @@ Create a design spec for an architecture-first ACP downstream entrypoint strateg
 - Verification: `git diff --check` passed.
 - Bandit: skipped because this task changed only Markdown/Backlog design artifacts and no Python code.
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created and reviewed the ACP downstream entrypoint strategy design. The spec defines native ACP, adapter ACP, documented candidate, and custom template strategies; requires explicit `acp_command` for certifiable native/adapter rows; scopes the first implementation to registry strategy metadata, classifier, profile manifests, and setup/status alignment; and keeps live certification, agent installation, adapter implementation, and issue closeout as follow-on work. The spec review loop approved the final revision.
-<!-- SECTION:FINAL_SUMMARY:END -->
