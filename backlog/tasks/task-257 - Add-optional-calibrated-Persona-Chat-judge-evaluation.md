@@ -1,10 +1,10 @@
 ---
 id: TASK-257
 title: Add optional calibrated Persona Chat judge evaluation
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-05-11 05:14'
-updated_date: '2026-05-11 05:26'
+updated_date: '2026-05-12 03:02'
 labels:
   - persona-chat
   - evaluations
@@ -58,6 +58,8 @@ PR review verification: python -m pytest tldw_Server_API/tests/Evaluations/test_
 Docstring follow-up: added concise helper docstrings in persona_chat_judge.py to address the CodeRabbit docstring coverage warning for the new module.
 
 Additional review follow-up: added a focused regression test proving calibrate_persona_chat_judge_predictions rejects invalid result values even when a prediction object bypasses dataclass post-init validation.
+
+Reopened on 2026-05-12 because #1566 remains open for the next PR-sized optional judge execution slice. New subtask TASK-257.3 tracks GitHub issue #1591 for the offline executable adapter boundary.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

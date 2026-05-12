@@ -52,6 +52,16 @@ There is intentionally no holistic Persona Chat quality score. If a future quali
 
 The prompt does not request numeric ratings or aggregate scores. It also does not include fixture `labels`; labels are calibration ground truth and must not be shown to the judge.
 
+## Execution Boundary
+
+`execute_persona_chat_judge()` is the optional offline adapter boundary for explicit judge runs. It builds one prompt per `(case_id, dimension_key)`, passes that prompt plus bounded metadata to a caller-supplied completion callable, and converts strict JSON responses into `PersonaChatJudgePrediction` objects. The adapter does not resolve provider credentials, call provider SDKs directly, persist results, enqueue Jobs, expose API endpoints, update WebUI state, or gate runtime Persona Chat responses.
+
+The completion callable must return JSON with exactly `critique`, `result`, and `evidence`. The adapter stores `critique` as the redacted marker `provided`; it does not echo model reasoning, prompts, fixture text, assistant responses, exemplar bodies, secrets, local paths, or database content in result payloads. Provider/model metadata is also bounded before it is included in result payloads or completion-call metadata. Evidence entries must be bounded field references allowed by the dimension and fixture envelope, such as `persona_memory_mode` or `assistant_text`.
+
+Fail-closed execution results use stable error keys only: `malformed_json`, `invalid_response_shape`, `missing_result`, `invalid_result`, `invalid_evidence`, `unknown_dimension`, `duplicate_prediction`, and `provider_call_failed`. These failures are review inputs, not runtime user-facing blocks.
+
+The execution adapter feeds `calibrate_persona_chat_judge_predictions()` for per-dimension calibration. The offline harness, review command, and policy helper remain the separate report-review path for already-produced V1 contract candidate outputs.
+
 ## Calibration Contract
 
 `calibrate_persona_chat_judge_predictions()` compares predicted judge results to expected fixture labels before outputs can be treated as useful quality signals.
@@ -87,6 +97,7 @@ The policy result is intentionally trace-safe. It contains status fields, stable
 - Insufficient labeled data: the current fixture set is a smoke and contract surface, not a statistically meaningful production calibration set. Raw pass rates must not be used as production quality claims.
 - Label leakage: fixture `labels` are calibration ground truth only. The prompt builder must continue excluding labels, and future callers must not pass calibration labels into judge-visible evidence.
 - Corrupted calibration keys: missing or duplicate `case_id` values and duplicate `(case_id, dimension_key)` predictions can silently overwrite data. The helper rejects these before computing metrics.
+- Executable adapter drift: the adapter accepts only strict JSON object responses with the expected keys, exact `Pass` or `Fail`, and allowlisted evidence field references. Malformed output, provider exceptions, unknown dimensions, and duplicate execution keys are bounded failures rather than predictions.
 - Invalid judge result parsing: only exact `Pass` and `Fail` values are accepted. Parser or model drift that emits variants such as `PASS`, `fail`, or explanatory prose must be treated as invalid output.
 - Unknown prediction scope: unregistered dimensions and unknown case IDs are reported as unknown predictions rather than counted as calibration evidence.
 - Model and prompt drift: any model, prompt, dimension, or fixture-schema change requires a fresh calibration run before comparing results across revisions.
@@ -98,8 +109,8 @@ The policy result is intentionally trace-safe. It contains status fields, stable
 
 ## Non-Goals
 
-- No live LLM execution.
-- No API endpoint or recipe-run wiring in this slice.
+- No direct provider credential resolution or provider SDK calls inside the adapter.
+- No API endpoint, Jobs worker, WebUI state, or recipe-run wiring in this slice.
 - No runtime Persona Chat gating.
 - No moderation gate.
 - No replacement for deterministic fixture checks.
@@ -116,3 +127,5 @@ Focused tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge
 - Required identity-field validation, duplicate calibration-key rejection, and invalid judge-result rejection.
 
 Policy tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py` and cover advisory classification for the synthetic fixture, blocked invalid/missing/extra/low-agreement reports, dict report input compatibility, stable JSON serialization, and raw-text exclusion.
+
+Execution tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_execution.py` and cover valid prediction parsing, bounded malformed JSON and shape failures, invalid result and evidence handling, unknown dimension rejection, duplicate execution-key handling, provider exception redaction, and feeding predictions into the existing calibration helper.

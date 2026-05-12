@@ -4,7 +4,7 @@ Date checked: 2026-05-11
 
 ## Summary
 
-This document defines the V1 contract for the optional Persona Chat judge evaluation tracked in [#1566](https://github.com/rmusser01/tldw_server/issues/1566). It is a contract and fixture slice only. It does not add an executable judge, change normal Persona Chat runtime behavior, add production scoring, or gate chat responses.
+This document defines the V1 contract for the optional Persona Chat judge evaluation tracked in [#1566](https://github.com/rmusser01/tldw_server/issues/1566). It includes contract fixtures, an offline review harness, and a narrow explicit execution adapter boundary. It does not change normal Persona Chat runtime behavior, add production scoring, or gate chat responses.
 
 The contract applies to ordinary persona-backed chat in the Buddy/Persona system. Persona Live rendering, avatar behavior, VN/CYOA flows, and native background interaction remain outside this scope.
 
@@ -62,11 +62,21 @@ A future executable judge must satisfy these rules before its output is consider
 4. Preserve deterministic checks as hard preconditions before subjective scoring.
 5. Document known bias cases, especially generic-assistant bias, over-rewarding theatrical style, and under-penalizing memory-mode claims.
 
-Judge execution remains deferred until these calibration requirements are implemented and reviewed.
+Production use of judge execution remains deferred until these calibration requirements are implemented and reviewed.
+
+## Executable Adapter Boundary
+
+The first executable adapter boundary is `execute_persona_chat_judge()` in `tldw_Server_API/app/core/Evaluations/persona_chat_judge_execution.py`. It is still offline and explicit: callers provide normalized `PersonaChatJudgeInput` rows, selected dimension keys, provider/model metadata, and a completion callable. The adapter builds prompts with the existing prompt helper, calls only the injected callable, and returns sanitized `PersonaChatJudgePrediction` rows plus bounded failures.
+
+The adapter is not a provider integration. It does not resolve credentials, call provider SDKs directly, persist reports, enqueue Jobs, expose API endpoints, update WebUI state, mutate chat output, or allow runtime gating. `runtime_gating_allowed` remains `false`.
+
+Judge responses must be strict JSON objects with exactly `critique`, `result`, and `evidence`. `result` must be exact `Pass` or `Fail`; evidence values must be allowed trace-field references. Parsed predictions redact critique text to the marker `provided`, and provider/model metadata is bounded before it is included in outputs or completion-call metadata. Failures use stable keys only, including `malformed_json`, `invalid_response_shape`, `missing_result`, `invalid_result`, `invalid_evidence`, `unknown_dimension`, `duplicate_prediction`, and `provider_call_failed`, and must not echo prompts, responses, exemplar text, filesystem paths, secrets, or database content.
+
+Adapter predictions feed the existing per-dimension calibration helper. The harness, review command, and policy helper below remain the separate report-review path for already-produced V1 contract candidate outputs.
 
 ## Offline Harness
 
-The first executable layer is the offline harness in `tldw_Server_API/app/core/Evaluations/persona_chat_judge_harness.py`. It compares already-produced candidate judge outputs against the checked-in V1 contract fixture and returns a bounded report with case counts, per-verdict counts, verdict agreement, flag agreement, score schema validity, missing candidates, invalid candidates, extra candidates, and per-case mismatch keys.
+The offline report-review harness lives in `tldw_Server_API/app/core/Evaluations/persona_chat_judge_harness.py`. It compares already-produced candidate judge outputs against the checked-in V1 contract fixture and returns a bounded report with case counts, per-verdict counts, verdict agreement, flag agreement, score schema validity, missing candidates, invalid candidates, extra candidates, and per-case mismatch keys.
 
 The harness does not call model providers, persist evaluation runs, enqueue Jobs, expose API endpoints, or gate Persona Chat responses. Future judge adapters should feed their outputs into this helper before any output is treated as calibrated.
 
@@ -119,7 +129,7 @@ Additional fixture cases should preserve the same envelope and continue mapping 
 
 ## Non-Goals
 
-- No live judge provider calls.
+- No direct live judge provider calls from the adapter itself.
 - No Persona Chat endpoint, worker, or recipe execution changes.
 - No runtime chat gating, blocking, retrying, or response rewriting.
 - No Persona Live, avatar, visual pack, VN/CYOA, or native companion changes.
@@ -127,8 +137,8 @@ Additional fixture cases should preserve the same envelope and continue mapping 
 
 ## Remaining Executable Harness Prerequisites
 
-Before adding executable judge code, follow-up PRs should still define:
+Before treating executable judge output as calibrated or production-usable, follow-up PRs should still define:
 
-- The exact prompt and model input shape derived from this envelope.
-- Executable adapter parsing and failure handling against the policy helper.
 - How any future persisted judge reports link back to deterministic Persona Chat trace ids without storing sensitive content.
+- Provider-specific completion adapters and configuration, if needed, outside the offline boundary.
+- Held-out calibration data and thresholds for any production quality claims.
