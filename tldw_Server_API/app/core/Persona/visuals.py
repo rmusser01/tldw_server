@@ -4,6 +4,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    get_persona_visual_renderer_capability,
+)
+
 
 VISUAL_STATE_IDS = {
     "idle",
@@ -17,7 +21,6 @@ VISUAL_STATE_IDS = {
     "offline",
 }
 REQUIRED_VISUAL_STATES = {"idle", "listening", "thinking", "speaking", "error"}
-SUPPORTED_RENDERER_TYPES = {"sprite_frames"}
 SUPPORTED_TRIGGER_SOURCES = {"live_state", "tool_category", "mcp_runtime"}
 
 MAX_FRAMES_PER_ANIMATION = 240
@@ -25,6 +28,7 @@ MIN_FRAME_DURATION_MS = 16
 MAX_FRAME_DURATION_MS = 30_000
 MIN_TRIGGER_DURATION_MS = 100
 MAX_TRIGGER_DURATION_MS = 30_000
+MAX_RENDERER_TYPE_ERROR_LENGTH = 100
 
 
 class PersonaVisualManifestError(ValueError):
@@ -44,7 +48,10 @@ def validate_visual_manifest(
     require_activatable: bool,
     available_asset_dimensions: dict[str, tuple[int, int]] | None = None,
 ) -> PersonaVisualManifestValidation:
-    normalized = _normalize_manifest_shape(manifest)
+    normalized = _normalize_manifest_shape(
+        manifest,
+        require_activatable=require_activatable,
+    )
     dimensions = available_asset_dimensions or {}
 
     for animation_id, animation in normalized["animations"].items():
@@ -82,15 +89,31 @@ def validate_visual_manifest(
     )
 
 
-def _normalize_manifest_shape(manifest: dict[str, Any]) -> dict[str, Any]:
+def _normalize_manifest_shape(
+    manifest: dict[str, Any],
+    *,
+    require_activatable: bool,
+) -> dict[str, Any]:
     if not isinstance(manifest, dict):
         raise PersonaVisualManifestError("Manifest must be an object")
 
     normalized = deepcopy(manifest)
-    if normalized.get("manifest_version") != 1:
-        raise PersonaVisualManifestError("manifest_version must be 1")
-    if normalized.get("renderer_type") not in SUPPORTED_RENDERER_TYPES:
-        raise PersonaVisualManifestError("renderer_type must be sprite_frames")
+    renderer_type = normalized.get("renderer_type")
+    renderer_type_for_error = _format_renderer_type_for_error(renderer_type)
+    capability = get_persona_visual_renderer_capability(str(renderer_type or ""))
+    if capability is None or not capability.can_validate:
+        raise PersonaVisualManifestError(
+            f"unsupported renderer_type: {renderer_type_for_error}"
+        )
+    if require_activatable and not capability.can_activate:
+        raise PersonaVisualManifestError(
+            f"unsupported renderer_type for activation: {renderer_type_for_error}"
+        )
+    if normalized.get("manifest_version") not in capability.manifest_versions:
+        raise PersonaVisualManifestError(
+            "manifest_version must be one of "
+            f"{', '.join(str(version) for version in capability.manifest_versions)}"
+        )
 
     states = normalized.setdefault("states", {})
     animations = normalized.setdefault("animations", {})
@@ -114,6 +137,19 @@ def _normalize_manifest_shape(manifest: dict[str, Any]) -> dict[str, Any]:
         animation["frames"] = _normalize_animation_frames(animation_id, animation)
 
     return normalized
+
+
+def _format_renderer_type_for_error(renderer_type: Any) -> str:
+    value = str(renderer_type or "")
+    value = (
+        value.replace("\\", "\\\\")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
+    if len(value) > MAX_RENDERER_TYPE_ERROR_LENGTH:
+        return value[:MAX_RENDERER_TYPE_ERROR_LENGTH] + "..."
+    return value or "<empty>"
 
 
 def _normalize_animation_frames(
@@ -385,7 +421,6 @@ def _resolve_state(
 __all__ = [
     "MAX_FRAMES_PER_ANIMATION",
     "REQUIRED_VISUAL_STATES",
-    "SUPPORTED_RENDERER_TYPES",
     "VISUAL_STATE_IDS",
     "PersonaVisualManifestError",
     "PersonaVisualManifestValidation",

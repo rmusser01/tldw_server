@@ -119,6 +119,42 @@ def _create_visual_pack(client: TestClient, persona_id: str, *, title: str = "Pa
     return response.json()
 
 
+def test_list_persona_visual_renderer_capabilities(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-renderers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "renderers": [
+            {
+                "renderer_type": "sprite_frames",
+                "display_name": "Sprite frames",
+                "manifest_versions": [1],
+                "can_validate": True,
+                "can_activate": True,
+                "buddy_runtime_supported": True,
+                "import_supported": True,
+                "export_supported": True,
+                "disabled_reason": None,
+            }
+        ]
+    }
+
+
+def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-renderers")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Persona disabled"}
+
+
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     response = client.post(
         f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets",
@@ -536,6 +572,37 @@ def test_activation_rejects_manifest_without_required_states(persona_db: Charact
 
         assert response.status_code == 400
         assert response.json()["detail"]["code"] == "invalid_manifest"
+
+
+def test_draft_manifest_update_accepts_future_renderer_but_activation_rejects_it(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Renderer Boundary Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        draft_response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": {
+                    "manifest_version": 1,
+                    "renderer_type": "live2d",
+                    "states": {},
+                    "animations": {},
+                },
+                "expected_version": pack["version"],
+            },
+        )
+        assert draft_response.status_code == 200, draft_response.text
+        assert draft_response.json()["manifest"]["renderer_type"] == "live2d"
+
+        activate_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+        )
+
+        assert activate_response.status_code == 400
+        assert activate_response.json()["detail"]["code"] == "invalid_manifest"
+        assert "unsupported renderer_type" in activate_response.json()["detail"]["message"]
 
 
 def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:

@@ -8,12 +8,11 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
-import { normalizeFrames } from "./personaVisualDiagnostics"
-
-export type PersonaVisualRenderError =
-  | "missing_animation"
-  | "missing_asset"
-  | "unsupported_region"
+import { normalizeFrames } from "./personaVisualAssets"
+import type {
+  PersonaVisualRenderError,
+  PersonaVisualRenderErrorHandler
+} from "./personaVisualTypes"
 
 export type SpriteFrameRendererProps = {
   manifest: PersonaVisualManifest
@@ -21,7 +20,7 @@ export type SpriteFrameRendererProps = {
   state: PersonaVisualStateId
   fallbackLabel: string
   className?: string
-  onRenderError?: (error: PersonaVisualRenderError | null) => void
+  onRenderError?: PersonaVisualRenderErrorHandler
 }
 
 type ResolvedAnimation = {

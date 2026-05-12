@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
     PersonaVisualPackExporter,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import (
+    sha256_bytes,
     sha256_file,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.models import (
@@ -384,3 +385,60 @@ def test_import_preview_reports_missing_asset_bytes_as_warning(
     ]
     exported_assets = preview["bundle_summary"]["assets"]
     assert exported_assets[0]["asset_bytes_status"] == ASSET_BYTES_STATUS_MISSING  # nosec B101
+
+
+def test_import_preview_rejects_unsupported_renderer_type_in_visual_manifest(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persona_id, pack, _asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    exporter = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    )
+    result = exporter.export_pack(
+        persona_id=persona_id,
+        pack_id=str(pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    mutated_archive_path = tmp_path / "unsupported-renderer.tldw-persona-vpack"
+
+    with zipfile.ZipFile(result.archive_path, "r") as source_archive:
+        pack_payload = json.loads(source_archive.read("metadata/pack.json"))
+        pack_payload["pack"]["visual_manifest"]["renderer_type"] = "live2d"
+        mutated_pack_bytes = json.dumps(
+            pack_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        checksums = json.loads(source_archive.read(CHECKSUMS_PATH))
+        checksums["metadata/pack.json"] = sha256_bytes(mutated_pack_bytes)
+        mutated_checksums_bytes = json.dumps(
+            dict(sorted(checksums.items())),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+
+        with zipfile.ZipFile(mutated_archive_path, "w", compression=zipfile.ZIP_DEFLATED) as target_archive:
+            for member in source_archive.infolist():
+                if member.filename == "metadata/pack.json":
+                    target_archive.writestr(member.filename, mutated_pack_bytes)
+                elif member.filename == CHECKSUMS_PATH:
+                    target_archive.writestr(member.filename, mutated_checksums_bytes)
+                else:
+                    target_archive.writestr(member, source_archive.read(member.filename))
+
+    with pytest.raises(ValueError, match="malformed_visual_manifest"):
+        PersonaVisualPackImportPreviewer().create_preview(
+            archive_path=mutated_archive_path,
+            owner_user_id="user-1",
+            target_persona_id=persona_id,
+        )

@@ -187,6 +187,22 @@ class PersonaVisualManifestUpdate(BaseModel):
     expected_version: int | None = Field(default=None, ge=1)
 
 
+class PersonaVisualRendererCapabilityResponse(BaseModel):
+    renderer_type: PersonaVisualRendererType
+    display_name: str
+    manifest_versions: list[int] = Field(default_factory=list)
+    can_validate: bool
+    can_activate: bool
+    buddy_runtime_supported: bool
+    import_supported: bool
+    export_supported: bool
+    disabled_reason: str | None = None
+
+
+class PersonaVisualRendererCapabilitiesResponse(BaseModel):
+    renderers: list[PersonaVisualRendererCapabilityResponse] = Field(default_factory=list)
+
+
 class PersonaVisualAssetResponse(BaseModel):
     id: str
     pack_id: str
