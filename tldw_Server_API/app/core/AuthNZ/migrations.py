@@ -1211,7 +1211,12 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
         ('api.rate_limit_override','Override rate limits','api'),
         # claims
         ('claims.review','Review claims','claims'),
-        ('claims.admin','Administer claims','claims')
+        ('claims.admin','Administer claims','claims'),
+        # moderation review
+        ('moderation.review.read','Read moderation review items','moderation'),
+        ('moderation.review.decide','Decide moderation review items','moderation'),
+        ('moderation.review.bulk_decide','Bulk decide moderation review items','moderation'),
+        ('moderation.audit.read','Read moderation review audit events','moderation')
     ]
     for name, description, category in perms:
         conn.execute(
@@ -1264,8 +1269,8 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
                 (mod_id, pid),
             )
 
-    # Reviewer: read media + claims.review
-    reviewer_perms = ['media.read', 'claims.review']
+    # Reviewer: read media + claims and moderation review decisions
+    reviewer_perms = ['media.read', 'claims.review', 'moderation.review.read', 'moderation.review.decide']
     for code in reviewer_perms:
         pid = _id('permissions', code)
         if pid is not None and reviewer_id is not None:

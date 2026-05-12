@@ -311,12 +311,12 @@ Expected: all tests pass; 390px viewport has no page-level horizontal overflow.
 - Modify: `tldw_Server_API/app/core/AuthNZ/settings.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/migrations.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/rbac_seed.py`
-- Modify: `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py`
+- Covered by shared Postgres/SQLite RBAC bootstrap: `tldw_Server_API/app/core/AuthNZ/rbac_seed.py`
 - Modify: `tldw_Server_API/app/api/v1/schemas/moderation_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/moderation.py`
 - Create: `tldw_Server_API/app/core/Moderation/review_store.py`
 - Create: `tldw_Server_API/app/core/Moderation/review_service.py`
-- Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
+- Covered by adjacent review-safe projection helper: `tldw_Server_API/app/core/Moderation/review_service.py`
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chat.py`
 - Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
@@ -328,7 +328,7 @@ Expected: all tests pass; 390px viewport has no page-level horizontal overflow.
 
 **Implementation Tasks:**
 
-- [ ] Add permission constants:
+- [x] Add permission constants:
 
 ```py
 MODERATION_REVIEW_READ = "moderation.review.read"
@@ -337,11 +337,11 @@ MODERATION_REVIEW_BULK_DECIDE = "moderation.review.bulk_decide"
 MODERATION_AUDIT_READ = "moderation.audit.read"
 ```
 
-- [ ] Seed permissions in SQLite and Postgres RBAC paths. Grant all to admin, grant `moderation.review.read` and `moderation.review.decide` to reviewer, and add review permissions to `SINGLE_USER_DEFAULT_PERMISSIONS` so local single-user mode remains usable.
+- [x] Seed permissions in SQLite and Postgres RBAC paths. Grant all to admin, grant `moderation.review.read` and `moderation.review.decide` to reviewer, and add review permissions to `SINGLE_USER_DEFAULT_PERMISSIONS` so local single-user mode remains usable.
 
-- [ ] Refactor `tldw_Server_API/app/api/v1/endpoints/moderation.py` so config endpoints keep admin plus `SYSTEM_CONFIGURE`, but review endpoints use review permissions. Use a root `router = APIRouter()` plus `rules_router` and `review_router` if needed; do not leave review endpoints under a global `SYSTEM_CONFIGURE` dependency.
+- [x] Refactor `tldw_Server_API/app/api/v1/endpoints/moderation.py` so config endpoints keep admin plus `SYSTEM_CONFIGURE`, but review endpoints use review permissions. Use a root `router = APIRouter()` plus `rules_router` and `review_router` if needed; do not leave review endpoints under a global `SYSTEM_CONFIGURE` dependency.
 
-- [ ] Add Pydantic schemas to `moderation_schemas.py`:
+- [x] Add Pydantic schemas to `moderation_schemas.py`:
 
 ```py
 ModerationReviewStatus = Literal[
@@ -378,20 +378,20 @@ class ModerationReviewItem(BaseModel):
     recommended_action: ModerationDecisionAction | None = None
 ```
 
-- [ ] Create `review_store.py` using SQLite at `MODERATION_REVIEW_DB_PATH` or default `tldw_Server_API/Databases/moderation_review.db`. Use `configure_sqlite_connection`, `sqlite3.Row`, parameterized queries, and schema creation in `__init__`.
+- [x] Create `review_store.py` using SQLite at `MODERATION_REVIEW_DB_PATH` or default `tldw_Server_API/Databases/moderation_review.db`. Use `configure_sqlite_connection`, `sqlite3.Row`, parameterized queries, and schema creation in `__init__`.
 
-- [ ] Store only sanitized fields by default. Minimum tables:
+- [x] Store only sanitized fields by default. Minimum tables:
   - `moderation_review_items`
   - `moderation_review_decisions`
   - `moderation_review_audit_events`
 
-- [ ] Add unique `idempotency_key` on `moderation_review_items` so repeated checks do not create duplicates.
+- [x] Add unique `idempotency_key` on `moderation_review_items` so repeated checks do not create duplicates.
 
-- [ ] Add retention fields `retention_expires_at` and `content_redacted_at`. Implement `redact_item_content(item_id, actor_id)` even if only used by tests in this stage.
+- [x] Add retention fields `retention_expires_at` and `content_redacted_at`. Implement `redact_item_content(item_id, actor_id)` even if only used by tests in this stage.
 
-- [ ] Create `review_service.py` with list/detail/record/decision/undo/bulk/audit methods. Map actions to resulting statuses: approve -> approved, block -> blocked, redact -> redacted, dismiss -> dismissed, escalate -> escalated.
+- [x] Create `review_service.py` with list/detail/record/decision/undo/bulk/audit methods. Map actions to resulting statuses: approve -> approved, block -> blocked, redact -> redacted, dismiss -> dismissed, escalate -> escalated.
 
-- [ ] Add review endpoints:
+- [x] Add review endpoints:
   - `GET /moderation/review/items`
   - `GET /moderation/review/items/{item_id}`
   - `POST /moderation/review/items/{item_id}/decision`
@@ -399,31 +399,40 @@ class ModerationReviewItem(BaseModel):
   - `POST /moderation/review/bulk-decision`
   - `GET /moderation/review/audit`
 
-- [ ] Add `CurrentPrincipal` dependency to decision endpoints so `decided_by` and audit actor use the authenticated principal id. Never trust actor fields from the request body.
+- [x] Add `CurrentPrincipal` dependency to decision endpoints so `decided_by` and audit actor use the authenticated principal id. Never trust actor fields from the request body.
 
-- [ ] Extend `ModerationEvaluationResult` or add an adjacent helper in `moderation_service.py` to provide review-safe metadata: sanitized excerpt, matched pattern type/category/action, effective policy snapshot, source phase, and recommended action. Keep raw text out of the returned review payload.
+- [x] Extend `ModerationEvaluationResult` or add an adjacent helper in `moderation_service.py` to provide review-safe metadata: sanitized excerpt, matched pattern type/category/action, effective policy snapshot, source phase, and recommended action. Keep raw text out of the returned review payload.
 
-- [ ] Add event producer calls in `tldw_Server_API/app/core/Chat/chat_service.py` where input/output moderation already resolves `block`, `redact`, or `warn`. Create review items after the moderation action is known and before returning or raising, using an idempotency key based on source type, source id, phase, user/principal id, category, action, and sanitized sample hash.
+- [x] Add event producer calls in `tldw_Server_API/app/core/Chat/chat_service.py` where input/output moderation already resolves `block`, `redact`, or `warn`. Create review items after the moderation action is known and before returning or raising, using an idempotency key based on source type, source id, phase, user/principal id, category, action, and sanitized sample hash.
 
-- [ ] Add a narrow endpoint-level hook in `tldw_Server_API/app/api/v1/endpoints/chat.py` only where moderation is handled outside `chat_service.py`. Avoid duplicate events for paths already routed through `moderate_input_messages`.
+- [x] Add a narrow endpoint-level hook in `tldw_Server_API/app/api/v1/endpoints/chat.py` only where moderation is handled outside `chat_service.py`. Avoid duplicate events for paths already routed through `moderate_input_messages`.
 
-- [ ] Add `MODERATION_REVIEW_CAPTURE_ENABLED` config/env gate defaulting off for production capture until Stage 5 UI and retention behavior are verified. Tests can enable it explicitly.
+- [x] Add `MODERATION_REVIEW_CAPTURE_ENABLED` config/env gate defaulting off for production capture until Stage 5 UI and retention behavior are verified. Tests can enable it explicitly.
 
-- [ ] Add review endpoints to `apps/packages/ui/src/services/tldw/openapi-guard.ts`.
+- [x] Add review endpoints to `apps/packages/ui/src/services/tldw/openapi-guard.ts`.
 
 **Tests:**
 
-- [ ] Store tests: schema creation, insert idempotency, sanitized list/detail, filtering, pagination cursor, decision, undo, bulk partial failure, audit order, retention redaction.
+- [x] Store/service tests: schema creation, insert idempotency, sanitized list/detail, filtering, pagination cursor, decision, undo, bulk partial failure, audit order, retention redaction.
 
-- [ ] Auth tests: config endpoints still require admin plus `SYSTEM_CONFIGURE`; review list allows `MODERATION_REVIEW_READ`; decision requires `MODERATION_REVIEW_DECIDE`; bulk requires `MODERATION_REVIEW_BULK_DECIDE`; audit requires `MODERATION_AUDIT_READ`.
+- [x] Auth tests: config endpoints still require admin plus `SYSTEM_CONFIGURE`; review list allows `MODERATION_REVIEW_READ`; decision requires `MODERATION_REVIEW_DECIDE`; bulk requires `MODERATION_REVIEW_BULK_DECIDE`; audit requires `MODERATION_AUDIT_READ`.
 
-- [ ] Event capture tests: chat input block/redact/warn creates one review item with sanitized excerpt and no raw text; repeated call with same idempotency key does not duplicate.
+- [x] Event capture tests: chat input block/redact/warn creates one review item with sanitized excerpt and no raw text; repeated call with same idempotency key does not duplicate.
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py tldw_Server_API/tests/AuthNZ_Unit/test_moderation_permissions_claims.py tldw_Server_API/tests/unit/test_moderation_event_capture.py -q`
 
 Expected: tests pass with review capture enabled only in tests that opt into it.
 
-**Status:** Not Started
+**Verification:**
+
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py tldw_Server_API/tests/AuthNZ_Unit/test_moderation_permissions_claims.py tldw_Server_API/tests/unit/test_moderation_event_capture.py -q` -> 21 passed, 5 warnings.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py -q` -> 15 passed, 5 warnings.
+- `bun run verify:openapi` from `apps/packages/ui` -> 265 ClientPath entries verified, 49 media add fallback fields verified, 10 existing reviewed exception paths allowed.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m py_compile tldw_Server_API/app/core/Moderation/review_store.py tldw_Server_API/app/core/Moderation/review_service.py tldw_Server_API/app/api/v1/endpoints/moderation.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py` -> passed.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/moderation.py tldw_Server_API/app/api/v1/schemas/moderation_schemas.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/review_store.py tldw_Server_API/app/core/Moderation/review_service.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py -f json -o /tmp/bandit_moderation_review_stage4.json` -> no findings; intentional `nosec B608` suppressions on whitelisted dynamic SQL fragments.
+- `git diff --check` -> passed.
+
+**Status:** Complete
 
 ---
 
