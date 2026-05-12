@@ -45,16 +45,20 @@ duplicate-to-persona, import/export, and shared-library workflows without
 changing the core pack format.
 
 V1 validation and Buddy runtime support are intentionally limited to
-`sprite_frames`. Reserved renderer labels in API/UI types are not support
-claims until backend manifest validation, import preview, Buddy runtime
-rendering, and capability reporting all agree on the new renderer contract.
+`sprite_frames`. PR #1608 added the renderer capability contract and authenticated
+`GET /api/v1/persona/visual-renderers` endpoint, with `sprite_frames` as the only
+enabled V1 activatable and Buddy-runtime renderer. Reserved renderer labels in
+API/UI types are still not support claims until backend manifest validation,
+import preview, Buddy runtime rendering, and capability reporting all agree on
+that renderer.
 
 Future renderer/provider adapter work is evaluated in
 `Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md`.
 That evaluation keeps Live2D, Rive, Lottie, Spine, and external MCP-compatible
-pack providers separate from the current V1 activation path. The recommended
-next step is a renderer capability contract and safe sprite atlas extension
-before any non-sprite adapter implementation.
+pack providers separate from the current V1 activation path. The renderer
+capability contract is now in place; sprite-sheet frame regions are supported
+inside `sprite_frames`, and any future non-sprite adapter should reuse the
+registry instead of adding another hardcoded renderer path.
 
 ## Personal Library
 
