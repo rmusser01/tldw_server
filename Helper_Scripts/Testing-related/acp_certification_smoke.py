@@ -10,16 +10,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
 import shlex
 # subprocess is intentionally used to run static manifest argv with shell=False.
 import subprocess  # nosec B404
 import sys
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -166,9 +170,98 @@ def build_manifest(profile: str) -> dict[str, Any]:
     return deepcopy(_MANIFESTS[profile])
 
 
-def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
-    """Render a certification manifest as JSON or Markdown."""
-    manifest = build_manifest(profile)
+def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
+    """Return a profile-specific ACP certification probe manifest."""
+    profile = str(entrypoint.get("type") or entrypoint.get("profile_key") or "")
+    if not profile:
+        raise ValueError("Agent profile manifest requires a profile type")
+
+    blockers = list(entrypoint.get("blockers") or [])
+    primary_blocker = entrypoint.get("primary_blocker")
+    if primary_blocker and primary_blocker not in blockers:
+        blockers.insert(0, str(primary_blocker))
+
+    manifest: dict[str, Any] = {
+        "profile": profile,
+        "name": entrypoint.get("name") or profile,
+        "support_state": "documented_unverified",
+        "verification_level": "documented_only",
+        "requires_live_agent": True,
+        "required_environment": [
+            "TLDW_E2E_SERVER_URL",
+            "TLDW_E2E_API_KEY",
+            "ACP_AGENT_PROFILE",
+        ],
+        "entrypoint": {
+            "entrypoint_strategy": entrypoint.get("entrypoint_strategy"),
+            "probe_state": entrypoint.get("probe_state"),
+            "acp_command": entrypoint.get("acp_command") or "",
+            "acp_args": list(entrypoint.get("acp_args") or []),
+            "primary_blocker": primary_blocker,
+            "status_message": entrypoint.get("status_message") or "",
+            "docs_url": entrypoint.get("docs_url"),
+        },
+        "blockers": blockers,
+        "notes": [
+            str(entrypoint.get("status_message") or "Profile-specific ACP certification manifest."),
+            "Requires operator-provided runtime state and an installed downstream ACP entrypoint.",
+        ],
+        "commands": [],
+    }
+
+    if entrypoint.get("probe_state") == "ready_to_probe":
+        manifest["commands"].append(
+            {
+                "id": "acp_initialize_probe",
+                "description": "Bounded ACP initialize probe for the selected downstream entrypoint.",
+                "cwd": ".",
+                "argv": [
+                    str(entrypoint["acp_command"]),
+                    *[str(arg) for arg in entrypoint.get("acp_args", [])],
+                ],
+                "stdin_jsonl": [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "1",
+                            "clientInfo": {
+                                "name": "tldw-server-certification-smoke",
+                                "version": "0",
+                            },
+                        },
+                    },
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "session/new",
+                        "params": {"cwd": ".", "mcpServers": []},
+                    },
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/prompt",
+                        "params": {
+                            "prompt": "Reply with a short ACP certification acknowledgement."
+                        },
+                    },
+                ],
+                "timeout_seconds": 10,
+                "capabilities": ["init", "session_new", "prompt"],
+                "safe_to_run_by_default": False,
+            }
+        )
+
+    return manifest
+
+
+def render_manifest_dict(
+    manifest: dict[str, Any],
+    *,
+    output_format: str = "markdown",
+) -> str:
+    """Render a certification manifest dictionary as JSON or Markdown."""
     if output_format == "json":
         return json.dumps(manifest, indent=2, sort_keys=True)
     if output_format != "markdown":
@@ -183,11 +276,32 @@ def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
     ]
     if manifest["required_environment"]:
         lines.append(f"- required_environment: `{', '.join(manifest['required_environment'])}`")
+    if manifest.get("entrypoint"):
+        entrypoint = manifest["entrypoint"]
+        lines.extend(
+            [
+                f"- entrypoint_strategy: `{entrypoint.get('entrypoint_strategy')}`",
+                f"- probe_state: `{entrypoint.get('probe_state')}`",
+                f"- acp_command: `{entrypoint.get('acp_command')}`",
+            ]
+        )
+        if entrypoint.get("acp_args"):
+            lines.append(f"- acp_args: `{shlex.join(str(arg) for arg in entrypoint['acp_args'])}`")
+    if manifest.get("blockers"):
+        lines.append(f"- blockers: `{', '.join(str(blocker) for blocker in manifest['blockers'])}`")
     lines.append("")
     lines.append("## Notes")
     lines.extend(f"- {note}" for note in manifest["notes"])
+    if manifest.get("blockers"):
+        lines.append("")
+        lines.append("## Blockers")
+        lines.extend(f"- {blocker}" for blocker in manifest["blockers"])
     lines.append("")
     lines.append("## Commands")
+    if not manifest["commands"]:
+        lines.append("")
+        lines.append("No runnable commands for this manifest.")
+        return "\n".join(lines).rstrip() + "\n"
     for command in manifest["commands"]:
         env_prefix = " ".join(
             f"{key}={_quote_shell_env_value(str(value))}"
@@ -213,7 +327,23 @@ def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
                 "",
             ]
         )
+        if command.get("stdin_jsonl"):
+            lines.extend(
+                [
+                    "stdin_jsonl:",
+                    "",
+                    "```jsonl",
+                    *[json.dumps(frame, sort_keys=True) for frame in command["stdin_jsonl"]],
+                    "```",
+                    "",
+                ]
+            )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_manifest(profile: str, *, output_format: str = "markdown") -> str:
+    """Render a certification manifest as JSON or Markdown."""
+    return render_manifest_dict(build_manifest(profile), output_format=output_format)
 
 
 def _quote_shell_env_value(value: str) -> str:
@@ -271,9 +401,99 @@ def _handle_missing_prerequisite(command: dict[str, Any], reason: str) -> int | 
     return 127
 
 
-def run_manifest(profile: str) -> int:
-    """Run safe-by-default commands for a certification profile."""
-    manifest = build_manifest(profile)
+def _read_jsonrpc_response(process: subprocess.Popen[str], timeout_seconds: float) -> dict[str, Any] | None:
+    """Read one JSON-RPC line from a process stdout within a timeout."""
+    stdout = process.stdout
+    if stdout is None:
+        return None
+
+    if hasattr(stdout, "fileno"):
+        try:
+            readable, _, _ = select.select([stdout], [], [], timeout_seconds)
+        except (OSError, ValueError):
+            readable = [stdout]
+        if not readable:
+            return None
+
+    line = stdout.readline()
+    if not line:
+        return None
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return {"error": {"message": f"invalid JSON-RPC response: {line.strip()}"}}
+    if not isinstance(payload, dict):
+        return {"error": {"message": "JSON-RPC response is not an object"}}
+    return payload
+
+
+def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
+    """Run an ordered stdio JSON-RPC sequence, stopping after the first error."""
+    timeout_seconds = float(command.get("timeout_seconds", 10))
+    deadline = time.monotonic() + timeout_seconds
+    command_id = command.get("id", "<unknown>")
+    try:
+        process = subprocess.Popen(  # nosec B603
+            command["argv"],
+            cwd=str(cwd),
+            env=_command_env(command),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        handled = _handle_missing_prerequisite(command, str(exc))
+        return 127 if handled is None else handled
+
+    for frame in command.get("stdin_jsonl", []):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            process.kill()
+            print(f"FAIL {command_id}: timed out before {frame.get('method')}", file=sys.stderr)
+            return 124
+        if process.stdin is None:
+            process.kill()
+            print(f"FAIL {command_id}: subprocess stdin is unavailable", file=sys.stderr)
+            return 1
+        try:
+            process.stdin.write(json.dumps(frame) + "\n")
+            process.stdin.flush()
+        except BrokenPipeError:
+            process.kill()
+            print(f"FAIL {command_id}: subprocess closed stdin before {frame.get('method')}", file=sys.stderr)
+            return 1
+
+        response = _read_jsonrpc_response(process, remaining)
+        if response is None:
+            process.kill()
+            print(f"FAIL {command_id}: timed out waiting for {frame.get('method')} response", file=sys.stderr)
+            return 124
+        if response.get("error"):
+            process.kill()
+            print(
+                f"FAIL {command_id}: {frame.get('method')} returned error: "
+                + json.dumps(response["error"], sort_keys=True),
+                file=sys.stderr,
+            )
+            return 1
+
+    if process.stdin is not None:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    return 0
+
+
+def run_manifest_dict(manifest: dict[str, Any]) -> int:
+    """Run safe-by-default commands from a certification manifest dictionary."""
     if manifest["requires_live_agent"]:
         missing = [
             name for name in manifest["required_environment"]
@@ -303,6 +523,11 @@ def run_manifest(profile: str) -> int:
                 continue
             return handled
         print(f"==> {command['id']} ({cwd})")
+        if command.get("stdin_jsonl"):
+            result_code = _run_stdio_jsonrpc_sequence(command, cwd)
+            if result_code != 0:
+                return int(result_code)
+            continue
         try:
             result = subprocess.run(  # nosec B603
                 command["argv"],
@@ -318,6 +543,28 @@ def run_manifest(profile: str) -> int:
         if result.returncode != 0:
             return int(result.returncode)
     return 0
+
+
+def run_manifest(profile: str) -> int:
+    """Run safe-by-default commands for a certification profile."""
+    return run_manifest_dict(build_manifest(profile))
+
+
+def _build_registry_agent_manifest(agent_profile: str) -> dict[str, Any]:
+    """Build a manifest for an agent registry entry."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import (
+        classify_agent_entrypoint,
+        get_agent_registry,
+    )
+
+    registry = get_agent_registry()
+    entry = registry.get_entry(agent_profile)
+    if entry is None:
+        raise ValueError(f"Unknown ACP agent profile: {agent_profile}")
+    classification = classify_agent_entrypoint(entry)
+    return build_agent_profile_manifest(
+        classification.as_dict() | {"type": entry.type, "name": entry.name}
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -339,7 +586,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run the manifest commands instead of printing them.",
     )
+    parser.add_argument(
+        "--agent-profile",
+        help="Render or run a registry-backed agent profile manifest.",
+    )
     args = parser.parse_args(argv)
+
+    if args.agent_profile:
+        manifest = _build_registry_agent_manifest(args.agent_profile)
+        if args.run:
+            return run_manifest_dict(manifest)
+        print(render_manifest_dict(manifest, output_format=args.format))
+        return 0
 
     if args.run:
         return run_manifest(args.profile)

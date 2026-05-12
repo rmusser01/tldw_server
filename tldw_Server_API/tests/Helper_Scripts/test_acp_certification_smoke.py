@@ -172,3 +172,143 @@ def test_run_manifest_skips_optional_missing_executable(
 
     assert rc == 0
     assert "SKIP optional_missing_browser" in captured.out
+
+
+def test_profile_manifest_renders_native_acp_entrypoint(monkeypatch) -> None:
+    module = _load_module()
+
+    manifest = module.build_agent_profile_manifest(
+        {
+            "type": "opencode",
+            "name": "OpenCode",
+            "entrypoint_strategy": "native_acp",
+            "acp_command": "opencode",
+            "acp_args": ["acp"],
+            "probe_state": "ready_to_probe",
+            "primary_blocker": None,
+            "blockers": [],
+            "status_message": "Ready to probe native ACP entrypoint.",
+            "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+        }
+    )
+
+    assert manifest["profile"] == "opencode"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "native_acp"
+    initialize = next(command for command in manifest["commands"] if command["id"] == "acp_initialize_probe")
+    assert initialize["argv"] == ["opencode", "acp"]
+    assert initialize["safe_to_run_by_default"] is False
+    assert [frame["method"] for frame in initialize["stdin_jsonl"]] == [
+        "initialize",
+        "session/new",
+        "session/prompt",
+    ]
+
+
+def test_profile_manifest_refuses_documented_candidate() -> None:
+    module = _load_module()
+
+    manifest = module.build_agent_profile_manifest(
+        {
+            "type": "codex",
+            "name": "Codex",
+            "entrypoint_strategy": "documented_candidate",
+            "acp_command": "",
+            "acp_args": [],
+            "probe_state": "documented_only",
+            "primary_blocker": "adapter_required",
+            "blockers": ["adapter_required"],
+            "status_message": "Codex requires an ACP adapter.",
+            "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+        }
+    )
+
+    assert manifest["requires_live_agent"] is True
+    assert manifest["commands"] == []
+    assert "adapter_required" in manifest["blockers"]
+
+
+def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
+    module = _load_module()
+    sequences = []
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "opencode")
+    monkeypatch.setattr(module, "_missing_executable_reason", lambda *_args: None)
+    monkeypatch.setattr(
+        module,
+        "_run_stdio_jsonrpc_sequence",
+        lambda command, cwd: sequences.append((command, cwd)) or 0,
+    )
+
+    rc = module.run_manifest_dict({
+        "profile": "opencode",
+        "requires_live_agent": True,
+        "required_environment": ["TLDW_E2E_SERVER_URL", "TLDW_E2E_API_KEY", "ACP_AGENT_PROFILE"],
+        "commands": [{
+            "id": "acp_initialize_probe",
+            "cwd": ".",
+            "argv": ["opencode", "acp"],
+            "safe_to_run_by_default": False,
+            "stdin_jsonl": [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+                {"jsonrpc": "2.0", "id": 3, "method": "session/prompt", "params": {"prompt": "Reply ok."}},
+            ],
+            "timeout_seconds": 10,
+        }],
+    })
+
+    assert rc == 0
+    assert sequences
+    command, _cwd = sequences[0]
+    assert [frame["method"] for frame in command["stdin_jsonl"]] == [
+        "initialize",
+        "session/new",
+        "session/prompt",
+    ]
+    assert command["timeout_seconds"] == 10
+
+
+def test_stdio_sequence_runner_stops_after_failed_initialize(monkeypatch) -> None:
+    module = _load_module()
+    written = []
+
+    class _Stdin:
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            return None
+
+    class _Stdout:
+        def readline(self):
+            return '{"jsonrpc":"2.0","id":1,"error":{"message":"init failed"}}\n'
+
+    class _Process:
+        stdin = _Stdin()
+        stdout = _Stdout()
+
+        def wait(self, timeout=None):
+            return 1
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: _Process())
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+            {"jsonrpc": "2.0", "id": 3, "method": "session/prompt", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert len(written) == 1
+    assert '"method": "initialize"' in written[0]
