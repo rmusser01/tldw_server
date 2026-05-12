@@ -17,9 +17,11 @@ const modeFilters: Array<{ key: VNPlayModeFilter; label: string }> = [
   { key: 'all', label: 'All' },
   { key: 'freeform', label: 'Freeform' },
   { key: 'story', label: 'Story' },
+  { key: 'scripted_story', label: 'Scripted Story' },
 ];
 
 function modeLabel(mode: VNPlayMode): string {
+  if (mode === 'scripted_story') return 'Scripted Story';
   return mode === 'story' ? 'Story' : 'Freeform';
 }
 

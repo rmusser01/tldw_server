@@ -72,6 +72,30 @@ describe('vnPlay api client', () => {
     });
   });
 
+  it('creates a scripted-story VN play session with script identifiers and policy acknowledgements', async () => {
+    await createVNPlaySession({
+      mode: 'scripted_story',
+      title: 'Published route',
+      primary_character_id: 7,
+      vn_asset_pack_id: 12,
+      content_rating: 'teen',
+      script_id: 44,
+      script_version_id: 5,
+      acknowledgements: ['script_policy_review'],
+    });
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions', {
+      mode: 'scripted_story',
+      title: 'Published route',
+      primary_character_id: 7,
+      vn_asset_pack_id: 12,
+      content_rating: 'teen',
+      script_id: 44,
+      script_version_id: 5,
+      acknowledgements: ['script_policy_review'],
+    });
+  });
+
   it('submits a VN play turn with idempotency key and scene version', async () => {
     mocks.apiClient.post.mockResolvedValueOnce({
       events: [],
@@ -158,7 +182,7 @@ describe('vnPlay api client', () => {
     });
 
     await listVNPlaySetupOptions({
-      mode: 'story',
+      mode: 'scripted_story',
       selected_character_id: 7,
       content_rating: 'mature',
       character_query: 'mira',
@@ -167,7 +191,7 @@ describe('vnPlay api client', () => {
 
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/setup-options', {
       params: {
-        mode: 'story',
+        mode: 'scripted_story',
         selected_character_id: 7,
         content_rating: 'mature',
         character_query: 'mira',

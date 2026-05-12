@@ -10,6 +10,7 @@ import type {
   VNPlaySession,
   VNPlaySetupAssetPackOption,
   VNPlaySetupOptionsResponse,
+  VNPlaySetupScriptVersionOption,
 } from '@web/types/vn-play';
 
 const mocks = vi.hoisted(() => ({
@@ -135,6 +136,7 @@ const defaultSetupOptions: VNPlaySetupOptionsResponse = {
       recommended: true,
     },
   ],
+  script_versions: [],
   defaults: {
     mode: 'freeform',
     character_id: 7,
@@ -192,16 +194,55 @@ function setupPack(overrides: Partial<VNPlaySetupAssetPackOption> = {}): VNPlayS
   };
 }
 
+function setupScriptVersion(
+  overrides: Partial<VNPlaySetupScriptVersionOption> = {}
+): VNPlaySetupScriptVersionOption {
+  return {
+    id: 5,
+    script_id: 44,
+    title: 'Moonlit Archive Route',
+    version_number: 2,
+    label: 'published',
+    asset_pack_id: 12,
+    manifest_snapshot_id: 101,
+    policy_snapshot_id: 102,
+    generation_profile_snapshot_id: 103,
+    policy_profile_id: 'local-safe',
+    generation_profile_id: 'balanced',
+    generation_profile_key: 'default',
+    generation_profile_snapshot_immutable: true,
+    provider_class: 'hosted',
+    max_automatic_generation_batch_count: 2,
+    moderation_required: false,
+    estimated_cost_class: 'low',
+    supported_output_schemas: ['choice_set'],
+    dynamic_choice_support: true,
+    scene_update_support: true,
+    confirmation_required: false,
+    content_rating: 'teen',
+    ready: true,
+    warning_summary: {
+      highest_severity: 'info',
+      requires_acknowledgement: false,
+      warnings: [],
+    },
+    recommended: true,
+    ...overrides,
+  };
+}
+
 function setupOptions(
   overrides: Partial<VNPlaySetupOptionsResponse> = {}
 ): VNPlaySetupOptionsResponse {
   const characters = overrides.characters ?? defaultSetupOptions.characters;
   const assetPacks = overrides.asset_packs ?? defaultSetupOptions.asset_packs;
+  const scriptVersions = overrides.script_versions ?? defaultSetupOptions.script_versions;
   return {
     ...defaultSetupOptions,
     ...overrides,
     characters,
     asset_packs: assetPacks,
+    script_versions: scriptVersions,
     defaults: {
       ...defaultSetupOptions.defaults,
       ...overrides.defaults,
@@ -444,6 +485,202 @@ describe('VNPlayWorkspace', () => {
       });
     });
     expect(await screen.findByText('Moonlit Archive')).toBeInTheDocument();
+  });
+
+  it('creates a scripted-story session from a published script version', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNPlaySetupOptions.mockResolvedValue(
+      setupOptions({
+        script_versions: [setupScriptVersion()],
+      })
+    );
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
+
+    expect(await screen.findByLabelText('Published script version')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Moonlit Archive Route v2.*published/i })).toBeInTheDocument();
+    expect(mocks.listVNPlaySetupOptions).toHaveBeenCalledWith({
+      content_rating: 'general',
+      mode: 'scripted_story',
+    });
+
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Published Route Session');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlaySession).toHaveBeenCalledWith({
+        mode: 'scripted_story',
+        title: 'Published Route Session',
+        primary_character_id: 7,
+        vn_asset_pack_id: 12,
+        linked_chat_id: null,
+        content_rating: 'teen',
+        script_id: 44,
+        script_version_id: 5,
+      });
+    });
+  });
+
+  it('submits scripted-story acknowledgement codes as top-level fields', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNPlaySetupOptions.mockResolvedValue(
+      setupOptions({
+        script_versions: [
+          setupScriptVersion({
+            warning_summary: {
+              highest_severity: 'high_risk',
+              requires_acknowledgement: true,
+              warnings: [
+                {
+                  code: 'script_policy_review',
+                  severity: 'high_risk',
+                  message: 'Review policy warnings before launch.',
+                  requires_acknowledgement: true,
+                },
+                {
+                  code: 'script_minor_note',
+                  severity: 'info',
+                  message: 'Informational script note.',
+                  requires_acknowledgement: false,
+                },
+              ],
+            },
+          }),
+        ],
+      })
+    );
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
+
+    expect(await screen.findByText(/Review policy warnings before launch/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+    await user.click(screen.getByRole('checkbox', { name: /I understand and want to proceed/i }));
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Acknowledged Script');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlaySession).toHaveBeenCalledWith({
+        mode: 'scripted_story',
+        title: 'Acknowledged Script',
+        primary_character_id: 7,
+        vn_asset_pack_id: 12,
+        linked_chat_id: null,
+        content_rating: 'teen',
+        script_id: 44,
+        script_version_id: 5,
+        acknowledgements: ['script_policy_review'],
+      });
+    });
+    expect(mocks.createVNPlaySession).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({
+          setup_acknowledgements: expect.anything(),
+        }),
+      })
+    );
+  });
+
+  it('falls back to all script warning codes when scripted-story acknowledgement is required at summary level', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNPlaySetupOptions.mockResolvedValue(
+      setupOptions({
+        script_versions: [
+          setupScriptVersion({
+            warning_summary: {
+              highest_severity: 'high_risk',
+              requires_acknowledgement: true,
+              warnings: [
+                {
+                  code: 'script_summary_review',
+                  severity: 'high_risk',
+                  message: 'Review script summary warnings before launch.',
+                  requires_acknowledgement: false,
+                },
+              ],
+            },
+          }),
+        ],
+      })
+    );
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
+
+    expect(await screen.findByText(/Review script summary warnings before launch/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /I understand and want to proceed/i }));
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Summary Acknowledged Script');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlaySession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'scripted_story',
+          acknowledgements: ['script_summary_review'],
+        })
+      );
+    });
+  });
+
+  it('shows VN scripts guidance when no published script versions exist', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNPlaySetupOptions.mockResolvedValue(
+      setupOptions({
+        script_versions: [],
+        empty_states: [
+          {
+            code: 'no_script_versions',
+            scope: 'global',
+            message: 'No published VN script versions were found.',
+          },
+        ],
+      })
+    );
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
+
+    expect(await screen.findByText(/No published VN script versions were found/i)).toBeInTheDocument();
+    const scriptLinks = screen.getAllByRole('link', { name: /Open VN scripts/i });
+    expect(scriptLinks).toHaveLength(1);
+    expect(scriptLinks[0]).toHaveAttribute('href', '/vn-scripts');
+    expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
+  });
+
+  it('shows scripted-story sessions as their own mode filter and label', async () => {
+    mockVNPlayApi({
+      sessions: [
+        {
+          id: 1,
+          mode: 'scripted_story',
+          title: 'Published Route',
+          primary_character_id: 7,
+          vn_asset_pack_id: 12,
+          script_id: 44,
+          script_version_id: 5,
+          scene_version: 0,
+          scene_state: { scene_version: 0 },
+        },
+      ],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByRole('tab', { name: 'Scripted Story' })).toBeInTheDocument();
+    expect(screen.getByText('Published Route')).toBeInTheDocument();
+    expect(screen.getAllByText('Scripted Story').length).toBeGreaterThan(0);
   });
 
   it('uses backend setup options instead of client-side setup fan-out', async () => {
@@ -732,7 +969,7 @@ describe('VNPlayWorkspace', () => {
   it('keeps manual ID entry available when setup selectors fail to load', async () => {
     const user = userEvent.setup();
     mockVNPlayApi({ sessions: [] });
-    mocks.listVNPlaySetupOptions.mockRejectedValueOnce(new Error('setup options offline'));
+    mocks.listVNPlaySetupOptions.mockRejectedValue(new Error('setup options offline'));
 
     render(<VNPlayWorkspace />);
 
@@ -755,6 +992,47 @@ describe('VNPlayWorkspace', () => {
         vn_asset_pack_id: 21,
         linked_chat_id: null,
         content_rating: 'general',
+      });
+    });
+  });
+
+  it('requires script identifiers when scripted-story setup falls back to manual entry', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNPlaySetupOptions.mockRejectedValue(new Error('setup options offline'));
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
+    expect(await screen.findByText(/Could not load setup options/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Script ID')).toBeInTheDocument();
+    expect(screen.getByLabelText('Script version ID')).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Manual Scripted Session');
+    await user.clear(screen.getByLabelText('Primary character ID'));
+    await user.type(screen.getByLabelText('Primary character ID'), '17');
+    await user.clear(screen.getByLabelText('VN asset pack ID'));
+    await user.type(screen.getByLabelText('VN asset pack ID'), '21');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    expect(await screen.findByText(/Enter script ID and script version ID/i)).toBeInTheDocument();
+    expect(mocks.createVNPlaySession).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('Script ID'), '44');
+    await user.type(screen.getByLabelText('Script version ID'), '5');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlaySession).toHaveBeenCalledWith({
+        mode: 'scripted_story',
+        title: 'Manual Scripted Session',
+        primary_character_id: 17,
+        vn_asset_pack_id: 21,
+        linked_chat_id: null,
+        content_rating: 'general',
+        script_id: 44,
+        script_version_id: 5,
       });
     });
   });
@@ -926,6 +1204,41 @@ describe('VNPlayWorkspace', () => {
     expect(screen.getAllByText('Open the archive door').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /resume branch: step inside/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /return to choice: step inside/i })).toBeInTheDocument();
+    expect(mocks.getVNPlayBranchNavigation).toHaveBeenCalledWith(1);
+  });
+
+  it('renders player-facing branch navigation for scripted-story sessions', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'scripted_story',
+      title: 'Scripted Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      script_id: 44,
+      script_version_id: 5,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      ...emptyBranchNavigation,
+      mode: 'scripted_story',
+      scene_version: 6,
+      active_path: [
+        {
+          branch_id: 12,
+          branch_label: 'Scripted step',
+          choice_id: 'scripted-door',
+          choice_text: 'Follow the scripted branch',
+          depth: 1,
+        },
+      ],
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Branch timeline')).toBeInTheDocument();
+    expect(screen.getAllByText('Follow the scripted branch').length).toBeGreaterThan(0);
     expect(mocks.getVNPlayBranchNavigation).toHaveBeenCalledWith(1);
   });
 

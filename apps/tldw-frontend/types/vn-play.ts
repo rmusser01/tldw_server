@@ -1,4 +1,4 @@
-export type VNPlayMode = 'freeform' | 'story';
+export type VNPlayMode = 'freeform' | 'story' | 'scripted_story';
 export type VNPlaySessionStatus = 'active' | 'paused' | 'completed' | 'archived' | 'failed';
 export type VNPlayTrustLevel = 'local' | 'trusted_restore' | 'untrusted_import' | 'mixed';
 export type VNPlayLinkedChatMode = 'read_only_context';
@@ -75,6 +75,12 @@ export interface VNPlaySession {
   asset_manifest_version?: string | null;
   source_world_book_ids?: number[];
   content_rating?: string;
+  script_id?: number | null;
+  script_version_id?: number | null;
+  script_manifest_snapshot_id?: number | null;
+  script_policy_snapshot_id?: number | null;
+  script_generation_profile_snapshot_id?: number | null;
+  script_position?: Record<string, unknown> | null;
   trust_level?: VNPlayTrustLevel;
   linked_chat_mode?: VNPlayLinkedChatMode;
   seed?: string | null;
@@ -98,6 +104,9 @@ export interface VNPlaySessionCreate {
   asset_manifest_version?: string | null;
   source_world_book_ids?: number[];
   content_rating?: string;
+  script_id?: number;
+  script_version_id?: number;
+  acknowledgements?: string[];
   trust_level?: VNPlayTrustLevel;
   linked_chat_mode?: VNPlayLinkedChatMode;
   seed?: string | null;
@@ -149,10 +158,42 @@ export interface VNPlaySetupAssetPackOption {
   recommended: boolean;
 }
 
+export interface VNPlaySetupScriptVersionOption {
+  id: number;
+  script_id: number;
+  title: string;
+  version_number: number;
+  label?: string | null;
+  asset_pack_id: number;
+  manifest_snapshot_id: number;
+  policy_snapshot_id: number;
+  generation_profile_snapshot_id?: number | null;
+  policy_profile_id: string;
+  generation_profile_id: string;
+  generation_profile_key: string;
+  generation_profile_snapshot_immutable: boolean;
+  provider_class?: string | null;
+  max_automatic_generation_batch_count?: number | null;
+  moderation_required?: boolean | null;
+  estimated_cost_class?: string | null;
+  supported_output_schemas: string[];
+  dynamic_choice_support: boolean;
+  scene_update_support: boolean;
+  confirmation_required: boolean;
+  content_rating: string;
+  ready: boolean;
+  warning_summary: VNPlaySetupWarningSummary;
+  recommended: boolean;
+}
+
 export interface VNPlaySetupDefaults {
   mode?: VNPlayMode | null;
   character_id?: number | null;
   asset_pack_id?: number | null;
+  script_id?: number | null;
+  script_version_id?: number | null;
+  policy_profile_id?: string | null;
+  generation_profile_id?: string | null;
   content_rating?: string | null;
 }
 
@@ -173,6 +214,7 @@ export interface VNPlaySetupOptionsResponse {
   characters: VNPlaySetupCharacterOption[];
   selected_character?: VNPlaySetupCharacterOption | null;
   asset_packs: VNPlaySetupAssetPackOption[];
+  script_versions: VNPlaySetupScriptVersionOption[];
   defaults: VNPlaySetupDefaults;
   pagination: {
     characters: VNPlaySetupPagination;

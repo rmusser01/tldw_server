@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, MessageSquarePlus } from 'lucide-react';
+import { BookOpen, MessageSquarePlus, ScrollText } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
@@ -54,7 +54,12 @@ import type {
 const GENERATION_HISTORY_PAGE_SIZE = 25;
 
 function sessionModeLabel(mode: VNPlayMode): string {
+  if (mode === 'scripted_story') return 'Scripted Story';
   return mode === 'story' ? 'Story/CYOA' : 'Freeform';
+}
+
+function hasBranchNavigation(mode?: VNPlayMode | null): boolean {
+  return mode === 'story' || mode === 'scripted_story';
 }
 
 function isVNPlayChoice(choice: VNPlayChoice | Record<string, unknown>): choice is VNPlayChoice {
@@ -181,7 +186,7 @@ export default function VNPlayWorkspace({
     sessionId: number,
     mode?: VNPlayMode | null
   ): Promise<{ error: string | null; navigation: VNPlayBranchNavigationResponse | null }> => {
-    if (mode !== 'story') {
+    if (!hasBranchNavigation(mode)) {
       return { error: null, navigation: null };
     }
 
@@ -200,7 +205,7 @@ export default function VNPlayWorkspace({
     sessionId: number,
     mode?: VNPlayMode | null
   ): Promise<VNPlayBranchNavigationResponse | null> => {
-    setIsLoadingBranchNavigation(mode === 'story');
+    setIsLoadingBranchNavigation(hasBranchNavigation(mode));
     try {
       const result = await fetchBranchNavigation(sessionId, mode);
       setBranchTimelineError(result.error);
@@ -268,7 +273,7 @@ export default function VNPlayWorkspace({
     let cancelled = false;
     async function loadSessionCollections() {
       setIsLoadingGenerations(true);
-      setIsLoadingBranchNavigation(selectedSession?.mode === 'story');
+      setIsLoadingBranchNavigation(hasBranchNavigation(selectedSession?.mode));
       try {
         const [
           nextEvents,
@@ -659,6 +664,21 @@ export default function VNPlayWorkspace({
                 <BookOpen aria-hidden className="h-4 w-4" />
                 New Story
               </Button>
+              <Button
+                className="gap-2"
+                onClick={() => handleNewSession('scripted_story')}
+                type="button"
+                variant="secondary"
+              >
+                <ScrollText aria-hidden className="h-4 w-4" />
+                New Scripted Story
+              </Button>
+              <Link
+                className="inline-flex items-center rounded-md border border-border px-3 py-2 text-sm font-medium text-text hover:bg-surface"
+                href="/vn-scripts"
+              >
+                VN scripts
+              </Link>
             </div>
           </div>
         </header>
@@ -724,7 +744,7 @@ export default function VNPlayWorkspace({
                       onError={handleTurnError}
                       onTurn={(response) => void handleTurn(response)}
                     />
-                    {selectedSession.mode === 'story' && (
+                    {(selectedSession.mode === 'story' || selectedSession.mode === 'scripted_story') && (
                       <ChoicePanel
                         choices={choices}
                         sceneVersion={sceneVersion}
@@ -739,7 +759,7 @@ export default function VNPlayWorkspace({
                 )}
               </div>
 
-              {selectedSession?.mode === 'story' && (
+              {(selectedSession?.mode === 'story' || selectedSession?.mode === 'scripted_story') && (
                 <>
                   {branchTimelineError && (
                     <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
