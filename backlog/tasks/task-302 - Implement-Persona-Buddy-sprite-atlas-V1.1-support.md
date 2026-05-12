@@ -30,7 +30,7 @@ Implement the approved Persona/Buddy sprite atlas V1.1 hardening slice under spr
 <!-- AC:BEGIN -->
 - [x] #1 Backend atlas manifest validation characterization covers known dimensions, missing dimensions, malformed regions, and required-state activation.
 - [x] #2 WebUI renderer and diagnostics characterization covers atlas preview_frame, coarse registry renderability, and unsupported_region fallback.
-- [ ] #3 Persona Visual Packs documentation explains sprite atlas packs under sprite_frames and rejects sprite_sheet as a renderer.
+- [x] #3 Persona Visual Packs documentation explains sprite atlas packs under sprite_frames and rejects sprite_sheet as a renderer.
 - [ ] #4 Focused backend/frontend/security verification is recorded.
 <!-- AC:END -->
 
@@ -52,6 +52,8 @@ Task 1 backend atlas manifest characterization
 Task 1 backend characterization complete. Added atlas activation coverage for frames[].region without known asset dimensions and malformed region validation coverage in tldw_Server_API/tests/Persona/test_persona_visuals_core.py. Focused pytest passed: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q (23 passed, 5 warnings). visuals.py was not changed because existing validation already satisfies the characterization. Bandit hygiene: raw test-file run reports expected pytest assert B101 findings; B101-skipped test-scope run exited 0 and wrote /tmp/bandit_task302_task1_skip_b101.json.
 
 Task 2 WebUI characterization complete. Added atlas preview_frame coverage for shared sprite sheet assets, registry renderability coverage for atlas-backed sprite_frames packs including malformed regions, and diagnostics coverage for unsupported_region renderer errors. Focused Vitest passed from apps/packages/ui: bunx vitest run src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualRenderers.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts (3 files passed, 27 tests passed).
+
+Task 3 documentation update complete. Added the Sprite Atlas Packs section to Docs/Code_Documentation/Persona_Visual_Packs.md documenting atlas support under renderer_type sprite_frames, sprite_sheet as an asset role only, continued rejection of renderer_type sprite_sheet, frames[].region atlas crops, and preview_frame vs preview_asset_id guidance. Verification: git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
