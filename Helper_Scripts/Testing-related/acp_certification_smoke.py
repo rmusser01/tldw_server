@@ -183,6 +183,8 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
 
     blockers = list(entrypoint.get("blockers") or [])
     primary_blocker = entrypoint.get("primary_blocker")
+    if entrypoint.get("probe_state") == "custom_template" and not primary_blocker:
+        primary_blocker = "custom_template"
     if primary_blocker and primary_blocker not in blockers:
         blockers.insert(0, str(primary_blocker))
 

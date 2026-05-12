@@ -375,6 +375,9 @@ def test_classifier_custom_template_is_never_probe_ready() -> None:
 
     assert result.probe_state == "custom_template"
     assert result.acp_command == ""
+    assert result.primary_blocker == "custom_template"
+    assert result.blockers == ("custom_template",)
+    assert "command, args, env, workspace policy, and evidence bundle" in result.status_message
 
 
 def test_classifier_rejects_shell_builtin_entrypoint() -> None:

@@ -268,18 +268,22 @@ def test_profile_manifest_refuses_custom_template() -> None:
             "probe_state": "custom_template",
             "primary_blocker": None,
             "blockers": [],
-            "status_message": "Custom agent templates require operator-supplied ACP entrypoint metadata.",
+            "status_message": (
+                "Create a named custom ACP profile with command, args, env, "
+                "workspace policy, and evidence bundle."
+            ),
             "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
         }
     )
 
     assert manifest["profile"] == "custom"
     assert manifest["commands"] == []
-    assert manifest["blockers"] == []
+    assert manifest["blockers"] == ["custom_template"]
+    assert manifest["entrypoint"]["primary_blocker"] == "custom_template"
     assert manifest["entrypoint"]["entrypoint_strategy"] == "custom_template"
     assert manifest["entrypoint"]["probe_state"] == "custom_template"
     assert manifest["entrypoint"]["acp_command"] == ""
-    assert "operator-supplied ACP entrypoint metadata" in manifest["notes"][0]
+    assert "command, args, env, workspace policy, and evidence bundle" in manifest["notes"][0]
 
 
 def test_render_manifest_dict_prints_stdin_jsonl_and_blockers() -> None:

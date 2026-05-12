@@ -4,7 +4,7 @@ title: Implement ACP downstream entrypoint strategy stages 1-3
 status: In Progress
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 06:00'
+updated_date: '2026-05-12 06:19'
 labels:
   - ACP
   - implementation
@@ -61,6 +61,8 @@ Task 3 code-quality follow-up plan: add red tests for partial-line timeout clean
 Task 3 code-quality follow-up red evidence: helper pytest failed 3 tests for partial-line timeout and missing cleanup on JSON-RPC error and broken pipe. Final green evidence: helper pytest reports 17 passed, 5 warnings in 2.87s. Bandit on acp_certification_smoke.py reports 0 findings. git diff --check is clean. Implementation now uses a daemon stdout reader thread plus queue/deadline matching, central cleanup for kill or terminate plus wait and stdio close, and sanitized bounded JSON-RPC error output that omits error.data.
 
 Task 3 final robustness follow-up red evidence: helper pytest failed 4 tests before implementation for bounded stdout queue behavior, write OSError cleanup, flush ValueError cleanup, and success cleanup ordering. Final green evidence: helper pytest reports 22 passed and 5 warnings in 38.12s. Bandit on acp_certification_smoke.py reports 0 findings. git diff --check is clean. Implementation bounds stdout line and queue size, drops notifications and wrong-id responses before enqueueing, pauses read-ahead after matching the expected id, handles OSError and ValueError write or flush failures through centralized cleanup, and closes stdin before waiting on successful probe shutdown.
+
+Task 3 custom-template blocker follow-up red evidence: requested pytest failed 2 tests after updating expectations because custom-template classification and manifests omitted explicit blocker metadata. Final green evidence: requested pytest reports 45 passed and 5 warnings. git diff --check is clean. Bandit on acp_certification_smoke.py and agent_registry.py reports 0 findings. Implementation now uses custom_template as the explicit blocker and lists the required named custom profile evidence bundle in the classifier status.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

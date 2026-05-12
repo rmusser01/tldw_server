@@ -202,7 +202,11 @@ def classify_agent_entrypoint(
     if strategy == "custom_template":
         return classification(
             "custom_template",
-            status_message="Custom agent templates require operator-supplied ACP entrypoint metadata.",
+            blocker="custom_template",
+            status_message=(
+                "Create a named custom ACP profile with command, args, env, "
+                "workspace policy, and evidence bundle."
+            ),
             command="",
             args=[],
         )
