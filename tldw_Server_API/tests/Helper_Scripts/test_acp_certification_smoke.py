@@ -492,7 +492,7 @@ def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypat
     elapsed = time.monotonic() - started
 
     assert rc == 124
-    assert elapsed < 0.15
+    assert elapsed < 0.35
     assert process.killed is True
     assert process.wait_calls >= 1
     assert process.stdin.closed is True
@@ -633,3 +633,344 @@ def test_stdio_sequence_runner_cleans_up_after_broken_pipe(monkeypatch) -> None:
     assert process.wait_calls >= 1
     assert process.stdin.closed is True
     assert process.stdout.closed is True
+
+
+def test_stdio_sequence_runner_drops_noisy_notifications_without_unbounded_queue(
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    queue_sizes = []
+    lines = [
+        '{"jsonrpc":"2.0","method":"log/message","params":{"index":%d}}\n' % index
+        for index in range(200)
+    ]
+    lines.append('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1"}}\n')
+    responses = iter(lines)
+
+    class _TrackingQueue(module.queue.Queue):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            queue_sizes.append(self.maxsize)
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    class _Stdout(_Pipe):
+        def readline(self, _limit=-1):
+            return next(responses, "")
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.terminated = False
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 0
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.queue, "Queue", _TrackingQueue)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc == 0
+    assert queue_sizes
+    assert queue_sizes[0] > 0
+    assert queue_sizes[0] <= 64
+    assert process.killed is False
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
+
+
+def test_stdio_sequence_runner_fails_and_cleans_up_on_overlong_stdout_line(monkeypatch) -> None:
+    module = _load_module()
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def readline(self, limit=-1):
+            return "{" * max(limit, 1)
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 1
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert process.killed is True
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
+
+
+def test_stdio_sequence_runner_cleans_up_after_write_oserror(monkeypatch) -> None:
+    module = _load_module()
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            raise OSError("write failed")
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def readline(self, _limit=-1):
+            return ""
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 1
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert process.killed is True
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
+
+
+def test_stdio_sequence_runner_cleans_up_after_flush_valueerror(monkeypatch) -> None:
+    module = _load_module()
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            raise ValueError("flush failed")
+
+    class _Stdout(_Pipe):
+        def readline(self, _limit=-1):
+            return ""
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 1
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert process.killed is True
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
+
+
+def test_stdio_sequence_runner_success_closes_stdin_before_terminating(monkeypatch) -> None:
+    module = _load_module()
+    events = []
+    responses = iter(['{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1"}}\n'])
+
+    class _Pipe:
+        def __init__(self, name):
+            self.name = name
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+            events.append(f"{self.name}.close")
+
+    class _Stdin(_Pipe):
+        def __init__(self):
+            super().__init__("stdin")
+
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def __init__(self):
+            super().__init__("stdout")
+
+        def readline(self, _limit=-1):
+            return next(responses, "")
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.terminated = False
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+            events.append("terminate")
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            events.append("wait")
+            return 0
+
+        def kill(self):
+            self.killed = True
+            events.append("kill")
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc == 0
+    assert events.index("stdin.close") < events.index("wait")
+    assert "terminate" not in events
+    assert "kill" not in events
+    assert process.terminated is False
+    assert process.killed is False

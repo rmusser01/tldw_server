@@ -27,6 +27,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 _STDOUT_EOF = object()
 _ERROR_MESSAGE_LIMIT = 240
+_STDOUT_LINE_LIMIT = 64 * 1024
+_STDOUT_QUEUE_MAXSIZE = 32
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -414,6 +416,17 @@ def _close_pipe(pipe: Any) -> None:
         pass
 
 
+def _wait_for_process(process: subprocess.Popen[str], timeout: float) -> bool:
+    """Return True when a process exits before timeout."""
+    try:
+        process.wait(timeout=timeout)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError:
+        return True
+
+
 def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) -> None:
     """Close stdio, stop the subprocess, and wait so failure paths do not leak."""
     is_running = True
@@ -422,6 +435,12 @@ def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) 
             is_running = process.poll() is None
         except OSError:
             is_running = True
+
+    if not force_kill:
+        _close_pipe(getattr(process, "stdin", None))
+        if _wait_for_process(process, 1):
+            _close_pipe(getattr(process, "stdout", None))
+            return
 
     if is_running:
         try:
@@ -452,30 +471,74 @@ def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) 
         _close_pipe(getattr(process, "stdout", None))
 
 
+def _enqueue_stdout_payload(responses: queue.Queue[object], payload: object) -> None:
+    """Bound stdout queue memory while preserving the first queued response."""
+    try:
+        responses.put_nowait(payload)
+    except queue.Full:
+        return
+
+
+def _drain_stdout_payloads(responses: queue.Queue[object]) -> None:
+    """Discard stale queued responses before advancing to the next request id."""
+    while True:
+        try:
+            responses.get_nowait()
+        except queue.Empty:
+            return
+
+
 def _stdout_reader(
     stdout: Any,
     responses: queue.Queue[object],
     stop_event: threading.Event,
+    expected_response: dict[str, Any],
+    expected_response_condition: threading.Condition,
 ) -> None:
     """Read complete stdout lines in a daemon thread."""
     while not stop_event.is_set():
+        with expected_response_condition:
+            while expected_response.get("matched") and not stop_event.is_set():
+                expected_response_condition.wait(timeout=0.01)
         try:
-            line = stdout.readline()
+            try:
+                line = stdout.readline(_STDOUT_LINE_LIMIT + 1)
+            except TypeError:
+                line = stdout.readline()
         except (OSError, ValueError):
-            responses.put(_STDOUT_EOF)
+            _enqueue_stdout_payload(responses, _STDOUT_EOF)
             return
         if not line:
-            responses.put(_STDOUT_EOF)
+            _enqueue_stdout_payload(responses, _STDOUT_EOF)
+            return
+        if len(line) > _STDOUT_LINE_LIMIT:
+            _enqueue_stdout_payload(
+                responses,
+                {"_reader_error": {"message": "JSON-RPC stdout line exceeds maximum length"}},
+            )
             return
         try:
             payload = json.loads(line)
         except json.JSONDecodeError:
-            responses.put({"_reader_error": {"message": "invalid JSON-RPC response"}})
+            _enqueue_stdout_payload(
+                responses,
+                {"_reader_error": {"message": "invalid JSON-RPC response"}},
+            )
             continue
         if not isinstance(payload, dict):
-            responses.put({"_reader_error": {"message": "JSON-RPC response is not an object"}})
+            _enqueue_stdout_payload(
+                responses,
+                {"_reader_error": {"message": "JSON-RPC response is not an object"}},
+            )
             continue
-        responses.put(payload)
+        with expected_response_condition:
+            expected_id = expected_response.get("id")
+        if payload.get("id") != expected_id:
+            continue
+        _enqueue_stdout_payload(responses, payload)
+        with expected_response_condition:
+            expected_response["matched"] = True
+            expected_response_condition.notify_all()
 
 
 def _finish_stdio_process(
@@ -554,20 +617,32 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
         handled = _handle_missing_prerequisite(command, str(exc))
         return 127 if handled is None else handled
 
-    responses: queue.Queue[object] = queue.Queue()
+    frames = list(command.get("stdin_jsonl", []))
+    responses: queue.Queue[object] = queue.Queue(maxsize=_STDOUT_QUEUE_MAXSIZE)
     if process.stdout is None:
         _finish_stdio_process(process, force_kill=True)
         print(f"FAIL {command_id}: subprocess stdout is unavailable", file=sys.stderr)
         return 1
     reader_stop = threading.Event()
+    expected_response: dict[str, Any] = {
+        "id": frames[0].get("id") if frames else None,
+        "matched": False,
+    }
+    expected_response_condition = threading.Condition()
     reader_thread = threading.Thread(
         target=_stdout_reader,
-        args=(process.stdout, responses, reader_stop),
+        args=(
+            process.stdout,
+            responses,
+            reader_stop,
+            expected_response,
+            expected_response_condition,
+        ),
         daemon=True,
     )
     reader_thread.start()
 
-    for frame in command.get("stdin_jsonl", []):
+    for frame in frames:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             _finish_stdio_process(
@@ -587,10 +662,14 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             )
             print(f"FAIL {command_id}: subprocess stdin is unavailable", file=sys.stderr)
             return 1
+        with expected_response_condition:
+            expected_response["id"] = frame.get("id")
+            expected_response["matched"] = False
+            expected_response_condition.notify_all()
         try:
             process.stdin.write(json.dumps(frame) + "\n")
             process.stdin.flush()
-        except BrokenPipeError:
+        except (BrokenPipeError, OSError, ValueError):
             _finish_stdio_process(
                 process,
                 force_kill=True,
@@ -623,6 +702,7 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
                 file=sys.stderr,
             )
             return 1
+        _drain_stdout_payloads(responses)
 
     _finish_stdio_process(
         process,

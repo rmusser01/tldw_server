@@ -4,7 +4,7 @@ title: Implement ACP downstream entrypoint strategy stages 1-3
 status: In Progress
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 05:34'
+updated_date: '2026-05-12 06:00'
 labels:
   - ACP
   - implementation
@@ -59,6 +59,8 @@ Task 3 follow-up red evidence: helper pytest failed with len(written)==2 after a
 Task 3 code-quality follow-up plan: add red tests for partial-line timeout cleanup, JSON-RPC error cleanup with sanitized stderr, and broken-pipe cleanup; replace select/readline main-thread response reading with a reader-thread queue bounded by the existing deadline; add one cleanup helper that closes stdio, terminates or kills, waits, and is used on all timeout/error/broken-pipe paths; re-run focused helper tests, Bandit, and diff checks before committing.
 
 Task 3 code-quality follow-up red evidence: helper pytest failed 3 tests for partial-line timeout and missing cleanup on JSON-RPC error and broken pipe. Final green evidence: helper pytest reports 17 passed, 5 warnings in 2.87s. Bandit on acp_certification_smoke.py reports 0 findings. git diff --check is clean. Implementation now uses a daemon stdout reader thread plus queue/deadline matching, central cleanup for kill or terminate plus wait and stdio close, and sanitized bounded JSON-RPC error output that omits error.data.
+
+Task 3 final robustness follow-up red evidence: helper pytest failed 4 tests before implementation for bounded stdout queue behavior, write OSError cleanup, flush ValueError cleanup, and success cleanup ordering. Final green evidence: helper pytest reports 22 passed and 5 warnings in 38.12s. Bandit on acp_certification_smoke.py reports 0 findings. git diff --check is clean. Implementation bounds stdout line and queue size, drops notifications and wrong-id responses before enqueueing, pauses read-ahead after matching the expected id, handles OSError and ValueError write or flush failures through centralized cleanup, and closes stdin before waiting on successful probe shutdown.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
