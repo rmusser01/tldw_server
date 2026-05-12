@@ -200,6 +200,12 @@ Open the next implementation task as Slice 1: Persona Chat Trace And Error Taxon
 
 This update defines judge input/output shape, calibration expectations, privacy rules, and taxonomy mapping only. Live judge execution, provider calls, runtime gating, and Persona Chat behavior changes remain deferred until the contract fixtures are reviewed and a held-out calibration path exists.
 
+## 2026-05-12 Calibration Policy Update
+
+[Issue #1586](https://github.com/rmusser01/tldw_server/issues/1586) adds the next review-only guardrail for Slice 5. The policy helper classifies offline harness/review-command reports as `advisory` or `blocked` before maintainers treat report output as a calibration signal.
+
+The policy keeps the current synthetic fixture advisory because the sample count is below the production threshold, and it blocks malformed, missing, extra, invalid, or low-agreement reports. Its output is trace-safe: status, reason keys, `case_id`, and `source_case_id` only. It still does not add provider calls, persistence, Jobs, API/WebUI state, runtime gating, or Persona Chat response mutation.
+
 ## Verification
 
 This document is a planning/audit artifact. Runtime tests are not required for this slice because no runtime code is changed.
