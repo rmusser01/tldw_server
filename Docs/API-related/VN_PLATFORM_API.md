@@ -48,6 +48,33 @@ Example:
 
 `/api/v1/vn/vn-audio` is reserved for a future VN-scoped TTS module. Current clients must only call VN audio routes when both `enabled_modules.audio` and `features.tts_jobs` are `true`; otherwise use the existing `/api/v1/audio` APIs directly.
 
+## VN Script Starter Templates
+
+VN script starter templates are exposed under the existing scripts resource:
+
+- `GET /api/v1/vn/vn-scripts/templates`
+- `POST /api/v1/vn/vn-scripts/templates/{template_id}/scripts`
+
+The catalog endpoint returns preview-safe metadata only. Each item includes a stable `id`, `label`, `description`, `category`, `recommended_content_rating`, `required_capabilities`, `preview`, `default_title`, and `default_description`. It intentionally omits full draft JSON, raw prompts, provider/model settings, and policy or generation profile overrides so custom frontends can display the catalog without becoming a second source of truth.
+
+Built-in V1 template IDs are `linear_scene`, `authored_choices`, `generated_choice_set`, `scene_update`, and `confirm_gated_generation`.
+
+Create-from-template accepts the same script metadata as normal script creation, including `primary_asset_pack_id`, optional policy/generation profile IDs, generation profile maps, and content rating. The response contains:
+
+```json
+{
+  "script": { "id": 12, "title": "Linear Scene", "status": "draft" },
+  "draft": {
+    "script_id": 12,
+    "revision": 1,
+    "draft": { "schema_version": "vn_script_program.v1" },
+    "diagnostics": { "valid": true, "errors": [], "warnings": [] }
+  }
+}
+```
+
+After creation, the script is a normal authored script. Clients should use the standard draft, validation, diagnostics, and publish endpoints for further editing.
+
 ## Policy Profiles
 
 VN policy definitions are global server configuration stored in the AuthNZ database. This lets admins create one profile that is visible to all API clients and custom frontends. Per-resource effective policy snapshots remain in the owning user's ChaChaNotes database so script/session/asset history preserves the exact settings used at creation time.

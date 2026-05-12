@@ -28,6 +28,7 @@ class VNScriptCreate(BaseModel):
 
     @model_validator(mode="after")
     def _merge_generation_profile_ids(self) -> "VNScriptCreate":
+        """Let legacy generation_profile_ids override generation_profiles when supplied."""
         if self.generation_profile_ids is not None:
             self.generation_profiles = dict(self.generation_profile_ids)
         return self
@@ -50,6 +51,7 @@ class VNScriptPatch(BaseModel):
 
     @model_validator(mode="after")
     def _merge_generation_profile_ids(self) -> "VNScriptPatch":
+        """Map legacy generation_profile_ids onto generation_profiles for patch compatibility."""
         if self.generation_profile_ids is not None:
             self.generation_profiles = dict(self.generation_profile_ids)
         return self
@@ -81,6 +83,48 @@ class VNScriptListResponse(BaseModel):
     pagination: OffsetPaginationMeta
 
 
+class VNScriptTemplateSummary(BaseModel):
+    """Preview-safe starter template catalog entry."""
+
+    id: str
+    label: str
+    description: str
+    category: str
+    recommended_content_rating: ContentRating
+    required_capabilities: list[str] = Field(default_factory=list)
+    preview: dict[str, Any]
+    default_title: str
+    default_description: str | None = None
+
+
+class VNScriptTemplateListResponse(BaseModel):
+    """Starter template catalog response."""
+
+    items: list[VNScriptTemplateSummary]
+
+
+class VNScriptCreateFromTemplateRequest(BaseModel):
+    """Create request for a VN script starter template."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=1000)
+    primary_asset_pack_id: int = Field(..., ge=1)
+    policy_profile_id: str = Field(default="local_default", min_length=1, max_length=80)
+    generation_profile_id: str = Field(default="story_default", min_length=1, max_length=80)
+    generation_profiles: dict[str, str] = Field(default_factory=dict)
+    generation_profile_ids: dict[str, str] | None = None
+    content_rating: ContentRating = "general"
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _merge_generation_profile_ids(self) -> "VNScriptCreateFromTemplateRequest":
+        """Let legacy generation_profile_ids override generation_profiles for template creates."""
+        if self.generation_profile_ids is not None:
+            self.generation_profiles = dict(self.generation_profile_ids)
+        return self
+
+
 class VNScriptDraftResponse(BaseModel):
     """Mutable script draft response."""
 
@@ -88,6 +132,13 @@ class VNScriptDraftResponse(BaseModel):
     revision: int
     draft: dict[str, Any]
     diagnostics: dict[str, Any]
+
+
+class VNScriptCreateFromTemplateResponse(BaseModel):
+    """Create-from-template response with the stored draft."""
+
+    script: VNScriptResponse
+    draft: VNScriptDraftResponse
 
 
 class VNScriptDraftPutRequest(BaseModel):

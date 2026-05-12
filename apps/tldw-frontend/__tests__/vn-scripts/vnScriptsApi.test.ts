@@ -15,6 +15,7 @@ vi.mock('@web/lib/api', () => ({
 }));
 
 import {
+  createVNScriptFromTemplate,
   createVNScript,
   deleteVNScript,
   evaluateVNScriptVersionPolicy,
@@ -23,6 +24,7 @@ import {
   getVNScriptDraft,
   getVNScriptManifestSnapshot,
   getVNScriptVersion,
+  listVNScriptTemplates,
   listVNScripts,
   listVNScriptVersions,
   patchVNScript,
@@ -143,5 +145,75 @@ describe('vnScripts api client', () => {
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-scripts/scripts/1/versions', {
       params: {},
     });
+  });
+
+  it('calls the VN script template catalog endpoint', async () => {
+    mocks.apiClient.get.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'linear_scene',
+          label: 'Linear scene',
+          description: 'Simple intro scene',
+          category: 'starter',
+          recommended_content_rating: 'general',
+          required_capabilities: [],
+          preview: { scenes: 1 },
+          default_title: 'Linear scene',
+          default_description: 'A simple starter scene',
+        },
+      ],
+    });
+
+    const response = await listVNScriptTemplates();
+
+    expect(response.items[0].id).toBe('linear_scene');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-scripts/templates');
+  });
+
+  it('creates a VN script from a template endpoint with the request payload', async () => {
+    const request = {
+      title: 'Template Route',
+      description: 'Created from a starter',
+      primary_asset_pack_id: 7,
+      policy_profile_id: 'teen-policy',
+      generation_profile_id: 'story-default',
+      content_rating: 'teen' as const,
+    };
+
+    await createVNScriptFromTemplate('linear_scene', request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/templates/linear_scene/scripts',
+      request
+    );
+  });
+
+  it('encodes VN script template ids before building the create endpoint', async () => {
+    const request = {
+      title: 'Template Route',
+      primary_asset_pack_id: 7,
+      content_rating: 'general' as const,
+    };
+
+    await createVNScriptFromTemplate('linear scene/α', request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/templates/linear%20scene%2F%CE%B1/scripts',
+      request
+    );
+  });
+
+  it('allows create-from-template requests to rely on server template title defaults', async () => {
+    const request = {
+      primary_asset_pack_id: 7,
+      content_rating: 'general' as const,
+    };
+
+    await createVNScriptFromTemplate('linear_scene', request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/templates/linear_scene/scripts',
+      request
+    );
   });
 });

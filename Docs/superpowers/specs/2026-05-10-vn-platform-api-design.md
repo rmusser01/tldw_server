@@ -445,6 +445,8 @@ or historical sessions.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `GET` | `/templates` | List preview-safe starter templates. |
+| `POST` | `/templates/{template_id}/scripts` | Create a script shell with a validated starter draft. |
 | `POST` | `/scripts` | Create a script shell. |
 | `GET` | `/scripts` | List owned scripts. |
 | `GET` | `/scripts/{script_id}` | Read script metadata. |
@@ -459,6 +461,31 @@ or historical sessions.
 | `GET` | `/scripts/{script_id}/versions/{version_id}` | Read immutable version. |
 | `GET` | `/scripts/{script_id}/versions/{version_id}/manifest-snapshot` | Inspect pinned manifest. |
 | `POST` | `/scripts/{script_id}/versions/{version_id}/policy/evaluate` | Preflight a version. |
+
+### Starter Templates
+
+Starter templates are backend-owned catalog entries for custom frontends and the
+bundled `/vn-scripts` WebUI. `GET /templates` returns only preview-safe metadata:
+stable `id`, `label`, `description`, `category`, `recommended_content_rating`,
+`required_capabilities`, `preview`, `default_title`, and
+`default_description`. Catalog responses must not expose full draft JSON, raw
+prompts, internal/debug fields, policy profile IDs, generation profile IDs, or
+model/provider settings.
+
+V1 built-ins are:
+
+- `linear_scene`
+- `authored_choices`
+- `generated_choice_set`
+- `scene_update`
+- `confirm_gated_generation`
+
+`POST /templates/{template_id}/scripts` creates a normal owned VN script and
+stores the starter draft through the same draft replacement and diagnostics path
+used by `PUT /scripts/{script_id}/draft`. The response includes both `script`
+and `draft`; after creation, clients treat the script like any other authored
+script. Validation and publishing remain server-side authority. Unknown template
+IDs return `404 template_not_found`.
 
 ### Draft Save
 

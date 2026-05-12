@@ -147,8 +147,13 @@ class VNScriptsRepository:
         description: str | None = None,
         content_rating: str = "general",
         status: str = "draft",
+        initial_draft: Mapping[str, Any] | None = None,
+        initial_diagnostics: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        draft_revision = 1 if initial_draft is not None else 0
+        draft_payload = dict(initial_draft or {})
+        diagnostics_payload = dict(initial_diagnostics or {"valid": True, "errors": [], "warnings": []})
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -187,9 +192,15 @@ class VNScriptsRepository:
                     draft_json,
                     diagnostics_json
                 )
-                VALUES (?, ?, 0, '{}', ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (script_id, owner_user_id, _json_dump({"valid": True, "errors": [], "warnings": []})),
+                (
+                    script_id,
+                    owner_user_id,
+                    draft_revision,
+                    _json_dump(draft_payload),
+                    _json_dump(diagnostics_payload),
+                ),
             )
 
         script = self.get_script(script_id, owner_user_id=owner_user_id)
