@@ -35,6 +35,7 @@ _SHELL_BUILTIN_COMMANDS = frozenset({"alias", "cd", "export", "set", "source", "
 
 
 def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
+    """Return a valid entrypoint strategy, defaulting unknown input conservatively."""
     if value in {"native_acp", "adapter_acp", "documented_candidate", "custom_template"}:
         return value
     return "documented_candidate"
@@ -42,6 +43,7 @@ def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
 
 @dataclass(frozen=True)
 class AgentEntrypointClassification:
+    """Deterministic ACP entrypoint readiness without launching the agent."""
     profile_key: str
     entrypoint_strategy: AgentEntrypointStrategy
     probe_state: AgentProbeState
@@ -181,28 +183,45 @@ def classify_agent_entrypoint(
     def classification(
         probe_state: AgentProbeState,
         *,
-        blocker: str | None = None,
+        blockers: tuple[str, ...] = (),
         status_message: str,
         command: str = acp_command,
         args: list[str] | None = None,
     ) -> AgentEntrypointClassification:
-        blockers = (blocker,) if blocker else ()
+        normalized_blockers = tuple(dict.fromkeys(str(blocker) for blocker in blockers if blocker))
+        primary_blocker = normalized_blockers[0] if normalized_blockers else None
         return AgentEntrypointClassification(
             profile_key=entry.type,
             entrypoint_strategy=strategy,
             probe_state=probe_state,
             acp_command=command,
             acp_args=tuple(args if args is not None else acp_args),
-            primary_blocker=blocker,
-            blockers=blockers,
+            primary_blocker=primary_blocker,
+            blockers=normalized_blockers,
             status_message=status_message,
             docs_url=docs_url,
         )
 
+    def blocked_status(blockers: list[str]) -> str:
+        """Return a readable status for one or more deterministic blockers."""
+        messages = {
+            "entrypoint_strategy_missing": "Registry entry has no explicit ACP stdio command.",
+            "shell_builtin_collision": "Configured ACP command matches a shell builtin or alias-like value.",
+            "credentials_missing": "Required API key or credential environment variable is missing.",
+            "adapter_missing": "Configured ACP adapter command is not available on PATH.",
+            "binary_missing": "Configured ACP entrypoint command is not available on PATH.",
+        }
+        if not blockers:
+            return "ACP entrypoint readiness is blocked."
+        status_message = messages.get(blockers[0], "ACP entrypoint readiness is blocked.")
+        if len(blockers) > 1:
+            status_message += " Additional blockers: " + ", ".join(blockers[1:]) + "."
+        return status_message
+
     if strategy == "custom_template":
         return classification(
             "custom_template",
-            blocker="custom_template",
+            blockers=("custom_template",),
             status_message=(
                 "Create a named custom ACP profile with command, args, env, "
                 "workspace policy, and evidence bundle."
@@ -214,39 +233,32 @@ def classify_agent_entrypoint(
     if strategy == "documented_candidate":
         return classification(
             "documented_only",
-            blocker=entry.certification_blocker,
+            blockers=(entry.certification_blocker,) if entry.certification_blocker else (),
             status_message="Agent is documented as a candidate and is not eligible for live ACP probing yet.",
             command="",
             args=[],
         )
 
+    blockers: list[str] = []
     if not acp_command:
-        return classification(
-            "blocked",
-            blocker="entrypoint_strategy_missing",
-            status_message="Registry entry has no explicit ACP stdio command.",
-        )
+        blockers.append("entrypoint_strategy_missing")
 
-    if acp_command in _SHELL_BUILTIN_COMMANDS:
-        return classification(
-            "blocked",
-            blocker="shell_builtin_collision",
-            status_message="Configured ACP command matches a shell builtin or alias-like value.",
-        )
+    shell_builtin_collision = bool(acp_command and acp_command in _SHELL_BUILTIN_COMMANDS)
+    if shell_builtin_collision:
+        blockers.append("shell_builtin_collision")
 
     if entry.requires_api_key and not env_getter(entry.requires_api_key):
-        return classification(
-            "blocked",
-            blocker="credentials_missing",
-            status_message="Required API key or credential environment variable is missing.",
-        )
+        blockers.append("credentials_missing")
 
-    if not command_resolver(acp_command):
+    if acp_command and not shell_builtin_collision and not command_resolver(acp_command):
         blocker = "adapter_missing" if strategy == "adapter_acp" else "binary_missing"
+        blockers.append(blocker)
+
+    if blockers:
         return classification(
             "blocked",
-            blocker=blocker,
-            status_message="Configured ACP entrypoint command is not available on PATH.",
+            blockers=tuple(blockers),
+            status_message=blocked_status(blockers),
         )
 
     return classification(

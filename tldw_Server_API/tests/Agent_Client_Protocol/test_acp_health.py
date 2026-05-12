@@ -303,6 +303,24 @@ def test_acp_agents_includes_opencode_entrypoint_metadata(client_user_only, stub
     assert entrypoint["probe_state"] in {"ready_to_probe", "blocked"}
 
 
+def test_entrypoint_status_from_entry_normalizes_docs_url() -> None:
+    """Registry-backed entrypoint status uses served docs-static URLs."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_mod
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistryEntry
+
+    status = acp_mod._entrypoint_status_from_entry(
+        AgentRegistryEntry(
+            type="docs_agent",
+            name="Docs Agent",
+            entrypoint_strategy="documented_candidate",
+            certification_blocker="adapter_required",
+            compatibility_docs_url="Docs/Development/ACP_Compatibility_Matrix.md",
+        )
+    )
+
+    assert status["docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+
+
 def test_acp_agents_normalizes_invalid_runner_compatibility_values(
     client_user_only,
     stub_runner_client,

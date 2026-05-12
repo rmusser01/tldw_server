@@ -194,11 +194,7 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
         "support_state": "documented_unverified",
         "verification_level": "documented_only",
         "requires_live_agent": True,
-        "required_environment": [
-            "TLDW_E2E_SERVER_URL",
-            "TLDW_E2E_API_KEY",
-            "ACP_AGENT_PROFILE",
-        ],
+        "required_environment": [],
         "entrypoint": {
             "entrypoint_strategy": entrypoint.get("entrypoint_strategy"),
             "probe_state": entrypoint.get("probe_state"),
@@ -705,6 +701,17 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             )
             return 1
         _drain_stdout_payloads(responses)
+
+    exit_code = process.poll()
+    if exit_code not in (None, 0):
+        _finish_stdio_process(
+            process,
+            force_kill=False,
+            reader_stop=reader_stop,
+            reader_thread=reader_thread,
+        )
+        print(f"FAIL {command_id}: subprocess exited with status {exit_code}", file=sys.stderr)
+        return int(exit_code)
 
     _finish_stdio_process(
         process,

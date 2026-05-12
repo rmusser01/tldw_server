@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import time
+import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -194,6 +194,8 @@ def test_profile_manifest_renders_native_acp_entrypoint(monkeypatch) -> None:
     )
 
     assert manifest["profile"] == "opencode"
+    assert manifest["requires_live_agent"] is True
+    assert manifest["required_environment"] == []
     assert manifest["entrypoint"]["entrypoint_strategy"] == "native_acp"
     initialize = next(command for command in manifest["commands"] if command["id"] == "acp_initialize_probe")
     assert initialize["argv"] == ["opencode", "acp"]
@@ -224,6 +226,7 @@ def test_profile_manifest_refuses_documented_candidate() -> None:
     )
 
     assert manifest["requires_live_agent"] is True
+    assert manifest["required_environment"] == []
     assert manifest["commands"] == []
     assert "adapter_required" in manifest["blockers"]
 
@@ -248,6 +251,7 @@ def test_profile_manifest_refuses_blocked_entrypoint() -> None:
 
     assert manifest["profile"] == "claude-code"
     assert manifest["requires_live_agent"] is True
+    assert manifest["required_environment"] == []
     assert manifest["commands"] == []
     assert manifest["blockers"] == ["adapter_missing"]
     assert manifest["entrypoint"]["entrypoint_strategy"] == "adapter_acp"
@@ -583,8 +587,16 @@ def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypat
             return None
 
     class _Stdout(_Pipe):
-        def readline(self):
-            time.sleep(0.2)
+        def __init__(self):
+            super().__init__()
+            self.closed_event = threading.Event()
+
+        def close(self):
+            super().close()
+            self.closed_event.set()
+
+        def readline(self, _limit=-1):
+            self.closed_event.wait()
             return '{"jsonrpc":"2.0","id":1'
 
     class _Process:
@@ -610,7 +622,6 @@ def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypat
     process = _Process()
     monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
 
-    started = time.monotonic()
     rc = module._run_stdio_jsonrpc_sequence({
         "id": "acp_initialize_probe",
         "cwd": ".",
@@ -621,10 +632,8 @@ def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypat
         ],
         "timeout_seconds": 0.01,
     }, module.ROOT)
-    elapsed = time.monotonic() - started
 
     assert rc == 124
-    assert elapsed < 0.35
     assert process.killed is True
     assert process.wait_calls >= 1
     assert process.stdin.closed is True
@@ -1106,3 +1115,65 @@ def test_stdio_sequence_runner_success_closes_stdin_before_terminating(monkeypat
     assert "kill" not in events
     assert process.terminated is False
     assert process.killed is False
+
+
+def test_stdio_sequence_runner_returns_child_nonzero_exit_after_success(monkeypatch, capsys) -> None:
+    module = _load_module()
+    responses = iter(['{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1"}}\n'])
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def readline(self, _limit=-1):
+            return next(responses, "")
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.wait_calls = 0
+
+        def poll(self):
+            return 7
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 7
+
+        def kill(self):
+            return None
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    captured = capsys.readouterr()
+    assert rc == 7
+    assert "subprocess exited with status 7" in captured.err
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True

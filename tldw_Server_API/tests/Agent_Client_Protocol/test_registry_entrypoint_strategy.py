@@ -84,6 +84,8 @@ def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> No
     assert persisted.acp_command == "agent-acp"
     assert persisted.acp_args == ["--stdio"]
     assert persisted.adapter_source == "example/agent-acp"
+    assert persisted.adapter_docs_url == "https://example.test/agent-acp"
+    assert persisted.certification_blocker == "adapter_missing"
 
 
 def test_update_agent_clears_nullable_entrypoint_metadata(acp_db) -> None:
@@ -146,8 +148,8 @@ def test_register_agent_coerces_invalid_entrypoint_strategy(acp_db) -> None:
     assert persisted.entrypoint_strategy == "documented_candidate"
 
 
-def test_update_agent_coerces_invalid_entrypoint_strategy() -> None:
-    registry = AgentRegistry(yaml_path="/missing.yaml")
+def test_update_agent_coerces_invalid_entrypoint_strategy(acp_db) -> None:
+    registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
     registry.register_agent(
         type="bad_update_strategy",
         name="Bad Update Strategy",
@@ -161,6 +163,12 @@ def test_update_agent_coerces_invalid_entrypoint_strategy() -> None:
 
     assert updated is not None
     assert updated.entrypoint_strategy == "documented_candidate"
+
+    reloaded = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
+    reloaded._load_api_entries()
+    persisted = reloaded.get_entry("bad_update_strategy")
+    assert persisted is not None
+    assert persisted.entrypoint_strategy == "documented_candidate"
 
 
 def test_update_agent_collection_defaults_are_fresh_instances() -> None:
@@ -272,6 +280,27 @@ def test_classifier_blocks_missing_required_credentials() -> None:
     assert result.probe_state == "blocked"
     assert result.primary_blocker == "credentials_missing"
     assert "credentials_missing" in result.blockers
+
+
+def test_classifier_reports_multiple_applicable_blockers() -> None:
+    entry = AgentRegistryEntry(
+        type="commercial_agent",
+        name="Commercial Agent",
+        entrypoint_strategy="native_acp",
+        acp_command="commercial-agent",
+        requires_api_key="COMMERCIAL_AGENT_API_KEY",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda _command: None,
+        env_getter=lambda _name: None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "credentials_missing"
+    assert result.blockers == ("credentials_missing", "binary_missing")
+    assert "binary_missing" in result.status_message
 
 
 def test_classifier_does_not_infer_native_acp_command_from_command() -> None:

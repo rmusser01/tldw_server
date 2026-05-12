@@ -1636,7 +1636,9 @@ def _string_list(value: Any) -> list[str]:
 
 def _entrypoint_status_from_entry(reg_entry: Any) -> dict[str, Any]:
     """Build ACP entrypoint status from a registry entry classifier."""
-    return classify_agent_entrypoint(reg_entry).as_dict()
+    status = classify_agent_entrypoint(reg_entry).as_dict()
+    status["docs_url"] = _normalize_docs_url(status.get("docs_url"))
+    return status
 
 
 def _entrypoint_status_from_dict(item: dict[str, Any]) -> dict[str, Any]:
