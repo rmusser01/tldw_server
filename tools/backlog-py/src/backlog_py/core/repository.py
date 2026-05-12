@@ -218,7 +218,8 @@ class MutableRepository(ReadOnlyRepository):
 
 
 def _load_task(path: Path) -> TaskRecord:
-    parsed = parse_task_markdown(path.read_text(encoding="utf-8"))
+    with path.open("r", encoding="utf-8", newline="") as task_file:
+        parsed = parse_task_markdown(task_file.read())
     frontmatter = parsed.frontmatter
     task_id = str(frontmatter.get("id") or _id_from_filename(path))
     return TaskRecord(
@@ -363,8 +364,8 @@ def _extract_marker_block(source: str, marker: str) -> str:
 
 
 def _set_checklist_line(line: str, *, checked: bool) -> str:
-    newline = "\n" if line.endswith("\n") else ""
     raw_line = line.rstrip("\r\n")
+    newline = line[len(raw_line):]
     match = _CHECKLIST_LINE_RE.match(raw_line)
     if match is None:
         return line

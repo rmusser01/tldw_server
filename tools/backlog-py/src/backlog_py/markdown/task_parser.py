@@ -65,11 +65,20 @@ def _split_frontmatter(source: str) -> tuple[str | None, dict[str, Any], str]:
             break
 
     if closing_index is None:
-        return None, {}, source
+        raise TaskMarkdownParseError(
+            code="unterminated_frontmatter",
+            message="Unterminated YAML frontmatter",
+        )
 
     raw_frontmatter = "".join(lines[: closing_index + 1])
     yaml_source = "".join(lines[1:closing_index])
-    loaded = yaml.safe_load(yaml_source) or {}
+    try:
+        loaded = yaml.safe_load(yaml_source) or {}
+    except yaml.YAMLError as exc:
+        raise TaskMarkdownParseError(
+            code="invalid_frontmatter",
+            message=f"Invalid YAML frontmatter: {exc}",
+        ) from exc
     if not isinstance(loaded, dict):
         raise TaskMarkdownParseError(
             code="invalid_frontmatter",

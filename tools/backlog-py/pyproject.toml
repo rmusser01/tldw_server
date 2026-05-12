@@ -9,6 +9,7 @@ description = "Python compatibility clone of Backlog.md"
 requires-python = ">=3.10"
 dependencies = [
   "click>=8.0.0",
+  "loguru>=0.7.0",
   "PyYAML>=6.0.0",
 ]
 

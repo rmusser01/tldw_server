@@ -59,6 +59,25 @@ def test_frontmatter_accepts_crlf_opening_marker():
     assert parsed.body == "Body\r\n"
 
 
+def test_unterminated_frontmatter_raises_structured_error():
+    source = "---\nid: TASK-2\nstatus: To Do\n\nBody\n"
+
+    with pytest.raises(TaskMarkdownParseError) as error:
+        parse_task_markdown(source)
+
+    assert error.value.code == "unterminated_frontmatter"
+
+
+def test_invalid_yaml_frontmatter_raises_structured_error():
+    source = "---\nid: [unterminated\n---\nBody\n"
+
+    with pytest.raises(TaskMarkdownParseError) as error:
+        parse_task_markdown(source)
+
+    assert error.value.code == "invalid_frontmatter"
+    assert "unterminated" in error.value.message
+
+
 def test_unterminated_owned_section_raises_structured_error():
     source = "---\nid: TASK-2\n---\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nMissing end\n"
 

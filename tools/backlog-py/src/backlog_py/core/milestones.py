@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import re
 from dataclasses import dataclass
@@ -8,14 +7,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository, TaskMutationError, _atomic_write_text, _mutation_path
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
-
-
-_LOGGER = logging.getLogger(__name__)
 
 
 class MilestoneMutationError(ValueError):
@@ -66,7 +63,8 @@ class MilestoneService:
     def rename_milestone(self, old_name: str, new_name: str, *, update_tasks: bool = False) -> MilestoneRecord:
         existing = self._find_active(old_name)
         target = self._active_path(new_name)
-        if target.exists():
+        same_path = target.exists() and target.resolve() == existing.path.resolve()
+        if target.exists() and not same_path:
             raise MilestoneMutationError(f"Milestone already exists: {new_name}")
         task_updates = self._task_reference_updates(existing.name, new_name) if update_tasks else []
         frontmatter = dict(existing.frontmatter)
@@ -74,16 +72,20 @@ class MilestoneService:
         source = _render_milestone(frontmatter, existing.content)
         parse_task_markdown(source)
         target.parent.mkdir(parents=True, exist_ok=True)
+        original_source = existing.path.read_text(encoding="utf-8") if same_path else None
         target_written = False
         written_updates: list[_TaskReferenceUpdate] = []
         try:
             _atomic_write_text(target, source)
             target_written = True
             _write_task_updates(task_updates, written_updates)
-            existing.path.unlink()
+            if not same_path:
+                existing.path.unlink()
         except Exception:
             _rollback_task_updates(written_updates)
-            if target_written:
+            if same_path and target_written and original_source is not None:
+                _atomic_write_text(existing.path, original_source)
+            elif target_written:
                 _unlink_best_effort(target)
             raise
         return _load_milestone(self.project, target, archived=False)
@@ -196,14 +198,14 @@ def _rollback_task_updates(updates: list[_TaskReferenceUpdate]) -> None:
         try:
             _atomic_write_text(update.path, update.original_source)
         except Exception as exc:
-            _LOGGER.warning("Failed to rollback task milestone reference %s: %s", update.path, exc)
+            logger.warning("Failed to rollback task milestone reference {}: {}", update.path, exc)
 
 
 def _unlink_best_effort(path: Path) -> None:
     try:
         path.unlink(missing_ok=True)
     except Exception as exc:
-        _LOGGER.warning("Failed to remove partially written milestone %s: %s", path, exc)
+        logger.warning("Failed to remove partially written milestone {}: {}", path, exc)
 
 
 def _render_milestone(frontmatter: dict[str, Any], content: str) -> str:

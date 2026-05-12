@@ -3,13 +3,15 @@ from backlog_py.compat.inventory import load_builtin_inventory
 
 def test_inventory_starts_with_agent_critical_commands():
     inventory = load_builtin_inventory()
-    names = {item.name for item in inventory.items}
+    names = [item.name for item in inventory.items]
 
-    assert "cli:task-list-plain" in names
-    assert "cli:task-view-plain" in names
-    assert "cli:search-plain" in names
-    assert "mcp:workflow-overview" in names
-    assert "mcp:task-search" in names
+    assert names[:5] == [
+        "cli:help",
+        "cli:task-list-plain",
+        "cli:task-view-plain",
+        "cli:search-plain",
+        "cli:board",
+    ]
 
 
 def test_inventory_classifies_browser_and_interactive_deferrals():

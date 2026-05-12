@@ -40,9 +40,10 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         definition_of_done_add=_optional_string_list(
             _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
         ),
-        disable_definition_of_done_defaults=bool(
-            _get_alias(kwargs, "disableDefinitionOfDoneDefaults", "disable_definition_of_done_defaults") or False
-        ),
+        disable_definition_of_done_defaults=_coerce_bool(
+            _get_alias(kwargs, "disableDefinitionOfDoneDefaults", "disable_definition_of_done_defaults")
+        )
+        or False,
         dependencies=_optional_string_list(_get_alias(kwargs, "dependencies")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
@@ -143,7 +144,8 @@ def definition_of_done_defaults_get(project: BacklogProject) -> dict[str, list[s
 
 def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]) -> dict[str, list[str]]:
     """Replace project-level Definition of Done default checklist items."""
-    return {"items": replace_definition_of_done_defaults(project, items)}
+    config = replace_definition_of_done_defaults(project, items)
+    return {"items": list(config.definition_of_done or [])}
 
 
 def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
@@ -205,9 +207,21 @@ def _optional_string(value: Any) -> str | None:
 
 
 def _optional_bool(value: Any) -> bool | None:
+    return _coerce_bool(value)
+
+
+def _coerce_bool(value: Any) -> bool | None:
     if value is None:
         return None
-    return bool(value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "1"}:
+            return True
+        if normalized in {"false", "0"}:
+            return False
+    raise TypeError("Expected boolean value")
 
 
 def _string_list(value: Any) -> list[str]:

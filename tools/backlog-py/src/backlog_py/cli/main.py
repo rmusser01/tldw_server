@@ -6,6 +6,7 @@ import click
 
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
+from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
 from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
@@ -63,6 +64,7 @@ def task_command(
             raise click.UsageError("Usage: task edit TASK_ID")
         task_record = _mutable_repository(ctx).edit_task(
             args[1],
+            description=description,
             status=status,
             append_notes=append_notes,
             check_ac=check_ac,
@@ -145,7 +147,8 @@ def config_dod_defaults_get(ctx: click.Context) -> None:
 @click.pass_context
 def config_dod_defaults_upsert(ctx: click.Context, items: tuple[str, ...]) -> None:
     """Replace project Definition of Done defaults."""
-    for item in replace_definition_of_done_defaults(_project(ctx), list(items)):
+    config = replace_definition_of_done_defaults(_project(ctx), list(items))
+    for item in config.definition_of_done or []:
         click.echo(item)
 
 
@@ -254,7 +257,7 @@ def milestone_archive_command(ctx: click.Context, name: str) -> None:
     click.echo(f"{_format_milestone_line(milestone)} archived")
 
 
-def _project(ctx: click.Context):
+def _project(ctx: click.Context) -> BacklogProject:
     cwd = ctx.obj.get("cwd") if ctx.obj else None
     return discover_project(Path.cwd(), explicit_cwd=cwd)
 

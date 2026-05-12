@@ -25,6 +25,7 @@ _KEY_ALIASES = {
 
 
 def load_config(path: Path) -> BacklogConfig:
+    """Load a Backlog.md YAML config file into the normalized Python model."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Backlog config must contain a mapping: {path}")
@@ -43,17 +44,19 @@ def load_config(path: Path) -> BacklogConfig:
 
 
 def get_definition_of_done_defaults(project: BacklogProject) -> list[str]:
+    """Return current project-level Definition of Done defaults from disk."""
     return list(load_config(project.config_path).definition_of_done or [])
 
 
-def replace_definition_of_done_defaults(project: BacklogProject, items: list[str]) -> list[str]:
+def replace_definition_of_done_defaults(project: BacklogProject, items: list[str]) -> BacklogConfig:
+    """Persist Definition of Done defaults and return the refreshed config."""
     normalized = [str(item) for item in items]
     raw = _load_raw_config(project.config_path)
     key = "definition_of_done" if "definition_of_done" in raw else "definitionOfDone"
     raw[key] = normalized
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n")
-    return normalized
+    return load_config(project.config_path)
 
 
 def _get(raw: dict[Any, Any], normalized_key: str, default: Any) -> Any:

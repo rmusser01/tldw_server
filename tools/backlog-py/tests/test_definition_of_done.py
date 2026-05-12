@@ -43,7 +43,7 @@ def test_config_definition_of_done_defaults_can_be_read_and_replaced(tmp_path):
 
     updated = replace_definition_of_done_defaults(project, ["Tests pass", "Docs updated"])
 
-    assert updated == ["Tests pass", "Docs updated"]
+    assert updated.definition_of_done == ["Tests pass", "Docs updated"]
     assert get_definition_of_done_defaults(_project(repo)) == ["Tests pass", "Docs updated"]
     config_source = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
     assert "definitionOfDone:" in config_source

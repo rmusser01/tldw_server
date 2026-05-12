@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.mcp.tools import task_create, task_edit
+from backlog_py.storage.config import replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
 
 
@@ -40,6 +41,14 @@ def _snapshot_tasks(repo: Path) -> dict[Path, str]:
     return {
         path.relative_to(task_dir): path.read_text(encoding="utf-8")
         for path in sorted(task_dir.glob("*.md"))
+    }
+
+
+def _snapshot_backlog_markdown(repo: Path) -> dict[Path, str]:
+    backlog_dir = repo / "backlog"
+    return {
+        path.relative_to(backlog_dir): path.read_text(encoding="utf-8")
+        for path in sorted(backlog_dir.rglob("*.md"))
     }
 
 
@@ -99,6 +108,19 @@ def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_pa
     after = _task_file(repo).read_text(encoding="utf-8")
     assert "- [ ] #1 Preserve completed acceptance criteria raw line" in after
     assert "- [ ] #1 Tests written" in after
+
+
+def test_edit_task_preserves_crlf_when_toggling_checklists(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+    task_path.write_text(original.replace("\n", "\r\n"), encoding="utf-8")
+
+    _repository(repo).edit_task("TASK-1", check_ac=[2])
+
+    after = task_path.read_bytes().decode("utf-8")
+    assert "- [x] #2 Preserve incomplete acceptance criteria raw line\r\n" in after
+    assert "\n" not in after.replace("\r\n", "")
 
 
 def test_invalid_checklist_index_is_rejected_before_write(tmp_path):
@@ -186,11 +208,13 @@ def test_edit_unknown_status_is_rejected_before_write(tmp_path):
 def test_path_traversal_task_id_is_rejected_without_partial_file(tmp_path):
     repo = _copy_fixture(tmp_path)
     before = _snapshot_tasks(repo)
+    before_backlog_markdown = _snapshot_backlog_markdown(repo)
 
     with pytest.raises(TaskMutationError, match="Invalid task id"):
         _repository(repo).create_task(title="Escape", task_id="../TASK-9")
 
     assert _snapshot_tasks(repo) == before
+    assert _snapshot_backlog_markdown(repo) == before_backlog_markdown
     assert not (repo / "backlog" / "TASK-9.md").exists()
 
 
@@ -268,6 +292,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "task",
             "edit",
             "TASK-2",
+            "--description",
+            "Edited from CLI.",
             "--append-notes",
             "- CLI note.",
             "--final-summary",
@@ -278,6 +304,7 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert edit.exit_code == 0
     assert "TASK-2 [To Do] CLI mutation task" in edit.output
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "Edited from CLI." in written
     assert "- CLI note." in written
     assert "CLI final summary." in written
 
@@ -330,3 +357,33 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "- MCP note." in written
     assert "MCP final summary." in written
     assert "- [ ] #1 MCP create works" in written
+
+
+def test_mcp_bool_string_values_are_parsed_explicitly(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+
+    replace_definition_of_done_defaults(project, ["Project default"])
+
+    created = task_create(
+        project,
+        title="MCP bool task",
+        disableDefinitionOfDoneDefaults="false",
+        definitionOfDoneAdd=["Specific"],
+        onStatusChange="false",
+    )
+
+    edited = task_edit(project, task_id=created["id"], status="Done", onStatusChange="false")
+
+    source = _task_file(repo, created["id"].lower()).read_text(encoding="utf-8")
+    assert edited["status"] == "Done"
+    assert "- [ ] #1 Project default" in source
+    assert "- [ ] #2 Specific" in source
+
+
+def test_mcp_invalid_bool_string_is_rejected(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+
+    with pytest.raises(TypeError, match="boolean"):
+        task_create(project, title="Bad bool", onStatusChange="sometimes")

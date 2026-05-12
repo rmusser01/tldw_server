@@ -40,6 +40,13 @@ def _snapshot_docs(repo: Path) -> dict[Path, str]:
     }
 
 
+def _snapshot_markdown(repo: Path) -> dict[Path, str]:
+    return {
+        path.relative_to(repo): path.read_text(encoding="utf-8")
+        for path in sorted(repo.rglob("*.md"))
+    }
+
+
 def _frontmatter(path: Path) -> dict[str, object]:
     source = path.read_text(encoding="utf-8")
     assert source.startswith("---\n")
@@ -120,6 +127,7 @@ def test_update_document_preserves_omitted_body_source(tmp_path):
 def test_document_path_traversal_is_rejected_before_write(tmp_path):
     repo = _copy_fixture(tmp_path)
     before = _snapshot_docs(repo)
+    before_repo_markdown = _snapshot_markdown(repo)
 
     with pytest.raises(DocumentMutationError, match="Invalid document path"):
         _service(repo).create_document("../escape.md", title="Escape", content="Nope")
@@ -128,6 +136,7 @@ def test_document_path_traversal_is_rejected_before_write(tmp_path):
         _service(repo).create_document(str((repo / "outside.md").absolute()), title="Escape", content="Nope")
 
     assert _snapshot_docs(repo) == before
+    assert _snapshot_markdown(repo) == before_repo_markdown
     assert not (repo / "outside.md").exists()
 
 
@@ -152,6 +161,7 @@ def test_update_document_path_traversal_is_rejected_before_write(tmp_path):
     service = _service(repo)
     service.create_document("guides/setup.md", title="Setup Guide", content="Original body.")
     before = _snapshot_docs(repo)
+    before_repo_markdown = _snapshot_markdown(repo)
 
     with pytest.raises(DocumentMutationError, match="Invalid document path"):
         service.update_document("../escape.md", title="Escape")
@@ -160,6 +170,7 @@ def test_update_document_path_traversal_is_rejected_before_write(tmp_path):
         service.update_document(str((repo / "outside.md").absolute()), title="Escape")
 
     assert _snapshot_docs(repo) == before
+    assert _snapshot_markdown(repo) == before_repo_markdown
 
 
 def test_cli_document_commands_use_safe_service(tmp_path):

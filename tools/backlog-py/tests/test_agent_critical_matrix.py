@@ -4,7 +4,7 @@ from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.oracle.manifest import load_oracle_manifest
 
 
-MATRIX_PATH = Path("tools/backlog-py/docs/agent-critical-parity.md")
+MATRIX_PATH = Path(__file__).resolve().parents[1] / "docs" / "agent-critical-parity.md"
 MANIFEST_PATH = Path(__file__).parent / "fixtures" / "oracle" / "manifest.yml"
 
 EXPECTED_AGENT_CRITICAL = {
@@ -63,8 +63,13 @@ def test_agent_critical_inventory_enumerates_cutover_and_deferral_scope():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
 
-    assert sorted(EXPECTED_AGENT_CRITICAL - by_name.keys()) == []
-    assert sorted(EXPECTED_DEFERRED - by_name.keys()) == []
+    actual_agent_critical = {
+        item.name for item in inventory.items if item.classification == "golden-required"
+    }
+    actual_deferred = {item.name for item in inventory.items if item.status == "deferred"}
+
+    assert actual_agent_critical == EXPECTED_AGENT_CRITICAL
+    assert actual_deferred == EXPECTED_DEFERRED
 
     for name in EXPECTED_AGENT_CRITICAL:
         item = by_name[name]
@@ -110,12 +115,14 @@ def test_agent_critical_manifest_tracks_all_inventory_items():
 def test_agent_critical_matrix_doc_matches_inventory():
     inventory = load_builtin_inventory()
     matrix = MATRIX_PATH.read_text(encoding="utf-8")
+    matrix_lines = matrix.splitlines()
 
     for item in inventory.items:
-        assert item.name in matrix
-        assert item.expected in matrix
-        assert item.status in matrix
-        if item.classification == "golden-required":
-            assert item.fixture in matrix
-        else:
-            assert item.deferred_reason in matrix
+        detail = item.fixture if item.classification == "golden-required" else item.deferred_reason
+        assert any(
+            item.name in line
+            and item.expected in line
+            and item.status in line
+            and detail in line
+            for line in matrix_lines
+        ), f"Missing or mismatched matrix row for {item.name}"

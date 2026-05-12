@@ -109,6 +109,20 @@ def test_rename_and_remove_update_task_refs_when_lookup_uses_different_case(tmp_
     assert "milestone:" not in _task_path(repo).read_text(encoding="utf-8")
 
 
+def test_rename_same_slug_milestone_updates_display_name_and_task_refs(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Release 1")
+    _set_task_milestone(repo, "Release 1")
+
+    renamed = service.rename_milestone("Release 1", "Release-1", update_tasks=True)
+
+    assert renamed.name == "Release-1"
+    assert renamed.path == repo / "backlog" / "milestones" / "Release-1.md"
+    assert [path.name for path in sorted((repo / "backlog" / "milestones").glob("*.md"))] == ["Release-1.md"]
+    assert "milestone: Release-1" in _task_path(repo).read_text(encoding="utf-8")
+
+
 def test_rename_with_task_reference_symlink_escape_is_rejected_before_milestone_changes(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -132,6 +146,30 @@ def test_rename_with_task_reference_symlink_escape_is_rejected_before_milestone_
     assert (repo / "backlog" / "milestones" / "Alpha.md").exists()
     assert not (repo / "backlog" / "milestones" / "Beta.md").exists()
     assert outside_task.read_text(encoding="utf-8") == original_task_source
+
+
+def test_same_slug_rename_rolls_back_original_milestone_when_task_write_fails(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Release 1")
+    _set_task_milestone(repo, "Release 1")
+    milestone_path = repo / "backlog" / "milestones" / "Release-1.md"
+    original_milestone_source = milestone_path.read_text(encoding="utf-8")
+    original_task_source = _task_path(repo).read_text(encoding="utf-8")
+    original_writer = milestones_module._atomic_write_text
+
+    def fail_on_task(path: Path, source: str) -> None:
+        if path.name.startswith("task-1"):
+            raise OSError("simulated task write failure")
+        original_writer(path, source)
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", fail_on_task)
+
+    with pytest.raises(OSError, match="simulated task write failure"):
+        service.rename_milestone("Release 1", "Release-1", update_tasks=True)
+
+    assert milestone_path.read_text(encoding="utf-8") == original_milestone_source
+    assert _task_path(repo).read_text(encoding="utf-8") == original_task_source
 
 
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):
