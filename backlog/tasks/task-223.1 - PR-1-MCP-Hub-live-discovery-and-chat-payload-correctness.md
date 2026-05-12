@@ -15,7 +15,7 @@ dependencies: []
 references:
   - https://github.com/rmusser01/tldw_server/pull/1514
 documentation:
-  - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
+  - docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
   - docs/superpowers/plans/2026-05-10-mcp-hub-live-discovery-chat-plan.md
 parent_task_id: TASK-223
 priority: high
