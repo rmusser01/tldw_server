@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsReposit
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_payload_hash
 from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety_definition
+from tldw_Server_API.app.core.VN_Scripts.authoring_catalog import list_authoring_catalog
+from tldw_Server_API.app.core.VN_Scripts.snippet_patcher import SnippetPatchResult, apply_snippet_patch
 from tldw_Server_API.app.core.VN_Scripts.templates import instantiate_template, list_template_catalog
 from tldw_Server_API.app.core.VN_Scripts.validator import VNScriptValidationContext, validate_script_program
 
@@ -87,6 +89,115 @@ class VNScriptService:
     def list_templates(self) -> list[dict[str, Any]]:
         """List built-in starter templates as preview-safe catalog entries."""
         return list_template_catalog()
+
+    def get_authoring_catalog(self) -> dict[str, Any]:
+        """Return preview-safe script authoring metadata and snippet catalog."""
+        return list_authoring_catalog()
+
+    def build_snippet_patch(
+        self,
+        script_id: int,
+        snippet_id: str,
+        anchor: Mapping[str, Any],
+        parameters: Mapping[str, Any],
+        *,
+        draft: Mapping[str, Any] | None = None,
+        draft_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Build a side-effect-free snippet patch against a stored or supplied draft."""
+        script = self._require_script(script_id)
+        draft_row = self.get_draft(script_id)
+        stored_revision = int(draft_row["revision"])
+        if draft is not None:
+            if draft_revision is None:
+                raise ValueError("draft_revision_required")
+            if int(draft_revision) != stored_revision:
+                raise ValueError("draft_revision_conflict")
+            base_revision = int(draft_revision)
+            base_draft = draft
+        else:
+            base_revision = stored_revision
+            base_draft = draft_row["draft"]
+        patch = apply_snippet_patch(base_draft, snippet_id, anchor, parameters)
+        return {
+            "script": script,
+            "base_revision": base_revision,
+            "snippet_id": snippet_id,
+            "patch": patch,
+        }
+
+    def preview_snippet_patch(
+        self,
+        script_id: int,
+        snippet_id: str,
+        base_revision: int,
+        patch: SnippetPatchResult,
+        *,
+        audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
+        policy_profile: ProfileRow | None = None,
+        generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
+    ) -> dict[str, Any]:
+        """Validate a patched draft without storing the draft or diagnostics."""
+        script = self._require_script(script_id)
+        diagnostics = self.validate_draft_payload(
+            script,
+            patch.draft,
+            audio_refs=audio_refs,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
+        )
+        return {
+            "script_id": script_id,
+            "base_revision": int(base_revision),
+            "snippet_id": snippet_id,
+            "draft": patch.draft,
+            "diagnostics": diagnostics,
+            "patch_summary": patch.patch_summary,
+            "warnings": list(diagnostics.get("warnings") or []),
+        }
+
+    def apply_snippet_patch_result(
+        self,
+        script_id: int,
+        snippet_id: str,
+        base_revision: int,
+        patch: SnippetPatchResult,
+        *,
+        audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
+        policy_profile: ProfileRow | None = None,
+        generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
+    ) -> dict[str, Any]:
+        """Validate and persist a patched draft using optimistic revision control."""
+        script = self._require_script(script_id)
+        draft_row = self.get_draft(script_id)
+        if int(draft_row["revision"]) != int(base_revision):
+            raise ValueError("draft_revision_conflict")
+        diagnostics = self.validate_draft_payload(
+            script,
+            patch.draft,
+            audio_refs=audio_refs,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
+        )
+        updated_draft = self.repo.replace_draft(
+            script_id,
+            owner_user_id=self.owner_user_id,
+            if_revision=int(base_revision),
+            draft=patch.draft,
+            diagnostics=diagnostics,
+        )
+        return {
+            "script_id": script_id,
+            "revision": int(updated_draft["revision"]),
+            "snippet_id": snippet_id,
+            "draft": updated_draft["draft"],
+            "diagnostics": updated_draft["diagnostics"],
+            "patch_summary": patch.patch_summary,
+        }
 
     def create_script_from_template(
         self,

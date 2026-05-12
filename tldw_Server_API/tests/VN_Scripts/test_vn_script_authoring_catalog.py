@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from typing import Any
 
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.VN_Scripts.authoring_catalog import list_authoring_catalog
 from tldw_Server_API.app.core.VN_Scripts.authoring_errors import VNScriptAuthoringError
+from tldw_Server_API.app.core.VN_Scripts.service import VNScriptService
 from tldw_Server_API.app.core.VN_Scripts.snippet_patcher import (
     MAX_SNIPPET_PARAMETER_DEPTH,
     MAX_SNIPPET_PARAMETER_PAYLOAD_BYTES,
     MAX_SNIPPET_PARAMETER_STRING_LENGTH,
+    SnippetPatchResult,
     apply_snippet_patch,
 )
 from tldw_Server_API.app.core.VN_Scripts.validator import (
@@ -64,6 +69,7 @@ def _forbidden_keys_present(value: Any) -> set[str]:
 def _draft() -> dict[str, Any]:
     return {
         "schema_version": "vn_script_program.v1",
+        "primary_asset_pack_id": 7,
         "entry_label": "start",
         "labels": {
             "start": [
@@ -72,6 +78,64 @@ def _draft() -> dict[str, Any]:
             ]
         },
     }
+
+
+def _audio_draft() -> dict[str, Any]:
+    return {
+        "schema_version": "vn_script_program.v1",
+        "primary_asset_pack_id": 7,
+        "entry_label": "start",
+        "labels": {
+            "start": [
+                {"op": "narrate", "text": "Opening line."},
+                {"op": "end"},
+            ]
+        },
+    }
+
+
+def _manifest() -> dict[str, Any]:
+    return {
+        "schema_version": "vn_asset_manifest.v1",
+        "pack_id": 7,
+        "title": "Starter Pack",
+        "primary_character_id": None,
+        "content_rating": "general",
+        "assets": {"backgrounds": [], "sprites": [], "depth_companions": [], "cgs": []},
+    }
+
+
+@pytest.fixture
+def chacha_db() -> Generator[CharactersRAGDB, None, None]:
+    database = CharactersRAGDB(":memory:", client_id="vn-script-authoring-catalog-test-client")
+    yield database
+    database.close_connection()
+
+
+def _service(
+    chacha_db: CharactersRAGDB,
+    *,
+    owner_user_id: int = 42,
+    audio_ref_resolver: Any | None = None,
+) -> VNScriptService:
+    return VNScriptService(
+        chacha_db,
+        owner_user_id=owner_user_id,
+        manifest_resolver=lambda asset_pack_id: _manifest(),
+        audio_ref_resolver=audio_ref_resolver,
+    )
+
+
+def _create_script(service: VNScriptService, draft: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    return service.create_script(
+        title="Archive Door",
+        primary_asset_pack_id=7,
+        policy_profile_id="local_default",
+        generation_profile_id="story_default",
+        content_rating="general",
+        initial_draft=draft or _draft(),
+        initial_diagnostics={"valid": True, "errors": [], "warnings": [], "stored": True},
+    )
 
 
 def _assert_authoring_error(
@@ -88,10 +152,280 @@ def _assert_authoring_error(
     assert error.details[detail_key] == detail_value
 
 
+def test_service_get_authoring_catalog_returns_catalog_metadata(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+
+    assert service.get_authoring_catalog() == list_authoring_catalog()
+
+
+def test_service_build_snippet_patch_requires_ownership_and_uses_stored_draft_without_persisting(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    owner_service = _service(chacha_db, owner_user_id=42)
+    other_service = _service(chacha_db, owner_user_id=7)
+    script = _create_script(owner_service)
+
+    with pytest.raises(ValueError, match="script_not_found"):
+        other_service.build_snippet_patch(
+            script["id"],
+            "narration",
+            {"label": "start", "op_index": 1, "mode": "before"},
+            {"text": "Inserted line."},
+        )
+
+    result = owner_service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Inserted line."},
+    )
+    stored = owner_service.get_draft(script["id"])
+
+    assert result["script"]["id"] == script["id"]
+    assert result["base_revision"] == 1
+    assert result["snippet_id"] == "narration"
+    assert isinstance(result["patch"], SnippetPatchResult)
+    assert result["patch"].draft["labels"]["start"][1] == {"op": "narrate", "text": "Inserted line."}
+    assert stored["revision"] == 1
+    assert stored["draft"] == _draft()
+    assert stored["diagnostics"]["stored"] is True
+
+
+def test_service_build_snippet_patch_with_supplied_draft_uses_current_base_revision_without_persisting(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+    supplied_draft = _draft()
+    supplied_draft["labels"]["start"][0]["text"] = "Supplied opening."
+
+    result = service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Inserted line."},
+        draft=supplied_draft,
+        draft_revision=1,
+    )
+    stored = service.get_draft(script["id"])
+
+    assert result["base_revision"] == 1
+    assert result["patch"].draft["labels"]["start"][0] == {"op": "narrate", "text": "Supplied opening."}
+    assert stored["revision"] == 1
+    assert stored["draft"] == _draft()
+
+
+def test_service_supplied_draft_requires_draft_revision(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+
+    with pytest.raises(ValueError, match="draft_revision_required"):
+        service.build_snippet_patch(
+            script["id"],
+            "narration",
+            {"label": "start", "op_index": 1, "mode": "before"},
+            {"text": "Inserted line."},
+            draft=_draft(),
+        )
+
+
+def test_service_supplied_draft_requires_matching_revision_and_cannot_overwrite_newer_draft(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+    stale_draft = service.get_draft(script["id"])["draft"]
+    stale_build = service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Stale line."},
+        draft=stale_draft,
+        draft_revision=1,
+    )
+    service.replace_draft(
+        script["id"],
+        if_revision=1,
+        draft={
+            **_draft(),
+            "labels": {"start": [{"op": "narrate", "text": "Current line."}, {"op": "end"}]},
+        },
+    )
+
+    with pytest.raises(ValueError, match="draft_revision_conflict"):
+        service.build_snippet_patch(
+            script["id"],
+            "narration",
+            {"label": "start", "op_index": 1, "mode": "before"},
+            {"text": "Stale line."},
+            draft=stale_draft,
+            draft_revision=1,
+        )
+    with pytest.raises(ValueError, match="draft_revision_conflict"):
+        service.apply_snippet_patch_result(script["id"], "narration", stale_build["base_revision"], stale_build["patch"])
+
+    stored = service.get_draft(script["id"])
+    assert stored["revision"] == 2
+    assert stored["draft"]["labels"]["start"][0] == {"op": "narrate", "text": "Current line."}
+
+
+def test_service_preview_snippet_patch_validates_payload_without_mutating_stored_draft(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+    build = service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Inserted line."},
+    )
+
+    def fail_validate_draft(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("preview must not call validate_draft")
+
+    monkeypatch.setattr(service, "validate_draft", fail_validate_draft)
+
+    preview = service.preview_snippet_patch(
+        script["id"],
+        "narration",
+        build["base_revision"],
+        build["patch"],
+    )
+    stored = service.get_draft(script["id"])
+
+    assert preview["script_id"] == script["id"]
+    assert preview["base_revision"] == 1
+    assert preview["snippet_id"] == "narration"
+    assert preview["draft"]["labels"]["start"][1] == {"op": "narrate", "text": "Inserted line."}
+    assert preview["diagnostics"]["valid"] is True
+    assert preview["patch_summary"] == build["patch"].patch_summary
+    assert preview["warnings"] == preview["diagnostics"]["warnings"]
+    assert stored["revision"] == 1
+    assert stored["draft"] == _draft()
+    assert stored["diagnostics"]["stored"] is True
+
+
+def test_service_apply_snippet_patch_result_validates_and_persists_with_revision(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+    build = service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Inserted line."},
+    )
+
+    applied = service.apply_snippet_patch_result(
+        script["id"],
+        "narration",
+        build["base_revision"],
+        build["patch"],
+    )
+    stored = service.get_draft(script["id"])
+
+    assert applied["script_id"] == script["id"]
+    assert applied["revision"] == 2
+    assert applied["snippet_id"] == "narration"
+    assert applied["draft"]["labels"]["start"][1] == {"op": "narrate", "text": "Inserted line."}
+    assert applied["diagnostics"]["valid"] is True
+    assert applied["patch_summary"] == build["patch"].patch_summary
+    assert stored["revision"] == 2
+    assert stored["draft"] == applied["draft"]
+    assert stored["diagnostics"] == applied["diagnostics"]
+
+
+def test_service_stale_apply_raises_draft_revision_conflict(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+    build = service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Inserted line."},
+    )
+
+    with pytest.raises(ValueError, match="draft_revision_conflict"):
+        service.apply_snippet_patch_result(script["id"], "narration", 0, build["patch"])
+
+
+def test_service_stale_apply_conflicts_before_validation_or_audio_resolution(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service, _audio_draft())
+    build = service.build_snippet_patch(
+        script["id"],
+        "play_bgm",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"media_ref": "missing.audio"},
+    )
+
+    def fail_validate_draft_payload(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("stale apply must not validate patched draft")
+
+    monkeypatch.setattr(service, "validate_draft_payload", fail_validate_draft_payload)
+
+    with pytest.raises(ValueError, match="draft_revision_conflict"):
+        service.apply_snippet_patch_result(script["id"], "play_bgm", 0, build["patch"])
+
+
+def test_service_duplicate_apply_against_same_revision_conflicts(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service)
+    build = service.build_snippet_patch(
+        script["id"],
+        "narration",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"text": "Inserted line."},
+    )
+
+    service.apply_snippet_patch_result(script["id"], "narration", build["base_revision"], build["patch"])
+    with pytest.raises(ValueError, match="draft_revision_conflict"):
+        service.apply_snippet_patch_result(script["id"], "narration", build["base_revision"], build["patch"])
+
+
+def test_service_audio_refs_are_resolved_from_patched_draft_for_validation(chacha_db: CharactersRAGDB) -> None:
+    seen_drafts: list[Mapping[str, Any]] = []
+
+    def audio_ref_resolver(program: Mapping[str, Any]) -> Mapping[str, Mapping[str, Any]]:
+        seen_drafts.append(program)
+        has_audio_op = any(op.get("op") == "play_bgm" for op in program["labels"]["start"])
+        return {"bgm.archive": {"mime_type": "audio/mpeg", "generated_file_id": 7001}} if has_audio_op else {}
+
+    service = _service(chacha_db, audio_ref_resolver=audio_ref_resolver)
+    script = _create_script(service, _audio_draft())
+    build = service.build_snippet_patch(
+        script["id"],
+        "play_bgm",
+        {"label": "start", "op_index": 1, "mode": "before"},
+        {"media_ref": "bgm.archive"},
+    )
+
+    preview = service.preview_snippet_patch(script["id"], "play_bgm", build["base_revision"], build["patch"])
+    applied = service.apply_snippet_patch_result(
+        script["id"],
+        "play_bgm",
+        build["base_revision"],
+        build["patch"],
+        audio_refs={"bgm.explicit": {"mime_type": "audio/mpeg", "generated_file_id": 7002}},
+    )
+
+    assert preview["diagnostics"]["valid"] is True
+    assert applied["diagnostics"]["valid"] is False
+    assert applied["diagnostics"]["errors"][0]["code"] == "audio_media_ref_inaccessible"
+    assert all(any(op.get("op") == "play_bgm" for op in draft["labels"]["start"]) for draft in seen_drafts)
+
+
 def test_generated_choice_set_patch_inserts_generate_and_handler_without_mutating_draft() -> None:
     draft = _draft()
     original = {
         "schema_version": "vn_script_program.v1",
+        "primary_asset_pack_id": 7,
         "entry_label": "start",
         "labels": {"start": [{"op": "narrate", "text": "Opening line."}, {"op": "end"}]},
     }
