@@ -46,11 +46,15 @@ class AgentEntrypointClassification:
     entrypoint_strategy: AgentEntrypointStrategy
     probe_state: AgentProbeState
     acp_command: str
-    acp_args: list[str]
+    acp_args: tuple[str, ...]
     primary_blocker: str | None
-    blockers: list[str]
+    blockers: tuple[str, ...]
     status_message: str
     docs_url: str | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "acp_args", tuple(self.acp_args))
+        object.__setattr__(self, "blockers", tuple(self.blockers))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -182,13 +186,13 @@ def classify_agent_entrypoint(
         command: str = acp_command,
         args: list[str] | None = None,
     ) -> AgentEntrypointClassification:
-        blockers = [blocker] if blocker else []
+        blockers = (blocker,) if blocker else ()
         return AgentEntrypointClassification(
             profile_key=entry.type,
             entrypoint_strategy=strategy,
             probe_state=probe_state,
             acp_command=command,
-            acp_args=list(args if args is not None else acp_args),
+            acp_args=tuple(args if args is not None else acp_args),
             primary_blocker=blocker,
             blockers=blockers,
             status_message=status_message,

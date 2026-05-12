@@ -4,7 +4,7 @@ title: Implement ACP downstream entrypoint strategy stages 1-3
 status: In Progress
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 04:43'
+updated_date: '2026-05-12 05:02'
 labels:
   - ACP
   - implementation
@@ -45,6 +45,8 @@ Implementation plan saved at Docs/superpowers/plans/2026-05-12-acp-entrypoint-st
 Plan review completed after two fix rounds. Added explicit no-inference guardrail tests, legacy DB migration/default coverage, dynamic API parity tests, and initialize-gated session/new plus session/prompt manifest sequencing. Final reviewer status: approved.
 
 Task 1 complete. Added registry/API/DB ACP entrypoint strategy metadata, built-in YAML seeds, migration/default handling, and focused tests. Reviews: spec compliant and code quality approved after null-clearing and mutable-default fixes. Final scoped Task 1 tests: 67 passed, 5 warnings. Bandit reports only existing ACP_Sessions_DB.py baseline findings outside changed lines.
+
+Task 2 complete. Added deterministic classify_agent_entrypoint output, immutable AgentEntrypointClassification value object, blocker precedence tests, no acp_command inference tests, and caveat taxonomy rows. Reviews: spec compliant and code quality approved after tuple immutability fix. Focused classifier tests: 19 passed, 5 warnings; Bandit on agent_registry.py reported 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

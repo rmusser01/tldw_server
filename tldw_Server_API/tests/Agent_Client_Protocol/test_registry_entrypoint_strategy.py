@@ -4,6 +4,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
 from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import (
+    AgentEntrypointClassification,
     AgentRegistry,
     AgentRegistryEntry,
     classify_agent_entrypoint,
@@ -185,7 +186,7 @@ def test_update_agent_collection_defaults_are_fresh_instances() -> None:
     assert second.acp_args is not first.acp_args
 
 
-def test_classifier_ready_to_probe_native_entrypoint(monkeypatch) -> None:
+def test_classifier_ready_to_probe_native_entrypoint() -> None:
     entry = AgentRegistryEntry(
         type="opencode",
         name="OpenCode",
@@ -202,9 +203,39 @@ def test_classifier_ready_to_probe_native_entrypoint(monkeypatch) -> None:
 
     assert result.probe_state == "ready_to_probe"
     assert result.acp_command == "opencode"
-    assert result.acp_args == ["acp"]
+    assert result.acp_args == ("acp",)
     assert result.primary_blocker is None
-    assert result.blockers == []
+    assert result.blockers == ()
+    assert result.as_dict()["acp_args"] == ["acp"]
+    assert result.as_dict()["blockers"] == []
+
+
+def test_classification_is_immutable_against_source_and_as_dict_mutation() -> None:
+    source_args = ["acp"]
+    source_blockers = ["binary_missing"]
+    result = AgentEntrypointClassification(
+        profile_key="goose",
+        entrypoint_strategy="native_acp",
+        probe_state="blocked",
+        acp_command="goose",
+        acp_args=source_args,
+        primary_blocker="binary_missing",
+        blockers=source_blockers,
+        status_message="blocked",
+        docs_url=None,
+    )
+
+    source_args.append("--mutated")
+    source_blockers.append("credentials_missing")
+
+    serialized = result.as_dict()
+    serialized["acp_args"].append("--dict-mutated")
+    serialized["blockers"].append("dict_mutated")
+
+    assert result.acp_args == ("acp",)
+    assert result.blockers == ("binary_missing",)
+    assert result.as_dict()["acp_args"] == ["acp"]
+    assert result.as_dict()["blockers"] == ["binary_missing"]
 
 
 def test_classifier_blocks_native_entrypoint_missing_command() -> None:
