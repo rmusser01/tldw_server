@@ -108,7 +108,7 @@ def expected_candidate_outputs_from_fixture(fixture_payload: Mapping[str, Any]) 
 
 def build_persona_chat_judge_report(
     fixture_payload: Mapping[str, Any],
-    candidate_outputs_by_case_id: Mapping[str, Mapping[str, Any]],
+    candidate_outputs_by_case_id: Mapping[str, Any],
 ) -> PersonaChatJudgeHarnessReport:
     """Compare candidate judge outputs with fixture expectations."""
     case_results: list[PersonaChatJudgeCaseResult] = []
@@ -164,7 +164,7 @@ def _compare_case(
     case_id: str,
     source_case_id: str,
     expected_output: Mapping[str, Any],
-    candidate_output: Mapping[str, Any] | None,
+    candidate_output: Any,
 ) -> PersonaChatJudgeCaseResult:
     """Compare one candidate output with one expected fixture output."""
     if candidate_output is None:
@@ -176,6 +176,16 @@ def _compare_case(
             flag_match=False,
             score_schema_valid=False,
             mismatches=("missing_candidate",),
+        )
+    if not isinstance(candidate_output, Mapping):
+        return PersonaChatJudgeCaseResult(
+            case_id=case_id,
+            source_case_id=source_case_id,
+            status="invalid_candidate",
+            verdict_match=False,
+            flag_match=False,
+            score_schema_valid=False,
+            mismatches=("invalid_candidate_envelope",),
         )
 
     mismatches: list[str] = []

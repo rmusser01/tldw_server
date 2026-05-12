@@ -134,6 +134,20 @@ def test_invalid_candidate_schema_records_invalid_result() -> None:
     _require("invalid_scores" in case_result["mismatches"], "invalid scores should be reported")
 
 
+def test_non_mapping_candidate_envelope_records_invalid_result() -> None:
+    """Non-object candidate envelopes should be invalid instead of crashing the harness."""
+    candidates: dict[str, Any] = _candidate_outputs()
+    candidates["PC-JUDGE-001"] = "not-a-candidate-object"
+
+    report = build_persona_chat_judge_report(_load_fixture(), candidates).to_dict()
+    case_result = report["cases"][0]
+
+    _require(report["invalid_candidate_count"] == 1, "invalid candidate envelope should be counted")
+    _require(report["mismatched_cases"] == 0, "invalid candidate envelope should not be a simple mismatch")
+    _require(case_result["status"] == "invalid_candidate", "case status should identify invalid candidate")
+    _require("invalid_candidate_envelope" in case_result["mismatches"], "invalid envelope should be reported")
+
+
 def test_malformed_fixture_rows_are_bounded_and_empty_case_ids_are_skipped() -> None:
     """Malformed fixture scores should not crash extraction, and empty ids are ignored."""
     fixture = _copy_fixture()
