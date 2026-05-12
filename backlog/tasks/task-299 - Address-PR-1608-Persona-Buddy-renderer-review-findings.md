@@ -4,6 +4,7 @@ title: Address PR 1608 Persona Buddy renderer review findings
 status: Done
 assignee: []
 created_date: '2026-05-12 13:53'
+updated_date: '2026-05-12 14:06'
 labels:
   - persona-buddy
   - pr-review
@@ -41,17 +42,18 @@ Resolve still-valid review feedback on PR #1608 for the Persona Buddy renderer c
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-- 2026-05-12: Addressed PR #1608 review findings after verifying the comments against the current branch. Backend manifest validation now rejects validation-only renderer capabilities when activation is required and sanitizes renderer types in errors. Frontend renderer lookup now uses an own-property guard, legacy `asset_ids` are trimmed before renderability checks, shared render-error types live in a neutral module, and renderer capability response types allow forward-compatible string values.
-- 2026-05-12: Redacted local absolute worktree paths from TASK-293, TASK-294, and TASK-296.
-- 2026-05-12: The Gemini `Object.keys()` allocation comment was addressed with a semantics-preserving own-entry helper instead of changing to a truthy `assets_by_id` check, because an empty `assets_by_id` record must still fall back to legacy `assets`.
-- 2026-05-12 verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py -q` passed with 65 tests.
-- 2026-05-12 verification: `bunx vitest run src/components/Common/PersonaBuddy/__tests__/personaVisualRenderers.test.tsx src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts src/services/__tests__/persona-visuals.test.ts` passed with 5 files and 46 tests. Existing `react-i18next` `NO_I18NEXT_INSTANCE` warning was observed.
-- 2026-05-12 verification: `git diff --check` passed; `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visuals.py` passed.
-- 2026-05-12 security: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visuals.py tldw_Server_API/tests/Persona/test_persona_visuals_core.py -s B101 -f json -o /tmp/bandit_persona_buddy_renderer_review.json` completed with no findings; B101 was excluded for test assertions.
+Verified the live PR #1608 review threads before editing. Addressed the still-valid findings: validation-only renderer capabilities are now rejected when activation validation is requested; unsupported renderer IDs in manifest errors are bounded and newline/tab/backslash escaped; legacy `asset_ids` are trimmed before frame lookup; asset map presence no longer allocates `Object.keys`; the Buddy renderer registry uses own-property lookup for untrusted renderer strings; the shared render-error type moved to a neutral PersonaBuddy module; capability payload `renderer_type` is string-based for forward compatibility; local absolute worktree paths were redacted from the touched task notes.
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q` -> 18 passed, 5 warnings.
+- `bunx vitest run src/components/Common/PersonaBuddy/__tests__/personaVisualRenderers.test.tsx src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts src/services/__tests__/persona-visuals.test.ts` from `apps/packages/ui` -> 4 files passed, 37 tests passed, with the existing react-i18next test warning.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visuals.py -f json -o /tmp/bandit_pr1608_review_visuals.json` -> 0 results, 0 errors.
+- `git diff --check` -> passed.
+- Package-wide `bunx tsc -p tsconfig.json --noEmit --pretty false` still has unrelated baseline errors; after the local typed-map fix, filtered Persona/Buddy/persona-visuals TypeScript output had no matches.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
-<!-- SECTION:FINAL:BEGIN -->
-Resolved PR #1608 review feedback with focused backend renderer activation validation, sanitized renderer-type errors, frontend asset/renderer registry hardening, forward-compatible capability typing, local path redaction in Backlog records, and focused backend/frontend/security verification.
-<!-- SECTION:FINAL:END -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Addressed PR #1608 review feedback for the Persona/Buddy renderer capability slice. The backend activation path now enforces `can_activate` centrally and sanitizes unsupported renderer IDs in errors. The WebUI trims legacy animation asset IDs, avoids prototype-chain renderer lookup, keeps asset fallback behavior without `Object.keys` allocation, moves shared render-error typing out of the concrete sprite renderer, and keeps capability renderer IDs forward-compatible. Touched Backlog notes no longer include the local absolute worktree path.
+<!-- SECTION:FINAL_SUMMARY:END -->
