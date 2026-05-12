@@ -177,11 +177,7 @@ def _load_json_array(path: Path, *, label: str) -> Sequence[Mapping[str, Any]]:
         raise click.ClickException(f"{label} JSON must be valid JSON: {exc}") from exc
     except OSError as exc:
         raise click.ClickException(f"Failed to read {label.lower()} JSON: {exc}") from exc
-    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
-        raise click.ClickException(f"{label} JSON must be an array.")
-    if not all(isinstance(item, Mapping) for item in payload):
-        raise click.ClickException(f"{label} JSON entries must be objects.")
-    return payload
+    return _required_array(payload, label=f"{label} JSON")
 
 
 def _execution_result_from_payload(
