@@ -243,6 +243,14 @@ type PlaygroundQueuedSourceContext = {
   isImageCommand?: boolean;
 };
 
+type ComposerPopoverKey =
+  | "context"
+  | "model"
+  | "mcp"
+  | "tools"
+  | "attachment"
+  | "send";
+
 const FOLLOW_UP_RESEARCH_PROMPT_PREFIX = "Follow up on this research:";
 const CASUAL_COMPOSER_MAX_HEIGHT_PX = 120;
 const PRO_COMPOSER_MAX_HEIGHT_PX = 160;
@@ -593,6 +601,9 @@ export const PlaygroundForm = ({
   const updateChatModelSettings = useStoreChatModelSettings(
     (state) => state.updateSettings,
   );
+  const setActiveChatModelSettingsScope = useStoreChatModelSettings(
+    (state) => state.setActiveSettingsScope,
+  );
   const { data: promptLibrary = [] } = useQuery({
     queryKey: ["playgroundStartupPromptLibrary"],
     queryFn: getAllPrompts,
@@ -694,6 +705,7 @@ export const PlaygroundForm = ({
     setToolCatalogId,
     toolChoice,
   });
+  const setMcpPopoverOpen = mcpCtrl.setMcpPopoverOpen;
   const handleModuleSelect = React.useCallback(
     (value?: string[]) => {
       setToolModules(Array.isArray(value) ? value : []);
@@ -1146,7 +1158,10 @@ export const PlaygroundForm = ({
     setModelSearchQuery,
     modelSortMode,
     setModelSortMode,
+    modelListScope = "configured",
+    setModelListScope = () => undefined,
     selectedModelMeta,
+    selectedModelKey,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,
@@ -1168,6 +1183,33 @@ export const PlaygroundForm = ({
     setSelectedModel,
     navigate,
   });
+  React.useEffect(() => {
+    setActiveChatModelSettingsScope(selectedModelKey ?? null);
+  }, [selectedModelKey, setActiveChatModelSettingsScope]);
+
+  const closeComposerPopoversExcept = React.useCallback(
+    (activePopover: ComposerPopoverKey) => {
+      if (activePopover !== "context") {
+        setContextToolsOpen(false);
+      }
+      if (activePopover !== "model") {
+        setModelDropdownOpen(false);
+      }
+      if (activePopover !== "mcp") {
+        setMcpPopoverOpen(false);
+      }
+      if (activePopover !== "tools") {
+        setToolsPopoverOpen(false);
+      }
+      if (activePopover !== "attachment") {
+        setAttachmentMenuOpen(false);
+      }
+      if (activePopover !== "send") {
+        setSendMenuOpen(false);
+      }
+    },
+    [setContextToolsOpen, setMcpPopoverOpen, setModelDropdownOpen],
+  );
 
   React.useEffect(() => {
     setOptionalPanelVisible("model-catalog", modelDropdownOpen);
@@ -1723,8 +1765,9 @@ export const PlaygroundForm = ({
     ],
   );
   const openModelApiSelector = React.useCallback(() => {
+    closeComposerPopoversExcept("model");
     setModelDropdownOpen(true);
-  }, [setModelDropdownOpen]);
+  }, [closeComposerPopoversExcept, setModelDropdownOpen]);
   const getModelRecommendationActionLabel = React.useCallback(
     (action: ModelRecommendationAction) => {
       if (action === "enable_json_mode") {
@@ -1811,6 +1854,9 @@ export const PlaygroundForm = ({
     <Dropdown
       open={modelDropdownOpen}
       onOpenChange={(open) => {
+        if (open) {
+          closeComposerPopoversExcept("model");
+        }
         setModelDropdownOpen(open);
         if (!open) {
           setModelSearchQuery("");
@@ -1819,15 +1865,57 @@ export const PlaygroundForm = ({
       menu={{
         items: modelDropdownMenuItems,
         className: "no-scrollbar",
-        activeKey: selectedModel ?? undefined,
+        activeKey: selectedModelKey ?? selectedModel ?? undefined,
       }}
       popupRender={(menu) => (
         <div className="bg-surface rounded-lg shadow-lg border border-border">
-          <div className="p-2 border-b border-border flex items-center gap-2">
+          <div className="p-2 border-b border-border flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="model-list-scope-toggle"
+                aria-pressed={modelListScope === "catalog"}
+                className={`rounded border px-2 py-1 text-xs transition-colors ${
+                  modelListScope === "catalog"
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-surface2 text-text-muted hover:text-text"
+                }`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setModelListScope(
+                    modelListScope === "catalog" ? "configured" : "catalog",
+                  );
+                }}
+              >
+                {modelListScope === "catalog"
+                  ? t("playground:composer.configuredModels", "Configured")
+                  : t("playground:composer.searchAllModels", "Search all models")}
+              </button>
+              <span className="text-[11px] text-text-subtle">
+                {modelListScope === "catalog"
+                  ? t(
+                      "playground:composer.catalogScopeHint",
+                      "All known models",
+                    )
+                  : t(
+                      "playground:composer.configuredScopeHint",
+                      "Usable configured models",
+                    )}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
             <Input
               size="small"
               placeholder={t(
-                "playground:composer.modelSearchPlaceholder",
+                modelListScope === "catalog"
+                  ? "playground:composer.modelCatalogSearchPlaceholder"
+                  : "playground:composer.modelSearchPlaceholder",
+                modelListScope === "catalog"
+                  ? "Search all known models"
+                  : "Search models",
+              )}
+              aria-label={t(
+                "playground:composer.modelSearchLabel",
                 "Search models",
               )}
               value={modelSearchQuery}
@@ -1861,6 +1949,7 @@ export const PlaygroundForm = ({
               className="min-w-[120px]"
               onKeyDown={(event) => event.stopPropagation()}
             />
+            </div>
           </div>
           <div className="max-h-[400px] overflow-y-auto no-scrollbar">
             {menu}
@@ -2404,9 +2493,12 @@ export const PlaygroundForm = ({
   );
   const handleKnowledgePanelOpenChange = React.useCallback(
     (nextOpen: boolean) => {
+      if (nextOpen) {
+        closeComposerPopoversExcept("context");
+      }
       setContextToolsOpen(nextOpen);
     },
-    [],
+    [closeComposerPopoversExcept, setContextToolsOpen],
   );
   const handleKnowledgeRemoveImage = React.useCallback(() => {
     form.setFieldValue("image", "");
@@ -2715,8 +2807,9 @@ export const PlaygroundForm = ({
     setWebSearch(!webSearch);
   }, [setWebSearch, webSearch]);
   const handleOpenModelSettings = React.useCallback(() => {
+    closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
-  }, [setOpenModelSettings]);
+  }, [closeComposerPopoversExcept, setOpenModelSettings]);
   const {
     showSlashMenu,
     slashActiveIndex,
@@ -2869,9 +2962,10 @@ export const PlaygroundForm = ({
   const openKnowledgePanel = React.useCallback(
     (tab: KnowledgeTab) => {
       requestKnowledgePanelTab(tab);
+      closeComposerPopoversExcept("context");
       setContextToolsOpen(true);
     },
-    [requestKnowledgePanelTab, setContextToolsOpen],
+    [closeComposerPopoversExcept, requestKnowledgePanelTab, setContextToolsOpen],
   );
 
   const toggleKnowledgePanel = React.useCallback(
@@ -2879,10 +2973,16 @@ export const PlaygroundForm = ({
       const nextOpen = !contextToolsOpen;
       if (nextOpen) {
         requestKnowledgePanelTab(tab);
+        closeComposerPopoversExcept("context");
       }
       setContextToolsOpen(nextOpen);
     },
-    [contextToolsOpen, requestKnowledgePanelTab, setContextToolsOpen],
+    [
+      closeComposerPopoversExcept,
+      contextToolsOpen,
+      requestKnowledgePanelTab,
+      setContextToolsOpen,
+    ],
   );
 
   React.useEffect(() => {
@@ -4039,6 +4139,43 @@ export const PlaygroundForm = ({
     return t("playground:composer.toolRunIdle", "Idle");
   }, [chatLoopState, t]);
 
+  const handleMcpPopoverChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("mcp");
+      }
+      setMcpPopoverOpen(open);
+    },
+    [closeComposerPopoversExcept, setMcpPopoverOpen],
+  );
+  const handleToolsPopoverChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("tools");
+      }
+      setToolsPopoverOpen(open);
+    },
+    [closeComposerPopoversExcept],
+  );
+  const handleAttachmentMenuChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("attachment");
+      }
+      setAttachmentMenuOpen(open);
+    },
+    [closeComposerPopoversExcept],
+  );
+  const handleSendMenuChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("send");
+      }
+      setSendMenuOpen(open);
+    },
+    [closeComposerPopoversExcept],
+  );
+
   const mcpControl = (
     <PlaygroundMcpControl
       hasMcp={hasMcp}
@@ -4053,7 +4190,7 @@ export const PlaygroundForm = ({
       mcpChoiceLabel={mcpCtrl.mcpChoiceLabel}
       mcpDisabledReason={mcpCtrl.mcpDisabledReason}
       mcpPopoverOpen={mcpCtrl.mcpPopoverOpen}
-      onMcpPopoverChange={mcpCtrl.setMcpPopoverOpen}
+      onMcpPopoverChange={handleMcpPopoverChange}
       onOpenMcpSettings={() => setMcpSettingsOpen(true)}
       t={t}
     />
@@ -4092,7 +4229,7 @@ export const PlaygroundForm = ({
   const toolsButton = (
     <PlaygroundToolsPopover
       toolsPopoverOpen={toolsPopoverOpen}
-      onToolsPopoverChange={setToolsPopoverOpen}
+      onToolsPopoverChange={handleToolsPopoverChange}
       isProMode={isProMode}
       onOpenImageGenerate={openImageGenerateModal}
       onOpenKnowledgePanel={openKnowledgePanel}
@@ -4139,7 +4276,7 @@ export const PlaygroundForm = ({
       onDocumentUpload={handleDocumentUpload}
       onOpenKnowledgePanel={openKnowledgePanel}
       attachmentMenuOpen={attachmentMenuOpen}
-      onAttachmentMenuChange={setAttachmentMenuOpen}
+      onAttachmentMenuChange={handleAttachmentMenuChange}
       t={t}
     />
   );
@@ -4157,7 +4294,7 @@ export const PlaygroundForm = ({
       onStopListening={stopListening}
       onSubmitForm={submitForm}
       sendMenuOpen={sendMenuOpen}
-      onSendMenuChange={setSendMenuOpen}
+      onSendMenuChange={handleSendMenuChange}
       t={t}
     />
   );

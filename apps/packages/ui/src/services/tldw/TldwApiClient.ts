@@ -521,6 +521,9 @@ export interface TldwModel {
   function_calling?: boolean
   json_output?: boolean
   type?: string
+  is_configured?: boolean
+  provider_is_configured?: boolean
+  catalog_only?: boolean
   modalities?: {
     input?: string[]
     output?: string[]
@@ -1892,6 +1895,7 @@ export class TldwApiClientBase {
           : canonicalModelId
 
       return {
+        ...m,
         id: canonicalModelId,
         name: displayName,
         provider: String(m.provider || "default"),
@@ -1923,6 +1927,9 @@ export class TldwApiClientBase {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
+        is_configured: m.is_configured,
+        provider_is_configured: m.provider_is_configured,
+        catalog_only: m.catalog_only,
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {

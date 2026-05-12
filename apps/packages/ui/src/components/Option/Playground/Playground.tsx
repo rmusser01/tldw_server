@@ -1,6 +1,13 @@
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
+import {
+  PlaygroundCockpitShell,
+  type PlaygroundCockpitMode,
+} from "./PlaygroundCockpitShell";
+import { PlaygroundContextRail } from "./PlaygroundContextRail";
+import { PlaygroundRuntimeInspector } from "./PlaygroundRuntimeInspector";
+import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
@@ -120,18 +127,28 @@ export const Playground = () => {
     DEFAULT_CHAT_SETTINGS.stickyChatInput,
   );
   const isMobileViewport = useMobile();
+  const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
+    ? "focus"
+    : "cockpit";
+  const [chatLayoutMode, setChatLayoutMode] =
+    useStorage<PlaygroundCockpitMode>(
+      "playgroundChatLayoutMode",
+      defaultChatLayoutMode,
+    );
   const {
     messages,
     history,
     historyId,
     serverChatId,
     isLoading,
+    selectedModel,
     setHistoryId,
     setHistory,
     setMessages,
     setSelectedSystemPrompt,
     setSelectedModel,
     setServerChatId,
+    contextFiles,
     setContextFiles,
     createChatBranch,
     streaming,
@@ -139,6 +156,10 @@ export const Playground = () => {
     setSelectedCharacter,
     compareMode,
     compareFeatureEnabled,
+    temporaryChat,
+    webSearch,
+    selectedKnowledge,
+    ragMediaIds,
   } = useMessageOption();
   const { setSystemPrompt } = useStoreChatModelSettings();
   const composerBottomOffsetPx = stickyChatInput
@@ -193,6 +214,16 @@ export const Playground = () => {
   );
   const setSelectedQuickPrompt = useStoreMessageOption(
     (state) => state.setSelectedQuickPrompt,
+  );
+  const normalizedChatLayoutMode: PlaygroundCockpitMode =
+    chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
+      ? chatLayoutMode
+      : defaultChatLayoutMode;
+  const handleChatLayoutModeChange = React.useCallback(
+    (mode: PlaygroundCockpitMode) => {
+      void setChatLayoutMode(mode);
+    },
+    [setChatLayoutMode],
   );
 
   React.useEffect(() => {
@@ -1327,6 +1358,79 @@ export const Playground = () => {
     [scrollToMessageIndex, threadSearchMatches],
   );
 
+  const contextFileCount = Array.isArray(contextFiles)
+    ? contextFiles.length
+    : 0;
+  const selectedKnowledgeCount = Array.isArray(selectedKnowledge)
+    ? selectedKnowledge.length
+    : selectedKnowledge
+      ? 1
+      : 0;
+  const ragMediaIdCount = Array.isArray(ragMediaIds)
+    ? ragMediaIds.length
+    : 0;
+  const hasChatContext = Boolean(
+    attachedResearchContext ||
+      webSearch ||
+      contextFileCount > 0 ||
+      selectedKnowledgeCount > 0 ||
+      ragMediaIdCount > 0,
+  );
+  const sessionLabel = temporaryChat
+    ? toText(t("playground:cockpit.sessionTemporary", "Temporary chat"))
+    : serverChatId
+      ? toText(t("playground:cockpit.sessionServer", "Server chat"))
+      : toText(t("playground:cockpit.sessionLocal", "Local chat"));
+  const contextSummary = [
+    attachedResearchContext
+      ? toText(t("playground:cockpit.contextResearch", "Research attachment"))
+      : null,
+    webSearch ? toText(t("playground:cockpit.contextWeb", "Web search")) : null,
+    contextFileCount > 0
+      ? `${contextFileCount} ${toText(
+          t("playground:cockpit.contextFiles", "file(s)"),
+        )}`
+      : null,
+    selectedKnowledgeCount > 0
+      ? `${selectedKnowledgeCount} ${toText(
+          t("playground:cockpit.contextKnowledge", "knowledge item(s)"),
+        )}`
+      : null,
+    ragMediaIdCount > 0
+      ? `${ragMediaIdCount} ${toText(
+          t("playground:cockpit.contextMedia", "media scope(s)"),
+        )}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+  const cockpitLeftRail = (
+    <PlaygroundContextRail
+      hasContext={hasChatContext}
+      contextSummary={contextSummary}
+      sessionLabel={sessionLabel}
+      historyLinked={Boolean(historyId)}
+    />
+  );
+  const cockpitRightRail = (
+    <PlaygroundRuntimeInspector
+      streaming={streaming}
+      selectedModel={selectedModel}
+      messageCount={messages.length}
+      threadSearchOpen={threadSearchOpen}
+      selectedCharacterName={selectedCharacter?.name || null}
+    />
+  );
+  const cockpitStatusStrip = (
+    <PlaygroundStatusStrip
+      mode={normalizedChatLayoutMode}
+      streaming={streaming}
+      selectedModel={selectedModel}
+      messageCount={messages.length}
+      serverChatId={serverChatId}
+      temporaryChat={temporaryChat}
+      hasContext={hasChatContext}
+    />
+  );
+
   return (
     <div
       ref={drop}
@@ -1381,7 +1485,14 @@ export const Playground = () => {
       )}
 
       <div className="relative z-10 flex h-full min-h-0 w-full">
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <PlaygroundCockpitShell
+          mode={normalizedChatLayoutMode}
+          onModeChange={handleChatLayoutModeChange}
+          leftRail={cockpitLeftRail}
+          rightRail={cockpitRightRail}
+          statusStrip={cockpitStatusStrip}
+        >
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           {parentMeta?.parentHistoryId && (
             <div className="flex w-full justify-center px-5 pt-2">
               <div className="inline-flex flex-wrap items-center justify-center gap-2">
@@ -1809,7 +1920,8 @@ export const Playground = () => {
               }
             />
           </div>
-        </div>
+          </div>
+        </PlaygroundCockpitShell>
         {artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">

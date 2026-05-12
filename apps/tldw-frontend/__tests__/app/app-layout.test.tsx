@@ -57,8 +57,19 @@ vi.mock("@web/components/AppProviders", () => ({
 }))
 
 vi.mock("@web/components/networking/ServerReadinessGate", () => ({
-  ServerReadinessGate: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="server-readiness-gate">{children}</div>
+  ServerReadinessGate: ({
+    children,
+    allowDegraded
+  }: {
+    children: React.ReactNode
+    allowDegraded?: boolean
+  }) => (
+    <div
+      data-testid="server-readiness-gate"
+      data-allow-degraded={String(Boolean(allowDegraded))}
+    >
+      {children}
+    </div>
   )
 }))
 
@@ -129,6 +140,10 @@ describe("App layout routing", () => {
   it("wraps non-login routes with OptionLayout", async () => {
     renderApp("/media")
     expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "false"
+    )
     expect(screen.getByTestId("first-run-gate")).toBeInTheDocument()
     expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
       "data-bypass",
@@ -136,6 +151,23 @@ describe("App layout routing", () => {
     )
     expect(await screen.findByTestId("option-layout")).toBeInTheDocument()
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
+  })
+
+  it("allows degraded server readiness only on chat", () => {
+    const { rerender } = renderApp("/chat")
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "true"
+    )
+
+    mockRouter.pathname = "/media"
+    mockRouter.asPath = "/media"
+    rerender(<App Component={DummyPage} pageProps={{}} />)
+
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "false"
+    )
   })
 
   it("bypasses the generic first-run splash for character-chat route intent", async () => {

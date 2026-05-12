@@ -178,9 +178,32 @@ describe("TldwModelsService caching", () => {
     expect(chatIds).not.toContain("black-forest-labs/flux.1-schnell")
   })
 
+  it("carries provider configuration flags into chat model descriptors", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "qwen/qwen-max",
+        name: "qwen-max",
+        provider: "qwen",
+        type: "chat",
+        is_configured: false,
+        provider_is_configured: false,
+        catalog_only: true
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels[0]?.isConfigured).toBe(false)
+    expect(chatModels[0]?.providerIsConfigured).toBe(false)
+    expect(chatModels[0]?.catalogOnly).toBe(true)
+  })
+
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 2,
+      version: 3,
       timestamp: Date.now(),
       scope: "http://127.0.0.1:8000|single-user|key|none",
       models: [
