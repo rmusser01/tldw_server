@@ -27,10 +27,17 @@ def test_openwebui_import_is_discoverable_from_user_guides() -> None:
     assert "Process supported files" in guide_text  # nosec B101
     assert "OpenWebUI chat JSON migration" in readme_text  # nosec B101
     assert "OpenWebUI webui.db migration" in readme_text  # nosec B101
+    assert "post-import OpenWebUI attachment hydration" in readme_text  # nosec B101
+    assert "referenced images/files" in readme_text  # nosec B101
     assert "WebUI_Extension/Chatbook_User_Guide.md" in readme_text  # nosec B101
     assert "WebUI_Extension/Chatbook_User_Guide.md" in index_text  # nosec B101
     assert "OpenWebUI chat JSON and database import" in index_text  # nosec B101
+    assert "post-import attachment hydration" in index_text  # nosec B101
+    assert "OpenWebUI attachment hydration panel" in guide_text  # nosec B101
+    assert "when imported messages show missing OpenWebUI images/files" in guide_text  # nosec B101
     assert 'import OpenWebUI "Export Chats" JSON files and uploaded webui.db databases' in overview_text  # nosec B101
+    assert "Chatbooks import tab" in overview_text  # nosec B101
+    assert "server-local OpenWebUI data root" in overview_text  # nosec B101
 
 
 def test_openwebui_import_is_discoverable_from_api_docs() -> None:
@@ -43,6 +50,8 @@ def test_openwebui_import_is_discoverable_from_api_docs() -> None:
     assert "Chatbooks - `/api/v1/chatbooks`" in api_readme  # nosec B101
     assert "source_format=openwebui_json" in api_readme  # nosec B101
     assert "source_format=openwebui_db" in api_readme  # nosec B101
+    assert "server-local attachment hydration" in api_readme  # nosec B101
+    assert "allowed OpenWebUI data root" in api_readme  # nosec B101
     assert "Chatbook_API_Documentation.md" in api_readme  # nosec B101
     assert "| `chatbooks` | API-related/Chatbook_API_Documentation.md |" in api_tags  # nosec B101
     assert "OpenWebUI chat export JSON" in api_doc  # nosec B101
@@ -63,6 +72,12 @@ def test_openwebui_import_is_reflected_in_published_docs() -> None:
     published_api = Path("Docs/Published/API-related/API_README.md").read_text(
         encoding="utf-8"
     )
+    published_index = Path("Docs/Published/User_Guides/index.md").read_text(
+        encoding="utf-8"
+    )
+    published_overview = Path(
+        "Docs/Published/User_Guides/WebUI_Extension/User_Guide.md"
+    ).read_text(encoding="utf-8")
     feature_status = Path("Docs/Published/Overview/Feature_Status.md").read_text(
         encoding="utf-8"
     )
@@ -70,10 +85,15 @@ def test_openwebui_import_is_reflected_in_published_docs() -> None:
     assert "OpenWebUI Chat Import" in published_guide  # nosec B101
     assert "OpenWebUI database" in published_guide  # nosec B101
     assert "OpenWebUI attachment hydration" in published_guide  # nosec B101
+    assert "OpenWebUI attachment hydration panel" in published_guide  # nosec B101
+    assert "post-import attachment hydration" in published_index  # nosec B101
+    assert "server-local OpenWebUI data root" in published_overview  # nosec B101
     assert "source_format=openwebui_json" in published_api  # nosec B101
     assert "source_format=openwebui_db" in published_api  # nosec B101
+    assert "server-local attachment hydration" in published_api  # nosec B101
     assert "/api/v1/chatbooks/openwebui/hydration/preview" in published_api  # nosec B101
     assert "OpenWebUI JSON and database chat import" in feature_status  # nosec B101
+    assert "post-import attachment hydration" in feature_status  # nosec B101
 
 
 def test_chatbook_import_docs_match_multipart_contract() -> None:

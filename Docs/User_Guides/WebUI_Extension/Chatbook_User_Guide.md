@@ -196,7 +196,7 @@ Use database import when you have local access to the OpenWebUI SQLite database 
 
 Database import reads chats only for the selected source user. It does not import every user from the database by default. Folder paths are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`; if the same folder name is already used elsewhere, tldw keeps the displayed path but safely disambiguates the backing collection name.
 
-OpenWebUI import first preserves files, images, and artifacts as metadata references. The import step does not copy binaries from the OpenWebUI attachment store. Use the separate attachment hydration workflow below after the conversations are imported.
+OpenWebUI import first preserves files, images, and artifacts as metadata references. The import step does not copy binaries from the OpenWebUI attachment store. Use the separate attachment hydration workflow below after the conversations are imported. The WebUI shows the OpenWebUI attachment hydration panel directly under the OpenWebUI import preview and results in the Chatbooks import tab. Use it when preview reports attachment references or when imported messages show missing OpenWebUI images/files.
 
 #### Hydrating OpenWebUI Attachments
 
