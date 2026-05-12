@@ -1113,6 +1113,78 @@ describe('VNPlayWorkspace', () => {
     });
   });
 
+  it('refreshes generation history when a generation action returns a session payload', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 4,
+      scene_state: { scene_version: 4 },
+    };
+    const refreshedSession: VNPlaySession = {
+      ...session,
+      scene_version: 5,
+      scene_state: { scene_version: 5 },
+    };
+    const initialGenerations: VNPlayGenerationHistoryResponse = {
+      ...defaultGenerationHistory,
+      items: [
+        {
+          id: 31,
+          generation_id: 12,
+          generation_point_key: 'intro:2:choice',
+          revision_number: 1,
+          status: 'succeeded',
+          active: false,
+          output_schema: 'choice_set',
+          public_output: { choices: [{ id: 'ask-map', text: 'Ask about the map' }] },
+          profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+        },
+      ],
+      total: 1,
+    };
+    const refreshedGenerations: VNPlayGenerationHistoryResponse = {
+      ...defaultGenerationHistory,
+      items: [
+        {
+          id: 32,
+          generation_id: 12,
+          generation_point_key: 'intro:2:choice',
+          revision_number: 2,
+          status: 'succeeded',
+          active: true,
+          output_schema: 'choice_set',
+          public_output: { choices: [{ id: 'follow-map', text: 'Follow the refreshed map' }] },
+          profile: { profile_key: 'choice_writer', snapshot_id: 45 },
+        },
+      ],
+      total: 1,
+    };
+    mockVNPlayApi({ generations: initialGenerations, sessions: [session] });
+    mocks.regenerateVNPlayGeneration.mockResolvedValue({
+      turn_request_id: 21,
+      status: 'completed',
+      scene_version: 5,
+      session: refreshedSession,
+      events: [],
+    });
+    mocks.getVNPlaySession.mockResolvedValue(refreshedSession);
+    mocks.listVNPlayGenerations
+      .mockResolvedValueOnce(initialGenerations)
+      .mockResolvedValueOnce(refreshedGenerations);
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Ask about the map')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /regenerate intro:2:choice/i }));
+
+    expect(await screen.findByText('Follow the refreshed map')).toBeInTheDocument();
+    expect(mocks.listVNPlayGenerations).toHaveBeenCalledTimes(2);
+  });
+
   it('runs pending generation confirm and cancel commands through backend actions', async () => {
     const user = userEvent.setup();
     const session: VNPlaySession = {

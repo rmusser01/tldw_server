@@ -298,6 +298,11 @@ export default function VNPlayWorkspace({
       setSessions((previous) =>
         previous.map((session) => (session.id === response.session?.id ? response.session : session))
       );
+      try {
+        await reloadSessionCollections(response.session.id);
+      } catch {
+        // Keep response-derived session state when the follow-up collection refresh is unavailable.
+      }
       return;
     }
 
@@ -340,7 +345,7 @@ export default function VNPlayWorkspace({
     } catch {
       // Keep response-derived state when the follow-up refresh is unavailable.
     }
-  }, [reloadSelectedSession, selectedSession]);
+  }, [reloadSelectedSession, reloadSessionCollections, selectedSession]);
 
   const handleTurnError = useCallback(async (turnError: unknown) => {
     const errorInfo = getVNPlayErrorInfo(turnError);
