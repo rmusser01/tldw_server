@@ -64,6 +64,12 @@ A future executable judge must satisfy these rules before its output is consider
 
 Judge execution remains deferred until these calibration requirements are implemented and reviewed.
 
+## Offline Harness
+
+The first executable layer is the offline harness in `tldw_Server_API/app/core/Evaluations/persona_chat_judge_harness.py`. It compares already-produced candidate judge outputs against the checked-in V1 contract fixture and returns a bounded report with case counts, per-verdict counts, verdict agreement, flag agreement, score schema validity, missing candidates, invalid candidates, extra candidates, and per-case mismatch keys.
+
+The harness does not call model providers, persist evaluation runs, enqueue Jobs, expose API endpoints, or gate Persona Chat responses. Future judge adapters should feed their outputs into this helper before any output is treated as calibrated.
+
 ## Privacy And Redaction
 
 Contract fixtures must not contain:
