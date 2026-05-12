@@ -128,7 +128,7 @@ def client(
     fake_jobs: FakeJobManager,
 ) -> Iterator[TestClient]:
     app = FastAPI()
-    app.include_router(vn_assets_router, prefix="/api/v1")
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
 
     async def override_user() -> User:
         user_id = current_user_id["value"]
@@ -183,8 +183,12 @@ def test_start_export_creates_jobs_backed_portability_row(
     pack: SimpleNamespace,
 ) -> None:
     response = client.post(
-        f"/api/v1/vn-assets/packs/{pack.id}/export",
-        json={"strict": True, "include_full_provenance": False},
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={
+            "strict": True,
+            "include_full_provenance": False,
+            "idempotency_key": "export-create-1",
+        },
     )
 
     assert response.status_code == 202
@@ -202,6 +206,40 @@ def test_start_export_creates_jobs_backed_portability_row(
     assert fake_jobs.created[0]["payload"]["pack_id"] == pack.id
 
 
+def test_start_export_replays_same_idempotency_key_and_conflicts_on_different_payload(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    pack: SimpleNamespace,
+) -> None:
+    payload = {"idempotency_key": "export-pack-1", "strict": True}
+
+    first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json=payload)
+    replay = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json=payload)
+    conflict = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-pack-1", "strict": False},
+    )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(fake_jobs.created) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_start_export_requires_idempotency_key(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    pack: SimpleNamespace,
+) -> None:
+    response = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
+    assert fake_jobs.created == []
+
+
 def test_start_export_rejects_non_owned_pack(
     client: TestClient,
     current_user_id: dict[str, int],
@@ -211,7 +249,7 @@ def test_start_export_rejects_non_owned_pack(
 ) -> None:
     current_user_id["value"] = 7
 
-    response = client.post(f"/api/v1/vn-assets/packs/{pack.id}/export", json={})
+    response = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json={})
 
     assert response.status_code == 404
     assert fake_jobs.created == []
@@ -224,7 +262,10 @@ def test_export_status_composes_jobs_lifecycle_with_vn_stage(
     repo: VNAssetPacksRepository,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-status-1"},
+    )
     job_id = started.json()["job_id"]
     fake_jobs.jobs[int(job_id)]["status"] = "processing"
     repo.update_portability_job(
@@ -233,7 +274,7 @@ def test_export_status_composes_jobs_lifecycle_with_vn_stage(
         owner_user_id=42,
     )
 
-    response = client.get(f"/api/v1/vn-assets/portability/exports/{job_id}")
+    response = client.get(f"/api/v1/vn/vn-assets/portability/exports/{job_id}")
 
     assert response.status_code == 200
     body = response.json()
@@ -249,7 +290,10 @@ def test_export_status_reconciles_terminal_jobs_state(
     repo: VNAssetPacksRepository,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-status-2"},
+    )
     job_id = started.json()["job_id"]
     fake_jobs.jobs[int(job_id)]["status"] = "completed"
     repo.update_portability_job(
@@ -258,7 +302,7 @@ def test_export_status_reconciles_terminal_jobs_state(
         owner_user_id=42,
     )
 
-    response = client.get(f"/api/v1/vn-assets/portability/exports/{job_id}")
+    response = client.get(f"/api/v1/vn/vn-assets/portability/exports/{job_id}")
 
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
@@ -272,10 +316,13 @@ def test_export_download_rejects_incomplete_job(
     client: TestClient,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-download-1"},
+    )
     job_id = started.json()["job_id"]
 
-    response = client.get(f"/api/v1/vn-assets/portability/exports/{job_id}/download")
+    response = client.get(f"/api/v1/vn/vn-assets/portability/exports/{job_id}/download")
 
     assert response.status_code == 409
     assert response.json()["detail"] == "export_not_completed"
@@ -287,10 +334,13 @@ def test_export_cancel_routes_through_jobs_manager(
     repo: VNAssetPacksRepository,
     pack: SimpleNamespace,
 ) -> None:
-    started = client.post(f"/api/v1/vn-assets/packs/{pack.id}/export", json={})
+    started = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
+        json={"idempotency_key": "export-cancel-1"},
+    )
     job_id = started.json()["job_id"]
 
-    response = client.post(f"/api/v1/vn-assets/portability/exports/{job_id}/cancel")
+    response = client.post(f"/api/v1/vn/vn-assets/portability/exports/{job_id}/cancel")
 
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
@@ -310,7 +360,8 @@ def test_start_import_preview_creates_jobs_backed_preview_row(
 
     with archive_path.open("rb") as archive_file:
         response = client.post(
-            "/api/v1/vn-assets/import/previews",
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-create-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
 
@@ -336,6 +387,60 @@ def test_start_import_preview_creates_jobs_backed_preview_row(
     assert fake_jobs.created[0]["payload"]["preview_id"] == body["preview_id"]
 
 
+def test_start_import_preview_replays_same_idempotency_key_and_conflicts_on_different_archive(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "preview.tldw-vnpack")
+    conflict_archive_path = tmp_path / "preview-conflict.tldw-vnpack"
+    conflict_archive_path.write_bytes(archive_path.read_bytes() + b"changed")
+
+    with archive_path.open("rb") as archive_file:
+        first = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-upload-1"},
+            files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
+        )
+    with archive_path.open("rb") as archive_file:
+        replay = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-upload-1"},
+            files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
+        )
+    with conflict_archive_path.open("rb") as archive_file:
+        conflict = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-upload-1"},
+            files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
+        )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(fake_jobs.created) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_start_import_preview_requires_idempotency_key(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "preview-missing-key.tldw-vnpack")
+
+    with archive_path.open("rb") as archive_file:
+        response = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
+    assert fake_jobs.created == []
+
+
 def test_get_import_preview_composes_preview_and_jobs_status(
     client: TestClient,
     fake_jobs: FakeJobManager,
@@ -345,7 +450,8 @@ def test_get_import_preview_composes_preview_and_jobs_status(
     archive_path = _write_preview_archive(tmp_path / "preview.tldw-vnpack")
     with archive_path.open("rb") as archive_file:
         started = client.post(
-            "/api/v1/vn-assets/import/previews",
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-status-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
@@ -370,7 +476,7 @@ def test_get_import_preview_composes_preview_and_jobs_status(
         owner_user_id=42,
     )
 
-    response = client.get(f"/api/v1/vn-assets/import/previews/{preview_id}")
+    response = client.get(f"/api/v1/vn/vn-assets/import/previews/{preview_id}")
 
     assert response.status_code == 200
     body = response.json()
@@ -391,13 +497,14 @@ def test_import_preview_cancel_routes_through_jobs_manager(
     archive_path = _write_preview_archive(tmp_path / "preview.tldw-vnpack")
     with archive_path.open("rb") as archive_file:
         started = client.post(
-            "/api/v1/vn-assets/import/previews",
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-cancel-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
     job_id = started.json()["job_id"]
 
-    response = client.post(f"/api/v1/vn-assets/import/previews/{preview_id}/cancel")
+    response = client.post(f"/api/v1/vn/vn-assets/import/previews/{preview_id}/cancel")
 
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
@@ -416,7 +523,8 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     archive_path = _write_preview_archive(tmp_path / "preview.tldw-vnpack")
     with archive_path.open("rb") as archive_file:
         started = client.post(
-            "/api/v1/vn-assets/import/previews",
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-delete-1"},
             files={"archive": ("preview.tldw-vnpack", archive_file, "application/zip")},
         )
     preview_id = started.json()["preview_id"]
@@ -426,7 +534,7 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     uploaded_archive_path = Path(preview["archive_path"])
     assert uploaded_archive_path.is_file()
 
-    response = client.delete(f"/api/v1/vn-assets/import/previews/{preview_id}")
+    response = client.delete(f"/api/v1/vn/vn-assets/import/previews/{preview_id}")
 
     assert response.status_code == 204
     assert not uploaded_archive_path.exists()
@@ -455,13 +563,14 @@ def test_start_import_commit_creates_jobs_backed_journal_row(
     )
 
     response = client.post(
-        "/api/v1/vn-assets/import/commit",
+        "/api/v1/vn/vn-assets/import/commit",
         json={
             "preview_id": preview["id"],
             "trust_mode": "trusted_restore",
             "target_mode": "create_new",
             "character_action": "link_existing_character",
             "target_character_id": character_id,
+            "idempotency_key": "commit-create-1",
         },
     )
 
@@ -486,6 +595,130 @@ def test_start_import_commit_creates_jobs_backed_journal_row(
     assert fake_jobs.created[0]["payload"]["import_id"] == body["import_id"]
 
 
+def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_different_payload(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    repo: VNAssetPacksRepository,
+    character_id: int,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "commit-idempotent.tldw-vnpack")
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="preview-job-1",
+        status="completed",
+        archive_path=str(archive_path),
+        archive_sha256="a" * 64,
+        canonical_payload_fingerprint="b" * 64,
+        schema_version=VNPACK_SCHEMA_VERSION,
+    )
+    payload = {
+        "preview_id": preview["id"],
+        "trust_mode": "trusted_restore",
+        "target_mode": "create_new",
+        "character_action": "link_existing_character",
+        "target_character_id": character_id,
+        "idempotency_key": "commit-1",
+    }
+
+    first = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+    replay = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+    conflict = client.post(
+        "/api/v1/vn/vn-assets/import/commit",
+        json={**payload, "trust_mode": "untrusted_import"},
+    )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert len(fake_jobs.created) == 1
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_start_import_commit_releases_idempotency_claim_on_enqueue_failure(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    repo: VNAssetPacksRepository,
+    character_id: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "commit-enqueue-failure.tldw-vnpack")
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="preview-job-1",
+        status="completed",
+        archive_path=str(archive_path),
+        archive_sha256="a" * 64,
+        canonical_payload_fingerprint="b" * 64,
+        schema_version=VNPACK_SCHEMA_VERSION,
+    )
+    payload = {
+        "preview_id": preview["id"],
+        "trust_mode": "trusted_restore",
+        "target_mode": "create_new",
+        "character_action": "link_existing_character",
+        "target_character_id": character_id,
+        "idempotency_key": "commit-enqueue-failure",
+    }
+
+    def fail_create_job(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("job enqueue failed")
+
+    monkeypatch.setattr(fake_jobs, "create_job", fail_create_job)
+    with pytest.raises(RuntimeError, match="job enqueue failed"):
+        client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+
+    record = repo.get_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_import_commit",
+        resource_id=f"preview:{preview['id']}",
+        idempotency_key="commit-enqueue-failure",
+    )
+    assert record is None
+
+    monkeypatch.undo()
+    retry = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+
+    assert retry.status_code == 202
+    assert retry.json()["operation"] == "import_commit"
+
+
+def test_start_import_commit_requires_idempotency_key(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    repo: VNAssetPacksRepository,
+    character_id: int,
+    tmp_path: Path,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "commit-missing-key.tldw-vnpack")
+    preview = repo.create_import_preview(
+        owner_user_id=42,
+        job_id="preview-job-1",
+        status="completed",
+        archive_path=str(archive_path),
+        archive_sha256="a" * 64,
+        canonical_payload_fingerprint="b" * 64,
+        schema_version=VNPACK_SCHEMA_VERSION,
+    )
+
+    response = client.post(
+        "/api/v1/vn/vn-assets/import/commit",
+        json={
+            "preview_id": preview["id"],
+            "trust_mode": "trusted_restore",
+            "target_mode": "create_new",
+            "character_action": "link_existing_character",
+            "target_character_id": character_id,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "idempotency_key_required"
+    assert fake_jobs.created == []
+
+
 def test_import_commit_status_composes_jobs_lifecycle_with_journal(
     client: TestClient,
     fake_jobs: FakeJobManager,
@@ -504,13 +737,14 @@ def test_import_commit_status_composes_jobs_lifecycle_with_journal(
         schema_version=VNPACK_SCHEMA_VERSION,
     )
     started = client.post(
-        "/api/v1/vn-assets/import/commit",
+        "/api/v1/vn/vn-assets/import/commit",
         json={
             "preview_id": preview["id"],
             "trust_mode": "untrusted_import",
             "target_mode": "create_new",
             "character_action": "link_existing_character",
             "target_character_id": character_id,
+            "idempotency_key": "commit-status-1",
         },
     )
     job_id = started.json()["job_id"]
@@ -527,7 +761,7 @@ def test_import_commit_status_composes_jobs_lifecycle_with_journal(
         owner_user_id=42,
     )
 
-    response = client.get(f"/api/v1/vn-assets/portability/imports/{job_id}")
+    response = client.get(f"/api/v1/vn/vn-assets/portability/imports/{job_id}")
 
     assert response.status_code == 200
     body = response.json()
@@ -555,18 +789,19 @@ def test_import_commit_cancel_routes_through_jobs_manager(
         schema_version=VNPACK_SCHEMA_VERSION,
     )
     started = client.post(
-        "/api/v1/vn-assets/import/commit",
+        "/api/v1/vn/vn-assets/import/commit",
         json={
             "preview_id": preview["id"],
             "trust_mode": "trusted_restore",
             "target_mode": "create_new",
             "character_action": "link_existing_character",
             "target_character_id": character_id,
+            "idempotency_key": "commit-cancel-1",
         },
     )
     job_id = started.json()["job_id"]
 
-    response = client.post(f"/api/v1/vn-assets/portability/imports/{job_id}/cancel")
+    response = client.post(f"/api/v1/vn/vn-assets/portability/imports/{job_id}/cancel")
 
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"

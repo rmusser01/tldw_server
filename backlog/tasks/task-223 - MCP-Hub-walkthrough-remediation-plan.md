@@ -1,10 +1,11 @@
 ---
 id: TASK-223
 title: MCP Hub walkthrough remediation plan
-status: In Progress
-assignee: []
+status: Done
+assignee:
+  - '@Codex'
 created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 06:26'
+updated_date: '2026-05-10 19:20'
 labels:
   - mcp
   - webui
@@ -13,6 +14,9 @@ labels:
 dependencies: []
 documentation:
   - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
+references:
+  - https://github.com/rmusser01/tldw_server/pull/1514
+  - https://github.com/rmusser01/tldw_server/pull/1531
 priority: high
 ---
 
@@ -40,12 +44,14 @@ Spec review loop passed on first review. Reviewer status: Approved. Advisory rec
 No blocking spec-review issues found. Human review is the remaining process gate before transitioning to implementation-plan writing.
 
 After human-requested design review, clarified the spec around live MCP runtime resolution via get_mcp_server(), explicit ExternalServerManager.reconcile_servers(), normal chat/raw-preview scope, executable-tool data sources, and PR 2 setup isolation deliverables. Second spec review passed with no blocking issues. Advisory notes for implementation planning: resolve refresh endpoint path and external federation module-id fallback; include delete/disable runtime reconciliation flows; enumerate exact temp-path env/config values for walkthrough isolation.
+
+2026-05-10: Both child implementation phases are merged to dev. PR #1514 landed live external discovery refresh, chat payload correctness, and degraded readiness handling. PR #1531 landed setup-state polish, Tool Catalog recovery guidance, deployment diagnostics, toy MCP walkthrough docs, and skip-safe E2E coverage.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec created, split into two PR-sized implementation tasks, reviewed by a spec-review subagent, and approved with no blocking issues. Bandit is not applicable because this task only added planning documents and Backlog task records.
+Design spec created, split into two PR-sized implementation tasks, reviewed, implemented, and merged through PR #1514 and PR #1531. The remediation program now covers live MCP external discovery, honest chat MCP request construction, degraded readiness entry, no-auth setup clarity, Tool Catalog recovery states, deployment diagnostics, and toy MCP walkthrough isolation. Bandit was handled in the implementation tasks where backend Python was touched; this closeout only updates Backlog task state.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

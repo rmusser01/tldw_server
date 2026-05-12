@@ -1100,7 +1100,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentRegistry/index.tsx:Alert#antd-alert-agentregistrypage-type-error-line-313-zcr2cw",
+    "id": "antd-product-state-import:src/components/Option/AgentRegistry/index.tsx:Alert#antd-alert-agentregistrypage-type-warning-health-check-u-9wmva4",
     "path": "src/components/Option/AgentRegistry/index.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -1111,7 +1111,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentRegistry/index.tsx:Alert#antd-alert-agentregistrypage-type-warning-health-check-u-1tmrb37",
+    "id": "antd-product-state-import:src/components/Option/AgentRegistry/index.tsx:Alert#antd-alert-agentregistrypage-type-error-line-211-1w95fyt",
     "path": "src/components/Option/AgentRegistry/index.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -1122,7 +1122,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-error-line-416-womu31",
+    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-error-line-602-3sl8bm",
     "path": "src/components/Option/AgentTasks/index.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -1133,7 +1133,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-warning-line-408-1vo7t8",
+    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-warning-line-566-1tag24f",
     "path": "src/components/Option/AgentTasks/index.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -1144,7 +1144,18 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Tag#antd-tag-taskcard-color-error-needs-human-attention-line-14jo2cr",
+    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-warning-acp-setup-needs-a-iqib32",
+    "path": "src/components/Option/AgentTasks/index.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/AgentTasks/index.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Tag#antd-tag-taskcard-color-error-needs-human-attention-line-164f3ho",
     "path": "src/components/Option/AgentTasks/index.tsx",
     "rule": "antd-product-state-import",
     "subject": "Tag",
@@ -1155,7 +1166,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Tag#antd-tag-taskcard-color-processing-running-line-721-k3zhrq",
+    "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Tag#antd-tag-taskcard-color-processing-running-line-1117-zq2s4w",
     "path": "src/components/Option/AgentTasks/index.tsx",
     "rule": "antd-product-state-import",
     "subject": "Tag",
@@ -1452,101 +1463,189 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-error-line-1709-xiyye1",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-contenttypepicker-type-info-line-810-6qtehq",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-1594-11zyt83",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-contenttypepicker-type-warning-line-860-1n11pqb",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-1701-1fhvw6z",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-contenttypepicker-type-warning-line-928-u7x3ts",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-1830-hrfk06",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-1862-1lpinsh",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-188-1431cba",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-2023-he7ydp",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-208-vp1oe",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-error-line-2031-zeh1o4",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-contenttypepicker-type-info-line-766-g4tn6i",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-211-vthxbx",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-contenttypepicker-type-warning-line-816-1o53a06",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-2187-6g0ie4",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-contenttypepicker-type-warning-line-884-1to71s1",
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-219-rmwgbs",
     "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx before the stable duplicate-id guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-221-6wy9f4",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-2364-mihfsx",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-error-line-2376-e7s34w",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-246-1f61j66",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-error-line-2481-ivkzaz",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-info-line-2617-10ljr5s",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-267-1luqiaq",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx:Alert#antd-alert-chatbooksplaygroundpage-type-warning-line-287-tea4t7",
+    "path": "src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
@@ -2299,7 +2398,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-error-line-583-x7269a",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-error-line-713-1hs0tt5",
     "path": "src/components/Option/MCPHub/ExternalServersTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2310,7 +2409,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-info-no-external-serv-1vfpcn4",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-info-no-external-serv-1cu94hi",
     "path": "src/components/Option/MCPHub/ExternalServersTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2321,7 +2420,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-success-line-584-1kgvx90",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-success-line-714-15smgsz",
     "path": "src/components/Option/MCPHub/ExternalServersTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2332,13 +2431,35 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-success-template-vali-1ljgp77",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-success-template-vali-stzgp4",
     "path": "src/components/Option/MCPHub/ExternalServersTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/ExternalServersTab.tsx before the stable duplicate-id guard.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-success-no-credential-1ffju3v",
+    "path": "src/components/Option/MCPHub/ExternalServersTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/ExternalServersTab.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ExternalServersTab.tsx:Alert#antd-alert-externalserverstab-type-success-auth-template-1ljuumz",
+    "path": "src/components/Option/MCPHub/ExternalServersTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/ExternalServersTab.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
@@ -2541,7 +2662,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-error-line-53-iik5bz",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-error-line-132-wgi5lv",
     "path": "src/components/Option/MCPHub/ToolCatalogsTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2552,7 +2673,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-info-line-116-1gky7o9",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-info-line-211-1n06m9h",
     "path": "src/components/Option/MCPHub/ToolCatalogsTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2563,7 +2684,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-warning-line-124-pk4b1y",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-warning-line-219-a0ksw3",
     "path": "src/components/Option/MCPHub/ToolCatalogsTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2574,13 +2695,35 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-warning-line-74-146ei0y",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-warning-line-169-1qh02b5",
     "path": "src/components/Option/MCPHub/ToolCatalogsTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/ToolCatalogsTab.tsx before the stable duplicate-id guard.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-warning-tools-are-regist-lmd30i",
+    "path": "src/components/Option/MCPHub/ToolCatalogsTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/ToolCatalogsTab.tsx on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/MCPHub/ToolCatalogsTab.tsx:Alert#antd-alert-toolcatalogstab-type-warning-could-not-load-s-1487orj",
+    "path": "src/components/Option/MCPHub/ToolCatalogsTab.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/ToolCatalogsTab.tsx on current dev; baseline refresh captures current shared-product-state debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
@@ -4983,28 +5126,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Common/PromptSelect.tsx:Loading",
-    "path": "src/components/Common/PromptSelect.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Loading",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Loading\" state label in src/components/Common/PromptSelect.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Common/SplashScreen/effects/tech/AsciiSpinner.ts:Loading",
-    "path": "src/components/Common/SplashScreen/effects/tech/AsciiSpinner.ts",
-    "rule": "canonical-state-label",
-    "subject": "Loading",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Loading\" state label in src/components/Common/SplashScreen/effects/tech/AsciiSpinner.ts before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Flashcards/FlashcardsWorkspace.tsx:Setup required",
     "path": "src/components/Flashcards/FlashcardsWorkspace.tsx",
     "rule": "canonical-state-label",
@@ -5012,28 +5133,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing hardcoded \"Setup required\" state label in src/components/Flashcards/FlashcardsWorkspace.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Media/hooks/useReadingProgress.tsx:Loading",
-    "path": "src/components/Media/hooks/useReadingProgress.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Loading",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Loading\" state label in src/components/Media/hooks/useReadingProgress.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx:Ready",
-    "path": "src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx before the guard.",
     "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },
@@ -5078,17 +5177,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing hardcoded \"Unavailable\" state label in src/components/Option/AgentRegistry/index.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/ChatWorkspace/InspectorRail.tsx:Ready",
-    "path": "src/components/Option/ChatWorkspace/InspectorRail.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/ChatWorkspace/InspectorRail.tsx before the guard.",
     "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },
@@ -5346,28 +5434,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Sidepanel/Chat/conversation-context-utils.ts:Blocked",
-    "path": "src/components/Sidepanel/Chat/conversation-context-utils.ts",
-    "rule": "canonical-state-label",
-    "subject": "Blocked",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Blocked\" state label in src/components/Sidepanel/Chat/conversation-context-utils.ts before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Sidepanel/Chat/conversation-context-utils.ts:Ready",
-    "path": "src/components/Sidepanel/Chat/conversation-context-utils.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/components/Sidepanel/Chat/conversation-context-utils.ts before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/routes/sidepanel-chat.tsx:Ready",
     "path": "src/routes/sidepanel-chat.tsx",
     "rule": "canonical-state-label",
@@ -5375,39 +5441,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing hardcoded \"Ready\" state label in src/routes/sidepanel-chat.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/utils/demo-content.ts:Ready#label-ready-demo-content-line-137-151ahk2",
-    "path": "src/utils/demo-content.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/utils/demo-content.ts before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/utils/demo-content.ts:Ready#label-ready-demo-content-line-157-5ixvdc",
-    "path": "src/utils/demo-content.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/utils/demo-content.ts before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/utils/demo-content.ts:Ready#label-ready-demo-content-line-20-yq5yw3",
-    "path": "src/utils/demo-content.ts",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/utils/demo-content.ts before the stable duplicate-id guard.",
     "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },
@@ -5574,6 +5607,50 @@
     "owner": "design-system",
     "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/RecipesTab.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
     "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/PersonaGarden/personaBuddyDiagnostics.ts:Ready#label-ready-personabuddydiagnostics-line-116-v09kqm",
+    "path": "src/components/PersonaGarden/personaBuddyDiagnostics.ts",
+    "rule": "canonical-state-label",
+    "subject": "Ready",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing hardcoded \"Ready\" state label in src/components/PersonaGarden/personaBuddyDiagnostics.ts on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "getDesignSystemState(...)",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/PersonaGarden/personaBuddyDiagnostics.ts:Ready#label-ready-personabuddydiagnostics-line-127-1qda4me",
+    "path": "src/components/PersonaGarden/personaBuddyDiagnostics.ts",
+    "rule": "canonical-state-label",
+    "subject": "Ready",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing hardcoded \"Ready\" state label in src/components/PersonaGarden/personaBuddyDiagnostics.ts on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "getDesignSystemState(...)",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/PersonaGarden/personaBuddyDiagnostics.ts:Loading#label-loading-personabuddydiagnostics-line-173-gk5tgm",
+    "path": "src/components/PersonaGarden/personaBuddyDiagnostics.ts",
+    "rule": "canonical-state-label",
+    "subject": "Loading",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing hardcoded \"Loading\" state label in src/components/PersonaGarden/personaBuddyDiagnostics.ts on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "getDesignSystemState(...)",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "canonical-state-label:src/components/PersonaGarden/personaBuddyDiagnostics.ts:Loading#label-loading-personabuddydiagnostics-line-612-1pmf966",
+    "path": "src/components/PersonaGarden/personaBuddyDiagnostics.ts",
+    "rule": "canonical-state-label",
+    "subject": "Loading",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing hardcoded \"Loading\" state label in src/components/PersonaGarden/personaBuddyDiagnostics.ts on current dev; baseline refresh captures current shared-product-state debt.",
+    "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   }
 ]

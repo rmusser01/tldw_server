@@ -13,6 +13,12 @@
 #   default: Whether this is the default agent (only one should be true)
 #   install_instructions: Steps to install the agent (list of strings)
 #   docs_url: Link to agent documentation
+#   support_state: ACP compatibility state; one of supported,
+#     supported_with_caveats, experimental, documented_unverified, unsupported
+#   verification_level: Evidence level; one of documented_only,
+#     stub_smoke_tested, live_e2e_tested, sandbox_tested, production_supported
+#   compatibility_notes: Release-facing compatibility caveat
+#   compatibility_docs_url: Compatibility matrix or evidence document
 
 agents:
   - type: claude_code
@@ -26,6 +32,10 @@ agents:
     install_instructions:
       - "npm install -g @anthropic-ai/claude-code"
     docs_url: "https://docs.anthropic.com/en/docs/claude-code"
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Configured-agent setup is documented, but live Claude Code ACP compatibility remains blocked until credentials and an ACP-compatible stdio command are verified."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: codex
     name: OpenAI Codex CLI
@@ -37,6 +47,10 @@ agents:
     install_instructions:
       - "npm install -g @openai/codex"
     docs_url: "https://github.com/openai/codex"
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Configured-agent setup is documented, but live Codex ACP compatibility remains blocked until an ACP-compatible stdio command and provider credentials are verified."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: aider
     name: Aider
@@ -46,6 +60,10 @@ agents:
     install_instructions:
       - "pip install aider-chat"
     docs_url: "https://aider.chat"
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Configured-agent setup is documented, but live Aider ACP compatibility remains blocked until an ACP-compatible Aider command is installed and verified."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: goose
     name: Goose
@@ -56,6 +74,10 @@ agents:
       - "brew install block/goose/goose"
       - "# or: cargo install goose-cli"
     docs_url: "https://github.com/block/goose"
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Configured-agent setup is documented, but live Goose ACP compatibility remains blocked until an ACP-compatible Goose command is installed and verified."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: continue_dev
     name: Continue
@@ -66,6 +88,10 @@ agents:
       - "npm install -g @continuedev/cli"
     docs_url: "https://continue.dev"
     default: false
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Configured-agent setup is documented, but live Continue ACP compatibility remains blocked until an ACP-compatible Continue command is installed and verified."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: opencode
     name: OpenCode
@@ -78,6 +104,10 @@ agents:
       - "go install github.com/sst/opencode@latest"
     docs_url: "https://github.com/sst/opencode"
     default: false
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Configured-agent setup is documented, but live OpenCode ACP compatibility remains blocked until an ACP-compatible OpenCode command is installed and verified."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
   - type: custom
     name: Custom Agent
@@ -87,3 +117,7 @@ agents:
     env: {}
     requires_api_key: null
     default: false
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Custom ACP profiles require a named command, workspace policy, and certification evidence before release claims."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"

@@ -160,6 +160,18 @@ async def test_update_registries_failure_log_sanitizes_exception_detail() -> Non
 
 
 @pytest.mark.asyncio
+async def test_refresh_module_registries_preserves_existing_mappings_when_rebuild_fails() -> None:
+    registry = ModuleRegistry()
+    registry._modules["catalog_module"] = _registration("catalog_module", _RegistryUpdateFailsModule())
+    registry._tool_registry["old.tool"] = "catalog_module"
+
+    refreshed = await registry.refresh_module_registries("catalog_module")
+
+    assert refreshed is False
+    assert registry.get_module_id_for_tool("old.tool") == "catalog_module"
+
+
+@pytest.mark.asyncio
 async def test_unregister_module_shutdown_log_sanitizes_exception_detail() -> None:
     sensitive_detail = "shutdown leaked /private/shutdown.db with sk-shutdown-secret"
     registry = ModuleRegistry()

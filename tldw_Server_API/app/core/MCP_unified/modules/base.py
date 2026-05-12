@@ -506,14 +506,24 @@ class BaseModule(ABC):
         """Heuristic and metadata-based check for write/management tools.
 
         Criteria:
-        - metadata.category in {ingestion, management}
+        - metadata write flags such as write_capable/is_write/mutates_state
+        - metadata.category in {ingestion, management, write, mutation, admin}
         - or name matches keywords (ingest|update|delete|create|import)
         """
         try:
             name = str(tool_def.get("name") or "").lower()
             meta = tool_def.get("metadata") or {}
             category = (meta.get("category") or "").lower()
-            if category in {"ingestion", "management"}:
+            write_flags: list[bool] = []
+            for flag_name in ("write_capable", "is_write", "mutates_state"):
+                flag_value = meta.get(flag_name)
+                if isinstance(flag_value, bool):
+                    write_flags.append(flag_value)
+            if any(write_flags):
+                return True
+            if write_flags:
+                return False
+            if category in {"ingestion", "management", "write", "mutation", "admin"}:
                 return True
             import re as _re
             return bool(_re.search(r"(ingest|update|delete|create|import)", name))

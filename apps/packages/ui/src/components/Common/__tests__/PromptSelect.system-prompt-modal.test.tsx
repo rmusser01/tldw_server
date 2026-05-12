@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   getPromptById: vi.fn(async () => undefined)
 }))
 
+const registryLabels = vi.hoisted(() => ({
+  loading: "Loading via registry"
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback || _key
@@ -24,6 +28,24 @@ vi.mock("@/db/dexie/helpers", () => ({
   getAllPrompts: mocks.getAllPrompts,
   getPromptById: mocks.getPromptById
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "loading" ? registryLabels.loading : state.label
+        }
+      }
+    )
+  }
+})
 
 vi.mock("antd", async () => {
   const React = await import("react")
@@ -244,5 +266,18 @@ describe("PromptSelect system prompt modal", () => {
     await waitFor(() => {
       expect(props.setSystemPrompt).toHaveBeenCalledWith("")
     })
+  })
+
+  it("uses the design-system loading label while resolving editor content", async () => {
+    const user = userEvent.setup()
+    mocks.getPromptById.mockReturnValue(new Promise(() => {}))
+    renderPromptSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+
+    expect(await screen.findByText("Loading via registry")).toBeInTheDocument()
   })
 })

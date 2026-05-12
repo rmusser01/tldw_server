@@ -61,6 +61,96 @@ def test_repository_constructor_does_not_create_schema(chacha_db: CharactersRAGD
     assert cursor.fetchall() == []
 
 
+def test_idempotency_claim_replays_completed_response_and_rejects_payload_conflict(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+
+    first_record, claimed = repo.claim_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_export",
+        resource_id="pack:1",
+        idempotency_key="export-1",
+        payload_hash="hash-a",
+    )
+    assert claimed is True
+    assert first_record["status"] == "in_progress"
+
+    second_record, second_claimed = repo.claim_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_export",
+        resource_id="pack:1",
+        idempotency_key="export-1",
+        payload_hash="hash-a",
+    )
+    assert second_claimed is False
+    assert second_record["status"] == "in_progress"
+
+    repo.complete_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_export",
+        resource_id="pack:1",
+        idempotency_key="export-1",
+        payload_hash="hash-a",
+        response={"job_id": "job-1"},
+    )
+    completed_record, replay_claimed = repo.claim_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_export",
+        resource_id="pack:1",
+        idempotency_key="export-1",
+        payload_hash="hash-a",
+    )
+    assert replay_claimed is False
+    assert completed_record["status"] == "completed"
+    assert json.loads(completed_record["response_json"]) == {"job_id": "job-1"}
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.claim_idempotency_record(
+            owner_user_id=42,
+            scope="vn_asset_export",
+            resource_id="pack:1",
+            idempotency_key="export-1",
+            payload_hash="hash-b",
+        )
+
+
+def test_create_idempotency_record_is_conflict_tolerant_for_same_payload(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+
+    first = repo.create_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_export",
+        resource_id="pack:1",
+        idempotency_key="legacy-export-1",
+        payload_hash="hash-a",
+        response={"job_id": "job-1"},
+    )
+    second = repo.create_idempotency_record(
+        owner_user_id=42,
+        scope="vn_asset_export",
+        resource_id="pack:1",
+        idempotency_key="legacy-export-1",
+        payload_hash="hash-a",
+        response={"job_id": "job-1"},
+    )
+
+    assert second["id"] == first["id"]
+    assert second["status"] == "completed"
+    assert json.loads(second["response_json"]) == {"job_id": "job-1"}
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_idempotency_record(
+            owner_user_id=42,
+            scope="vn_asset_export",
+            resource_id="pack:1",
+            idempotency_key="legacy-export-1",
+            payload_hash="hash-b",
+            response={"job_id": "job-2"},
+        )
+
+
 def test_ensure_vn_asset_tables_preserves_outer_transaction_rollback(chacha_db: CharactersRAGDB) -> None:
     character_name = "Rolled Back Before VN Schema"
 

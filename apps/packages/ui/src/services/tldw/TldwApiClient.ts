@@ -10,7 +10,10 @@ import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
-import { captureChatRequestDebugSnapshot } from "@/services/tldw/chat-request-debug"
+import {
+  captureChatRequestDebugSnapshot,
+  type ChatRequestDebugMetadata
+} from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { toTrimmedStringArray } from "@/services/tldw/client-utils"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
@@ -244,6 +247,17 @@ export interface OpenAICredentialSourceSwitchResponse {
   provider: "openai"
   auth_source: "api_key" | "oauth"
   updated_at?: string | null
+}
+
+export type OpenWebUIHydrationScopeRequest = {
+  conversation_ids?: string[]
+  source_user_id?: string | null
+}
+
+export type OpenWebUIHydrationRequest = {
+  openwebui_data_root: string
+  scope?: OpenWebUIHydrationScopeRequest
+  process_supported_files?: boolean
 }
 
 const getCurrentBrowserSurface = (): BrowserSurface => {
@@ -701,6 +715,15 @@ export interface ChatCompletionRequest {
   grammar_override?: string
   response_format?: { type: "json_object" | "text" }
   research_context?: ChatResearchContext
+}
+
+export type ChatCompletionRequestOptions = {
+  signal?: AbortSignal
+  debugMetadata?: ChatRequestDebugMetadata
+}
+
+export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
+  streamIdleTimeoutMs?: number
 }
 
 export interface ServerChatSummary {
@@ -2180,14 +2203,15 @@ export class TldwApiClientBase {
 
   async createChatCompletion(
     request: ChatCompletionRequest,
-    options?: { signal?: AbortSignal }
+    options?: ChatCompletionRequestOptions
   ): Promise<Response> {
     // Non-stream request via background
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "non-stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     const res = await bgRequest<Response>({
       path: '/api/v1/chat/completions',
@@ -2203,13 +2227,14 @@ export class TldwApiClientBase {
     return createJsonResponseLike(safeData, { status: 200 })
   }
 
-  async *streamChatCompletion(request: ChatCompletionRequest, options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }): AsyncGenerator<any, void, unknown> {
+  async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
     request.stream = true
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
       try {
@@ -5466,13 +5491,16 @@ export class TldwApiClientBase {
     })
   }
 
-  async previewChatbook(file: File): Promise<any> {
+  async previewChatbook(file: File, options?: { source_format?: string }): Promise<any> {
     const data = await file.arrayBuffer()
     const name = file.name || "chatbook.zip"
     const type = file.type || "application/zip"
+    const fields: Record<string, any> = {}
+    if (options?.source_format) fields.source_format = options.source_format
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/preview",
       method: "POST",
+      fields,
       file: { name, type, data }
     })
   }
@@ -5486,6 +5514,8 @@ export class TldwApiClientBase {
       import_embeddings?: boolean
       async_mode?: boolean
       content_selections?: Record<string, string[]>
+      source_format?: string
+      selected_openwebui_user_id?: string
     }
   ): Promise<any> {
     const data = await file.arrayBuffer()
@@ -5494,13 +5524,45 @@ export class TldwApiClientBase {
     const normalized: Record<string, any> = {}
     for (const [k, v] of Object.entries(options || {})) {
       if (typeof v === "undefined" || v === null) continue
-      normalized[k] = typeof v === "boolean" ? (v ? "true" : "false") : v
+      if (typeof v === "boolean") {
+        normalized[k] = v ? "true" : "false"
+      } else if (typeof v === "object") {
+        normalized[k] = JSON.stringify(v)
+      } else {
+        normalized[k] = v
+      }
     }
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/import",
       method: "POST",
       fields: normalized,
       file: { name, type, data }
+    })
+  }
+
+  async previewOpenWebUIHydration(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async createOpenWebUIHydrationJob(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getOpenWebUIHydrationJob(job_id: string): Promise<any> {
+    const id = encodeURIComponent(String(job_id))
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/openwebui/hydration/jobs/${id}`,
+      method: "GET"
     })
   }
 

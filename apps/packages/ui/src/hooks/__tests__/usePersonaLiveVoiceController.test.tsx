@@ -240,6 +240,83 @@ describe("usePersonaLiveVoiceController", () => {
 
     expect(wakeHarness.detector.start).not.toHaveBeenCalled()
     expect(result.current.wakeWarning).toMatch(/trigger phrase/i)
+    expect(result.current.wakeWarningReasonCode).toBe("wake_not_configured")
+  })
+
+  it("marks unavailable wake detector state with a stable recovery reason", async () => {
+    const detector: WakeDetector = {
+      isAvailable: vi.fn(async () => false),
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined)
+    }
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    expect(detector.start).not.toHaveBeenCalled()
+    expect(result.current.wakeArmed).toBe(false)
+    expect(result.current.wakeDetectorState).toBe("unavailable")
+    expect(result.current.wakeWarning).toMatch(/unavailable/i)
+    expect(result.current.wakeWarningReasonCode).toBe("wake_detector_unavailable")
+  })
+
+  it("maps wake detector permission errors to a recovery reason", async () => {
+    const detector: WakeDetector = {
+      isAvailable: vi.fn(async () => true),
+      start: vi.fn(async (nextConfig) => {
+        nextConfig.onStateChange?.("error")
+        nextConfig.onError?.({
+          code: "not-allowed",
+          message: "Microphone permission is blocked."
+        })
+      }),
+      stop: vi.fn(async () => undefined)
+    }
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    expect(result.current.wakeDetectorState).toBe("error")
+    expect(result.current.wakeWarning).toMatch(/permission/i)
+    expect(result.current.wakeWarningReasonCode).toBe(
+      "wake_detector_permission_denied"
+    )
   })
 
   it("starts the wake detector with raw saved phrases", async () => {
@@ -353,6 +430,7 @@ describe("usePersonaLiveVoiceController", () => {
 
     expect(result.current.wakeArmed).toBe(true)
     expect(result.current.wakeWarning).toMatch(/activation could not be sent/i)
+    expect(result.current.wakeWarningReasonCode).toBe("wake_activation_send_failed")
     expect(wakeHarness.detector.stop).not.toHaveBeenCalled()
     expect(hookMocks.micStart).not.toHaveBeenCalled()
   })
@@ -397,6 +475,9 @@ describe("usePersonaLiveVoiceController", () => {
     await waitFor(() => {
       expect(result.current.wakeWarning).toMatch(/saved trigger phrase/i)
     })
+    expect(result.current.wakeWarningReasonCode).toBe(
+      "wake_activation_rejected_not_saved_in_profile"
+    )
     expect(result.current.wakeArmed).toBe(true)
   })
 
@@ -440,6 +521,9 @@ describe("usePersonaLiveVoiceController", () => {
     await waitFor(() => {
       expect(result.current.wakeWarning).toMatch(/live voice configuration/i)
     })
+    expect(result.current.wakeWarningReasonCode).toBe(
+      "wake_activation_rejected_missing_from_runtime_config"
+    )
     expect(result.current.wakeArmed).toBe(true)
   })
 
@@ -2098,6 +2182,7 @@ describe("usePersonaLiveVoiceController", () => {
     expect(result.current.manualModeRequired).toBe(true)
     expect(result.current.canSendNow).toBe(true)
     expect(result.current.warning).toContain("Use Send now")
+    expect(result.current.warningReasonCode).toBe("voice_manual_mode_required")
 
     const stopCallsBeforeSend = hookMocks.micStop.mock.calls.length
 
@@ -2155,6 +2240,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
     expect(result.current.textOnlyDueToTtsFailure).toBe(true)
     expect(result.current.warning).toContain("Continuing in text-only mode.")
+    expect(result.current.warningReasonCode).toBe("voice_tts_unavailable_text_only")
   })
 
   it("cancels a queued auto-resume before hydration finishes", async () => {

@@ -190,7 +190,12 @@ vi.mock("@/components/Review/usePromptSearch", () => ({
 
 vi.mock("@/utils/demo-content", () => ({
   getDemoMediaItems: () => [
-    { title: "Demo review item", meta: "Demo metadata", status: "Ready" }
+    {
+      title: "Demo review item",
+      meta: "Demo metadata",
+      statusKey: "ready",
+      statusLabel: "Ready"
+    }
   ]
 }))
 

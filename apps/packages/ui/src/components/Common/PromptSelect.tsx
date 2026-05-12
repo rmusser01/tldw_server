@@ -7,6 +7,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { getAllPrompts } from "@/db/dexie/helpers"
 import type { Prompt } from "@/db/dexie/types"
+import { getDesignSystemState } from "@/design-system"
 import { useStorage } from "@plasmohq/storage/hook"
 import { IconButton } from "./IconButton"
 import {
@@ -355,7 +356,7 @@ export const PromptSelect: React.FC<Props> = ({
               />
               {editorLoading ? (
                 <div className="text-xs text-text-subtle">
-                  {t("common:loading", "Loading")}
+                  {t("common:loading", getDesignSystemState("loading")?.label)}
                 </div>
               ) : null}
             </div>

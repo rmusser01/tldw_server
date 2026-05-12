@@ -799,6 +799,7 @@ describe('VNPlayWorkspace', () => {
     await waitFor(() => {
       expect(mocks.restoreVNPlaySession).toHaveBeenCalledWith(1, expect.objectContaining({
         checkpoint_id: 5,
+        client_scene_version: 2,
         idempotency_key: expect.stringMatching(/^restore-/),
       }));
     });

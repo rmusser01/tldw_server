@@ -16,11 +16,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
+    ACP_COMPATIBILITY_DOCS_URL,
+    ACPAgentCompatibilityStatus,
     ACPAgentInfo,
     ACPAgentListResponse,
     ACPAgentHealthEntry,
@@ -32,6 +35,7 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAsyncPromptResponse,
     ACPCheckpointListResponse,
     ACPHealthResponse,
+    ACPSetupGuideResponse,
     ACPRollbackRequest,
     ACPRollbackResponse,
     ACPSessionCancelRequest,
@@ -171,6 +175,20 @@ _ACP_DIAGNOSTIC_REASON_MAP: dict[str, str] = {
     "runtime_error": "failed_runtime",
     "invariant_violation": "invariant_violation",
 }
+_ACP_SUPPORT_STATES = frozenset({
+    "supported",
+    "supported_with_caveats",
+    "experimental",
+    "documented_unverified",
+    "unsupported",
+})
+_ACP_VERIFICATION_LEVELS = frozenset({
+    "documented_only",
+    "stub_smoke_tested",
+    "live_e2e_tested",
+    "sandbox_tested",
+    "production_supported",
+})
 
 
 def get_acp_runtime_policy_service() -> ACPRuntimePolicyService:
@@ -330,17 +348,28 @@ def _acp_record_audit_event(
 
 def _acp_list_audit_events(*, session_id: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
+    retention_days = 30
+    now_seconds = time.time()
     try:
         from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
 
         audit_db = get_acp_audit_db()
+        retention_days = max(0, int(getattr(audit_db, "_retention_days", retention_days)))
         audit_db.flush()
         events.extend(audit_db.query_events(session_id=session_id, limit=5000))
-        events.extend(audit_db.get_hot_cache(session_id=session_id))
+        events.extend(
+            item for item in audit_db.get_hot_cache(session_id=session_id)
+            if _acp_audit_event_within_retention(item, retention_days=retention_days, now=now_seconds)
+        )
     except Exception:
         logger.warning("ACP audit DB read failed")
     with _ACP_AUDIT_LOCK:
-        events.extend(dict(item) for item in _ACP_AUDIT_EVENTS if str(item.get("session_id")) == str(session_id))
+        events.extend(
+            dict(item)
+            for item in _ACP_AUDIT_EVENTS
+            if str(item.get("session_id")) == str(session_id)
+            and _acp_audit_event_within_retention(item, retention_days=retention_days, now=now_seconds)
+        )
 
     deduped: dict[tuple[str, str, str, int, str], dict[str, Any]] = {}
     for event in events:
@@ -358,6 +387,38 @@ def _acp_list_audit_events(*, session_id: str) -> list[dict[str, Any]]:
         )
         deduped[key] = dict(event)
     return sorted(deduped.values(), key=lambda item: str(item.get("timestamp") or ""))
+
+
+def _acp_audit_event_timestamp_seconds(event: dict[str, Any]) -> float | None:
+    """Best-effort conversion of an audit event timestamp to epoch seconds."""
+    value = event.get("timestamp")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _acp_audit_event_within_retention(
+    event: dict[str, Any],
+    *,
+    retention_days: int,
+    now: float,
+) -> bool:
+    """Return true when an in-memory audit event is inside the retention window."""
+    timestamp_seconds = _acp_audit_event_timestamp_seconds(event)
+    if timestamp_seconds is None:
+        return True
+    cutoff = float(now) - (max(0, int(retention_days)) * 86400)
+    return timestamp_seconds >= cutoff
 
 
 def _is_agent_audit_scope(session_id: str) -> bool:
@@ -414,6 +475,95 @@ def _sanitize_diagnostic_message(message: Any) -> str:
     if len(text) > 300:
         return f"{text[:300]}..."
     return text
+
+
+_ACP_REDACTED_VALUE = "[redacted]"
+_ACP_REDACTION_SENSITIVE_KEYS = _ACP_AUDIT_SENSITIVE_KEYS | {
+    "access_token",
+    "api-token",
+    "artifact_path",
+    "auth",
+    "content",
+    "file_path",
+    "openai_api_key",
+    "password",
+    "path",
+    "payload",
+    "raw_data",
+    "raw_prompt",
+    "raw_result",
+    "refresh_token",
+    "secret",
+    "secrets",
+    "text",
+    "tool_arguments",
+}
+_ACP_REDACTION_MARKERS = _ACP_AUDIT_SENSITIVE_MARKERS + (
+    "api-key",
+    "password=",
+    "secret=",
+    "token=",
+)
+
+
+def _redact_acp_string(value: str) -> str:
+    """Return a support-safe representation of one ACP string value."""
+    text = str(value)
+    lowered = text.lower()
+    if any(marker in lowered for marker in _ACP_REDACTION_MARKERS):
+        return _ACP_REDACTED_VALUE
+    if (
+        text.startswith("/")
+        or text.startswith(".")
+        or text.startswith("~")
+        or text.startswith("\\\\")
+        or "/" in text
+        or ":\\" in text
+        or ":/" in text
+    ):
+        return _ACP_REDACTED_VALUE
+    if len(text) > 300:
+        return f"{text[:300]}..."
+    return text
+
+
+def _redact_acp_value(value: Any, *, key: str = "") -> Any:
+    """Recursively redact sensitive ACP payload data while preserving shape."""
+    key_l = str(key).strip().lower()
+    if key_l in _ACP_REDACTION_SENSITIVE_KEYS:
+        return _ACP_REDACTED_VALUE
+    if isinstance(value, dict):
+        return {
+            str(child_key): _redact_acp_value(child_value, key=str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_acp_value(item, key=key_l) for item in value]
+    if isinstance(value, str):
+        return _redact_acp_string(value)
+    return value
+
+
+def _redact_acp_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Redact transcript-level prompt/result payloads for support-safe views."""
+    redacted: dict[str, Any] = {
+        "role": message.get("role"),
+        "content": _ACP_REDACTED_VALUE if message.get("content") is not None else None,
+        "timestamp": message.get("timestamp"),
+    }
+    for raw_key in ("raw_prompt", "raw_result", "raw_data"):
+        if raw_key in message:
+            redacted[raw_key] = _ACP_REDACTED_VALUE
+    return redacted
+
+
+def _redact_acp_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return redacted copies of ACP transcript messages."""
+    return [
+        _redact_acp_message(msg)
+        for msg in messages
+        if isinstance(msg, dict)
+    ]
 
 
 def _normalize_reason_code(raw_reason: Any, raw_message: Any) -> str:
@@ -1455,10 +1605,59 @@ def _check_agent_availability(agent_type: str) -> dict[str, Any]:
             "status": "unknown",
             "binary_found": False,
             "api_key_set": False,
+            "support_state": "documented_unverified",
+            "verification_level": "documented_only",
+            "compatibility_notes": "Agent is not present in the registry; live-agent ACP compatibility has not been certified.",
+            "compatibility_docs_url": ACP_COMPATIBILITY_DOCS_URL,
         }
     result = entry.check_availability()
     result["agent_type"] = agent_type
     return result
+
+
+def _build_agent_compatibility_status(source: Any) -> ACPAgentCompatibilityStatus:
+    """Return ACP compatibility metadata with conservative defaults."""
+    get_value = source.get if isinstance(source, dict) else lambda key, default=None: getattr(source, key, default)
+
+    support_state = str(get_value("support_state") or "documented_unverified")
+    verification_level = str(get_value("verification_level") or "documented_only")
+    if support_state not in _ACP_SUPPORT_STATES:
+        support_state = "documented_unverified"
+    if verification_level not in _ACP_VERIFICATION_LEVELS:
+        verification_level = "documented_only"
+    notes = (
+        get_value("compatibility_notes")
+        or "Configured locally; live-agent ACP compatibility has not been certified."
+    )
+    docs_url = get_value("compatibility_docs_url") or ACP_COMPATIBILITY_DOCS_URL
+    if str(docs_url).startswith("Docs/"):
+        docs_url = f"/docs-static/{str(docs_url).removeprefix('Docs/')}"
+    return ACPAgentCompatibilityStatus(
+        support_state=support_state,
+        verification_level=verification_level,
+        notes=str(notes),
+        docs_url=str(docs_url),
+    )
+
+
+def _compatibility_setup_steps(compatibility: ACPAgentCompatibilityStatus) -> list[str]:
+    """Return setup-guide actions for ACP compatibility certification state."""
+    support_state = compatibility.support_state
+    if support_state == "documented_unverified":
+        return [
+            "Run the ACP certification checklist before claiming live-agent support.",
+            "Record evidence in the ACP compatibility matrix after live verification.",
+        ]
+    if support_state == "unsupported":
+        return [
+            "Do not claim ACP support for this agent until the compatibility issue is resolved.",
+            "Open or link a follow-up issue before release if this agent must ship.",
+        ]
+    if support_state == "experimental":
+        return ["Treat this ACP integration as experimental and review the compatibility caveats before release."]
+    if support_state == "supported_with_caveats":
+        return ["Review the ACP compatibility matrix caveats before release claims."]
+    return []
 
 
 @router.get(
@@ -1495,6 +1694,10 @@ async def acp_health(
             "binary_found": avail.get("binary_found", False),
             "api_key_set": avail.get("api_key_set", False),
             "is_configured": avail.get("is_configured", False),
+            "support_state": avail.get("support_state", "documented_unverified"),
+            "verification_level": avail.get("verification_level", "documented_only"),
+            "compatibility_notes": avail.get("compatibility_notes", ""),
+            "compatibility_docs_url": avail.get("compatibility_docs_url"),
         })
     result["agents"] = agents_status
 
@@ -1562,6 +1765,7 @@ async def acp_health(
 
 @router.get(
     "/setup-guide",
+    response_model=ACPSetupGuideResponse,
     dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.setup_guide"))],
 )
 async def acp_setup_guide(
@@ -1608,6 +1812,7 @@ async def acp_setup_guide(
             "agent_type": reg_entry.type,
             "name": reg_entry.name,
             "status": avail.get("status", "unknown"),
+            "compatibility": _build_agent_compatibility_status(reg_entry),
             "steps": [],
         }
 
@@ -1619,6 +1824,8 @@ async def acp_setup_guide(
 
         if not avail.get("api_key_set", True) and reg_entry.requires_api_key:
             guide_item["steps"].append(f"Set {reg_entry.requires_api_key} environment variable or add to .env file")
+
+        guide_item["steps"].extend(_compatibility_setup_steps(guide_item["compatibility"]))
 
         if not guide_item["steps"]:
             guide_item["steps"] = [f"{reg_entry.name} is fully configured"]
@@ -1646,6 +1853,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="Anthropic's Claude Code agent for software development tasks",
             is_configured=bool(anthropic_key),
             requires_api_key="ANTHROPIC_API_KEY" if not anthropic_key else None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Static fallback only; live Claude Code ACP compatibility has not been certified.",
         )
     )
 
@@ -1657,6 +1867,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="OpenAI's Codex agent for code generation and analysis",
             is_configured=bool(openai_key),
             requires_api_key="OPENAI_API_KEY" if not openai_key else None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Static fallback only; live Codex ACP compatibility has not been certified.",
         )
     )
 
@@ -1667,6 +1880,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="Open-source coding agent (github.com/sst/opencode)",
             is_configured=True,
             requires_api_key=None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Static fallback only; live OpenCode ACP compatibility has not been certified.",
         )
     )
 
@@ -1677,6 +1893,9 @@ def _get_static_agents() -> tuple[list[ACPAgentInfo], str]:
             description="Configure a custom agent with your own settings",
             is_configured=True,
             requires_api_key=None,
+            support_state="documented_unverified",
+            verification_level="documented_only",
+            compatibility_notes="Custom agent profiles require certification evidence before release claims.",
         )
     )
 
@@ -1693,6 +1912,7 @@ def _get_registry_agents() -> tuple[list[ACPAgentInfo], str] | None:
             return None
         agents: list[ACPAgentInfo] = []
         for item in available:
+            compatibility = _build_agent_compatibility_status(item)
             agents.append(
                 ACPAgentInfo(
                     type=str(item["type"]),
@@ -1700,6 +1920,10 @@ def _get_registry_agents() -> tuple[list[ACPAgentInfo], str] | None:
                     description=str(item.get("description", "")),
                     is_configured=bool(item.get("is_configured", False)),
                     requires_api_key=item.get("missing_api_key"),
+                    support_state=compatibility.support_state,
+                    verification_level=compatibility.verification_level,
+                    compatibility_notes=compatibility.notes,
+                    compatibility_docs_url=compatibility.docs_url,
                 )
             )
         return agents, registry.default_type
@@ -1738,15 +1962,23 @@ async def _get_available_agents() -> tuple[list[ACPAgentInfo], str]:
         requires_api_key = item.get("requiresApiKey")
         if requires_api_key is None:
             requires_api_key = item.get("requires_api_key")
-        agents.append(
-            ACPAgentInfo(
+        compatibility = _build_agent_compatibility_status(item)
+        try:
+            agent_info = ACPAgentInfo(
                 type=str(agent_type),
                 name=str(name),
                 description=str(item.get("description") or ""),
                 is_configured=bool(is_configured),
                 requires_api_key=str(requires_api_key) if requires_api_key else None,
+                support_state=compatibility.support_state,
+                verification_level=compatibility.verification_level,
+                compatibility_notes=compatibility.notes,
+                compatibility_docs_url=compatibility.docs_url,
             )
-        )
+        except ValidationError:
+            logger.warning("Skipping invalid ACP runner agent entry: {}", agent_type)
+            continue
+        agents.append(agent_info)
 
     if not agents:
         return _get_static_agents()
@@ -2503,6 +2735,10 @@ async def acp_list_sessions(
 )
 async def acp_session_detail(
     session_id: str,
+    redacted: bool = Query(
+        default=False,
+        description="Return a support-safe redacted transcript view",
+    ),
     user: User = Depends(get_request_user),
 ) -> ACPSessionDetailResponse:
     """Get detailed information about an ACP session."""
@@ -2514,10 +2750,14 @@ async def acp_session_detail(
     if not rec:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
     fork_lineage = await store.get_fork_lineage(session_id)
-    return ACPSessionDetailResponse(**rec.to_detail_dict(
+    detail = rec.to_detail_dict(
         has_websocket=client.has_websocket_connections(session_id),
         fork_lineage=fork_lineage,
-    ))
+    )
+    if redacted:
+        detail["messages"] = _redact_acp_messages(detail.get("messages") or [])
+        detail["cwd"] = _ACP_REDACTED_VALUE if detail.get("cwd") else detail.get("cwd")
+    return ACPSessionDetailResponse(**detail)
 
 
 @router.get(
@@ -2566,6 +2806,10 @@ async def acp_session_events(
     session_id: str,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    redacted: bool = Query(
+        default=False,
+        description="Return support-safe redacted event payloads",
+    ),
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Query persisted ACP session events/messages."""
@@ -2582,19 +2826,27 @@ async def acp_session_events(
         if not isinstance(msg, dict):
             continue
         content = msg.get("content")
-        raw_reason = content.get("reason_code") if isinstance(content, dict) else None
+        raw_reason = (
+            content.get("reason_code") or content.get("error_type") or content.get("status")
+            if isinstance(content, dict)
+            else None
+        )
         raw_error = (
             content.get("error") if isinstance(content, dict) else None
         ) or (
             content.get("message") if isinstance(content, dict) else None
         )
+        data = _redact_acp_value(content, key="data") if redacted else content
+        reason_code = _normalize_reason_code(raw_reason, raw_error) if isinstance(content, dict) else None
+        if redacted and content is not None and not isinstance(content, dict):
+            data = _ACP_REDACTED_VALUE
         event = {
             "index": idx,
             "event_type": "message",
             "role": msg.get("role"),
             "timestamp": msg.get("timestamp"),
-            "data": content,
-            "reason_code": _normalize_reason_code(raw_reason, raw_error),
+            "data": data,
+            "reason_code": reason_code,
         }
         events.append(event)
 
@@ -2707,6 +2959,10 @@ async def acp_session_events_stream(
 )
 async def acp_session_artifacts(
     session_id: str,
+    redacted: bool = Query(
+        default=False,
+        description="Return support-safe redacted artifact payloads",
+    ),
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     """Query artifacts emitted in ACP session messages."""
@@ -2729,10 +2985,20 @@ async def acp_session_artifacts(
         if isinstance(listed, list):
             for artifact in listed:
                 if isinstance(artifact, dict):
-                    artifacts.append(dict(artifact))
+                    artifact_payload = dict(artifact)
+                    artifacts.append(
+                        _redact_acp_value(artifact_payload, key="artifact")
+                        if redacted
+                        else artifact_payload
+                    )
         single = content.get("artifact")
         if isinstance(single, dict):
-            artifacts.append(dict(single))
+            single_payload = dict(single)
+            artifacts.append(
+                _redact_acp_value(single_payload, key="artifact")
+                if redacted
+                else single_payload
+            )
 
     _acp_record_audit_event(
         action="artifacts_query",

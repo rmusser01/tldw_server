@@ -38,6 +38,8 @@ class ChatbookValidator:
     # Filename patterns
     SAFE_FILENAME_PATTERN = re.compile(r'^[a-zA-Z0-9._\-]+$')
     VALID_EXTENSIONS = {'.zip', '.chatbook'}
+    VALID_JSON_EXTENSIONS = {'.json'}
+    VALID_SQLITE_EXTENSIONS = {'.db', '.sqlite'}
 
     # Security patterns
     PATH_TRAVERSAL_PATTERN = re.compile(r'(\.\./|\.\.\\|^/|^~)')
@@ -99,6 +101,40 @@ class ChatbookValidator:
         Returns:
             Tuple of (is_valid, error_message, sanitized_filename)
         """
+        return cls._validate_filename_for_extensions(filename, cls.VALID_EXTENSIONS)
+
+    @classmethod
+    def validate_json_filename(cls, filename: str) -> tuple[bool, Optional[str], str]:
+        """
+        Validate and sanitize an OpenWebUI JSON import filename.
+
+        Args:
+            filename: The filename to validate
+
+        Returns:
+            Tuple of (is_valid, error_message, sanitized_filename)
+        """
+        return cls._validate_filename_for_extensions(filename, cls.VALID_JSON_EXTENSIONS)
+
+    @classmethod
+    def validate_sqlite_filename(cls, filename: str) -> tuple[bool, Optional[str], str]:
+        """
+        Validate and sanitize an OpenWebUI SQLite database import filename.
+
+        Args:
+            filename: The filename to validate
+
+        Returns:
+            Tuple of (is_valid, error_message, sanitized_filename)
+        """
+        return cls._validate_filename_for_extensions(filename, cls.VALID_SQLITE_EXTENSIONS)
+
+    @classmethod
+    def _validate_filename_for_extensions(
+        cls,
+        filename: str,
+        valid_extensions: set[str],
+    ) -> tuple[bool, Optional[str], str]:
         if not filename:
             return False, "No filename provided", ""
 
@@ -115,10 +151,10 @@ class ChatbookValidator:
 
         # Check extension - must end with a valid extension (not just contain it)
         lower_name = base_filename.lower()
-        has_valid_extension = any(lower_name.endswith(valid_ext) for valid_ext in cls.VALID_EXTENSIONS)
+        has_valid_extension = any(lower_name.endswith(valid_ext) for valid_ext in valid_extensions)
 
         if not has_valid_extension:
-            return False, f"Invalid file type. Allowed: {', '.join(cls.VALID_EXTENSIONS)}", ""
+            return False, f"Invalid file type. Allowed: {', '.join(sorted(valid_extensions))}", ""
 
         # Sanitize filename - remove dangerous characters
         sanitized = re.sub(r'[^a-zA-Z0-9._\-]', '_', base_filename)
@@ -132,9 +168,9 @@ class ChatbookValidator:
                 sanitized = f"{name_part}.{parts[1]}"
 
         # Ensure it ends with a valid extension after sanitization
-        if not any(sanitized.lower().endswith(ext) for ext in cls.VALID_EXTENSIONS):
-            # Force it to end with .zip
-            sanitized = sanitized.rsplit('.', 1)[0] + '.zip' if '.' in sanitized else sanitized + '.zip'
+        if not any(sanitized.lower().endswith(ext) for ext in valid_extensions):
+            default_ext = sorted(valid_extensions)[0]
+            sanitized = sanitized.rsplit('.', 1)[0] + default_ext if '.' in sanitized else sanitized + default_ext
 
         return True, None, sanitized
 

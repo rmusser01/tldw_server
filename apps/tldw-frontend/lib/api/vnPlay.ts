@@ -15,7 +15,7 @@ import type {
   VNPlayTurnResponse,
 } from '@web/types/vn-play';
 
-const VN_PLAY_BASE = '/vn-play';
+const VN_PLAY_BASE = '/vn/vn-play';
 
 export function createVNPlaySession(request: VNPlaySessionCreate): Promise<VNPlaySession> {
   return apiClient.post(`${VN_PLAY_BASE}/sessions`, request);

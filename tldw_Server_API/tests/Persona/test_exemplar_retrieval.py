@@ -1,4 +1,5 @@
 from tldw_Server_API.app.core.Persona.exemplar_retrieval import select_persona_exemplars
+from tldw_Server_API.tests.Persona.persona_chat_quality_cases import case_by_id
 
 
 def _ids(rows: list[dict]) -> list[str]:
@@ -74,6 +75,9 @@ def test_select_persona_exemplars_falls_back_to_tone_when_no_scenario_match_exis
 
 
 def test_select_persona_exemplars_excludes_disabled_and_wrong_persona_rows():
+    fixture_case = case_by_id("PC-CASE-011")
+    assert set(fixture_case["labels"]) == {"PC-EX-003", "PC-EX-004"}  # nosec B101
+
     result = select_persona_exemplars(
         persona_id="persona-1",
         exemplars=[
@@ -117,6 +121,9 @@ def test_select_persona_exemplars_excludes_disabled_and_wrong_persona_rows():
 
 
 def test_select_persona_exemplars_caps_boundary_selection_at_one():
+    fixture_case = case_by_id("PC-CASE-012")
+    assert fixture_case["labels"] == ["PC-EX-005"]  # nosec B101
+
     result = select_persona_exemplars(
         persona_id="persona-1",
         exemplars=[

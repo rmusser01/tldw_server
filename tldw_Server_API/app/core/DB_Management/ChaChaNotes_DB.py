@@ -23672,6 +23672,8 @@ for _conversation_store_method in (
     "_normalize_conversation_assistant_identity",
     "add_conversation",
     "get_conversation_by_id",
+    "get_conversation_by_source_ref",
+    "conversation_title_exists",
     "get_conversations_for_character",
     "count_conversations_for_user",
     "count_conversations_for_user_by_character",
@@ -23736,6 +23738,7 @@ for _character_store_method in (
 for _message_store_method in (
     "add_message",
     "_insert_message_images",
+    "append_message_image",
     "get_message_images",
     "get_message_conversation_id",
     "get_message_by_id",

@@ -1,7 +1,10 @@
+import { getDesignSystemState } from "@/design-system";
 import { CharGrid } from "../../engine/CharGrid";
 import type { SplashEffect } from "../../engine/types";
 
 const SPINNER_FRAMES = ["|", "/", "-", "\\"];
+const LOADING_LABEL = getDesignSystemState("loading").label;
+const LOADING_DOT_SUFFIXES = ["   ", ".  ", ".. ", "..."] as const;
 
 const BIG_SPINNER: string[][] = [
   [
@@ -72,7 +75,7 @@ export default class AsciiSpinner implements SplashEffect {
 
     // Loading dots
     const dots = Math.floor(this.elapsed / 400) % 4;
-    const dotStr = "Loading" + ".".repeat(dots) + " ".repeat(3 - dots);
+    const dotStr = LOADING_LABEL + LOADING_DOT_SUFFIXES[dots];
     grid.writeCentered(17, dotStr, "#aaaaaa");
 
     // Progress bar

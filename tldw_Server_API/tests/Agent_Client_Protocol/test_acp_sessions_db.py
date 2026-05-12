@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 
 import pytest
 
@@ -407,6 +408,45 @@ class TestQuotasAndCleanup:
         assert evicted == 0
         rec = db.get_session("s1")
         assert rec["status"] == "active"
+
+    def test_purge_retained_sessions_deletes_old_closed_sessions_and_messages(self, db):
+        db.register_session(session_id="old-closed", user_id=1)
+        db.record_prompt(
+            "old-closed",
+            [{"role": "user", "content": "Retained prompt"}],
+            {"content": "Retained response", "usage": {}},
+        )
+        db.close_session("old-closed")
+        db.register_session(session_id="old-active", user_id=1)
+        db.register_session(session_id="fresh-closed", user_id=1)
+        db.close_session("fresh-closed")
+
+        conn = db._get_conn()
+        conn.execute(
+            "UPDATE sessions SET created_at = ?, last_activity_at = ? WHERE session_id IN (?, ?)",
+            (
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+                "old-closed",
+                "old-active",
+            ),
+        )
+        conn.execute(
+            "UPDATE sessions SET created_at = ?, last_activity_at = ? WHERE session_id = ?",
+            ("2026-01-12T00:00:00+00:00", "2026-01-12T00:00:00+00:00", "fresh-closed"),
+        )
+        conn.commit()
+
+        deleted = db.purge_retained_sessions(
+            retention_days=1,
+            now=datetime(2026, 1, 12, tzinfo=timezone.utc),
+        )
+
+        assert deleted == 1
+        assert db.get_session("old-closed") is None
+        assert db.get_messages("old-closed") == []
+        assert db.get_session("old-active") is not None
+        assert db.get_session("fresh-closed") is not None
 
 
 class TestCascadeDelete:

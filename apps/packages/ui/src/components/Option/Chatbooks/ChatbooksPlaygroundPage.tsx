@@ -89,6 +89,7 @@ type FetchParams = {
 }
 
 type JobKind = "export" | "import"
+type ImportSourceFormat = "chatbook" | "openwebui_json" | "openwebui_db"
 
 type ChatbookJob = {
   job_id: string
@@ -110,6 +111,49 @@ type ChatbookJob = {
   skipped_items?: number
   warnings?: string[]
   conflicts?: any[]
+}
+
+type OpenWebUIDatabasePreviewUser = {
+  source_user_id: string
+  display_label: string
+  email?: string | null
+  chat_count?: number
+  folder_count?: number
+  message_count?: number
+  branched_chat_count?: number
+  duplicate_chat_count?: number
+  archived_chat_count?: number
+  pinned_chat_count?: number
+  attachment_reference_count?: number
+  warning_count?: number
+  warnings?: string[]
+}
+
+type OpenWebUIHydrationSummary = {
+  referenced_files?: number
+  resolved_files?: number
+  image_files?: number
+  media_files?: number
+  missing_files?: number
+  unsupported_files?: number
+  failed_files?: number
+  hydrated_images?: number
+  registered_media_files?: number
+  already_hydrated?: number
+  processed_files?: number
+  warning_count?: number
+}
+
+type OpenWebUIHydrationPreviewState = {
+  summary?: OpenWebUIHydrationSummary
+  warnings?: string[]
+}
+
+type OpenWebUIHydrationJobState = {
+  job_id?: string
+  status?: string
+  result?: any
+  error?: string | null
 }
 
 const parseIdList = (raw: string) =>
@@ -1033,7 +1077,12 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [exportSubmitting, setExportSubmitting] = React.useState(false)
 
   const [importFile, setImportFile] = React.useState<File | null>(null)
+  const [importSourceFormat, setImportSourceFormat] = React.useState<ImportSourceFormat>("chatbook")
+  const [importPreviewVersion, setImportPreviewVersion] = React.useState(0)
   const [previewManifest, setPreviewManifest] = React.useState<any | null>(null)
+  const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
+  const [openwebuiDbPreview, setOpenwebuiDbPreview] = React.useState<any | null>(null)
+  const [selectedOpenWebUIUserId, setSelectedOpenWebUIUserId] = React.useState("")
   const [previewError, setPreviewError] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [conflictResolution, setConflictResolution] = React.useState("skip")
@@ -1048,6 +1097,18 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     buildSelectionState(() => true)
   )
   const [importSubmitting, setImportSubmitting] = React.useState(false)
+  const [hydrationDataRoot, setHydrationDataRoot] = React.useState("")
+  const [hydrationConversationIdsRaw, setHydrationConversationIdsRaw] = React.useState("")
+  const [hydrationSourceUserId, setHydrationSourceUserId] = React.useState("")
+  const [hydrationProcessSupportedFiles, setHydrationProcessSupportedFiles] = React.useState(false)
+  const [hydrationPreview, setHydrationPreview] =
+    React.useState<OpenWebUIHydrationPreviewState | null>(null)
+  const [hydrationPreviewSignature, setHydrationPreviewSignature] = React.useState("")
+  const [hydrationPreviewError, setHydrationPreviewError] = React.useState<string | null>(null)
+  const [hydrationPreviewLoading, setHydrationPreviewLoading] = React.useState(false)
+  const [hydrationJob, setHydrationJob] = React.useState<OpenWebUIHydrationJobState | null>(null)
+  const [hydrationJobError, setHydrationJobError] = React.useState<string | null>(null)
+  const [hydrationJobLoading, setHydrationJobLoading] = React.useState(false)
 
   const [exportJobs, setExportJobs] = React.useState<ChatbookJob[]>([])
   const [importJobs, setImportJobs] = React.useState<ChatbookJob[]>([])
@@ -1055,8 +1116,39 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [jobsError, setJobsError] = React.useState<string | null>(null)
   const [pollIndex, setPollIndex] = React.useState(0)
   const lastSignatureRef = React.useRef<string>("")
+  const previewRequestIdRef = React.useRef(0)
 
   const canUseChatbooks = capabilities?.hasChatbooks !== false
+  const isOpenWebUIJsonImport = importSourceFormat === "openwebui_json"
+  const isOpenWebUIDatabaseImport = importSourceFormat === "openwebui_db"
+  const isOpenWebUIImport = isOpenWebUIJsonImport || isOpenWebUIDatabaseImport
+
+  React.useEffect(() => {
+    previewRequestIdRef.current += 1
+    setImportFile(null)
+    setPreviewManifest(null)
+    setOpenwebuiPreview(null)
+    setOpenwebuiDbPreview(null)
+    setImportPreviewVersion(0)
+    setSelectedOpenWebUIUserId("")
+    setPreviewError(null)
+    setPreviewLoading(false)
+    setImportSelections(buildSelectionState(() => [] as string[]))
+    setImportIncludeAll(buildSelectionState(() => true))
+    setHydrationPreview(null)
+    setHydrationPreviewSignature("")
+    setHydrationPreviewError(null)
+    setHydrationPreviewLoading(false)
+    setHydrationJob(null)
+    setHydrationJobError(null)
+    if (importSourceFormat === "openwebui_json" || importSourceFormat === "openwebui_db") {
+      setImportMedia(false)
+      setImportEmbeddings(false)
+      setConflictResolution((current) =>
+        current === "rename" || current === "skip" ? current : "skip"
+      )
+    }
+  }, [importSourceFormat])
 
   React.useEffect(() => {
     clearFetchAllItemsCache()
@@ -1078,6 +1170,65 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       : []
     return Array.from(new Set([...fromCounts, ...fromItems]))
   }, [previewManifest, previewItemsByType])
+
+  const openwebuiDbUsers = React.useMemo<OpenWebUIDatabasePreviewUser[]>(() => {
+    const users = openwebuiDbPreview?.users
+    return Array.isArray(users) ? users : []
+  }, [openwebuiDbPreview])
+
+  const selectedOpenWebUIUser = React.useMemo(
+    () =>
+      openwebuiDbUsers.find(
+        (user) => user.source_user_id === selectedOpenWebUIUserId
+      ) || null,
+    [openwebuiDbUsers, selectedOpenWebUIUserId]
+  )
+
+  const effectiveHydrationSourceUserId =
+    isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
+      ? selectedOpenWebUIUserId
+      : hydrationSourceUserId.trim()
+
+  const hydrationPayload = React.useMemo(() => {
+    const scope: {
+      conversation_ids: string[]
+      source_user_id?: string
+    } = {
+      conversation_ids: parseIdList(hydrationConversationIdsRaw)
+    }
+    if (effectiveHydrationSourceUserId) {
+      scope.source_user_id = effectiveHydrationSourceUserId
+    }
+    return {
+      openwebui_data_root: hydrationDataRoot.trim(),
+      scope,
+      process_supported_files: hydrationProcessSupportedFiles
+    }
+  }, [
+    effectiveHydrationSourceUserId,
+    hydrationConversationIdsRaw,
+    hydrationDataRoot,
+    hydrationProcessSupportedFiles
+  ])
+
+  const hydrationPayloadSignature = React.useMemo(
+    () =>
+      JSON.stringify({
+        hydrationPayload,
+        import_preview: {
+          source_format: importSourceFormat,
+          version: importPreviewVersion,
+          file_name: importFile?.name || "",
+          file_size: importFile?.size || 0,
+          file_last_modified: importFile?.lastModified || 0
+        }
+      }),
+    [hydrationPayload, importFile, importPreviewVersion, importSourceFormat]
+  )
+
+  const hydrationPreviewIsCurrent = Boolean(
+    hydrationPreview && hydrationPreviewSignature === hydrationPayloadSignature
+  )
 
   const activeJobs = React.useMemo(() => {
     const exportActive = exportJobs.filter((job) => isActiveJobStatus(job.status))
@@ -1369,28 +1520,57 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   }
 
   const handlePreview = async (file: File) => {
+    const requestId = previewRequestIdRef.current + 1
+    previewRequestIdRef.current = requestId
+    const sourceFormat = importSourceFormat
+    const isCurrentRequest = () => previewRequestIdRef.current === requestId
+
     setPreviewLoading(true)
     setPreviewError(null)
     setPreviewManifest(null)
+    setOpenwebuiPreview(null)
+    setOpenwebuiDbPreview(null)
+    setImportPreviewVersion(requestId)
+    setSelectedOpenWebUIUserId("")
     setImportFile(file)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
+    setHydrationPreview(null)
+    setHydrationPreviewSignature("")
+    setHydrationPreviewError(null)
+    setHydrationJob(null)
+    setHydrationJobError(null)
     try {
       await tldwClient.initialize().catch(() => null)
-      const res = await tldwClient.previewChatbook(file)
+      const res = await tldwClient.previewChatbook(file, {
+        source_format: sourceFormat
+      })
+      if (!isCurrentRequest()) return
       if (res?.error) {
         setPreviewError(res.error)
+      } else if (sourceFormat === "openwebui_json") {
+        setOpenwebuiPreview(res?.openwebui_preview || null)
+      } else if (sourceFormat === "openwebui_db") {
+        const dbPreview = res?.openwebui_db_preview || null
+        const users = Array.isArray(dbPreview?.users) ? dbPreview.users : []
+        setOpenwebuiDbPreview(dbPreview)
+        setSelectedOpenWebUIUserId(users.length === 1 ? users[0]?.source_user_id || "" : "")
       } else {
         setPreviewManifest(res?.manifest || null)
       }
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : String(error))
+      if (isCurrentRequest()) {
+        setPreviewError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setPreviewLoading(false)
+      if (isCurrentRequest()) {
+        setPreviewLoading(false)
+      }
     }
   }
 
   const resolveImportSelections = () => {
+    if (isOpenWebUIImport) return undefined
     const anySelective = previewTypes.some((key) => !importIncludeAll[key])
     if (!anySelective) return undefined
     const selections: Record<string, string[]> = {}
@@ -1429,13 +1609,22 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       })
       return
     }
+    if (isOpenWebUIDatabaseImport && !selectedOpenWebUIUserId) {
+      notification.error({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiDbUserRequired",
+          "Select an OpenWebUI user to import."
+        )
+      })
+      return
+    }
 
     setImportSubmitting(true)
     try {
       await tldwClient.initialize().catch(() => null)
       const contentSelections = resolveImportSelections()
       const normalizedSelections =
-        contentSelections && Object.keys(contentSelections).length
+        !isOpenWebUIImport && contentSelections && Object.keys(contentSelections).length
           ? contentSelections
           : undefined
       if (normalizedSelections) {
@@ -1454,12 +1643,16 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         }
       }
       const res = await tldwClient.importChatbook(importFile, {
+        source_format: importSourceFormat,
         conflict_resolution: conflictResolution,
         prefix_imported: prefixImported,
-        import_media: importMedia,
-        import_embeddings: importEmbeddings,
+        import_media: isOpenWebUIImport ? false : importMedia,
+        import_embeddings: isOpenWebUIImport ? false : importEmbeddings,
         async_mode: importAsync,
-        content_selections: normalizedSelections
+        content_selections: normalizedSelections,
+        selected_openwebui_user_id: isOpenWebUIDatabaseImport
+          ? selectedOpenWebUIUserId
+          : undefined
       })
 
       notification.success({
@@ -1477,6 +1670,81 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       })
     } finally {
       setImportSubmitting(false)
+    }
+  }
+
+  const handleHydrationPreview = async () => {
+    if (!hydrationPayload.openwebui_data_root) {
+      notification.error({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiHydrationRootRequired",
+          "OpenWebUI data root is required."
+        )
+      })
+      return
+    }
+
+    setHydrationPreviewLoading(true)
+    setHydrationPreviewError(null)
+    setHydrationJob(null)
+    setHydrationJobError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.previewOpenWebUIHydration(hydrationPayload)
+      setHydrationPreview(res || null)
+      setHydrationPreviewSignature(hydrationPayloadSignature)
+    } catch (error) {
+      setHydrationPreview(null)
+      setHydrationPreviewSignature("")
+      setHydrationPreviewError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHydrationPreviewLoading(false)
+    }
+  }
+
+  const handleCreateHydrationJob = async () => {
+    if (!hydrationPreviewIsCurrent) {
+      notification.error({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiHydrationPreviewRequired",
+          "Preview attachments before creating a hydration job."
+        )
+      })
+      return
+    }
+
+    setHydrationJobLoading(true)
+    setHydrationJobError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.createOpenWebUIHydrationJob(hydrationPayload)
+      setHydrationJob(res || null)
+      notification.success({
+        message: t(
+          "settings:chatbooksPlayground.openwebuiHydrationJobQueued",
+          "Hydration job created"
+        )
+      })
+    } catch (error) {
+      setHydrationJobError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHydrationJobLoading(false)
+    }
+  }
+
+  const handleRefreshHydrationJob = async () => {
+    if (!hydrationJob?.job_id) return
+
+    setHydrationJobLoading(true)
+    setHydrationJobError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.getOpenWebUIHydrationJob(hydrationJob.job_id)
+      setHydrationJob(res || null)
+    } catch (error) {
+      setHydrationJobError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHydrationJobLoading(false)
     }
   }
 
@@ -1664,6 +1932,36 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     </>
   )
 
+  const importAccept = isOpenWebUIDatabaseImport
+    ? ".db,.sqlite"
+    : isOpenWebUIJsonImport
+      ? ".json"
+      : ".zip,.chatbook"
+  const importDropText = isOpenWebUIDatabaseImport
+    ? t(
+        "settings:chatbooksPlayground.importDropOpenWebUIDb",
+        "Drop an OpenWebUI webui.db or .sqlite database or click to browse"
+      )
+    : isOpenWebUIJsonImport
+      ? t(
+          "settings:chatbooksPlayground.importDropOpenWebUI",
+          "Drop an OpenWebUI .json export or click to browse"
+        )
+      : t(
+          "settings:chatbooksPlayground.importDrop",
+          "Drop a .zip or .chatbook archive or click to browse"
+        )
+
+  const hydrationSummary = hydrationPreview?.summary || {}
+  const hydrationWarnings = Array.isArray(hydrationPreview?.warnings)
+    ? hydrationPreview.warnings
+    : []
+  const hydrationJobResult = hydrationJob?.result
+  const hydrationJobSummary =
+    hydrationJobResult && typeof hydrationJobResult === "object"
+      ? (hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary
+      : undefined
+
   const importTab = (
     <>
       <Card
@@ -1676,21 +1974,45 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         }
       >
         <div className="flex flex-col gap-4">
+          <Space wrap>
+            <Text>{t("settings:chatbooksPlayground.importSource", "Source")}</Text>
+            <Select
+              value={importSourceFormat}
+              onChange={(value) => setImportSourceFormat(value as ImportSourceFormat)}
+              className="min-w-[220px]"
+              options={[
+                {
+                  value: "chatbook",
+                  label: t("settings:chatbooksPlayground.sourceChatbook", "Chatbook archive")
+                },
+                {
+                  value: "openwebui_json",
+                  label: t("settings:chatbooksPlayground.sourceOpenWebUI", "OpenWebUI JSON")
+                },
+                {
+                  value: "openwebui_db",
+                  label: t("settings:chatbooksPlayground.sourceOpenWebUIDatabase", "OpenWebUI database")
+                }
+              ]}
+              disabled={!canUseChatbooks || previewLoading || importSubmitting}
+            />
+          </Space>
+
           <Upload.Dragger
-            accept=".zip"
+            accept={importAccept}
             multiple={false}
             showUploadList={false}
             beforeUpload={(file) => {
               void handlePreview(file as File)
               return false
             }}
-            disabled={!canUseChatbooks}
+            disabled={!canUseChatbooks || previewLoading || importSubmitting}
           >
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
             <p className="ant-upload-text">
-              {t("settings:chatbooksPlayground.importDrop", "Drop a .zip chatbook or click to browse")}
+              {importDropText}
             </p>
             <p className="ant-upload-hint">
               {importFile?.name || t("settings:chatbooksPlayground.importHint", "Preview before import")}
@@ -1759,33 +2081,498 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             </Card>
           )}
 
+          {openwebuiPreview && (
+            <Card
+              size="small"
+              className="border-border"
+              title={t("settings:chatbooksPlayground.openwebuiPreviewSummary", "OpenWebUI preview")}
+            >
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiChats", "Chats")}</Text>
+                  <div>{openwebuiPreview.chat_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiMessages", "Messages")}</Text>
+                  <div>{openwebuiPreview.message_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiBranches", "Branched")}</Text>
+                  <div>{openwebuiPreview.branched_chat_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiDuplicates", "Duplicates")}</Text>
+                  <div>{openwebuiPreview.duplicate_chat_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiAttachments", "Attachment refs")}</Text>
+                  <div>{openwebuiPreview.attachment_reference_count ?? 0}</div>
+                </div>
+                <div>
+                  <Text type="secondary">{t("settings:chatbooksPlayground.openwebuiMalformed", "Malformed")}</Text>
+                  <div>{openwebuiPreview.malformed_chat_count ?? 0}</div>
+                </div>
+              </div>
+              {Boolean(openwebuiPreview.warnings?.length) && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="mt-3"
+                  title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
+                  description={openwebuiPreview.warnings.slice(0, 3).join("\n")}
+                />
+              )}
+            </Card>
+          )}
+
+          {openwebuiDbPreview && (
+            <Card
+              size="small"
+              className="border-border"
+              title={t(
+                "settings:chatbooksPlayground.openwebuiDbPreviewSummary",
+                "OpenWebUI database users"
+              )}
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {openwebuiDbUsers.map((user) => (
+                  <div
+                    key={user.source_user_id}
+                    className="rounded border border-border p-3"
+                  >
+                    <Text strong>{user.display_label || user.source_user_id}</Text>
+                    <div className="text-sm text-muted-foreground">
+                      {user.email || user.source_user_id}
+                    </div>
+                    <Space wrap size="small" className="mt-2">
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiChats", "Chats")} ·{" "}
+                        {user.chat_count ?? 0}
+                      </Tag>
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiMessages", "Messages")} ·{" "}
+                        {user.message_count ?? 0}
+                      </Tag>
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiFolders", "Folders")} ·{" "}
+                        {user.folder_count ?? 0}
+                      </Tag>
+                      <Tag>
+                        {t("settings:chatbooksPlayground.openwebuiAttachments", "Attachment refs")} ·{" "}
+                        {user.attachment_reference_count ?? 0}
+                      </Tag>
+                    </Space>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3">
+                <Select
+                  placeholder={t(
+                    "settings:chatbooksPlayground.openwebuiDbUserSelect",
+                    "Select source user"
+                  )}
+                  value={selectedOpenWebUIUserId || undefined}
+                  onChange={(value) => setSelectedOpenWebUIUserId(String(value || ""))}
+                  className="min-w-[260px]"
+                  options={openwebuiDbUsers.map((user) => ({
+                    value: user.source_user_id,
+                    label: `${user.display_label || user.source_user_id} (${user.source_user_id})`
+                  }))}
+                  disabled={previewLoading || importSubmitting}
+                />
+              </div>
+
+              {selectedOpenWebUIUser && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="mt-3"
+                  title={t("settings:chatbooksPlayground.openwebuiDbDestination", "Destination")}
+                  description={`Destination: OpenWebUI / ${
+                    selectedOpenWebUIUser.display_label || selectedOpenWebUIUser.source_user_id
+                  } (${selectedOpenWebUIUser.source_user_id}) / source folders`}
+                />
+              )}
+
+              <Alert
+                type="warning"
+                showIcon
+                className="mt-3"
+                title={t(
+                  "settings:chatbooksPlayground.openwebuiDbAttachmentRefs",
+                  "Files and images"
+                )}
+                description={t(
+                  "settings:chatbooksPlayground.openwebuiDbAttachmentRefsDescription",
+                  "Files, images, and artifacts import as metadata references first. Use attachment hydration below to copy images and register supported files from your OpenWebUI data root."
+                )}
+              />
+
+              {Boolean(openwebuiDbPreview.warnings?.length) && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="mt-3"
+                  title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
+                  description={openwebuiDbPreview.warnings.slice(0, 3).join("\n")}
+                />
+              )}
+            </Card>
+          )}
+
+          {isOpenWebUIImport && (
+            <Card
+              size="small"
+              className="border-border"
+              title={t(
+                "settings:chatbooksPlayground.openwebuiHydrationTitle",
+                "OpenWebUI attachment hydration"
+              )}
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationRoot",
+                      "Data root"
+                    )}
+                  </Text>
+                  <Input
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationRootLabel",
+                      "OpenWebUI data root"
+                    ) as string}
+                    value={hydrationDataRoot}
+                    onChange={(event) => setHydrationDataRoot(event.target.value)}
+                    placeholder="/app/backend/data"
+                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                  />
+                </div>
+                <div>
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationSourceUser",
+                      "Source user"
+                    )}
+                  </Text>
+                  <Input
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserLabel",
+                      "OpenWebUI source user id"
+                    ) as string}
+                    value={
+                      isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
+                        ? selectedOpenWebUIUserId
+                        : hydrationSourceUserId
+                    }
+                    onChange={(event) => setHydrationSourceUserId(event.target.value)}
+                    placeholder={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserPlaceholder",
+                      "Optional source user id"
+                    ) as string}
+                    disabled={
+                      !canUseChatbooks ||
+                      hydrationPreviewLoading ||
+                      hydrationJobLoading ||
+                      (isOpenWebUIDatabaseImport && Boolean(selectedOpenWebUIUserId))
+                    }
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationConversationIds",
+                      "Imported conversation IDs"
+                    )}
+                  </Text>
+                  <Input.TextArea
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsLabel",
+                      "Imported conversation IDs"
+                    ) as string}
+                    value={hydrationConversationIdsRaw}
+                    onChange={(event) => setHydrationConversationIdsRaw(event.target.value)}
+                    autoSize={{ minRows: 2, maxRows: 4 }}
+                    placeholder={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsPlaceholder",
+                      "Paste tldw conversation ids, one per line or comma-separated"
+                    ) as string}
+                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Space>
+                  <Switch
+                    aria-label={t(
+                      "settings:chatbooksPlayground.openwebuiHydrationProcessFiles",
+                      "Process supported files"
+                    ) as string}
+                    checked={hydrationProcessSupportedFiles}
+                    onChange={setHydrationProcessSupportedFiles}
+                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                  />
+                  <Text>
+                    {t(
+                      "settings:chatbooksPlayground.openwebuiHydrationProcessFiles",
+                      "Process supported files"
+                    )}
+                  </Text>
+                </Space>
+                <Button
+                  aria-label={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreview",
+                    "Preview attachments"
+                  ) as string}
+                  onClick={() => void handleHydrationPreview()}
+                  loading={hydrationPreviewLoading}
+                  disabled={
+                    !canUseChatbooks ||
+                    !hydrationPayload.openwebui_data_root ||
+                    hydrationJobLoading
+                  }
+                >
+                  {t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreview",
+                    "Preview attachments"
+                  )}
+                </Button>
+                <Button
+                  aria-label={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationRun",
+                    "Run hydration job"
+                  ) as string}
+                  type="primary"
+                  onClick={() => void handleCreateHydrationJob()}
+                  loading={hydrationJobLoading}
+                  disabled={
+                    !canUseChatbooks ||
+                    !hydrationPreviewIsCurrent ||
+                    hydrationPreviewLoading
+                  }
+                >
+                  {t(
+                    "settings:chatbooksPlayground.openwebuiHydrationRun",
+                    "Run hydration job"
+                  )}
+                </Button>
+              </div>
+
+              {hydrationPreview && !hydrationPreviewIsCurrent && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreviewStale",
+                    "Preview needs refresh"
+                  )}
+                />
+              )}
+
+              {hydrationPreviewError && (
+                <Alert
+                  type="error"
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationPreviewError",
+                    "Attachment preview failed"
+                  )}
+                  description={hydrationPreviewError}
+                />
+              )}
+
+              {hydrationPreview && (
+                <div className="mt-3">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationReferenced",
+                          "Referenced files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.referenced_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationResolved",
+                          "Resolved files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.resolved_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationImages",
+                          "Image files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.image_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationMedia",
+                          "Media files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.media_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationMissing",
+                          "Missing files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.missing_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationUnsupported",
+                          "Unsupported files"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.unsupported_files ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationHydratedImages",
+                          "Hydrated images"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.hydrated_images ?? 0}</div>
+                    </div>
+                    <div>
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationRegisteredMedia",
+                          "Registered media"
+                        )}
+                      </Text>
+                      <div>{hydrationSummary.registered_media_files ?? 0}</div>
+                    </div>
+                  </div>
+
+                  {Boolean(hydrationWarnings.length) && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      className="mt-3"
+                      title={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationWarnings",
+                        "Hydration warnings"
+                      )}
+                      description={hydrationWarnings.slice(0, 3).join("\n")}
+                    />
+                  )}
+                </div>
+              )}
+
+              {hydrationJobError && (
+                <Alert
+                  type="error"
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationJobError",
+                    "Hydration job failed"
+                  )}
+                  description={hydrationJobError}
+                />
+              )}
+
+              {hydrationJob && (
+                <Alert
+                  type={hydrationJob.status === "failed" ? "error" : "info"}
+                  showIcon
+                  className="mt-3"
+                  title={t(
+                    "settings:chatbooksPlayground.openwebuiHydrationJobStatus",
+                    "Hydration job"
+                  )}
+                  description={
+                    <div className="flex flex-col gap-1">
+                      <Space wrap>
+                        {hydrationJob.job_id && <Tag>{hydrationJob.job_id}</Tag>}
+                        {hydrationJob.status && <Tag>{hydrationJob.status}</Tag>}
+                        <Button
+                          size="small"
+                          onClick={() => void handleRefreshHydrationJob()}
+                          loading={hydrationJobLoading}
+                        >
+                          {t(
+                            "settings:chatbooksPlayground.refresh",
+                            "Refresh"
+                          )}
+                        </Button>
+                      </Space>
+                      {hydrationJobSummary && (
+                        <Text type="secondary">
+                          {t(
+                            "settings:chatbooksPlayground.openwebuiHydrationJobSummary",
+                            {
+                              defaultValue:
+                                "Hydrated {{images}} images and registered {{media}} files.",
+                              images: hydrationJobSummary.hydrated_images ?? 0,
+                              media: hydrationJobSummary.registered_media_files ?? 0
+                            }
+                          )}
+                        </Text>
+                      )}
+                    </div>
+                  }
+                />
+              )}
+            </Card>
+          )}
+
           <Divider />
 
           <Space wrap>
             <Select
               value={conflictResolution}
               onChange={setConflictResolution}
-              options={[
-                { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
-                { value: "overwrite", label: t("settings:chatbooksPlayground.conflictOverwrite", "Overwrite") },
-                { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") },
-                { value: "merge", label: t("settings:chatbooksPlayground.conflictMerge", "Merge") }
-              ]}
+              options={
+                isOpenWebUIImport
+                  ? [
+                      { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
+                      { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") }
+                    ]
+                  : [
+                      { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
+                      { value: "overwrite", label: t("settings:chatbooksPlayground.conflictOverwrite", "Overwrite") },
+                      { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") },
+                      { value: "merge", label: t("settings:chatbooksPlayground.conflictMerge", "Merge") }
+                    ]
+              }
               className="min-w-[160px]"
             />
             <Switch checked={prefixImported} onChange={setPrefixImported} />
             <Text>{t("settings:chatbooksPlayground.prefixImported", "Prefix imported")}</Text>
           </Space>
 
-          <Space wrap>
-            <Switch checked={importMedia} onChange={setImportMedia} />
-            <Text>{t("settings:chatbooksPlayground.importMedia", "Import media")}</Text>
-          </Space>
+          {!isOpenWebUIImport && (
+            <>
+              <Space wrap>
+                <Switch checked={importMedia} onChange={setImportMedia} />
+                <Text>{t("settings:chatbooksPlayground.importMedia", "Import media")}</Text>
+              </Space>
 
-          <Space wrap>
-            <Switch checked={importEmbeddings} onChange={setImportEmbeddings} />
-            <Text>{t("settings:chatbooksPlayground.importEmbeddings", "Import embeddings")}</Text>
-          </Space>
+              <Space wrap>
+                <Switch checked={importEmbeddings} onChange={setImportEmbeddings} />
+                <Text>{t("settings:chatbooksPlayground.importEmbeddings", "Import embeddings")}</Text>
+              </Space>
+            </>
+          )}
 
           <Space wrap>
             <Switch checked={importAsync} onChange={setImportAsync} />
@@ -1794,7 +2581,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
       </Card>
 
-      {previewManifest && previewTypes.length > 0 && (
+      {!isOpenWebUIImport && previewManifest && previewTypes.length > 0 && (
         <div className="flex flex-col gap-4">
           {previewTypes.map((key) => (
             <ContentTypePicker
@@ -1826,7 +2613,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
       )}
 
-      {previewManifest && previewTypes.length === 0 && (
+      {!isOpenWebUIImport && previewManifest && previewTypes.length === 0 && (
         <Alert
           type="info"
           showIcon
@@ -1842,7 +2629,12 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           type="primary"
           onClick={handleImport}
           loading={importSubmitting}
-          disabled={!canUseChatbooks}
+          disabled={
+            !canUseChatbooks ||
+            !importFile ||
+            previewLoading ||
+            (isOpenWebUIDatabaseImport && !selectedOpenWebUIUserId)
+          }
         >
           {t("settings:chatbooksPlayground.importCta", "Import chatbook")}
         </Button>

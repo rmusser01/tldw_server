@@ -121,6 +121,7 @@ def test_sandbox_config_new_fields(monkeypatch):
     assert cfg.max_concurrent_sessions_per_user == 5
     assert cfg.max_tokens_per_session == 1_000_000
     assert cfg.max_session_duration_seconds == 14400
+    assert cfg.session_retention_days == 30
     assert cfg.audit_retention_days == 30
     assert cfg.allowed_egress_hosts == []
 
@@ -129,12 +130,16 @@ def test_sandbox_config_custom_values(monkeypatch):
     """New sandbox config fields can be customized via env vars."""
     monkeypatch.setenv("ACP_SESSION_TTL_SECONDS", "3600")
     monkeypatch.setenv("ACP_MAX_CONCURRENT_SESSIONS_PER_USER", "10")
+    monkeypatch.setenv("ACP_SESSION_RETENTION_DAYS", "7")
+    monkeypatch.setenv("ACP_AUDIT_RETENTION_DAYS", "14")
     monkeypatch.setenv("ACP_SANDBOX_ALLOWED_EGRESS_HOSTS", "api.anthropic.com,api.openai.com")
 
     from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
     cfg = load_acp_sandbox_config()
     assert cfg.session_ttl_seconds == 3600
     assert cfg.max_concurrent_sessions_per_user == 10
+    assert cfg.session_retention_days == 7
+    assert cfg.audit_retention_days == 14
     assert cfg.allowed_egress_hosts == ["api.anthropic.com", "api.openai.com"]
 
 
@@ -196,6 +201,8 @@ def test_acp_health_agents_detection(client_user_only, stub_runner_client):
     for agent in agents:
         assert "status" in agent
         assert agent["status"] in ("available", "unavailable", "requires_setup", "unknown")
+        assert "support_state" in agent
+        assert "verification_level" in agent
 
 
 def test_acp_health_runner_probe_with_running_client(client_user_only, stub_runner_client):
@@ -223,7 +230,71 @@ def test_acp_setup_guide_returns_guides(client_user_only, stub_runner_client):
         assert "name" in guide
         assert "status" in guide
         assert "steps" in guide
+        assert "compatibility" in guide
+        assert guide["compatibility"]["support_state"] in (
+            "supported",
+            "supported_with_caveats",
+            "experimental",
+            "documented_unverified",
+            "unsupported",
+        )
+        assert guide["compatibility"]["verification_level"] in (
+            "documented_only",
+            "stub_smoke_tested",
+            "live_e2e_tested",
+            "sandbox_tested",
+            "production_supported",
+        )
         assert len(guide["steps"]) > 0
+
+
+def test_acp_setup_guide_marks_configured_but_unverified_agents(client_user_only, stub_runner_client):
+    """Setup guide keeps runtime availability separate from compatibility support state."""
+    resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=custom")
+    assert resp.status_code == 200
+    data = resp.json()
+    guide = data["guides"][0]
+    compatibility = guide["compatibility"]
+    assert compatibility["support_state"] == "documented_unverified"
+    assert compatibility["verification_level"] == "documented_only"
+    assert compatibility["docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    assert any("certification checklist" in step.lower() for step in guide["steps"])
+
+
+def test_acp_agents_normalizes_invalid_runner_compatibility_values(
+    client_user_only,
+    stub_runner_client,
+    monkeypatch,
+):
+    """Runner-provided compatibility values are normalized before Pydantic validation."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_mod
+
+    async def _list_agents():
+        return {
+            "agents": [
+                {
+                    "type": "runner_agent",
+                    "name": "Runner Agent",
+                    "description": "Provided by runner",
+                    "isConfigured": True,
+                    "support_state": "not-a-real-state",
+                    "verification_level": "not-a-real-level",
+                    "compatibility_docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+                }
+            ],
+            "defaultAgentType": "runner_agent",
+        }
+
+    monkeypatch.setattr(acp_mod, "_get_registry_agents", lambda: None)
+    stub_runner_client.list_agents = _list_agents
+
+    resp = client_user_only.get("/api/v1/acp/agents")
+    assert resp.status_code == 200
+    data = resp.json()
+    agent = data["agents"][0]
+    assert agent["support_state"] == "documented_unverified"
+    assert agent["verification_level"] == "documented_only"
+    assert agent["compatibility_docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
 
 def test_acp_setup_guide_filter_agent(client_user_only, stub_runner_client):
