@@ -100,7 +100,7 @@ describe("ModerationPlayground quick phrase lists", () => {
     fireEvent.click(screen.getByRole("button", { name: /add rule/i }))
 
     // Switch to Notify action and add a notify phrase
-    fireEvent.click(screen.getByRole("button", { name: /notify/i }))
+    fireEvent.click(screen.getByRole("radio", { name: /notify/i }))
     fireEvent.change(phraseInput, { target: { value: "watch phrase" } })
     fireEvent.click(screen.getByRole("button", { name: /add rule/i }))
 

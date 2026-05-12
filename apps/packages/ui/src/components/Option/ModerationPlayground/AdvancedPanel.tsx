@@ -38,17 +38,20 @@ interface PerfFieldProps {
 }
 
 function PerfField({ label, value, description }: PerfFieldProps) {
+  const inputId = React.useId()
+  const descriptionId = React.useId()
   return (
     <div className="mb-3">
-      <label className="block text-sm font-medium text-text-secondary mb-0.5">{label}</label>
+      <label htmlFor={inputId} className="block text-sm font-medium text-text-secondary mb-0.5">{label}</label>
       <input
+        id={inputId}
         type="text"
         readOnly
         value={String(value)}
         className="w-full rounded border border-border bg-bg-secondary px-2 py-1 text-sm text-text-primary"
-        aria-label={label}
+        aria-describedby={descriptionId}
       />
-      <p className="mt-0.5 text-xs text-text-muted">{description}</p>
+      <p id={descriptionId} className="mt-0.5 text-xs text-text-muted">{description}</p>
     </div>
   )
 }
@@ -81,6 +84,7 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
   const policy = settings.policyQuery.data
   const blocklistFileRef = React.useRef<HTMLInputElement>(null)
   const overridesFileRef = React.useRef<HTMLInputElement>(null)
+  const blocklistUploadButtonRef = React.useRef<HTMLButtonElement>(null)
 
   // ---- Performance tuning values (read-only from policy) ----
   const maxScanChars = policy?.max_scan_chars ?? 200000
@@ -130,13 +134,17 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
         try {
           const content = reader.result as string
           const preview = await blocklist.previewRawReplace(content)
+          const returnFocus = () => window.setTimeout(() => blocklistUploadButtonRef.current?.focus(), 0)
           Modal.confirm({
             title: "Confirm blocklist upload",
             content: <BlocklistUploadPreview preview={preview} />,
             okText: "Replace blocklist",
             cancelText: "Cancel",
             okButtonProps: { danger: true, disabled: preview.lint.invalid_count > 0 },
-            onCancel: blocklist.cancelRawReplace,
+            onCancel: () => {
+              blocklist.cancelRawReplace()
+              returnFocus()
+            },
             onOk: async () => {
               await blocklist.confirmRawReplace()
               messageApi.success("Blocklist replaced successfully")
@@ -246,9 +254,11 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
             </Tooltip>
             <Tooltip title="Upload a text file to replace the current blocklist">
               <button
+                ref={blocklistUploadButtonRef}
                 type="button"
                 onClick={() => blocklistFileRef.current?.click()}
                 className="inline-flex items-center gap-1.5 rounded border border-border bg-bg-secondary px-3 py-1.5 text-sm hover:bg-bg-tertiary"
+                aria-label="Replace blocklist from uploaded file"
               >
                 <Upload size={14} />
                 Upload &amp; replace
@@ -261,6 +271,7 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
               className="hidden"
               onChange={onUploadBlocklist}
               data-testid="blocklist-file-input"
+              aria-label="Upload blocklist file"
             />
           </div>
         </div>
@@ -284,6 +295,7 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
                 type="button"
                 onClick={() => overridesFileRef.current?.click()}
                 className="inline-flex items-center gap-1.5 rounded border border-border bg-bg-secondary px-3 py-1.5 text-sm hover:bg-bg-tertiary"
+                aria-label="Replace user overrides from uploaded file"
               >
                 <Upload size={14} />
                 Upload &amp; replace
@@ -296,6 +308,7 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
               className="hidden"
               onChange={onUploadOverrides}
               data-testid="overrides-file-input"
+              aria-label="Upload user overrides file"
             />
           </div>
         </div>

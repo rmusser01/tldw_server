@@ -29,6 +29,8 @@ export const QuickTestInline: React.FC<QuickTestInlineProps> = ({
   const [result, setResult] = React.useState<ModerationTestResponse | null>(null)
   const [running, setRunning] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const textInputId = React.useId()
+  const phaseSelectId = React.useId()
 
   React.useEffect(() => {
     if (open) {
@@ -62,21 +64,29 @@ export const QuickTestInline: React.FC<QuickTestInlineProps> = ({
 
   return (
     <div className="border-b border-border bg-surface/80 backdrop-blur-sm px-4 py-3">
-      <div className="flex items-center gap-2 max-w-7xl mx-auto">
+      <div className="flex max-w-7xl flex-col gap-2 mx-auto sm:flex-row sm:items-center">
         <Zap className="h-4 w-4 text-text-muted flex-shrink-0" />
+        <label htmlFor={textInputId} className="sr-only">
+          Quick test text
+        </label>
         <input
+          id={textInputId}
           ref={inputRef}
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleRun()}
           placeholder="Quick test text..."
-          className="flex-1 min-w-0 px-2 py-1 text-sm border border-border rounded bg-bg text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full min-w-0 flex-1 px-2 py-1 text-sm border border-border rounded bg-bg text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
+        <label htmlFor={phaseSelectId} className="sr-only">
+          Quick test phase
+        </label>
         <select
+          id={phaseSelectId}
           value={phase}
           onChange={(e) => setPhase(e.target.value as "input" | "output")}
-          className="px-2 py-1 text-sm border border-border rounded bg-bg text-text"
+          className="w-full px-2 py-1 text-sm border border-border rounded bg-bg text-text sm:w-auto"
         >
           <option value="input">Input</option>
           <option value="output">Output</option>
@@ -85,12 +95,12 @@ export const QuickTestInline: React.FC<QuickTestInlineProps> = ({
           type="button"
           onClick={handleRun}
           disabled={running || !text.trim()}
-          className="px-3 py-1 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          className="w-full px-3 py-1 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
         >
           {running ? "..." : "Run"}
         </button>
         {result && (
-          <span className="flex items-center gap-1.5 text-sm">
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm" role="status" aria-live="polite">
             <span className={`font-semibold ${label?.color}`}>{label?.text}</span>
             {result.category && (
               <span className="text-text-muted">· {result.category}</span>
@@ -104,7 +114,12 @@ export const QuickTestInline: React.FC<QuickTestInlineProps> = ({
             </button>
           </span>
         )}
-        <button type="button" onClick={onClose} className="p-1 hover:bg-surface rounded">
+        <button
+          type="button"
+          onClick={onClose}
+          className="self-start p-1 hover:bg-surface rounded sm:self-auto"
+          aria-label="Close quick test"
+        >
           <X className="h-4 w-4 text-text-muted" />
         </button>
       </div>

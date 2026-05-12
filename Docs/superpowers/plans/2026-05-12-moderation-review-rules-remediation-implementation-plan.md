@@ -260,30 +260,30 @@ Expected: all tests pass and no raw replace service call occurs before preview c
 
 **Implementation Tasks:**
 
-- [ ] Add `aria-label` to icon-only buttons in `ModerationContextBar.tsx`: quick test, reload, and active-user clear.
+- [x] Add `aria-label` to icon-only buttons in `ModerationContextBar.tsx`: quick test, reload, and active-user clear.
 
-- [ ] Replace visual-only labels with programmatic labels. Use stable ids via `React.useId()` and either `htmlFor`/`id` or `aria-labelledby` for every input, textarea, select, AntD Select, and hidden file input trigger.
+- [x] Replace visual-only labels with programmatic labels. Use stable ids via `React.useId()` and either `htmlFor`/`id` or `aria-labelledby` for every input, textarea, select, AntD Select, and hidden file input trigger.
 
-- [ ] Convert phase segmented controls in `TestSandboxPanel.tsx` to `role="radiogroup"` plus `role="radio"`/`aria-checked`, or use native radio semantics.
+- [x] Convert phase segmented controls in `TestSandboxPanel.tsx` to `role="radiogroup"` plus `role="radio"`/`aria-checked`, or use native radio semantics.
 
-- [ ] Add keyboard handling to tab bars if needed: arrow keys move between tabs, Enter/Space activates, focus remains visible.
+- [x] Add keyboard handling to tab bars if needed: arrow keys move between tabs, Enter/Space activates, focus remains visible.
 
-- [ ] Make wide tables scroll inside their containers with `overflow-x-auto`, `min-w-*`, and no page-level horizontal scroll. Verify `ModerationPlaygroundShell` hero, context bar, status badges, tabs, category chips, and modals at 390px.
+- [x] Make wide tables scroll inside their containers with `overflow-x-auto`, `min-w-*`, and no page-level horizontal scroll. Verify `ModerationPlaygroundShell` hero, context bar, status badges, tabs, category chips, and modals at 390px.
 
-- [ ] Add focus management for confirmation modals and undo controls. After a delete/replace modal closes, return focus to the trigger or the next stable action.
+- [x] Add focus management for confirmation modals and undo controls. After a delete/replace modal closes, return focus to the trigger or the next stable action.
 
-- [ ] Ensure inline errors are associated with the related input using `aria-describedby`, and dynamic result/error areas use `aria-live="polite"` where appropriate.
+- [x] Ensure inline errors are associated with the related input using `aria-describedby`, and dynamic result/error areas use `aria-live="polite"` where appropriate.
 
 **Tests:**
 
-- [ ] Add Testing Library assertions for accessible names:
+- [x] Add Testing Library assertions for accessible names:
 
 ```ts
 expect(screen.getByRole("button", { name: /quick test/i })).toBeInTheDocument()
 expect(screen.getByLabelText(/sample text/i)).toBeInTheDocument()
 ```
 
-- [ ] Add Playwright responsive check with CDP/browser viewport sizes 390x844, 768x1024, and 1440x900. Assert no `document.documentElement.scrollWidth > clientWidth` on `/moderation/rules`.
+- [x] Add Playwright responsive check with CDP/browser viewport sizes 390x844, 768x1024, and 1440x900. Assert no `document.documentElement.scrollWidth > clientWidth` on `/moderation/rules`.
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationPlayground/__tests__/ModerationPlayground.accessibility.test.tsx`
 
@@ -291,7 +291,14 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: all tests pass; 390px viewport has no page-level horizontal overflow.
 
-**Status:** Not Started
+**Verification:**
+- `bunx vitest run ../packages/ui/src/components/Option/ModerationPlayground/__tests__ ../packages/ui/src/services/__tests__/moderation.service.contract.test.ts` - passed, 20 files / 217 tests.
+- `bunx playwright test e2e/workflows/tier-5-specialized/moderation-responsive.spec.ts e2e/workflows/tier-5-specialized/moderation-routes.spec.ts --project=tier-5 --reporter=line` - passed, 7 tests.
+- `git diff --check` - passed.
+- `bunx tsc --noEmit --pretty false` - still blocked by pre-existing unrelated errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
+- Bandit not run; touched files are TypeScript/TSX, Playwright tests, docs, and Backlog metadata only.
+
+**Status:** Complete
 
 ---
 

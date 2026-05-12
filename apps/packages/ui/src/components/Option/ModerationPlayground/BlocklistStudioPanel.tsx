@@ -67,8 +67,8 @@ function composeLine(
 const LintResultsTable: React.FC<{ items: BlocklistLintItem[] }> = ({ items }) => {
   if (items.length === 0) return null
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <table className="w-full text-sm" data-testid="lint-results-table">
+    <div className="border border-border rounded-lg overflow-x-auto">
+      <table className="min-w-[640px] w-full text-sm" data-testid="lint-results-table">
         <thead>
           <tr className="text-left text-text-muted bg-surface/50">
             <th className="px-3 py-2 font-medium">#</th>
@@ -154,6 +154,25 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
   const [replacement, setReplacement] = React.useState("")
   const [categories, setCategories] = React.useState<string[]>([])
   const [inlineLint, setInlineLint] = React.useState<BlocklistLintItem[] | null>(null)
+  const tabPanelBaseId = React.useId()
+  const patternInputId = React.useId()
+  const actionSelectId = React.useId()
+  const replacementInputId = React.useId()
+  const categoriesSelectId = React.useId()
+  const showInactiveRowsId = React.useId()
+  const searchInputId = React.useId()
+  const patternTypeFilterId = React.useId()
+  const actionFilterId = React.useId()
+  const categoryFilterId = React.useId()
+  const sortSelectId = React.useId()
+  const rawEditorId = React.useId()
+  const subTabRefs = React.useRef<Record<SubTab, HTMLButtonElement | null>>({
+    managed: null,
+    raw: null
+  })
+  const rawReplaceButtonRef = React.useRef<HTMLButtonElement>(null)
+  const undoManagedButtonRef = React.useRef<HTMLButtonElement>(null)
+  const undoRawButtonRef = React.useRef<HTMLButtonElement>(null)
 
   // Auto-load managed rules on mount
   React.useEffect(() => {
@@ -164,6 +183,46 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
   }, [blocklist.loadManaged]) // stable callback from useCallback([], [])
 
   const composed = composeLine(pattern, action, replacement, categories)
+
+  const getSubTabId = (tab: SubTab) => `${tabPanelBaseId}-${tab}-tab`
+  const getSubTabPanelId = (tab: SubTab) => `${tabPanelBaseId}-${tab}-panel`
+
+  const activateSubTab = (tab: SubTab) => {
+    setSubTab(tab)
+    subTabRefs.current[tab]?.focus()
+  }
+
+  const handleSubTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: SubTab
+  ) => {
+    const currentIndex = SUB_TABS.findIndex((tab) => tab.key === currentTab)
+    let nextIndex: number | null = null
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % SUB_TABS.length
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + SUB_TABS.length) % SUB_TABS.length
+    } else if (event.key === "Home") {
+      nextIndex = 0
+    } else if (event.key === "End") {
+      nextIndex = SUB_TABS.length - 1
+    }
+    if (nextIndex == null) return
+    event.preventDefault()
+    activateSubTab(SUB_TABS[nextIndex].key)
+  }
+
+  React.useEffect(() => {
+    if (managedUndo) {
+      window.setTimeout(() => undoManagedButtonRef.current?.focus(), 0)
+    }
+  }, [managedUndo])
+
+  React.useEffect(() => {
+    if (blocklist.rawReplaceUndo) {
+      window.setTimeout(() => undoRawButtonRef.current?.focus(), 0)
+    }
+  }, [blocklist.rawReplaceUndo])
 
   const handleValidate = async () => {
     if (!composed) {
@@ -204,13 +263,15 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
     }
   }
 
-  const handleDelete = (itemId: number) => {
+  const handleDelete = (itemId: number, trigger?: HTMLButtonElement | null) => {
     const rowToDelete = normalizedRows.find((row) => row.id === itemId)
     Modal.confirm({
       title: "Delete rule?",
       content: "This removes the rule from the managed blocklist. You can undo this during the current session.",
       okText: "Delete",
       okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onCancel: () => window.setTimeout(() => trigger?.focus(), 0),
       onOk: async () => {
         try {
           await blocklist.deleteManaged(itemId)
@@ -235,13 +296,17 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
   }
 
   const openRawReplaceConfirm = (preview: RawReplacePreview, title: string, successMessage: string) => {
+    const returnFocus = () => window.setTimeout(() => rawReplaceButtonRef.current?.focus(), 0)
     Modal.confirm({
       title,
       content: <RawReplacePreviewSummary preview={preview} />,
       okText: "Replace blocklist",
       cancelText: "Cancel",
       okButtonProps: { danger: true, disabled: preview.lint.invalid_count > 0 },
-      onCancel: blocklist.cancelRawReplace,
+      onCancel: () => {
+        blocklist.cancelRawReplace()
+        returnFocus()
+      },
       onOk: async () => {
         await blocklist.confirmRawReplace()
         messageApi.success(successMessage)
@@ -330,8 +395,9 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Pattern */}
           <div className="sm:col-span-2">
-            <label className="block text-xs text-text-muted mb-1">Pattern</label>
+            <label htmlFor={patternInputId} className="block text-xs text-text-muted mb-1">Pattern</label>
             <input
+              id={patternInputId}
               type="text"
               value={pattern}
               onChange={(e) => setPattern(e.target.value)}
@@ -343,8 +409,9 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
 
           {/* Action */}
           <div>
-            <label className="block text-xs text-text-muted mb-1">Action</label>
+            <label htmlFor={actionSelectId} className="block text-xs text-text-muted mb-1">Action</label>
             <select
+              id={actionSelectId}
               value={action}
               onChange={(e) => setAction(e.target.value)}
               className="w-full px-3 py-2 border border-border rounded-lg bg-bg text-text text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -361,8 +428,9 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
           {/* Replacement (only for redact) */}
           {action === "redact" && (
             <div>
-              <label className="block text-xs text-text-muted mb-1">Replacement</label>
+              <label htmlFor={replacementInputId} className="block text-xs text-text-muted mb-1">Replacement</label>
               <input
+                id={replacementInputId}
                 type="text"
                 value={replacement}
                 onChange={(e) => setReplacement(e.target.value)}
@@ -374,8 +442,10 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
 
           {/* Categories */}
           <div className={action === "redact" ? "sm:col-span-2" : ""}>
-            <label className="block text-xs text-text-muted mb-1">Categories</label>
+            <label htmlFor={categoriesSelectId} className="block text-xs text-text-muted mb-1">Categories</label>
             <Select
+              id={categoriesSelectId}
+              aria-label="Rule categories"
               mode="tags"
               value={categories}
               onChange={setCategories}
@@ -417,7 +487,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
 
         {/* Inline lint results */}
         {inlineLint && inlineLint.length > 0 && (
-          <div className="mt-2">
+          <div className="mt-2" aria-live="polite">
             <LintResultsTable items={inlineLint} />
           </div>
         )}
@@ -425,7 +495,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
 
       {/* Managed lint results */}
       {blocklist.managedLint && blocklist.managedLint.items.length > 0 && (
-        <div>
+        <div aria-live="polite">
           <h4 className="text-sm font-semibold mb-2">Lint Results</h4>
           <LintResultsTable items={blocklist.managedLint.items} />
         </div>
@@ -444,8 +514,9 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
                   : ""}
               </p>
             </div>
-            <label className="inline-flex items-center gap-2 text-xs text-text-muted">
+            <label htmlFor={showInactiveRowsId} className="inline-flex items-center gap-2 text-xs text-text-muted">
               <input
+                id={showInactiveRowsId}
                 type="checkbox"
                 checked={showInactiveRows}
                 onChange={(event) => setShowInactiveRows(event.target.checked)}
@@ -457,6 +528,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
             <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
               <span>Deleted rule available to restore during this session.</span>
               <button
+                ref={undoManagedButtonRef}
                 type="button"
                 onClick={handleUndoManagedDelete}
                 className="rounded border border-blue-300 px-2 py-1 text-xs font-medium hover:bg-blue-100 dark:border-blue-700 dark:hover:bg-blue-900/40"
@@ -467,14 +539,22 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
             </div>
           )}
           <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+            <label htmlFor={searchInputId} className="sr-only">
+              Rule search
+            </label>
             <input
+              id={searchInputId}
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search rules"
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-blue-500 md:col-span-2"
             />
+            <label htmlFor={patternTypeFilterId} className="sr-only">
+              Filter by pattern type
+            </label>
             <select
+              id={patternTypeFilterId}
               value={patternTypeFilter}
               onChange={(event) => setPatternTypeFilter(event.target.value as typeof patternTypeFilter)}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text"
@@ -486,7 +566,11 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
               <option value="comment">Comment</option>
               <option value="empty">Blank</option>
             </select>
+            <label htmlFor={actionFilterId} className="sr-only">
+              Filter by action
+            </label>
             <select
+              id={actionFilterId}
               value={actionFilter}
               onChange={(event) => setActionFilter(event.target.value as typeof actionFilter)}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text"
@@ -497,7 +581,11 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
               <option value="redact">Redact</option>
               <option value="warn">Warn</option>
             </select>
+            <label htmlFor={categoryFilterId} className="sr-only">
+              Filter by category
+            </label>
             <select
+              id={categoryFilterId}
               value={categoryFilter}
               onChange={(event) => setCategoryFilter(event.target.value)}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text"
@@ -510,9 +598,9 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-text-muted" htmlFor="rule-sort">Sort</label>
+            <label className="text-xs text-text-muted" htmlFor={sortSelectId}>Sort</label>
             <select
-              id="rule-sort"
+              id={sortSelectId}
               value={sortKey}
               onChange={(event) => setSortKey(event.target.value as typeof sortKey)}
               className="rounded border border-border bg-bg px-2 py-1 text-xs text-text"
@@ -534,8 +622,8 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
           </div>
         ) : (
           <>
-            <div className="border border-border rounded-lg overflow-hidden">
-              <table className="w-full text-sm" data-testid="rules-table">
+            <div className="border border-border rounded-lg overflow-x-auto">
+              <table className="min-w-[760px] w-full text-sm" data-testid="rules-table">
                 <thead>
                   <tr className="text-left text-text-muted bg-surface/50">
                     <th className="px-3 py-2 font-medium w-10">#</th>
@@ -607,7 +695,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
                           {item.isActive && (
                             <button
                               type="button"
-                              onClick={() => handleDelete(item.id)}
+                              onClick={(event) => handleDelete(item.id, event.currentTarget)}
                               className="p-1 text-text-muted hover:text-red-500 transition-colors"
                               aria-label={`Delete rule ${item.id}`}
                             >
@@ -676,7 +764,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
       </div>
 
       {/* Buttons */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={async () => {
@@ -708,6 +796,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
           Validate all
         </button>
         <button
+          ref={rawReplaceButtonRef}
           type="button"
           onClick={handlePreviewRawReplace}
           disabled={blocklist.loading}
@@ -721,6 +810,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
         <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
           <span>Previous blocklist available to restore during this session.</span>
           <button
+            ref={undoRawButtonRef}
             type="button"
             onClick={handleUndoRawReplace}
             className="rounded border border-blue-300 px-2 py-1 text-xs font-medium hover:bg-blue-100 dark:border-blue-700 dark:hover:bg-blue-900/40"
@@ -732,7 +822,11 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
       )}
 
       {/* TextArea */}
+      <label htmlFor={rawEditorId} className="sr-only">
+        Raw blocklist editor
+      </label>
       <textarea
+        id={rawEditorId}
         value={blocklist.rawText}
         onChange={(e) => blocklist.setRawText(e.target.value)}
         rows={12}
@@ -743,7 +837,7 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
 
       {/* Lint results */}
       {blocklist.rawLint && blocklist.rawLint.items.length > 0 && (
-        <div>
+        <div aria-live="polite">
           <h4 className="text-sm font-semibold mb-2">
             Lint Results ({blocklist.rawLint.valid_count} valid, {blocklist.rawLint.invalid_count} invalid)
           </h4>
@@ -764,13 +858,20 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
     <div className="space-y-6">
       {/* Sub-tab bar */}
       <div className="border-b border-border">
-        <div className="flex overflow-x-auto -mb-px" role="tablist">
+        <div className="flex overflow-x-auto -mb-px" role="tablist" aria-label="Blocklist editor views">
           {SUB_TABS.map((tab) => (
             <button
               key={tab.key}
+              id={getSubTabId(tab.key)}
+              ref={(node) => {
+                subTabRefs.current[tab.key] = node
+              }}
               role="tab"
               aria-selected={subTab === tab.key}
+              aria-controls={getSubTabPanelId(tab.key)}
+              tabIndex={subTab === tab.key ? 0 : -1}
               onClick={() => setSubTab(tab.key)}
+              onKeyDown={(event) => handleSubTabKeyDown(event, tab.key)}
               className={`
                 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
                 ${
@@ -787,7 +888,13 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
       </div>
 
       {/* Content */}
-      {subTab === "managed" ? renderManaged() : renderRaw()}
+      <div
+        id={getSubTabPanelId(subTab)}
+        role="tabpanel"
+        aria-labelledby={getSubTabId(subTab)}
+      >
+        {subTab === "managed" ? renderManaged() : renderRaw()}
+      </div>
     </div>
   )
 }

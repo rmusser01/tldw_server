@@ -118,8 +118,8 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
     <div className="space-y-6 max-w-3xl">
       {/* 1. Master Toggle (read-only) */}
       <section className="rounded-lg border border-border bg-surface/50 p-4">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="font-semibold text-text">Moderation Enabled</h3>
             <p className="text-sm text-text-muted mt-0.5">
               Whether the moderation engine is active server-wide.
@@ -174,8 +174,8 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
 
       {/* 3. PII Detection Toggle (editable) */}
       <section className="rounded-lg border border-border bg-surface/50 p-4">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="font-semibold text-text">Personal Data Protection</h3>
             <p className="text-sm text-text-muted mt-0.5">
               Runtime override for built-in personal-data detection. Saving applies immediately; persistence is controlled separately.
@@ -196,8 +196,8 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
 
       {/* 5. Persist Toggle (warning-styled) */}
       <section className="rounded-lg border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 p-4">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="font-semibold text-yellow-800 dark:text-yellow-300">
               Persist to Disk
             </h3>
@@ -210,7 +210,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
       </section>
 
       {/* 6. Save / Reset Buttons */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <button
           type="button"
           onClick={handleSave}

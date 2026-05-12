@@ -62,8 +62,8 @@ describe("TestSandboxPanel", () => {
   it("renders phase selector with 'User message' and 'AI response' buttons", () => {
     const tester = makeTester()
     render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
-    expect(screen.getByRole("button", { name: "User message" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "AI response" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "User message" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "AI response" })).toBeInTheDocument()
   })
 
   it("renders all quick sample buttons", () => {

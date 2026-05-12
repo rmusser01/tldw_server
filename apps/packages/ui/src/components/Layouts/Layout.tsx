@@ -358,7 +358,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
       )}
       <main
         className={classNames(
-          "relative flex min-h-0 flex-1 flex-col",
+          "relative flex min-h-0 min-w-0 flex-1 flex-col",
           hideHeader ? "bg-bg " : ""
         )}
         data-demo-mode={demoEnabled ? "on" : "off"}>
@@ -368,8 +368,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             {shortcutLoading && renderShortcutOverlay()}
           </div>
         ) : isViewportConstrainedRoute ? (
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <div className="relative z-20 w-full shrink-0">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+            <div className="relative z-20 w-full min-w-0 shrink-0">
               <Header
                 onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
                 sidebarCollapsed={showChatSidebar && isMobile ? !sidebarOpen : chatSidebarCollapsed}
@@ -377,14 +377,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 onOpenNotifications={onOpenNotifications}
               />
             </div>
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
           </div>
         ) : (
-          <div className="relative flex flex-col min-h-[135vh]">
-            <div className="relative z-20 w-full">
+          <div className="relative flex min-w-0 flex-col min-h-[135vh]">
+            <div className="relative z-20 w-full min-w-0">
               <Header
                 onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
                 sidebarCollapsed={showChatSidebar && isMobile ? !sidebarOpen : chatSidebarCollapsed}
@@ -392,7 +392,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 onOpenNotifications={onOpenNotifications}
               />
             </div>
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
