@@ -11,14 +11,14 @@ import type {
 
 import { BuddyShellPopover } from "./BuddyShellPopover"
 import {
-  getAssetsById,
   getPersonaVisualDiagnosticToneClassName,
   type PersonaVisualDiagnostic
 } from "./personaVisualDiagnostics"
 import {
-  SpriteFrameRenderer,
-  type PersonaVisualRenderError
-} from "./SpriteFrameRenderer"
+  getPersonaVisualRenderer,
+  PersonaVisualRendererHost
+} from "./personaVisualRenderers"
+import type { PersonaVisualRenderError } from "./SpriteFrameRenderer"
 
 type BuddyShellDockProps = {
   buddySummary: PersonaBuddySummary
@@ -49,12 +49,11 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   onDragHandlePointerDown,
   dockRef
 }) => {
-  const assetsById = getAssetsById(visualPack)
-  const canRenderVisualPack =
-    !isDormant &&
-    visualPack?.renderer_type === "sprite_frames" &&
-    Boolean(visualPack.manifest) &&
-    Object.keys(assetsById).length > 0
+  const visualRenderer = visualPack
+    ? getPersonaVisualRenderer(visualPack.renderer_type)
+    : null
+  const canMountVisualRenderer =
+    !isDormant && Boolean(visualPack?.manifest && visualRenderer)
 
   return (
     <div
@@ -83,11 +82,10 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         aria-label={`Toggle buddy for ${buddySummary.persona_name}`}
         className="flex min-w-[160px] items-center justify-between gap-3 rounded-2xl border border-border bg-bg/95 px-4 py-3 text-left shadow-xl backdrop-blur"
       >
-        {canRenderVisualPack ? (
+        {canMountVisualRenderer && visualPack ? (
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface2">
-            <SpriteFrameRenderer
-              manifest={visualPack.manifest}
-              assets={assetsById}
+            <PersonaVisualRendererHost
+              pack={visualPack}
               state={visualState}
               fallbackLabel={buddySummary.persona_name}
               className="max-h-10 max-w-10 object-contain"

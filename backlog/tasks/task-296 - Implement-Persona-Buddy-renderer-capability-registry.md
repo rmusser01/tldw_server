@@ -4,7 +4,7 @@ title: Implement Persona Buddy renderer capability registry
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:15'
-updated_date: '2026-05-12 05:36'
+updated_date: '2026-05-12 06:37'
 labels:
   - persona
   - buddy
@@ -33,7 +33,7 @@ Implement the approved Persona/Buddy renderer capability registry thin slice. Th
 - [x] #2 Persona API exposes authenticated visual-renderer capabilities without requiring a persona-specific lookup.
 - [x] #3 Draft manifest save remains permissive while activation and import-preview reject unsupported renderers.
 - [x] #4 Frontend service types/helper can fetch renderer capabilities and Buddy runtime uses a local renderer registry for renderability.
-- [ ] #5 Buddy diagnostics and dock rendering use the same frontend registry and preserve text fallback for unsupported renderers.
+- [x] #5 Buddy diagnostics and dock rendering use the same frontend registry and preserve text fallback for unsupported renderers.
 - [ ] #6 Focused backend and frontend tests pass, diff check passes, and Bandit on touched backend production scope reports no new findings.
 <!-- AC:END -->
 
@@ -63,6 +63,10 @@ Task 3 verification: focused pytest command passed with 9 passed and 5 warnings.
 Task 4 frontend registry/service plan: add typed capability response models, add getPersonaVisualRendererCapabilities() against /api/v1/persona/visual-renderers with malformed renderers normalized to [], add a local Buddy renderer registry with only sprite_frames mapped to SpriteFrameRenderer, and add focused Vitest coverage for service fetching and renderer resolution/fallback.
 
 Task 4 verification: red Vitest run failed before implementation because personaVisualRenderers.tsx and getPersonaVisualRendererCapabilities() were missing. Green run passed 2 files and 6 tests for personaVisualRenderers and persona-visuals service.
+
+Task 5 plan: add BuddyShellHost regressions first; move pure visual asset helpers into personaVisualAssets.ts; update diagnostics to consult getPersonaVisualRenderer; update BuddyShellDock to render through canRenderPersonaVisualPack and PersonaVisualRendererHost; run focused Vitest and git diff --check; then commit with the requested message.
+
+Task 5 verification: focused frontend Vitest command passed with 4 files and 42 tests. git diff --check 03cf75806..HEAD passed. Bandit not run for this slice because Task 5 touched only frontend TypeScript/React and Backlog notes, no backend production Python files. Red phase note: the added BuddyShellHost live2d and malformed sprite regression tests passed before production changes because current visible behavior already fell back and published diagnostics; the production change still replaces the weaker dock predicate with registry renderability semantics.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

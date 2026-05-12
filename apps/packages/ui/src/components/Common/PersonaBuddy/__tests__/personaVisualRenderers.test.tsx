@@ -104,6 +104,32 @@ describe("persona visual renderer registry", () => {
     expect(onRenderError).toHaveBeenCalledWith(null)
   })
 
+  it("mounts supported renderers so they can report render errors", () => {
+    const onRenderError = vi.fn()
+
+    render(
+      <PersonaVisualRendererHost
+        pack={buildPack({
+          assets_by_id: {
+            "other-asset": {
+              id: "other-asset",
+              url: "/assets/other.png",
+              mime_type: "image/png",
+              asset_role: "frame"
+            }
+          }
+        })}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+    expect(onRenderError).toHaveBeenCalledWith("missing_asset")
+  })
+
   it("falls back for unsupported renderer packs", () => {
     const unsupportedPack = buildPack({
       renderer_type: "live2d",

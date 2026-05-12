@@ -8,7 +8,7 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
-import { normalizeFrames } from "./personaVisualDiagnostics"
+import { normalizeFrames } from "./personaVisualAssets"
 
 export type PersonaVisualRenderError =
   | "missing_animation"

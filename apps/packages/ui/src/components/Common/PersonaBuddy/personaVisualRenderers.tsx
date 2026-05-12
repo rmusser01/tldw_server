@@ -6,7 +6,7 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
-import { getAssetsById, normalizeFrames } from "./personaVisualDiagnostics"
+import { getAssetsById, normalizeFrames } from "./personaVisualAssets"
 import {
   SpriteFrameRenderer,
   type PersonaVisualRenderError
@@ -78,7 +78,7 @@ export const PersonaVisualRendererHost: React.FC<
   PersonaVisualRendererComponentProps
 > = (props) => {
   const renderer = getPersonaVisualRenderer(props.pack.renderer_type)
-  if (!renderer || !renderer.canRender(props.pack)) {
+  if (!renderer || !props.pack.manifest) {
     return <span>{props.fallbackLabel}</span>
   }
   const Component = renderer.Component
