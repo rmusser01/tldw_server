@@ -85,6 +85,112 @@ def test_initialized_creates_session_actions_and_active_session_action_column(
     assert "active_session_action_id" in column_names
 
 
+def test_initialized_creates_generation_persistence_tables_on_fresh_and_upgraded_db(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    ensure_vn_play_tables(chacha_db)
+
+    table_cursor = chacha_db.execute_query(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name LIKE 'vn_play_generation%'
+        """
+    )
+    assert {row["name"] for row in table_cursor.fetchall()} == {
+        "vn_play_generations",
+        "vn_play_generation_requests",
+        "vn_play_generation_actions",
+        "vn_play_generation_revisions",
+    }
+
+    with chacha_db.transaction() as conn:
+        conn.execute("DROP TABLE vn_play_generation_revisions")
+        conn.execute("DROP TABLE vn_play_generation_actions")
+        conn.execute("DROP TABLE vn_play_generation_requests")
+        conn.execute("DROP TABLE vn_play_generations")
+        conn.execute(
+            """
+            CREATE TABLE vn_play_generations (
+                id INTEGER PRIMARY KEY,
+                session_id INTEGER NOT NULL,
+                owner_user_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE vn_play_generation_requests (
+                id INTEGER PRIMARY KEY,
+                generation_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL,
+                owner_user_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE vn_play_generation_actions (
+                id INTEGER PRIMARY KEY,
+                session_id INTEGER NOT NULL,
+                owner_user_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE vn_play_generation_revisions (
+                id INTEGER PRIMARY KEY,
+                generation_id INTEGER NOT NULL,
+                generation_request_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL,
+                owner_user_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute("INSERT INTO vn_play_generations (id, session_id, owner_user_id) VALUES (1, 1, 42)")
+        conn.execute(
+            """
+            INSERT INTO vn_play_generation_requests (id, generation_id, session_id, owner_user_id)
+            VALUES (1, 1, 1, 42)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO vn_play_generation_actions (id, session_id, owner_user_id)
+            VALUES (1, 1, 42)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO vn_play_generation_revisions (
+                id,
+                generation_id,
+                generation_request_id,
+                session_id,
+                owner_user_id
+            )
+            VALUES (1, 1, 1, 1, 42)
+            """
+        )
+
+    ensure_vn_play_tables(chacha_db)
+
+    column_cursor = chacha_db.execute_query("PRAGMA table_info(vn_play_generations)")
+    column_names = {row["name"] for row in column_cursor.fetchall()}
+    assert {
+        "generation_point_key",
+        "generation_profile_key",
+        "generation_profile_snapshot_id",
+        "active_revision_id",
+        "latest_request_id",
+        "status",
+    }.issubset(column_names)
+    action_column_cursor = chacha_db.execute_query("PRAGMA table_info(vn_play_generation_actions)")
+    action_column_names = {row["name"] for row in action_column_cursor.fetchall()}
+    assert {"created_at", "updated_at", "request_payload_hash"}.issubset(action_column_names)
+
+
 def test_turn_request_idempotency_key_is_unique_per_session(chacha_db: CharactersRAGDB) -> None:
     repo = VNPlayRepository.initialized(chacha_db)
     session = repo.create_session(
@@ -193,6 +299,666 @@ def test_session_action_idempotency_key_is_unique_per_session_and_decodes_json(
         owner_user_id=42,
         idempotency_key="restore-1",
     )["id"] == first["id"]
+
+
+def test_generation_point_is_unique_per_owner_session_and_key(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated branch",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        script_id=7,
+        script_version_id=8,
+        seed="seed",
+    )
+    other_session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated branch again",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        script_id=7,
+        script_version_id=8,
+        seed="seed",
+    )
+    first = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        script_id=7,
+        script_version_id=8,
+        opcode_id="map-clue",
+        opcode_label="archive",
+        opcode_index=3,
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    replayed = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        script_id=7,
+        script_version_id=8,
+        opcode_id="map-clue",
+        opcode_label="archive",
+        opcode_index=3,
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    other = repo.get_or_create_generation(
+        session_id=other_session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        script_id=7,
+        script_version_id=8,
+        opcode_id="map-clue",
+        opcode_label="archive",
+        opcode_index=3,
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+
+    assert replayed["id"] == first["id"]
+    assert first["generation_point_key"] == "archive:3:map-clue"
+    assert first["status"] == "not_started"
+    assert other["id"] != first["id"]
+
+    with pytest.raises(ValueError, match="generation_point_conflict"):
+        repo.get_or_create_generation(
+            session_id=session["id"],
+            owner_user_id=42,
+            generation_point_key="archive:3:map-clue",
+            script_id=7,
+            script_version_id=8,
+            opcode_id="map-clue",
+            opcode_label="archive",
+            opcode_index=3,
+            output_schema="scene_update",
+            generation_profile_key="scene_writer",
+            generation_profile_snapshot_id=45,
+        )
+
+
+def test_generation_action_idempotency_replays_and_rejects_changed_hash_or_kind(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated action",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="confirmation",
+        client_scene_version=2,
+        opcode_snapshot={"op": "generate"},
+        prompt_fingerprint="prompt-a",
+        checkpoint_id_before=11,
+        status="pending_confirmation",
+    )
+    first = repo.create_generation_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        action_kind="execute",
+        idempotency_key="generation-confirm-1",
+        request_payload_hash="hash-a",
+    )
+    repo.update_generation_action(
+        first["id"],
+        {
+            "status": "completed",
+            "completed_action_response": {"generation_request_id": request["id"]},
+        },
+        owner_user_id=42,
+    )
+
+    replayed = repo.create_generation_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        action_kind="execute",
+        idempotency_key="generation-confirm-1",
+        request_payload_hash="hash-a",
+    )
+
+    assert replayed["id"] == first["id"]
+    assert replayed["completed_action_response"] == {
+        "generation_request_id": request["id"]
+    }
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_generation_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            generation_id=generation["id"],
+            generation_request_id=request["id"],
+            action_kind="execute",
+            idempotency_key="generation-confirm-1",
+            request_payload_hash="hash-b",
+        )
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_generation_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            generation_id=generation["id"],
+            generation_request_id=request["id"],
+            action_kind="cancel",
+            idempotency_key="generation-confirm-1",
+            request_payload_hash="hash-a",
+        )
+
+    second_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="regenerate",
+        client_scene_version=3,
+        status="pending",
+    )
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.create_generation_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            generation_id=generation["id"],
+            generation_request_id=second_request["id"],
+            action_kind="execute",
+            idempotency_key="generation-confirm-1",
+            request_payload_hash="hash-a",
+        )
+
+
+def test_generation_action_rejects_revision_from_different_generation(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated action mismatch",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    other_generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:4:other",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="regenerate",
+        client_scene_version=2,
+        status="completed",
+    )
+    other_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=other_generation["id"],
+        request_kind="regenerate",
+        client_scene_version=2,
+        status="completed",
+    )
+    other_revision = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=other_generation["id"],
+        generation_request_id=other_request["id"],
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={"choices": []},
+    )
+
+    with pytest.raises(ValueError, match="generation_revision_mismatch"):
+        repo.create_generation_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            generation_id=generation["id"],
+            generation_request_id=request["id"],
+            generation_revision_id=other_revision["id"],
+            action_kind="activate",
+            idempotency_key="activate-mismatch",
+            request_payload_hash="hash-a",
+        )
+
+
+def test_generation_relation_updates_reject_cross_generation_links(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated relation guards",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    other_generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:4:other",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="automatic",
+        client_scene_version=2,
+        status="in_progress",
+    )
+    other_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=other_generation["id"],
+        request_kind="automatic",
+        client_scene_version=2,
+        status="in_progress",
+    )
+    action = repo.create_generation_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=other_generation["id"],
+        generation_request_id=other_request["id"],
+        action_kind="execute",
+        idempotency_key="other-execute",
+        request_payload_hash="hash-a",
+    )
+
+    with pytest.raises(ValueError, match="generation_action_mismatch"):
+        repo.update_generation_request(
+            request["id"],
+            {"execute_action_id": action["id"]},
+            owner_user_id=42,
+        )
+
+    with pytest.raises(ValueError, match="generation_request_mismatch"):
+        repo.update_generation_action(
+            action["id"],
+            {
+                "generation_id": generation["id"],
+                "generation_request_id": other_request["id"],
+            },
+            owner_user_id=42,
+        )
+
+
+def test_generation_request_status_update_syncs_parent_generation_status(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated status sync",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="automatic",
+        client_scene_version=2,
+        status="in_progress",
+    )
+
+    repo.update_generation_request(
+        request["id"],
+        {"status": "model_failed", "public_error_code": "provider_unavailable"},
+        owner_user_id=42,
+    )
+
+    updated_generation = repo.get_generation(generation["id"], owner_user_id=42)
+    assert updated_generation["status"] == "model_failed"
+
+
+def test_generation_request_status_update_does_not_regress_from_stale_request(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated stale status",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    stale_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="automatic",
+        client_scene_version=2,
+        status="in_progress",
+    )
+    latest_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="regenerate",
+        client_scene_version=3,
+        status="pending_confirmation",
+    )
+
+    repo.update_generation_request(
+        stale_request["id"],
+        {"status": "abandoned"},
+        owner_user_id=42,
+    )
+
+    updated_generation = repo.get_generation(generation["id"], owner_user_id=42)
+    assert updated_generation["latest_request_id"] == latest_request["id"]
+    assert updated_generation["status"] == "pending_confirmation"
+
+
+def test_generation_requests_and_revisions_store_public_error_debug_and_usage_json(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated request",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="narrative_dialogue",
+        generation_profile_key="default",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="automatic",
+        client_scene_version=2,
+        opcode_snapshot={"op": "generate", "profile_key": "default"},
+        prompt_fingerprint="prompt-a",
+        checkpoint_id_before=11,
+        status="in_progress",
+    )
+    updated_request = repo.update_generation_request(
+        request["id"],
+        {
+            "status": "model_failed",
+            "public_error_code": "provider_unavailable",
+            "provider_call_started_at": "2026-05-10T20:00:00Z",
+            "provider_call_completed_at": "2026-05-10T20:00:01Z",
+            "lease_expires_at": "2026-05-10T20:05:00Z",
+        },
+        owner_user_id=42,
+    )
+    revision = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        status="model_failed",
+        output_schema="narrative_dialogue",
+        public_output={},
+        public_error_code="provider_unavailable",
+        raw_output_debug={"error": "timeout"},
+        parser_diagnostics={"stage": "not_started"},
+        moderation_diagnostics={"skipped": True},
+        model_metadata={"provider": "mock"},
+        usage_metadata={"prompt_tokens": 17},
+        source="model",
+    )
+
+    assert updated_request["public_error_code"] == "provider_unavailable"
+    assert updated_request["opcode_snapshot"] == {
+        "op": "generate",
+        "profile_key": "default",
+    }
+    assert revision["revision_number"] == 1
+    assert revision["public_error_code"] == "provider_unavailable"
+    assert revision["raw_output_debug"] == {"error": "timeout"}
+    assert revision["parser_diagnostics"] == {"stage": "not_started"}
+    assert revision["moderation_diagnostics"] == {"skipped": True}
+    assert revision["model_metadata"] == {"provider": "mock"}
+    assert revision["usage_metadata"] == {"prompt_tokens": 17}
+
+
+def test_active_revision_requires_succeeded_revision_from_same_generation(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated activation",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    foreign_generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:4:other",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="regenerate",
+        client_scene_version=2,
+        status="completed",
+    )
+    foreign_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=foreign_generation["id"],
+        request_kind="regenerate",
+        client_scene_version=2,
+        status="completed",
+    )
+    failed_revision = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        status="parse_failed",
+        output_schema="choice_set",
+        public_error_code="invalid_model_output",
+    )
+    succeeded_revision = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={"choices": []},
+    )
+    foreign_revision = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=foreign_generation["id"],
+        generation_request_id=foreign_request["id"],
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={"choices": []},
+    )
+
+    with pytest.raises(ValueError, match="active_revision_not_succeeded"):
+        repo.set_active_generation_revision(
+            generation_id=generation["id"],
+            owner_user_id=42,
+            revision_id=failed_revision["id"],
+        )
+    with pytest.raises(ValueError, match="active_revision_generation_mismatch"):
+        repo.set_active_generation_revision(
+            generation_id=generation["id"],
+            owner_user_id=42,
+            revision_id=foreign_revision["id"],
+        )
+
+    updated = repo.set_active_generation_revision(
+        generation_id=generation["id"],
+        owner_user_id=42,
+        revision_id=succeeded_revision["id"],
+    )
+
+    assert updated["active_revision_id"] == succeeded_revision["id"]
+    assert updated["status"] == "completed"
+
+
+def test_generation_revision_listing_uses_stable_offset_order(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated history",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="regenerate",
+        client_scene_version=2,
+        status="completed",
+    )
+    first = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={"revision": 1},
+        source="model",
+    )
+    second = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={"revision": 2},
+        source="regenerated",
+    )
+    third = repo.create_generation_revision(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        generation_request_id=request["id"],
+        status="succeeded",
+        output_schema="choice_set",
+        public_output={"revision": 3},
+        source="regenerated",
+    )
+
+    page = repo.list_generation_revisions(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        limit=2,
+        offset=1,
+    )
+
+    assert [revision["id"] for revision in page] == [second["id"], first["id"]]
+    assert [revision["revision_number"] for revision in [first, second, third]] == [
+        1,
+        2,
+        3,
+    ]
 
 
 def test_session_action_duplicate_insert_replays_or_conflicts(
@@ -629,6 +1395,45 @@ def test_scene_branches_and_checkpoints_round_trip_json(chacha_db: CharactersRAG
     assert repo.get_scene_state(session["id"])["location_key"] == "museum"
     assert repo.list_branches(session["id"]) == [branch]
     assert repo.list_checkpoints(session["id"]) == [checkpoint]
+
+
+def test_restore_active_generation_revision_map_rejects_unknown_point_key(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Restore generated choice",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+    )
+    action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="checkpoint_restore",
+        idempotency_key="restore-unknown-generation",
+        request_payload_hash="restore-unknown-generation-hash",
+    )
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=action["id"],
+        expected_scene_version=0,
+    ) is True
+
+    with pytest.raises(ValueError, match="generation_point_not_found"):
+        repo.commit_session_restore_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            action_id=action["id"],
+            event_payload={"restore": "checkpoint"},
+            scene_state={},
+            scene_version=1,
+            response_payload_factory=lambda payload: {"event_id": payload["event"]["id"]},
+            active_generation_revisions={"missing:point": None},
+        )
 
 
 def test_record_story_choice_selection_creates_branch_event_turn_and_state(

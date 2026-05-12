@@ -97,6 +97,105 @@ CREATE TABLE IF NOT EXISTS vn_play_session_actions (
     UNIQUE(owner_user_id, session_id, idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS vn_play_generations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL,
+    script_id INTEGER,
+    script_version_id INTEGER,
+    generation_point_key TEXT NOT NULL,
+    opcode_id TEXT,
+    opcode_label TEXT,
+    opcode_index INTEGER,
+    output_schema TEXT NOT NULL,
+    generation_profile_key TEXT NOT NULL,
+    generation_profile_snapshot_id INTEGER NOT NULL,
+    active_revision_id INTEGER,
+    latest_request_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'not_started',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, session_id, generation_point_key)
+);
+
+CREATE TABLE IF NOT EXISTS vn_play_generation_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generation_id INTEGER NOT NULL REFERENCES vn_play_generations(id) ON DELETE CASCADE,
+    session_id INTEGER NOT NULL REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL,
+    script_id INTEGER,
+    script_version_id INTEGER,
+    generation_point_key TEXT NOT NULL,
+    generation_profile_key TEXT NOT NULL,
+    generation_profile_snapshot_id INTEGER NOT NULL,
+    request_kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_confirmation',
+    create_action_id INTEGER,
+    execute_action_id INTEGER,
+    cancel_action_id INTEGER,
+    client_scene_version INTEGER NOT NULL DEFAULT 0,
+    opcode_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    prompt_fingerprint TEXT,
+    checkpoint_id_before INTEGER,
+    provider_call_started_at DATETIME,
+    provider_call_completed_at DATETIME,
+    lease_expires_at DATETIME,
+    public_error_code TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vn_play_generation_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL,
+    generation_id INTEGER REFERENCES vn_play_generations(id) ON DELETE CASCADE,
+    generation_request_id INTEGER REFERENCES vn_play_generation_requests(id) ON DELETE CASCADE,
+    generation_revision_id INTEGER REFERENCES vn_play_generation_revisions(id) ON DELETE SET NULL,
+    action_kind TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_payload_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    completed_action_response_json TEXT,
+    public_error_code TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, session_id, idempotency_key),
+    UNIQUE(
+        owner_user_id,
+        session_id,
+        action_kind,
+        generation_request_id,
+        idempotency_key
+    )
+);
+
+CREATE TABLE IF NOT EXISTS vn_play_generation_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generation_id INTEGER NOT NULL REFERENCES vn_play_generations(id) ON DELETE CASCADE,
+    generation_request_id INTEGER NOT NULL REFERENCES vn_play_generation_requests(id) ON DELETE CASCADE,
+    session_id INTEGER NOT NULL REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
+    owner_user_id INTEGER NOT NULL,
+    generation_point_key TEXT NOT NULL,
+    generation_profile_key TEXT NOT NULL,
+    generation_profile_snapshot_id INTEGER NOT NULL,
+    revision_number INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    output_schema TEXT NOT NULL,
+    public_output_json TEXT NOT NULL DEFAULT '{}',
+    applied_visuals_json TEXT NOT NULL DEFAULT '[]',
+    rejected_visuals_json TEXT NOT NULL DEFAULT '[]',
+    public_error_code TEXT,
+    raw_output_debug_json TEXT,
+    parser_diagnostics_json TEXT NOT NULL DEFAULT '{}',
+    moderation_diagnostics_json TEXT NOT NULL DEFAULT '{}',
+    model_metadata_json TEXT NOT NULL DEFAULT '{}',
+    usage_metadata_json TEXT NOT NULL DEFAULT '{}',
+    source TEXT NOT NULL DEFAULT 'model',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(owner_user_id, session_id, generation_id, revision_number)
+);
+
 CREATE TABLE IF NOT EXISTS vn_play_scene_state (
     session_id INTEGER PRIMARY KEY REFERENCES vn_play_sessions(id) ON DELETE CASCADE,
     owner_user_id INTEGER NOT NULL,
@@ -173,6 +272,34 @@ CREATE INDEX IF NOT EXISTS idx_vn_play_session_actions_session
     ON vn_play_session_actions(session_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_session_actions_owner_status
     ON vn_play_session_actions(owner_user_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vn_play_generations_owner_session_point_unique
+    ON vn_play_generations(owner_user_id, session_id, generation_point_key);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generations_session
+    ON vn_play_generations(session_id, owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generations_owner_status
+    ON vn_play_generations(owner_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generation_requests_generation
+    ON vn_play_generation_requests(owner_user_id, session_id, generation_id, id);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generation_requests_owner_status
+    ON vn_play_generation_requests(owner_user_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vn_play_generation_actions_owner_session_key_unique
+    ON vn_play_generation_actions(owner_user_id, session_id, idempotency_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vn_play_generation_actions_request_key_unique
+    ON vn_play_generation_actions(
+        owner_user_id,
+        session_id,
+        action_kind,
+        generation_request_id,
+        idempotency_key
+    );
+CREATE INDEX IF NOT EXISTS idx_vn_play_generation_actions_session
+    ON vn_play_generation_actions(owner_user_id, session_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generation_actions_request
+    ON vn_play_generation_actions(owner_user_id, session_id, generation_request_id);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generation_revisions_history
+    ON vn_play_generation_revisions(owner_user_id, session_id, generation_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_vn_play_generation_revisions_request
+    ON vn_play_generation_revisions(generation_request_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_scene_state_owner_user_id
     ON vn_play_scene_state(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_vn_play_branches_session
@@ -195,8 +322,14 @@ def ensure_vn_play_tables(db: CharactersRAGDB) -> None:
     _require_sqlite_chacha_db(db)
     with db.transaction() as conn:
         for statement in VN_PLAY_SCHEMA_STATEMENTS:
+            if _is_index_statement(statement):
+                continue
             conn.execute(statement)
         _ensure_vn_play_session_columns(conn)
+        _ensure_vn_play_generation_columns(conn)
+        for statement in VN_PLAY_SCHEMA_STATEMENTS:
+            if _is_index_statement(statement):
+                conn.execute(statement)
 
 
 class VNPlayRepository:
@@ -943,6 +1076,7 @@ class VNPlayRepository:
         response_payload_factory: Callable[[Mapping[str, Any]], Mapping[str, Any]],
         branch_node_id: int | None = None,
         script_position: Mapping[str, Any] | None = None,
+        active_generation_revisions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically persist a restore event, scene state, session state, and action response."""
         self._ensure_schema_initialized()
@@ -1058,6 +1192,13 @@ class VNPlayRepository:
             )
             if session_cursor.rowcount != 1:
                 raise RuntimeError("session_action_lock_not_active")
+            if active_generation_revisions is not None:
+                _apply_active_generation_revision_map(
+                    conn,
+                    session_id=session_id,
+                    owner_user_id=owner_user_id,
+                    active_generation_revisions=active_generation_revisions,
+                )
 
             restore_event_row = conn.execute(
                 "SELECT * FROM vn_play_events WHERE id = ?",
@@ -1354,6 +1495,839 @@ class VNPlayRepository:
                     (value, turn_request_id, owner_user_id, owner_user_id),
                 )
         return self.get_turn_request(turn_request_id)
+
+    def get_or_create_generation(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        generation_point_key: str,
+        output_schema: str,
+        generation_profile_key: str,
+        generation_profile_snapshot_id: int,
+        script_id: int | None = None,
+        script_version_id: int | None = None,
+        opcode_id: str | None = None,
+        opcode_label: str | None = None,
+        opcode_index: int | None = None,
+        status: str = "not_started",
+    ) -> dict[str, Any]:
+        """Create or replay a session-scoped generation point."""
+        self._ensure_schema_initialized()
+        session = self.get_session(session_id, owner_user_id=owner_user_id)
+        if session is None:
+            raise ValueError("session_not_found")
+        existing = self.get_generation_by_point(
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            generation_point_key=generation_point_key,
+        )
+        generation_fields = {
+            "script_id": script_id if script_id is not None else session.get("script_id"),
+            "script_version_id": (
+                script_version_id
+                if script_version_id is not None
+                else session.get("script_version_id")
+            ),
+            "generation_point_key": generation_point_key,
+            "opcode_id": opcode_id,
+            "opcode_label": opcode_label,
+            "opcode_index": opcode_index,
+            "output_schema": output_schema,
+            "generation_profile_key": generation_profile_key,
+            "generation_profile_snapshot_id": generation_profile_snapshot_id,
+        }
+        if existing is not None:
+            for field_name, expected_value in generation_fields.items():
+                if expected_value is None and field_name in {
+                    "opcode_id",
+                    "opcode_label",
+                    "opcode_index",
+                }:
+                    continue
+                if existing.get(field_name) != expected_value:
+                    raise ValueError("generation_point_conflict")
+            return existing
+
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO vn_play_generations (
+                        session_id,
+                        owner_user_id,
+                        script_id,
+                        script_version_id,
+                        generation_point_key,
+                        opcode_id,
+                        opcode_label,
+                        opcode_index,
+                        output_schema,
+                        generation_profile_key,
+                        generation_profile_snapshot_id,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        owner_user_id,
+                        generation_fields["script_id"],
+                        generation_fields["script_version_id"],
+                        generation_point_key,
+                        opcode_id,
+                        opcode_label,
+                        opcode_index,
+                        output_schema,
+                        generation_profile_key,
+                        generation_profile_snapshot_id,
+                        status,
+                    ),
+                )
+                generation_id = int(cursor.lastrowid)
+        except sqlite3.IntegrityError as exc:
+            existing = self.get_generation_by_point(
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                generation_point_key=generation_point_key,
+            )
+            if existing is None:
+                raise exc
+            for field_name, expected_value in generation_fields.items():
+                if existing.get(field_name) != expected_value:
+                    raise ValueError("generation_point_conflict") from exc
+            return existing
+
+        generation = self.get_generation(generation_id, owner_user_id=owner_user_id)
+        if generation is None:
+            raise RuntimeError("created_generation_not_found")
+        return generation
+
+    def get_generation(
+        self,
+        generation_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generations
+            WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+            """,
+            (generation_id, owner_user_id, owner_user_id),
+        )
+        row = cursor.fetchone()
+        return _decode_generation(row) if row is not None else None
+
+    def list_generations(
+        self,
+        session_id: int,
+        *,
+        owner_user_id: int,
+    ) -> list[dict[str, Any]]:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generations
+            WHERE session_id = ?
+              AND owner_user_id = ?
+            ORDER BY id ASC
+            """,
+            (session_id, owner_user_id),
+        )
+        return [_decode_generation(row) for row in cursor.fetchall()]
+
+    def get_generation_by_point(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        generation_point_key: str,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generations
+            WHERE session_id = ?
+              AND owner_user_id = ?
+              AND generation_point_key = ?
+            """,
+            (session_id, owner_user_id, generation_point_key),
+        )
+        row = cursor.fetchone()
+        return _decode_generation(row) if row is not None else None
+
+    def update_generation(
+        self,
+        generation_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        update_values = _mapped_update_values(
+            fields,
+            {
+                "active_revision_id": "active_revision_id",
+                "latest_request_id": "latest_request_id",
+                "status": "status",
+            },
+            json_fields=set(),
+        )
+        if not update_values:
+            return self.get_generation(generation_id, owner_user_id=owner_user_id)
+        with self.db.transaction() as conn:
+            for field_name, value in update_values:
+                column_name = {
+                    "active_revision_id": "active_revision_id",
+                    "latest_request_id": "latest_request_id",
+                    "status": "status",
+                }[field_name]
+                conn.execute(
+                    f"""
+                    UPDATE vn_play_generations
+                    SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+                    """,  # nosec B608 - column name is from a fixed local map.
+                    (value, generation_id, owner_user_id, owner_user_id),
+                )
+        return self.get_generation(generation_id, owner_user_id=owner_user_id)
+
+    def create_generation_request(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        generation_id: int,
+        request_kind: str,
+        client_scene_version: int,
+        status: str = "pending_confirmation",
+        opcode_snapshot: Mapping[str, Any] | None = None,
+        prompt_fingerprint: str | None = None,
+        checkpoint_id_before: int | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        generation = self.get_generation(generation_id, owner_user_id=owner_user_id)
+        if generation is None or int(generation["session_id"]) != int(session_id):
+            raise ValueError("generation_not_found")
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO vn_play_generation_requests (
+                    generation_id,
+                    session_id,
+                    owner_user_id,
+                    script_id,
+                    script_version_id,
+                    generation_point_key,
+                    generation_profile_key,
+                    generation_profile_snapshot_id,
+                    request_kind,
+                    status,
+                    client_scene_version,
+                    opcode_snapshot_json,
+                    prompt_fingerprint,
+                    checkpoint_id_before
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    generation_id,
+                    session_id,
+                    owner_user_id,
+                    generation.get("script_id"),
+                    generation.get("script_version_id"),
+                    generation["generation_point_key"],
+                    generation["generation_profile_key"],
+                    generation["generation_profile_snapshot_id"],
+                    request_kind,
+                    status,
+                    client_scene_version,
+                    _json_dump(dict(opcode_snapshot or {})),
+                    prompt_fingerprint,
+                    checkpoint_id_before,
+                ),
+            )
+            request_id = int(cursor.lastrowid)
+            conn.execute(
+                """
+                UPDATE vn_play_generations
+                SET latest_request_id = ?,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (request_id, status, generation_id, owner_user_id),
+            )
+        request = self.get_generation_request(request_id, owner_user_id=owner_user_id)
+        if request is None:
+            raise RuntimeError("created_generation_request_not_found")
+        return request
+
+    def get_generation_request(
+        self,
+        generation_request_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generation_requests
+            WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+            """,
+            (generation_request_id, owner_user_id, owner_user_id),
+        )
+        row = cursor.fetchone()
+        return _decode_generation_request(row) if row is not None else None
+
+    def update_generation_request(
+        self,
+        generation_request_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        current = self.get_generation_request(
+            generation_request_id,
+            owner_user_id=owner_user_id,
+        )
+        if current is None:
+            return None
+        self._validate_generation_request_action_links(current, fields)
+        update_values = _mapped_update_values(
+            fields,
+            _GENERATION_REQUEST_UPDATE_COLUMNS,
+            json_fields={"opcode_snapshot"},
+        )
+        if not update_values:
+            return current
+        with self.db.transaction() as conn:
+            for field_name, value in update_values:
+                statement = _GENERATION_REQUEST_UPDATE_STATEMENTS[field_name]
+                conn.execute(
+                    statement,
+                    (value, generation_request_id, owner_user_id, owner_user_id),
+                )
+            if "status" in fields:
+                conn.execute(
+                    """
+                    UPDATE vn_play_generations
+                    SET status = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND owner_user_id = ?
+                      AND latest_request_id = ?
+                    """,
+                    (
+                        fields["status"],
+                        int(current["generation_id"]),
+                        int(current["owner_user_id"]),
+                        generation_request_id,
+                    ),
+                )
+        return self.get_generation_request(
+            generation_request_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def _validate_generation_request_action_links(
+        self,
+        request: Mapping[str, Any],
+        fields: Mapping[str, Any],
+    ) -> None:
+        for field_name in ("create_action_id", "execute_action_id", "cancel_action_id"):
+            if field_name not in fields or fields[field_name] is None:
+                continue
+            action = self.get_generation_action(
+                int(fields[field_name]),
+                owner_user_id=int(request["owner_user_id"]),
+            )
+            if action is None:
+                raise ValueError("generation_action_not_found")
+            if int(action["session_id"]) != int(request["session_id"]):
+                raise ValueError("generation_action_mismatch")
+            if (
+                action.get("generation_id") is not None
+                and int(action["generation_id"]) != int(request["generation_id"])
+            ):
+                raise ValueError("generation_action_mismatch")
+            if (
+                action.get("generation_request_id") is not None
+                and int(action["generation_request_id"]) != int(request["id"])
+            ):
+                raise ValueError("generation_action_mismatch")
+
+    def create_generation_action(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        action_kind: str,
+        idempotency_key: str,
+        request_payload_hash: str,
+        generation_id: int | None = None,
+        generation_request_id: int | None = None,
+        generation_revision_id: int | None = None,
+        status: str = "pending",
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        existing = self.get_generation_action_by_key(
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            if not _generation_action_matches(
+                existing,
+                action_kind=action_kind,
+                request_payload_hash=request_payload_hash,
+                generation_id=generation_id,
+                generation_request_id=generation_request_id,
+                generation_revision_id=generation_revision_id,
+            ):
+                raise ValueError("idempotency_key_conflict")
+            return existing
+        if generation_id is not None:
+            generation = self.get_generation(generation_id, owner_user_id=owner_user_id)
+            if generation is None or int(generation["session_id"]) != int(session_id):
+                raise ValueError("generation_not_found")
+        if generation_request_id is not None:
+            request = self.get_generation_request(
+                generation_request_id,
+                owner_user_id=owner_user_id,
+            )
+            if request is None or int(request["session_id"]) != int(session_id):
+                raise ValueError("generation_request_not_found")
+            if generation_id is not None and int(request["generation_id"]) != int(generation_id):
+                raise ValueError("generation_request_mismatch")
+        if generation_revision_id is not None:
+            revision = self.get_generation_revision(
+                generation_revision_id,
+                owner_user_id=owner_user_id,
+            )
+            if revision is None or int(revision["session_id"]) != int(session_id):
+                raise ValueError("generation_revision_not_found")
+            if generation_id is not None and int(revision["generation_id"]) != int(generation_id):
+                raise ValueError("generation_revision_mismatch")
+            if (
+                generation_request_id is not None
+                and int(revision["generation_request_id"]) != int(generation_request_id)
+            ):
+                raise ValueError("generation_revision_mismatch")
+
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO vn_play_generation_actions (
+                        session_id,
+                        owner_user_id,
+                        generation_id,
+                        generation_request_id,
+                        generation_revision_id,
+                        action_kind,
+                        idempotency_key,
+                        request_payload_hash,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        owner_user_id,
+                        generation_id,
+                        generation_request_id,
+                        generation_revision_id,
+                        action_kind,
+                        idempotency_key,
+                        request_payload_hash,
+                        status,
+                    ),
+                )
+                action_id = int(cursor.lastrowid)
+        except sqlite3.IntegrityError as exc:
+            return self._recover_generation_action_insert_conflict(
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                action_kind=action_kind,
+                request_payload_hash=request_payload_hash,
+                exc=exc,
+            )
+
+        action = self.get_generation_action(action_id, owner_user_id=owner_user_id)
+        if action is None:
+            raise RuntimeError("created_generation_action_not_found")
+        return action
+
+    def _recover_generation_action_insert_conflict(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        idempotency_key: str,
+        action_kind: str,
+        request_payload_hash: str,
+        exc: sqlite3.IntegrityError,
+    ) -> dict[str, Any]:
+        existing = self.get_generation_action_by_key(
+            session_id=session_id,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing is None:
+            raise exc
+        if (
+            existing["request_payload_hash"] != request_payload_hash
+            or existing["action_kind"] != action_kind
+        ):
+            raise ValueError("idempotency_key_conflict") from exc
+        return existing
+
+    def get_generation_action(
+        self,
+        action_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generation_actions
+            WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+            """,
+            (action_id, owner_user_id, owner_user_id),
+        )
+        row = cursor.fetchone()
+        return _decode_generation_action(row) if row is not None else None
+
+    def get_generation_action_by_key(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generation_actions
+            WHERE session_id = ?
+              AND owner_user_id = ?
+              AND idempotency_key = ?
+            """,
+            (session_id, owner_user_id, idempotency_key),
+        )
+        row = cursor.fetchone()
+        return _decode_generation_action(row) if row is not None else None
+
+    def update_generation_action(
+        self,
+        action_id: int,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        current = self.get_generation_action(action_id, owner_user_id=owner_user_id)
+        if current is None:
+            return None
+        self._validate_generation_action_relation_update(current, fields)
+        update_values = _mapped_update_values(
+            fields,
+            _GENERATION_ACTION_UPDATE_COLUMNS,
+            json_fields={"completed_action_response"},
+        )
+        if not update_values:
+            return current
+        with self.db.transaction() as conn:
+            for field_name, value in update_values:
+                statement = _GENERATION_ACTION_UPDATE_STATEMENTS[field_name]
+                conn.execute(
+                    statement,
+                    (value, action_id, owner_user_id, owner_user_id),
+                )
+        return self.get_generation_action(action_id, owner_user_id=owner_user_id)
+
+    def _validate_generation_action_relation_update(
+        self,
+        action: Mapping[str, Any],
+        fields: Mapping[str, Any],
+    ) -> None:
+        owner_user_id = int(action["owner_user_id"])
+        session_id = int(action["session_id"])
+        generation_id = fields.get("generation_id", action.get("generation_id"))
+        generation_request_id = fields.get(
+            "generation_request_id",
+            action.get("generation_request_id"),
+        )
+        generation_revision_id = fields.get(
+            "generation_revision_id",
+            action.get("generation_revision_id"),
+        )
+        if generation_id is not None:
+            generation = self.get_generation(int(generation_id), owner_user_id=owner_user_id)
+            if generation is None or int(generation["session_id"]) != session_id:
+                raise ValueError("generation_not_found")
+        if generation_request_id is not None:
+            request = self.get_generation_request(
+                int(generation_request_id),
+                owner_user_id=owner_user_id,
+            )
+            if request is None or int(request["session_id"]) != session_id:
+                raise ValueError("generation_request_not_found")
+            if generation_id is not None and int(request["generation_id"]) != int(generation_id):
+                raise ValueError("generation_request_mismatch")
+        if generation_revision_id is not None:
+            revision = self.get_generation_revision(
+                int(generation_revision_id),
+                owner_user_id=owner_user_id,
+            )
+            if revision is None or int(revision["session_id"]) != session_id:
+                raise ValueError("generation_revision_not_found")
+            if generation_id is not None and int(revision["generation_id"]) != int(generation_id):
+                raise ValueError("generation_revision_mismatch")
+            if (
+                generation_request_id is not None
+                and int(revision["generation_request_id"]) != int(generation_request_id)
+            ):
+                raise ValueError("generation_revision_mismatch")
+
+    def create_generation_revision(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        generation_id: int,
+        generation_request_id: int,
+        status: str,
+        output_schema: str,
+        public_output: Mapping[str, Any] | None = None,
+        applied_visuals: Sequence[Mapping[str, Any]] | None = None,
+        rejected_visuals: Sequence[Mapping[str, Any]] | None = None,
+        public_error_code: str | None = None,
+        raw_output_debug: Mapping[str, Any] | None = None,
+        parser_diagnostics: Mapping[str, Any] | None = None,
+        moderation_diagnostics: Mapping[str, Any] | None = None,
+        model_metadata: Mapping[str, Any] | None = None,
+        usage_metadata: Mapping[str, Any] | None = None,
+        source: str = "model",
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        generation = self.get_generation(generation_id, owner_user_id=owner_user_id)
+        if generation is None or int(generation["session_id"]) != int(session_id):
+            raise ValueError("generation_not_found")
+        request = self.get_generation_request(
+            generation_request_id,
+            owner_user_id=owner_user_id,
+        )
+        if request is None or int(request["generation_id"]) != int(generation_id):
+            raise ValueError("generation_request_not_found")
+        with self.db.transaction() as conn:
+            revision_cursor = conn.execute(
+                """
+                SELECT COALESCE(MAX(revision_number), 0) + 1 AS next_revision_number
+                FROM vn_play_generation_revisions
+                WHERE generation_id = ? AND owner_user_id = ?
+                """,
+                (generation_id, owner_user_id),
+            )
+            revision_number = int(revision_cursor.fetchone()["next_revision_number"])
+            cursor = conn.execute(
+                """
+                INSERT INTO vn_play_generation_revisions (
+                    generation_id,
+                    generation_request_id,
+                    session_id,
+                    owner_user_id,
+                    generation_point_key,
+                    generation_profile_key,
+                    generation_profile_snapshot_id,
+                    revision_number,
+                    status,
+                    output_schema,
+                    public_output_json,
+                    applied_visuals_json,
+                    rejected_visuals_json,
+                    public_error_code,
+                    raw_output_debug_json,
+                    parser_diagnostics_json,
+                    moderation_diagnostics_json,
+                    model_metadata_json,
+                    usage_metadata_json,
+                    source
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    generation_id,
+                    generation_request_id,
+                    session_id,
+                    owner_user_id,
+                    generation["generation_point_key"],
+                    generation["generation_profile_key"],
+                    generation["generation_profile_snapshot_id"],
+                    revision_number,
+                    status,
+                    output_schema,
+                    _json_dump(dict(public_output or {})),
+                    _json_dump(list(applied_visuals or [])),
+                    _json_dump(list(rejected_visuals or [])),
+                    public_error_code,
+                    (
+                        None
+                        if raw_output_debug is None
+                        else _json_dump(dict(raw_output_debug))
+                    ),
+                    _json_dump(dict(parser_diagnostics or {})),
+                    _json_dump(dict(moderation_diagnostics or {})),
+                    _json_dump(dict(model_metadata or {})),
+                    _json_dump(dict(usage_metadata or {})),
+                    source,
+                ),
+            )
+            revision_id = int(cursor.lastrowid)
+        revision = self.get_generation_revision(revision_id, owner_user_id=owner_user_id)
+        if revision is None:
+            raise RuntimeError("created_generation_revision_not_found")
+        return revision
+
+    def get_generation_revision(
+        self,
+        revision_id: int,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generation_revisions
+            WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+            """,
+            (revision_id, owner_user_id, owner_user_id),
+        )
+        row = cursor.fetchone()
+        return _decode_generation_revision(row) if row is not None else None
+
+    def update_generation_revision_diagnostics(
+        self,
+        revision_id: int,
+        *,
+        raw_output_debug: Mapping[str, Any] | None = None,
+        parser_diagnostics: Mapping[str, Any] | None = None,
+        moderation_diagnostics: Mapping[str, Any] | None = None,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Update diagnostic fields for a generation revision."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE vn_play_generation_revisions
+                SET raw_output_debug_json = ?,
+                    parser_diagnostics_json = ?,
+                    moderation_diagnostics_json = ?
+                WHERE id = ? AND (? IS NULL OR owner_user_id = ?)
+                """,
+                (
+                    None if raw_output_debug is None else _json_dump(dict(raw_output_debug)),
+                    _json_dump(dict(parser_diagnostics or {})),
+                    _json_dump(dict(moderation_diagnostics or {})),
+                    revision_id,
+                    owner_user_id,
+                    owner_user_id,
+                ),
+            )
+        return self.get_generation_revision(revision_id, owner_user_id=owner_user_id)
+
+    def list_generation_revisions(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        generation_id: int,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT *
+            FROM vn_play_generation_revisions
+            WHERE session_id = ?
+              AND owner_user_id = ?
+              AND generation_id = ?
+            ORDER BY id DESC
+            LIMIT COALESCE(?, -1) OFFSET ?
+            """,
+            (session_id, owner_user_id, generation_id, limit, offset),
+        )
+        return [_decode_generation_revision(row) for row in cursor.fetchall()]
+
+    def set_active_generation_revision(
+        self,
+        *,
+        generation_id: int,
+        owner_user_id: int,
+        revision_id: int,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            generation_row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_generations
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (generation_id, owner_user_id),
+            ).fetchone()
+            if generation_row is None:
+                raise ValueError("generation_not_found")
+            revision_row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_generation_revisions
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (revision_id, owner_user_id),
+            ).fetchone()
+            if revision_row is None:
+                raise ValueError("generation_revision_not_found")
+            if int(revision_row["generation_id"]) != int(generation_id):
+                raise ValueError("active_revision_generation_mismatch")
+            if revision_row["status"] != "succeeded":
+                raise ValueError("active_revision_not_succeeded")
+            conn.execute(
+                """
+                UPDATE vn_play_generations
+                SET active_revision_id = ?,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (revision_id, "completed", generation_id, owner_user_id),
+            )
+            updated_row = conn.execute(
+                """
+                SELECT *
+                FROM vn_play_generations
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (generation_id, owner_user_id),
+            ).fetchone()
+        if updated_row is None:
+            raise RuntimeError("generation_not_found")
+        return _decode_generation(updated_row)
 
     def record_story_choice_selection(
         self,
@@ -2107,6 +3081,29 @@ _SESSION_ACTION_UPDATE_COLUMNS = {
     "locked_until": "locked_until",
 }
 
+_GENERATION_REQUEST_UPDATE_COLUMNS = {
+    "status": "status",
+    "create_action_id": "create_action_id",
+    "execute_action_id": "execute_action_id",
+    "cancel_action_id": "cancel_action_id",
+    "client_scene_version": "client_scene_version",
+    "opcode_snapshot": "opcode_snapshot_json",
+    "prompt_fingerprint": "prompt_fingerprint",
+    "checkpoint_id_before": "checkpoint_id_before",
+    "provider_call_started_at": "provider_call_started_at",
+    "provider_call_completed_at": "provider_call_completed_at",
+    "lease_expires_at": "lease_expires_at",
+    "public_error_code": "public_error_code",
+}
+
+_GENERATION_ACTION_UPDATE_COLUMNS = {
+    "generation_request_id": "generation_request_id",
+    "generation_revision_id": "generation_revision_id",
+    "status": "status",
+    "completed_action_response": "completed_action_response_json",
+    "public_error_code": "public_error_code",
+}
+
 _SESSION_UPDATE_STATEMENTS = {
     "mode": (
         "UPDATE vn_play_sessions SET mode = ?, updated_at = CURRENT_TIMESTAMP "
@@ -2272,12 +3269,37 @@ _SESSION_ACTION_UPDATE_STATEMENTS = {
     ),
 }
 
+_GENERATION_REQUEST_UPDATE_STATEMENTS = {
+    field_name: (
+        f"UPDATE vn_play_generation_requests SET {column_name} = ?, "  # nosec B608
+        "updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    )
+    for field_name, column_name in _GENERATION_REQUEST_UPDATE_COLUMNS.items()
+}
+
+_GENERATION_ACTION_UPDATE_STATEMENTS = {
+    field_name: (
+        f"UPDATE vn_play_generation_actions SET {column_name} = ?, "  # nosec B608
+        "updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (? IS NULL OR owner_user_id = ?)"
+    )
+    for field_name, column_name in _GENERATION_ACTION_UPDATE_COLUMNS.items()
+}
+
 
 def _require_sqlite_chacha_db(db: CharactersRAGDB) -> None:
     if getattr(db, "backend_type", None) != BackendType.SQLITE:
         raise NotImplementedError(
             "VN Play metadata currently supports SQLite ChaChaNotes databases only."
         )
+
+
+def _is_index_statement(statement: str) -> bool:
+    normalized = statement.upper()
+    return normalized.startswith("CREATE INDEX") or normalized.startswith(
+        "CREATE UNIQUE INDEX"
+    )
 
 
 def _ensure_vn_play_session_columns(conn: Any) -> None:
@@ -2300,6 +3322,110 @@ def _ensure_vn_play_session_columns(conn: Any) -> None:
             conn.execute(
                 f"ALTER TABLE vn_play_sessions ADD COLUMN {column_name} {column_definition}"  # nosec B608
             )
+
+
+def _ensure_vn_play_generation_columns(conn: Any) -> None:
+    generation_columns = _table_column_names(conn, "vn_play_generations")
+    generation_defaults = {
+        "script_id": "INTEGER",
+        "script_version_id": "INTEGER",
+        "generation_point_key": "TEXT NOT NULL DEFAULT ''",
+        "opcode_id": "TEXT",
+        "opcode_label": "TEXT",
+        "opcode_index": "INTEGER",
+        "output_schema": "TEXT NOT NULL DEFAULT 'narrative_dialogue'",
+        "generation_profile_key": "TEXT NOT NULL DEFAULT 'default'",
+        "generation_profile_snapshot_id": "INTEGER NOT NULL DEFAULT 0",
+        "active_revision_id": "INTEGER",
+        "latest_request_id": "INTEGER",
+        "status": "TEXT NOT NULL DEFAULT 'not_started'",
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    }
+    for column_name, column_definition in generation_defaults.items():
+        if column_name not in generation_columns:
+            conn.execute(
+                f"ALTER TABLE vn_play_generations ADD COLUMN {column_name} {column_definition}"  # nosec B608
+            )
+
+    request_columns = _table_column_names(conn, "vn_play_generation_requests")
+    request_defaults = {
+        "script_id": "INTEGER",
+        "script_version_id": "INTEGER",
+        "generation_point_key": "TEXT NOT NULL DEFAULT ''",
+        "generation_profile_key": "TEXT NOT NULL DEFAULT 'default'",
+        "generation_profile_snapshot_id": "INTEGER NOT NULL DEFAULT 0",
+        "request_kind": "TEXT NOT NULL DEFAULT 'automatic'",
+        "status": "TEXT NOT NULL DEFAULT 'pending_confirmation'",
+        "create_action_id": "INTEGER",
+        "execute_action_id": "INTEGER",
+        "cancel_action_id": "INTEGER",
+        "client_scene_version": "INTEGER NOT NULL DEFAULT 0",
+        "opcode_snapshot_json": "TEXT NOT NULL DEFAULT '{}'",
+        "prompt_fingerprint": "TEXT",
+        "checkpoint_id_before": "INTEGER",
+        "provider_call_started_at": "DATETIME",
+        "provider_call_completed_at": "DATETIME",
+        "lease_expires_at": "DATETIME",
+        "public_error_code": "TEXT",
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    }
+    for column_name, column_definition in request_defaults.items():
+        if column_name not in request_columns:
+            conn.execute(
+                f"ALTER TABLE vn_play_generation_requests ADD COLUMN {column_name} {column_definition}"  # nosec B608
+            )
+
+    action_columns = _table_column_names(conn, "vn_play_generation_actions")
+    action_defaults = {
+        "generation_id": "INTEGER",
+        "generation_request_id": "INTEGER",
+        "generation_revision_id": "INTEGER",
+        "action_kind": "TEXT NOT NULL DEFAULT 'execute'",
+        "idempotency_key": "TEXT NOT NULL DEFAULT ''",
+        "request_payload_hash": "TEXT NOT NULL DEFAULT ''",
+        "status": "TEXT NOT NULL DEFAULT 'pending'",
+        "completed_action_response_json": "TEXT",
+        "public_error_code": "TEXT",
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    }
+    for column_name, column_definition in action_defaults.items():
+        if column_name not in action_columns:
+            conn.execute(
+                f"ALTER TABLE vn_play_generation_actions ADD COLUMN {column_name} {column_definition}"  # nosec B608
+            )
+
+    revision_columns = _table_column_names(conn, "vn_play_generation_revisions")
+    revision_defaults = {
+        "generation_point_key": "TEXT NOT NULL DEFAULT ''",
+        "generation_profile_key": "TEXT NOT NULL DEFAULT 'default'",
+        "generation_profile_snapshot_id": "INTEGER NOT NULL DEFAULT 0",
+        "revision_number": "INTEGER NOT NULL DEFAULT 1",
+        "status": "TEXT NOT NULL DEFAULT 'succeeded'",
+        "output_schema": "TEXT NOT NULL DEFAULT 'narrative_dialogue'",
+        "public_output_json": "TEXT NOT NULL DEFAULT '{}'",
+        "applied_visuals_json": "TEXT NOT NULL DEFAULT '[]'",
+        "rejected_visuals_json": "TEXT NOT NULL DEFAULT '[]'",
+        "public_error_code": "TEXT",
+        "raw_output_debug_json": "TEXT",
+        "parser_diagnostics_json": "TEXT NOT NULL DEFAULT '{}'",
+        "moderation_diagnostics_json": "TEXT NOT NULL DEFAULT '{}'",
+        "model_metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "usage_metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "source": "TEXT NOT NULL DEFAULT 'model'",
+        "created_at": "DATETIME",
+    }
+    for column_name, column_definition in revision_defaults.items():
+        if column_name not in revision_columns:
+            conn.execute(
+                f"ALTER TABLE vn_play_generation_revisions ADD COLUMN {column_name} {column_definition}"  # nosec B608
+            )
+
+
+def _table_column_names(conn: Any, table_name: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}  # nosec B608
 
 
 def _insert_event(
@@ -2353,6 +3479,84 @@ def _insert_event(
     return int(cursor.lastrowid)
 
 
+def _apply_active_generation_revision_map(
+    conn: Any,
+    *,
+    session_id: int,
+    owner_user_id: int,
+    active_generation_revisions: Mapping[str, Any],
+) -> None:
+    normalized_map = {
+        str(point_key): (None if revision_id is None else int(revision_id))
+        for point_key, revision_id in active_generation_revisions.items()
+        if str(point_key)
+    }
+    generation_rows = conn.execute(
+        """
+        SELECT *
+        FROM vn_play_generations
+        WHERE session_id = ? AND owner_user_id = ?
+        """,
+        (session_id, owner_user_id),
+    ).fetchall()
+    existing_point_keys = {
+        str(generation_row["generation_point_key"])
+        for generation_row in generation_rows
+    }
+    unknown_point_keys = set(normalized_map) - existing_point_keys
+    if unknown_point_keys:
+        raise ValueError("generation_point_not_found")
+    for generation_row in generation_rows:
+        generation_id = int(generation_row["id"])
+        point_key = str(generation_row["generation_point_key"])
+        revision_id = normalized_map.get(point_key)
+        if revision_id is None:
+            conn.execute(
+                """
+                UPDATE vn_play_generations
+                SET active_revision_id = NULL,
+                    latest_request_id = NULL,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                ("not_started", generation_id, owner_user_id),
+            )
+            continue
+        revision_row = conn.execute(
+            """
+            SELECT id, generation_id, generation_request_id, session_id, owner_user_id, status
+            FROM vn_play_generation_revisions
+            WHERE id = ?
+              AND generation_id = ?
+              AND session_id = ?
+              AND owner_user_id = ?
+            """,
+            (revision_id, generation_id, session_id, owner_user_id),
+        ).fetchone()
+        if revision_row is None:
+            raise ValueError("generation_revision_not_found")
+        if revision_row["status"] != "succeeded":
+            raise ValueError("active_revision_not_succeeded")
+        conn.execute(
+            """
+            UPDATE vn_play_generations
+            SET active_revision_id = ?,
+                latest_request_id = ?,
+                status = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND owner_user_id = ?
+            """,
+            (
+                revision_id,
+                int(revision_row["generation_request_id"]),
+                "completed",
+                generation_id,
+                owner_user_id,
+            ),
+        )
+
+
 def _mapped_update_values(
     fields: Mapping[str, Any],
     column_map: Mapping[str, str],
@@ -2395,6 +3599,65 @@ def _decode_session_action(row: Any) -> dict[str, Any]:
     data = dict(row)
     data["response_payload"] = _json_loads(data.pop("response_payload_json"), None)
     data["error"] = _json_loads(data.pop("error_json"), None)
+    return data
+
+
+def _generation_action_matches(
+    action: Mapping[str, Any],
+    *,
+    action_kind: str,
+    request_payload_hash: str,
+    generation_id: int | None,
+    generation_request_id: int | None,
+    generation_revision_id: int | None,
+) -> bool:
+    if action["request_payload_hash"] != request_payload_hash:
+        return False
+    if action["action_kind"] != action_kind:
+        return False
+    expected_links = {
+        "generation_id": generation_id,
+        "generation_request_id": generation_request_id,
+        "generation_revision_id": generation_revision_id,
+    }
+    for field_name, expected_value in expected_links.items():
+        if expected_value is not None and action.get(field_name) != expected_value:
+            return False
+    return True
+
+
+def _decode_generation(row: Any) -> dict[str, Any]:
+    return dict(row)
+
+
+def _decode_generation_request(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    data["opcode_snapshot"] = _json_loads(data.pop("opcode_snapshot_json"), {})
+    return data
+
+
+def _decode_generation_action(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    data["completed_action_response"] = _json_loads(
+        data.pop("completed_action_response_json"),
+        None,
+    )
+    return data
+
+
+def _decode_generation_revision(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    data["public_output"] = _json_loads(data.pop("public_output_json"), {})
+    data["applied_visuals"] = _json_loads(data.pop("applied_visuals_json"), [])
+    data["rejected_visuals"] = _json_loads(data.pop("rejected_visuals_json"), [])
+    data["raw_output_debug"] = _json_loads(data.pop("raw_output_debug_json"), None)
+    data["parser_diagnostics"] = _json_loads(data.pop("parser_diagnostics_json"), {})
+    data["moderation_diagnostics"] = _json_loads(
+        data.pop("moderation_diagnostics_json"),
+        {},
+    )
+    data["model_metadata"] = _json_loads(data.pop("model_metadata_json"), {})
+    data["usage_metadata"] = _json_loads(data.pop("usage_metadata_json"), {})
     return data
 
 

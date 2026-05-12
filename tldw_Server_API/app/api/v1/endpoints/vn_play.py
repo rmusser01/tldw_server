@@ -6,9 +6,17 @@ import json
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
+    VNPlayGenerationActionRequest,
+    VNPlayGenerationHistoryResponse,
+    VNPlayGenerationHistoryItem,
+    VNPlayGenerationRevisionDebugResponse,
+    VNPlayGenerationRevisionListResponse,
     VNPlayBranchNavigationResponse,
     VNPlayBranchResponse,
     VNPlayBranchRestoreRequest,
@@ -36,6 +44,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlayTurnResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.VN_Play.constants import (
@@ -43,6 +52,11 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_BRANCH_RESTORE_AMBIGUOUS,
     ERROR_BRANCH_RESTORE_NOT_ALLOWED,
     ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
+    ERROR_GENERATION_ATTEMPT_ABANDONED,
+    ERROR_GENERATION_REQUEST_IN_PROGRESS,
+    ERROR_GENERATION_REQUEST_NOT_PENDING,
+    ERROR_GENERATION_REVISION_ACTIVATION_BLOCKED,
+    ERROR_GENERATION_REVISION_NOT_FOUND,
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
     ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_STALE_SCENE_VERSION,
@@ -72,6 +86,11 @@ CONFLICT_ERROR_CODES = {
     ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
+    ERROR_GENERATION_ATTEMPT_ABANDONED,
+    ERROR_GENERATION_REQUEST_IN_PROGRESS,
+    ERROR_GENERATION_REQUEST_NOT_PENDING,
+    ERROR_GENERATION_REVISION_ACTIVATION_BLOCKED,
+    ERROR_GENERATION_REVISION_NOT_FOUND,
 }
 BAD_REQUEST_ERROR_CODES = {
     ERROR_BRANCH_RESTORE_AMBIGUOUS,
@@ -238,6 +257,7 @@ async def retry_last_turn(
 @router.get(
     "/sessions/{session_id}/branch-navigation",
     response_model=VNPlayBranchNavigationResponse,
+    response_model_exclude_none=True,
 )
 def get_branch_navigation(
     session_id: int,
@@ -523,14 +543,14 @@ async def start_story(
     "/sessions/{session_id}/script/advance",
     response_model=VNPlayScriptActionResponse,
 )
-def advance_scripted_story(
+async def advance_scripted_story(
     session_id: int,
     request: VNPlayScriptActionRequest,
     service: VNPlayService = Depends(_service),
 ) -> VNPlayScriptActionResponse:
     try:
         return VNPlayScriptActionResponse.model_validate(
-            service.advance_script(
+            await service.advance_script(
                 session_id,
                 client_scene_version=request.client_scene_version,
                 idempotency_key=request.idempotency_key,
@@ -595,7 +615,7 @@ def get_scripted_story_debug_state(
     "/sessions/{session_id}/script/choices/{choice_id}",
     response_model=VNPlayScriptActionResponse,
 )
-def choose_scripted_story_option(
+async def choose_scripted_story_option(
     session_id: int,
     choice_id: str,
     request: VNPlayScriptActionRequest,
@@ -603,11 +623,240 @@ def choose_scripted_story_option(
 ) -> VNPlayScriptActionResponse:
     try:
         return VNPlayScriptActionResponse.model_validate(
-            service.choose_script_option(
+            await service.choose_script_option(
                 session_id,
                 choice_id=choice_id,
                 client_scene_version=request.client_scene_version,
                 idempotency_key=request.idempotency_key,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/script/generation-requests/{generation_request_id}/confirm",
+    response_model=VNPlayScriptActionResponse,
+)
+async def confirm_script_generation_request(
+    session_id: int,
+    generation_request_id: int,
+    request: VNPlayGenerationActionRequest,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayScriptActionResponse:
+    try:
+        return VNPlayScriptActionResponse.model_validate(
+            await service.confirm_script_generation_request(
+                session_id,
+                generation_request_id=generation_request_id,
+                client_scene_version=request.client_scene_version,
+                idempotency_key=request.idempotency_key,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/script/generation-requests/{generation_request_id}/cancel",
+    response_model=VNPlayScriptActionResponse,
+)
+def cancel_script_generation_request(
+    session_id: int,
+    generation_request_id: int,
+    request: VNPlayGenerationActionRequest,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayScriptActionResponse:
+    try:
+        return VNPlayScriptActionResponse.model_validate(
+            service.cancel_script_generation_request(
+                session_id,
+                generation_request_id=generation_request_id,
+                client_scene_version=request.client_scene_version,
+                idempotency_key=request.idempotency_key,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/script/generations/{generation_id}/regenerate",
+    response_model=VNPlayScriptActionResponse,
+)
+async def regenerate_script_generation(
+    session_id: int,
+    generation_id: int,
+    request: VNPlayGenerationActionRequest,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayScriptActionResponse:
+    try:
+        return VNPlayScriptActionResponse.model_validate(
+            await service.regenerate_script_generation(
+                session_id,
+                generation_id=generation_id,
+                client_scene_version=request.client_scene_version,
+                idempotency_key=request.idempotency_key,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/activate",
+    response_model=VNPlayScriptActionResponse,
+)
+def activate_script_generation_revision(
+    session_id: int,
+    generation_id: int,
+    revision_id: int,
+    request: VNPlayGenerationActionRequest,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayScriptActionResponse:
+    try:
+        return VNPlayScriptActionResponse.model_validate(
+            service.activate_script_generation_revision(
+                session_id,
+                generation_id=generation_id,
+                revision_id=revision_id,
+                client_scene_version=request.client_scene_version,
+                idempotency_key=request.idempotency_key,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/script/generations",
+    response_model=VNPlayGenerationHistoryResponse,
+)
+def list_script_generation_history(
+    session_id: int,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: VNPlayService = Depends(_service),
+) -> VNPlayGenerationHistoryResponse:
+    try:
+        return VNPlayGenerationHistoryResponse.model_validate(
+            service.list_script_generation_history(
+                session_id,
+                limit=limit,
+                offset=offset,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}/debug",
+    response_model=VNPlayGenerationRevisionDebugResponse,
+)
+async def get_script_generation_revision_debug(
+    session_id: int,
+    generation_id: int,
+    revision_id: int,
+    include_blocked_raw: bool = Query(default=False),
+    confirm: str | None = Query(default=None),
+    owner_user_id: int | None = Query(default=None, ge=1),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    owner_service: VNPlayService = Depends(_service),
+) -> VNPlayGenerationRevisionDebugResponse:
+    target_owner_user_id = owner_user_id or principal.user_id
+    if target_owner_user_id is None:
+        raise _vn_play_http_error(status.HTTP_400_BAD_REQUEST, "invalid_user_id")
+    if not _debug_read_authorized(principal=principal, owner_user_id=target_owner_user_id):
+        logger.warning(
+            "vn.script_generation.debug_read denied principal_id={} owner_user_id={} session_id={} generation_id={} revision_id={}",
+            principal.principal_id,
+            target_owner_user_id,
+            session_id,
+            generation_id,
+            revision_id,
+        )
+        raise _vn_play_http_error(status.HTTP_403_FORBIDDEN, "debug_read_forbidden")
+    if include_blocked_raw and not _debug_read_raw_authorized(
+        principal=principal,
+        owner_user_id=target_owner_user_id,
+    ):
+        logger.warning(
+            "vn.script_generation.debug_raw_read denied principal_id={} owner_user_id={} session_id={} generation_id={} revision_id={}",
+            principal.principal_id,
+            target_owner_user_id,
+            session_id,
+            generation_id,
+            revision_id,
+        )
+        raise _vn_play_http_error(status.HTTP_403_FORBIDDEN, "debug_raw_read_forbidden")
+    if target_owner_user_id == principal.user_id:
+        service = owner_service
+    else:
+        service = VNPlayService(
+            repo=VNPlayRepository.initialized(
+                await get_chacha_db_for_user_id(target_owner_user_id)
+            ),
+            owner_user_id=target_owner_user_id,
+        )
+    try:
+        return VNPlayGenerationRevisionDebugResponse.model_validate(
+            service.get_script_generation_revision_debug(
+                session_id,
+                generation_id=generation_id,
+                revision_id=revision_id,
+                include_blocked_raw=include_blocked_raw,
+                allow_blocked_raw_reveal=_debug_read_raw_authorized(
+                    principal=principal,
+                    owner_user_id=target_owner_user_id,
+                ),
+                confirm=confirm,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/script/generations/{generation_id}/revisions",
+    response_model=VNPlayGenerationRevisionListResponse,
+)
+def list_script_generation_revisions(
+    session_id: int,
+    generation_id: int,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: VNPlayService = Depends(_service),
+) -> VNPlayGenerationRevisionListResponse:
+    try:
+        return VNPlayGenerationRevisionListResponse.model_validate(
+            service.list_script_generation_revisions(
+                session_id,
+                generation_id=generation_id,
+                limit=limit,
+                offset=offset,
+            )
+        )
+    except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
+        raise _http_error_for_service_exception(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/script/generations/{generation_id}/revisions/{revision_id}",
+    response_model=VNPlayGenerationHistoryItem,
+)
+def get_script_generation_revision(
+    session_id: int,
+    generation_id: int,
+    revision_id: int,
+    service: VNPlayService = Depends(_service),
+) -> VNPlayGenerationHistoryItem:
+    try:
+        return VNPlayGenerationHistoryItem.model_validate(
+            service.get_script_generation_revision(
+                session_id,
+                generation_id=generation_id,
+                revision_id=revision_id,
             )
         )
     except (VNPlayConflictError, VNPlayNotFoundError, VNPlayTurnError) as exc:
@@ -652,6 +901,35 @@ def _turn_response(
 
 def _scene_state(service: VNPlayService, session_id: int) -> dict[str, Any] | None:
     return service.get_enriched_scene_state(session_id)
+
+
+def _debug_read_authorized(*, principal: AuthPrincipal, owner_user_id: int) -> bool:
+    if principal.user_id == owner_user_id:
+        return True
+    roles = {str(role).strip().lower() for role in principal.roles if str(role).strip()}
+    permissions = {
+        str(permission).strip().lower()
+        for permission in principal.permissions
+        if str(permission).strip()
+    }
+    return bool(
+        principal.is_admin
+        or "admin" in roles
+        or "vn_play.debug.read" in permissions
+        or "vn_play.debug.read_raw" in permissions
+    )
+
+
+def _debug_read_raw_authorized(*, principal: AuthPrincipal, owner_user_id: int) -> bool:
+    if principal.user_id == owner_user_id:
+        return True
+    roles = {str(role).strip().lower() for role in principal.roles if str(role).strip()}
+    permissions = {
+        str(permission).strip().lower()
+        for permission in principal.permissions
+        if str(permission).strip()
+    }
+    return bool(principal.is_admin or "admin" in roles or "vn_play.debug.read_raw" in permissions)
 
 
 def _http_error_for_service_exception(exc: Exception) -> HTTPException:

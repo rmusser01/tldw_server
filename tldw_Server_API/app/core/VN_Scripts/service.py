@@ -59,6 +59,7 @@ class VNScriptService:
         primary_asset_pack_id: int,
         policy_profile_id: str = "local_default",
         generation_profile_id: str = "story_default",
+        generation_profiles: Mapping[str, str] | None = None,
         description: str | None = None,
         content_rating: str = "general",
     ) -> dict[str, Any]:
@@ -70,6 +71,7 @@ class VNScriptService:
             primary_asset_pack_id=primary_asset_pack_id,
             policy_profile_id=policy_profile_id,
             generation_profile_id=generation_profile_id,
+            generation_profiles=generation_profiles,
             content_rating=content_rating,
         )
 
@@ -111,6 +113,7 @@ class VNScriptService:
         audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
         policy_profile: ProfileRow | None = None,
         generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
     ) -> dict[str, Any]:
         """Replace a whole script draft using optimistic revision control."""
         script = self._require_script(script_id)
@@ -120,6 +123,7 @@ class VNScriptService:
             audio_refs=audio_refs,
             policy_profile=policy_profile,
             generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
         )
         return self.repo.replace_draft(
             script_id,
@@ -137,6 +141,7 @@ class VNScriptService:
         audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
         policy_profile: ProfileRow | None = None,
         generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
     ) -> dict[str, Any]:
         """Validate a supplied draft or the currently saved draft."""
         script = self._require_script(script_id)
@@ -148,6 +153,7 @@ class VNScriptService:
             audio_refs=audio_refs,
             policy_profile=policy_profile,
             generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
         )
         self.repo.store_diagnostics(script_id, owner_user_id=self.owner_user_id, diagnostics=validation)
         return validation
@@ -160,11 +166,17 @@ class VNScriptService:
         audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
         policy_profile: ProfileRow | None = None,
         generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
     ) -> dict[str, Any]:
         """Validate a draft with service-resolved manifest and profile context."""
         manifest = self._manifest_for_script(script)
         resolved_policy_profile = self._policy_profile(str(script["policy_profile_id"]), policy_profile)
         resolved_generation_profile = self._generation_profile(str(script["generation_profile_id"]), generation_profile)
+        resolved_generation_profiles = self._generation_profiles(
+            script,
+            generation_profiles,
+            default_resolved_profile=generation_profile,
+        )
         resolved_audio_refs = audio_refs if audio_refs is not None else self.audio_ref_resolver(draft)
         context = VNScriptValidationContext(
             approved_slot_keys=_approved_slot_keys(manifest),
@@ -172,6 +184,10 @@ class VNScriptService:
             generation_profile={
                 "profile_id": resolved_generation_profile["profile_id"],
                 **resolved_generation_profile["definition"],
+            },
+            available_generation_profiles={
+                profile_key: {"profile_id": profile["profile_id"], **profile["definition"]}
+                for profile_key, profile in resolved_generation_profiles.items()
             },
             content_rating=str(script.get("content_rating") or "general"),
             owner_user_id=self.owner_user_id,
@@ -195,39 +211,65 @@ class VNScriptService:
         audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
         policy_profile: ProfileRow | None = None,
         generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
     ) -> dict[str, Any]:
         """Validate and publish an immutable script version."""
         script = self._require_script(script_id)
-        payload_hash = canonical_payload_hash(
-            {
-                "script_id": script_id,
-                "draft_revision": draft_revision,
-                "label": label,
-                "acknowledgements": sorted(acknowledgements or []),
-            }
+        request_payload = _publish_request_payload(
+            script_id=script_id,
+            draft_revision=draft_revision,
+            label=label,
+            acknowledgements=acknowledgements,
         )
+        legacy_payload_hash = canonical_payload_hash(request_payload)
         existing = self.repo.get_publish_request_by_key(
             owner_user_id=self.owner_user_id,
             script_id=script_id,
             idempotency_key=idempotency_key,
         )
         if existing is not None:
-            if existing["payload_hash"] != payload_hash:
+            existing_request_payload = existing.get("request_payload")
+            if isinstance(existing_request_payload, Mapping):
+                matches_existing = dict(existing_request_payload) == request_payload
+            else:
+                matches_existing = existing["payload_hash"] == legacy_payload_hash
+            if not matches_existing:
                 raise ValueError("idempotency_key_conflict")
             return dict(existing["response"])
+
+        resolved_generation_profiles = self._generation_profiles(
+            script,
+            generation_profiles,
+            default_resolved_profile=generation_profile,
+        )
+        resolved_generation_profile_ids = {
+            profile_key: str(profile["profile_id"])
+            for profile_key, profile in sorted(resolved_generation_profiles.items())
+        }
+        payload_hash = canonical_payload_hash(
+            {
+                **request_payload,
+                "generation_profile_ids": resolved_generation_profile_ids,
+                "generation_profile_versions": {
+                    profile_key: int(profile["version"])
+                    for profile_key, profile in sorted(resolved_generation_profiles.items())
+                },
+            }
+        )
 
         draft_row = self.get_draft(script_id)
         if int(draft_row["revision"]) != int(draft_revision):
             raise ValueError("draft_revision_conflict")
         program = draft_row["draft"]
         resolved_policy_profile = self._policy_profile(str(script["policy_profile_id"]), policy_profile)
-        resolved_generation_profile = self._generation_profile(str(script["generation_profile_id"]), generation_profile)
+        resolved_generation_profile = resolved_generation_profiles["default"]
         validation = self.validate_draft_payload(
             script,
             program,
             audio_refs=audio_refs,
             policy_profile=resolved_policy_profile,
             generation_profile=resolved_generation_profile,
+            generation_profiles=resolved_generation_profiles,
         )
         policy_decision = self._evaluate_publish_policy(script, policy_profile=resolved_policy_profile)
         if policy_decision["decision"] == "block":
@@ -245,6 +287,7 @@ class VNScriptService:
             script_id=script_id,
             idempotency_key=idempotency_key,
             payload_hash=payload_hash,
+            request_payload=request_payload,
             label=label,
             draft_revision=draft_revision,
             program=program,
@@ -253,6 +296,7 @@ class VNScriptService:
             manifest_hash=manifest_hash,
             policy_profile=resolved_policy_profile,
             generation_profile=resolved_generation_profile,
+            generation_profiles=resolved_generation_profiles,
             script_defaults=_script_defaults(program, script),
             validation=validation,
         )
@@ -357,6 +401,22 @@ class VNScriptService:
             _GENERATION_DEFINITIONS,
             missing_reason="generation_profile_not_found",
         )
+
+    def _generation_profiles(
+        self,
+        script: Mapping[str, Any],
+        resolved_profiles: Mapping[str, ProfileRow] | None = None,
+        *,
+        default_resolved_profile: ProfileRow | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        profile_ids = dict(script.get("generation_profiles") or {"default": script["generation_profile_id"]})
+        profile_ids["default"] = str(script["generation_profile_id"])
+        resolved: dict[str, dict[str, Any]] = {}
+        provided = {"default": default_resolved_profile, **dict(resolved_profiles or {})}
+        for profile_key, profile_id in profile_ids.items():
+            profile_row = provided.get(profile_key)
+            resolved[profile_key] = self._generation_profile(str(profile_id), profile_row)
+        return resolved
 
     def _evaluate_publish_policy(
         self,
@@ -596,6 +656,21 @@ def _script_defaults(program: Mapping[str, Any], script: Mapping[str, Any]) -> d
     defaults["policy_profile_id"] = str(script["policy_profile_id"])
     defaults["generation_profile_id"] = str(script["generation_profile_id"])
     return defaults
+
+
+def _publish_request_payload(
+    *,
+    script_id: int,
+    draft_revision: int,
+    label: str | None,
+    acknowledgements: list[str] | None,
+) -> dict[str, Any]:
+    return {
+        "script_id": script_id,
+        "draft_revision": draft_revision,
+        "label": label,
+        "acknowledgements": sorted(acknowledgements or []),
+    }
 
 
 def _required_acknowledgement_codes(policy_decision: Mapping[str, Any]) -> set[str]:

@@ -44,8 +44,26 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert body["features"]["asset_generation"] is True
     assert body["features"]["asset_portability"] is True
     assert body["features"]["scripted_story"] is True
+    assert body["features"]["scripted_generation"] is True
+    assert body["features"]["scripted_generation_confirmation"] is True
+    assert body["features"]["scripted_generation_revision_activation"] is True
+    assert body["features"]["scripted_generation_history"] is True
+    assert body["features"]["scripted_generation_debug_detail"] is True
     assert body["features"]["tts_jobs"] is False
     assert body["features"]["realtime_image_generation"] is False
+    assert body["limits"]["max_automatic_generation_batch_count"] == 1
+    assert body["scripted_generation"]["enabled"] is True
+    assert body["scripted_generation"]["output_schemas"] == [
+        "narrative_dialogue",
+        "choice_set",
+        "scene_update",
+    ]
+    assert body["scripted_generation"]["confirmation_supported"] is True
+    assert body["scripted_generation"]["revision_activation_supported"] is True
+    assert body["scripted_generation"]["history_supported"] is True
+    assert body["scripted_generation"]["debug_detail_supported"] is True
+    assert body["scripted_generation"]["dynamic_choice_supported"] is True
+    assert body["scripted_generation"]["scene_update_supported"] is True
     assert "suggestive" in body["supported_content_ratings"]
     assert body["route_migration"]["canonical"] == "/api/v1/vn/vn-*"
     assert body["route_migration"]["supersedes"] == ["/api/v1/vn-assets", "/api/v1/vn-play"]
@@ -53,3 +71,21 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert "visible_generation_profiles" in body
     assert "image/png" in body["supported_media_types"]["image"]
     assert "audio/mpeg" in body["supported_media_types"]["audio"]
+
+
+def test_vn_capabilities_disable_scripted_generation_details_without_scripts() -> None:
+    app = FastAPI()
+    app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
+    app.include_router(vn_play_router, prefix="/api/v1/vn")
+    response = TestClient(app).get("/api/v1/vn/vn-capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled_modules"]["play"] is True
+    assert body["enabled_modules"]["scripts"] is False
+    assert body["features"]["scripted_generation"] is False
+    assert body["scripted_generation"]["enabled"] is False
+    assert body["scripted_generation"]["confirmation_supported"] is False
+    assert body["scripted_generation"]["dynamic_choice_supported"] is False
+    assert body["scripted_generation"]["scene_update_supported"] is False
+    assert body["scripted_generation"]["moderation_blocked_raw_reveal_supported"] is False

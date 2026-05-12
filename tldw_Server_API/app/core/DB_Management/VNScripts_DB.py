@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -10,6 +11,10 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import ensure_vn_profile_snapshot_tables
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+
+_GENERATION_PROFILE_KEY_RE = re.compile(r"^[a-z0-9_.-]{1,64}$")
+_MAX_GENERATION_PROFILE_MAP_SIZE = 16
+_MAX_GENERATION_PROFILE_ID_LENGTH = 80
 
 
 VN_SCRIPTS_SCHEMA_SQL = """
@@ -22,6 +27,7 @@ CREATE TABLE IF NOT EXISTS vn_scripts (
     primary_asset_pack_id INTEGER NOT NULL,
     policy_profile_id TEXT NOT NULL DEFAULT 'local_default',
     generation_profile_id TEXT NOT NULL DEFAULT 'story_default',
+    generation_profile_ids_json TEXT NOT NULL DEFAULT '{}',
     content_rating TEXT NOT NULL DEFAULT 'general',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -60,6 +66,7 @@ CREATE TABLE IF NOT EXISTS vn_script_versions (
     manifest_snapshot_id INTEGER NOT NULL REFERENCES vn_script_manifest_snapshots(id),
     policy_snapshot_id INTEGER NOT NULL,
     generation_profile_snapshot_id INTEGER NOT NULL,
+    generation_profile_snapshots_json TEXT NOT NULL DEFAULT '{}',
     script_defaults_json TEXT NOT NULL DEFAULT '{}',
     validation_json TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -72,6 +79,7 @@ CREATE TABLE IF NOT EXISTS vn_script_publish_requests (
     script_id INTEGER NOT NULL REFERENCES vn_scripts(id) ON DELETE CASCADE,
     idempotency_key TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
+    request_payload_json TEXT,
     response_json TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -104,6 +112,9 @@ def ensure_vn_scripts_tables(db: CharactersRAGDB) -> None:
     with db.transaction() as conn:
         for statement in VN_SCRIPTS_SCHEMA_STATEMENTS:
             conn.execute(statement)
+        _ensure_column(conn, "vn_scripts", "generation_profile_ids_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "vn_script_versions", "generation_profile_snapshots_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "vn_script_publish_requests", "request_payload_json", "TEXT")
 
 
 class VNScriptsRepository:
@@ -132,6 +143,7 @@ class VNScriptsRepository:
         primary_asset_pack_id: int,
         policy_profile_id: str,
         generation_profile_id: str,
+        generation_profiles: Mapping[str, str] | None = None,
         description: str | None = None,
         content_rating: str = "general",
         status: str = "draft",
@@ -148,9 +160,10 @@ class VNScriptsRepository:
                     primary_asset_pack_id,
                     policy_profile_id,
                     generation_profile_id,
+                    generation_profile_ids_json,
                     content_rating
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_user_id,
@@ -160,6 +173,7 @@ class VNScriptsRepository:
                     primary_asset_pack_id,
                     policy_profile_id,
                     generation_profile_id,
+                    _json_dump(_normalize_generation_profile_ids(generation_profile_id, generation_profiles)),
                     content_rating,
                 ),
             )
@@ -248,9 +262,30 @@ class VNScriptsRepository:
             "primary_asset_pack_id",
             "policy_profile_id",
             "generation_profile_id",
+            "generation_profiles",
             "content_rating",
         }
-        updates = [(key, value) for key, value in fields.items() if key in allowed]
+        current = self.get_script(script_id, owner_user_id=owner_user_id)
+        if current is None:
+            return None
+        normalized_fields = dict(fields)
+        if "generation_profile_id" in normalized_fields or "generation_profiles" in normalized_fields:
+            default_profile_id = str(normalized_fields.get("generation_profile_id") or current["generation_profile_id"])
+            raw_profiles = normalized_fields.get(
+                "generation_profiles",
+                {
+                    key: value
+                    for key, value in dict(current.get("generation_profiles") or {}).items()
+                    if key != "default"
+                },
+            )
+            normalized_fields["generation_profile_id"] = default_profile_id
+            normalized_fields["generation_profile_ids_json"] = _json_dump(
+                _normalize_generation_profile_ids(default_profile_id, raw_profiles)
+            )
+            normalized_fields.pop("generation_profiles", None)
+        allowed.add("generation_profile_ids_json")
+        updates = [(key, value) for key, value in normalized_fields.items() if key in allowed]
         if not updates:
             return self.get_script(script_id, owner_user_id=owner_user_id)
         assignments = ", ".join(f"{key} = ?" for key, _ in updates)
@@ -503,10 +538,15 @@ class VNScriptsRepository:
         manifest_hash: str,
         policy_snapshot_id: int,
         generation_profile_snapshot_id: int,
+        generation_profile_snapshots: Mapping[str, int] | None = None,
         script_defaults: Mapping[str, Any],
         validation: Mapping[str, Any],
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        normalized_generation_snapshots = _normalize_generation_profile_snapshots(
+            generation_profile_snapshot_id,
+            generation_profile_snapshots,
+        )
         with self.db.transaction() as conn:
             number_row = conn.execute(
                 """
@@ -550,10 +590,11 @@ class VNScriptsRepository:
                     manifest_snapshot_id,
                     policy_snapshot_id,
                     generation_profile_snapshot_id,
+                    generation_profile_snapshots_json,
                     script_defaults_json,
                     validation_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     script_id,
@@ -566,6 +607,7 @@ class VNScriptsRepository:
                     manifest_snapshot_id,
                     policy_snapshot_id,
                     generation_profile_snapshot_id,
+                    _json_dump(normalized_generation_snapshots),
                     _json_dump(dict(script_defaults)),
                     _json_dump(dict(validation)),
                 ),
@@ -579,19 +621,30 @@ class VNScriptsRepository:
                 """,
                 (version_id, manifest_snapshot_id),
             )
+            snapshot_ids = list(
+                dict.fromkeys(
+                    [
+                        int(policy_snapshot_id),
+                        *[
+                            int(snapshot_id)
+                            for snapshot_id in normalized_generation_snapshots.values()
+                        ],
+                    ]
+                )
+            )
+            placeholders = ", ".join("?" for _ in snapshot_ids)
             conn.execute(
-                """
+                f"""
                 UPDATE vn_profile_snapshots
                 SET resource_id = ?
                 WHERE owner_user_id = ?
                   AND resource_type = 'script_version'
-                  AND id IN (?, ?)
-                """,
+                  AND id IN ({placeholders})
+                """,  # nosec B608 - placeholders are generated for bound parameters only.
                 (
                     version_id,
                     owner_user_id,
-                    policy_snapshot_id,
-                    generation_profile_snapshot_id,
+                    *snapshot_ids,
                 ),
             )
         version = self.get_version(script_id, version_id, owner_user_id=owner_user_id)
@@ -606,6 +659,7 @@ class VNScriptsRepository:
         script_id: int,
         idempotency_key: str,
         payload_hash: str,
+        request_payload: Mapping[str, Any] | None = None,
         label: str | None,
         draft_revision: int,
         program: Mapping[str, Any],
@@ -614,6 +668,7 @@ class VNScriptsRepository:
         manifest_hash: str,
         policy_profile: Mapping[str, Any],
         generation_profile: Mapping[str, Any],
+        generation_profiles: Mapping[str, Mapping[str, Any]] | None = None,
         script_defaults: Mapping[str, Any],
         validation: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -630,7 +685,7 @@ class VNScriptsRepository:
             ).fetchone()
             if existing_row is not None:
                 existing = _decode_publish_request(existing_row)
-                if existing["payload_hash"] != payload_hash:
+                if not _publish_request_matches(existing, request_payload=request_payload, legacy_payload_hash=payload_hash):
                     raise ValueError("idempotency_key_conflict")
                 return {"replayed": True, "version": None, "response": dict(existing["response"])}
 
@@ -657,6 +712,17 @@ class VNScriptsRepository:
                 profile=generation_profile,
                 resource_type="script_version",
             )
+            generation_snapshot_map = {"default": generation_snapshot_id}
+            for profile_key, profile in (generation_profiles or {}).items():
+                if profile_key == "default":
+                    continue
+                generation_snapshot_map[str(profile_key)] = _insert_profile_snapshot(
+                    conn,
+                    owner_user_id=owner_user_id,
+                    snapshot_type="generation",
+                    profile=profile,
+                    resource_type="script_version",
+                )
             snapshot_cursor = conn.execute(
                 """
                 INSERT INTO vn_script_manifest_snapshots (
@@ -690,10 +756,11 @@ class VNScriptsRepository:
                     manifest_snapshot_id,
                     policy_snapshot_id,
                     generation_profile_snapshot_id,
+                    generation_profile_snapshots_json,
                     script_defaults_json,
                     validation_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     script_id,
@@ -706,6 +773,7 @@ class VNScriptsRepository:
                     manifest_snapshot_id,
                     policy_snapshot_id,
                     generation_snapshot_id,
+                    _json_dump(generation_snapshot_map),
                     _json_dump(dict(script_defaults)),
                     _json_dump(dict(validation)),
                 ),
@@ -719,20 +787,17 @@ class VNScriptsRepository:
                 """,
                 (version_id, manifest_snapshot_id),
             )
+            snapshot_ids = [policy_snapshot_id, *generation_snapshot_map.values()]
+            snapshot_placeholders = ", ".join("?" for _ in snapshot_ids)
             conn.execute(
-                """
+                f"""
                 UPDATE vn_profile_snapshots
                 SET resource_id = ?
                 WHERE owner_user_id = ?
                   AND resource_type = 'script_version'
-                  AND id IN (?, ?)
-                """,
-                (
-                    version_id,
-                    owner_user_id,
-                    policy_snapshot_id,
-                    generation_snapshot_id,
-                ),
+                  AND id IN ({snapshot_placeholders})
+                """,  # nosec B608
+                (version_id, owner_user_id, *snapshot_ids),
             )
             version_row = conn.execute(
                 "SELECT * FROM vn_script_versions WHERE id = ? AND owner_user_id = ?",
@@ -749,11 +814,19 @@ class VNScriptsRepository:
                     script_id,
                     idempotency_key,
                     payload_hash,
+                    request_payload_json,
                     response_json
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (owner_user_id, script_id, idempotency_key, payload_hash, _json_dump(response)),
+                (
+                    owner_user_id,
+                    script_id,
+                    idempotency_key,
+                    payload_hash,
+                    _json_dump(dict(request_payload or {})) if request_payload is not None else None,
+                    _json_dump(response),
+                ),
             )
         return {"replayed": False, "version": version, "response": response}
 
@@ -960,6 +1033,12 @@ def _require_sqlite_chacha_db(db: CharactersRAGDB) -> None:
         raise ValueError("VN scripts storage currently requires a SQLite ChaChaNotes DB")
 
 
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}  # nosec B608
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")  # nosec B608
+
+
 def _json_dump(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
@@ -1008,6 +1087,45 @@ def _insert_profile_snapshot(
     return int(cursor.lastrowid)
 
 
+def _normalize_generation_profile_ids(
+    default_profile_id: str,
+    generation_profiles: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    normalized_default_profile_id = str(default_profile_id)
+    if not normalized_default_profile_id or len(normalized_default_profile_id) > _MAX_GENERATION_PROFILE_ID_LENGTH:
+        raise ValueError("generation_profile_id_invalid")
+    profile_ids: dict[str, str] = {"default": normalized_default_profile_id}
+    if isinstance(generation_profiles, Mapping):
+        if len(generation_profiles) > _MAX_GENERATION_PROFILE_MAP_SIZE:
+            raise ValueError("generation_profile_map_too_large")
+        for key, value in generation_profiles.items():
+            profile_key = str(key)
+            if profile_key == "default":
+                if str(value) != normalized_default_profile_id:
+                    raise ValueError("generation_profile_default_reserved")
+                continue
+            if not _GENERATION_PROFILE_KEY_RE.fullmatch(profile_key):
+                raise ValueError("generation_profile_key_invalid")
+            profile_id = str(value)
+            if not profile_id or len(profile_id) > _MAX_GENERATION_PROFILE_ID_LENGTH:
+                raise ValueError("generation_profile_id_invalid")
+            profile_ids[profile_key] = profile_id
+    profile_ids["default"] = normalized_default_profile_id
+    return profile_ids
+
+
+def _normalize_generation_profile_snapshots(
+    default_snapshot_id: int,
+    generation_profile_snapshots: Mapping[str, Any] | None,
+) -> dict[str, int]:
+    snapshots: dict[str, int] = {"default": int(default_snapshot_id)}
+    if isinstance(generation_profile_snapshots, Mapping):
+        for key, value in generation_profile_snapshots.items():
+            snapshots[str(key)] = int(value)
+    snapshots["default"] = int(default_snapshot_id)
+    return snapshots
+
+
 def _publish_response_payload(version: Mapping[str, Any], validation: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "script_id": int(version["script_id"]),
@@ -1018,6 +1136,7 @@ def _publish_response_payload(version: Mapping[str, Any], validation: Mapping[st
         "manifest_snapshot_id": int(version["manifest_snapshot_id"]),
         "policy_snapshot_id": int(version["policy_snapshot_id"]),
         "generation_profile_snapshot_id": int(version["generation_profile_snapshot_id"]),
+        "generation_profile_snapshots": dict(version["generation_profile_snapshots"]),
         "validation": dict(validation),
         "created_at": version["created_at"],
     }
@@ -1033,6 +1152,10 @@ def _decode_script(row: Any) -> dict[str, Any]:
         "primary_asset_pack_id": int(row["primary_asset_pack_id"]),
         "policy_profile_id": row["policy_profile_id"],
         "generation_profile_id": row["generation_profile_id"],
+        "generation_profiles": _normalize_generation_profile_ids(
+            str(row["generation_profile_id"]),
+            _json_load(row["generation_profile_ids_json"], {}),
+        ),
         "content_rating": row["content_rating"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -1093,6 +1216,10 @@ def _decode_version(row: Any) -> dict[str, Any]:
         "manifest_snapshot_id": int(row["manifest_snapshot_id"]),
         "policy_snapshot_id": int(row["policy_snapshot_id"]),
         "generation_profile_snapshot_id": int(row["generation_profile_snapshot_id"]),
+        "generation_profile_snapshots": _normalize_generation_profile_snapshots(
+            int(row["generation_profile_snapshot_id"]),
+            _json_load(row["generation_profile_snapshots_json"], {}),
+        ),
         "script_defaults": _json_load(row["script_defaults_json"], {}),
         "validation": _json_load(row["validation_json"], {}),
         "created_at": row["created_at"],
@@ -1106,7 +1233,22 @@ def _decode_publish_request(row: Any) -> dict[str, Any]:
         "script_id": int(row["script_id"]),
         "idempotency_key": row["idempotency_key"],
         "payload_hash": row["payload_hash"],
+        "request_payload": _json_load(row["request_payload_json"], None),
         "response": _json_load(row["response_json"], {}),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def _publish_request_matches(
+    existing: Mapping[str, Any],
+    *,
+    request_payload: Mapping[str, Any] | None,
+    legacy_payload_hash: str,
+) -> bool:
+    existing_payload = existing.get("request_payload")
+    if isinstance(existing_payload, Mapping):
+        if request_payload is None:
+            return False
+        return dict(existing_payload) == dict(request_payload)
+    return existing.get("payload_hash") == legacy_payload_hash

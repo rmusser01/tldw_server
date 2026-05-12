@@ -67,6 +67,9 @@ WARNING_MESSAGES = {
     "readiness_unavailable": "Readiness could not be computed for this pack.",
     "script_pack_unavailable": "The script's asset pack could not be loaded.",
     "policy_snapshot_unavailable": "The script policy snapshot could not be loaded.",
+    "generation_profile_snapshot_unavailable": "The script generation profile snapshot could not be loaded.",
+    "generation_profile_snapshot_missing": "The script references a generation profile snapshot that is not pinned.",
+    "generation_profile_output_schema_unavailable": "The generation profile does not support one of this script's generated output schemas.",
     "character_safety_missing": "Character safety metadata is missing.",
 }
 
@@ -360,8 +363,31 @@ def _script_version_options(
             policy_blocked = bool(decision.get("blocked"))
             warnings.extend(_policy_warnings(decision))
 
+        generation_snapshot_id = _optional_int(version.get("generation_profile_snapshot_id"))
+        generation_snapshot = None
+        if generation_snapshot_id is not None:
+            generation_snapshot = profile_snapshots.get_profile_snapshot(
+                generation_snapshot_id,
+                owner_user_id=owner_user_id,
+            )
+        generation_definition = _profile_definition(generation_snapshot) if generation_snapshot else {}
+        generation_requirements = _script_generation_requirements(version.get("program"))
+        generation_blocked = generation_snapshot is None
+        if generation_snapshot_id is None:
+            warnings.append(_warning("generation_profile_snapshot_missing", "high_risk"))
+        elif generation_snapshot is None:
+            warnings.append(_warning("generation_profile_snapshot_unavailable", "high_risk"))
+        generation_warnings, generation_requirements_blocked = _generation_profile_warnings(
+            profile_snapshots=profile_snapshots,
+            owner_user_id=owner_user_id,
+            version=version,
+            requirements=generation_requirements,
+        )
+        warnings.extend(generation_warnings)
+        generation_blocked = generation_blocked or generation_requirements_blocked
+
         warning_summary = _warning_summary(_dedupe_warnings(warnings))
-        ready = pack_ready and not policy_blocked
+        ready = pack_ready and not policy_blocked and not generation_blocked
         options.append(
             VNPlaySetupScriptVersionOption(
                 id=int(version["id"]),
@@ -372,9 +398,39 @@ def _script_version_options(
                 asset_pack_id=int(version["asset_pack_id"]),
                 manifest_snapshot_id=int(version["manifest_snapshot_id"]),
                 policy_snapshot_id=int(version["policy_snapshot_id"]),
-                generation_profile_snapshot_id=int(version["generation_profile_snapshot_id"]),
+                generation_profile_snapshot_id=generation_snapshot_id,
                 policy_profile_id=str(version.get("policy_profile_id") or ""),
                 generation_profile_id=str(version.get("generation_profile_id") or ""),
+                generation_profile_key="default",
+                generation_profile_snapshot_immutable=True,
+                provider_class=_optional_string(
+                    generation_definition.get("provider_class")
+                    or generation_definition.get("deployment_class")
+                    or generation_definition.get("provider")
+                ),
+                max_automatic_generation_batch_count=_optional_int(
+                    generation_definition.get("automatic_generation_batch_cap")
+                    or generation_definition.get("max_automatic_generation_batch")
+                    or 1
+                ),
+                moderation_required=_optional_bool(
+                    generation_definition.get("moderation_required", False)
+                ),
+                estimated_cost_class=_optional_string(
+                    generation_definition.get("estimated_cost_class")
+                ),
+                supported_output_schemas=_supported_generation_output_schemas(
+                    generation_definition
+                ),
+                dynamic_choice_support="choice_set" in generation_requirements["output_schemas"],
+                scene_update_support="scene_update" in generation_requirements["output_schemas"],
+                confirmation_required=(
+                    generation_requirements["requires_confirmation"]
+                    or bool(
+                        generation_definition.get("requires_user_confirm")
+                        or generation_definition.get("confirmation_required")
+                    )
+                ),
                 content_rating=str(version.get("content_rating") or "general"),
                 ready=ready,
                 warning_summary=warning_summary,
@@ -435,6 +491,152 @@ def _policy_warning_severity(reason: Mapping[str, Any]) -> VNPlaySetupWarningSev
     if raw_severity == "warning":
         return "warning"
     return "info"
+
+
+def _profile_definition(snapshot: Mapping[str, Any] | None) -> dict[str, Any]:
+    if snapshot is None:
+        return {}
+    definition = snapshot.get("definition")
+    return dict(definition) if isinstance(definition, Mapping) else {}
+
+
+def _script_generation_requirements(program: Any) -> dict[str, Any]:
+    """Summarize generated-output requirements from a published script program."""
+    output_schemas: set[str] = set()
+    profile_keys: set[str] = set()
+    schemas_by_profile: dict[str, set[str]] = {}
+    requires_confirmation = False
+    if not isinstance(program, Mapping):
+        return {
+            "output_schemas": output_schemas,
+            "profile_keys": {"default"},
+            "schemas_by_profile": {"default": set()},
+            "requires_confirmation": False,
+        }
+    labels = program.get("labels")
+    if not isinstance(labels, Mapping):
+        return {
+            "output_schemas": output_schemas,
+            "profile_keys": {"default"},
+            "schemas_by_profile": {"default": set()},
+            "requires_confirmation": False,
+        }
+    for raw_ops in labels.values():
+        if not isinstance(raw_ops, list):
+            continue
+        for opcode in raw_ops:
+            if not isinstance(opcode, Mapping) or opcode.get("op") != "generate":
+                continue
+            profile_key = opcode.get("profile_key", "default")
+            profile_key_text = str(profile_key) if isinstance(profile_key, str) else "default"
+            profile_keys.add(profile_key_text)
+            if opcode.get("requires_user_confirm") is True:
+                requires_confirmation = True
+            is_literal_generation = (
+                isinstance(opcode.get("narrative_text"), str)
+                or isinstance(opcode.get("regeneration_text"), str)
+            )
+            output_schema = opcode.get("output_schema")
+            if output_schema is None and not is_literal_generation:
+                output_schema = "narrative_dialogue"
+            if isinstance(output_schema, str):
+                output_schemas.add(output_schema)
+                schemas_by_profile.setdefault(profile_key_text, set()).add(output_schema)
+    return {
+        "output_schemas": output_schemas,
+        "profile_keys": profile_keys or {"default"},
+        "schemas_by_profile": schemas_by_profile or {"default": set()},
+        "requires_confirmation": requires_confirmation,
+    }
+
+
+def _generation_profile_warnings(
+    *,
+    profile_snapshots: VNProfileSnapshotRepository,
+    owner_user_id: int,
+    version: Mapping[str, Any],
+    requirements: Mapping[str, Any],
+) -> tuple[list[VNPlaySetupWarning], bool]:
+    """Return generation profile readiness warnings for all generated script outputs."""
+    warnings: list[VNPlaySetupWarning] = []
+    blocked = False
+    snapshot_ids = _generation_snapshot_ids(version)
+    schemas_by_profile = requirements.get("schemas_by_profile", {})
+    if not isinstance(schemas_by_profile, Mapping):
+        schemas_by_profile = {}
+    for profile_key in sorted(str(key) for key in requirements.get("profile_keys", {"default"})):
+        snapshot_id = snapshot_ids.get(profile_key)
+        if snapshot_id is None:
+            warnings.append(_warning("generation_profile_snapshot_missing", "high_risk"))
+            blocked = True
+            continue
+        snapshot = profile_snapshots.get_profile_snapshot(snapshot_id, owner_user_id=owner_user_id)
+        if snapshot is None:
+            warnings.append(_warning("generation_profile_snapshot_unavailable", "high_risk"))
+            blocked = True
+            continue
+        definition = _profile_definition(snapshot)
+        supported = set(_supported_generation_output_schemas(definition))
+        required_schemas = {
+            str(schema)
+            for schema in (
+                schemas_by_profile.get(profile_key, set())
+                if isinstance(schemas_by_profile, Mapping)
+                else set()
+            )
+        }
+        if required_schemas and not required_schemas.issubset(supported):
+            warnings.append(
+                _warning("generation_profile_output_schema_unavailable", "high_risk")
+            )
+            blocked = True
+    return warnings, blocked
+
+
+def _generation_snapshot_ids(version: Mapping[str, Any]) -> dict[str, int]:
+    snapshot_ids: dict[str, int] = {}
+    default_snapshot_id = _optional_int(version.get("generation_profile_snapshot_id"))
+    if default_snapshot_id is not None:
+        snapshot_ids["default"] = default_snapshot_id
+    raw_map = version.get("generation_profile_snapshots")
+    if isinstance(raw_map, Mapping):
+        for key, value in raw_map.items():
+            try:
+                snapshot_ids[str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+    return snapshot_ids
+
+
+def _supported_generation_output_schemas(definition: Mapping[str, Any]) -> list[str]:
+    supported = definition.get("supported_output_schemas", definition.get("allowed_output_schemas"))
+    if isinstance(supported, list):
+        return sorted({str(schema) for schema in supported if str(schema).strip()})
+    if bool(definition.get("supports_structured_output")):
+        return ["choice_set", "narrative_dialogue", "scene_update"]
+    return ["narrative_dialogue"]
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
 
 
 def _readiness_for_pack(

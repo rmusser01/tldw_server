@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, validate_offset_pagination_aliases
 from tldw_Server_API.app.core.VN_Play.constants import (
     LINKED_CHAT_MODE_READ_ONLY_CONTEXT,
     SESSION_STATUS_ACTIVE,
@@ -23,6 +24,7 @@ VNPlaySetupCompatibilityStatus = Literal["compatible", "different_character", "u
 VNPlaySetupEmptyStateScope = Literal["global", "filter", "page"]
 VNPlayBranchRestoreTarget = Literal["branch_latest", "choice_point"]
 VNPlayBranchWarningSeverity = Literal["info", "warning", "high_risk"]
+VNPlayGenerationRawDebugState = Literal["absent", "available", "redacted", "revealed"]
 VNPlayTurnStatus = Literal[
     "pending",
     "model_calling",
@@ -51,6 +53,8 @@ VNPlayEventType = Literal[
     "session_settings_changed",
     "session_checkpoint_created",
     "session_restored",
+    "script_generation_canceled",
+    "script_generation_revision_activated",
 ]
 VNPlayEventSource = Literal["user", "model", "runtime", "system"]
 
@@ -237,9 +241,19 @@ class VNPlaySetupScriptVersionOption(BaseModel):
     asset_pack_id: StrictInt
     manifest_snapshot_id: StrictInt
     policy_snapshot_id: StrictInt
-    generation_profile_snapshot_id: StrictInt
+    generation_profile_snapshot_id: StrictInt | None = None
     policy_profile_id: StrictStr
     generation_profile_id: StrictStr
+    generation_profile_key: StrictStr = "default"
+    generation_profile_snapshot_immutable: StrictBool = True
+    provider_class: StrictStr | None = None
+    max_automatic_generation_batch_count: StrictInt | None = Field(default=None, ge=0)
+    moderation_required: StrictBool | None = None
+    estimated_cost_class: StrictStr | None = None
+    supported_output_schemas: list[StrictStr] = Field(default_factory=list)
+    dynamic_choice_support: StrictBool = False
+    scene_update_support: StrictBool = False
+    confirmation_required: StrictBool = False
     content_rating: StrictStr
     ready: StrictBool
     warning_summary: VNPlaySetupWarningSummary
@@ -428,6 +442,8 @@ class VNPlayScriptStateResponse(BaseModel):
     position: dict[str, Any] = Field(default_factory=dict)
     variables: dict[str, Any] = Field(default_factory=dict)
     waiting_choice: dict[str, Any] | None = None
+    waiting_generation_confirmation: dict[str, Any] | None = None
+    active_generation: dict[str, Any] | None = None
     ended: StrictBool = False
 
 
@@ -463,6 +479,100 @@ class VNPlayScriptActionResponse(BaseModel):
     script_state: VNPlayScriptStateResponse
     events: list[VNPlayEventResponse] = Field(default_factory=list)
     warnings: list[Any] = Field(default_factory=list)
+
+
+class VNPlayGenerationActionRequest(BaseModel):
+    """Request body for idempotent scripted generation commands."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_scene_version: StrictInt = Field(..., ge=0)
+    idempotency_key: StrictStr = Field(..., min_length=1, max_length=200)
+
+
+class VNPlayGenerationProfileSummary(BaseModel):
+    """Owner-safe generation profile lineage summary."""
+
+    profile_key: StrictStr
+    snapshot_id: StrictInt
+    provider_class: StrictStr | None = None
+    moderation_required: StrictBool | None = None
+    estimated_cost_class: StrictStr | None = None
+
+
+class VNPlayGenerationHistoryItem(BaseModel):
+    """Owner-safe generation revision history item."""
+
+    id: StrictInt
+    generation_id: StrictInt
+    generation_point_key: StrictStr
+    revision_number: StrictInt
+    status: StrictStr
+    active: StrictBool = False
+    output_schema: StrictStr
+    public_output: dict[str, Any] = Field(default_factory=dict)
+    applied_visuals: list[dict[str, Any]] = Field(default_factory=list)
+    rejected_visuals: list[dict[str, Any]] = Field(default_factory=list)
+    public_error_code: StrictStr | None = None
+    source: StrictStr = "model"
+    profile: VNPlayGenerationProfileSummary
+    created_at: StrictStr | None = None
+
+
+class VNPlayGenerationHistoryResponse(BaseModel):
+    """Offset-paginated owner-safe generation revision history."""
+
+    items: list[VNPlayGenerationHistoryItem] = Field(default_factory=list)
+    pagination: OffsetPaginationMeta
+    total: StrictInt | None = Field(default=None, ge=0)
+    limit: StrictInt | None = Field(default=None, ge=1)
+    offset: StrictInt | None = Field(default=None, ge=0)
+    has_more: StrictBool | None = None
+    next_offset: StrictInt | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_aliases(self) -> VNPlayGenerationHistoryResponse:
+        validate_offset_pagination_aliases(self)
+        return self
+
+
+class VNPlayGenerationRevisionListResponse(BaseModel):
+    """Offset-paginated owner-safe revision list for one generation point."""
+
+    items: list[VNPlayGenerationHistoryItem] = Field(default_factory=list)
+    pagination: OffsetPaginationMeta
+    total: StrictInt | None = Field(default=None, ge=0)
+    limit: StrictInt | None = Field(default=None, ge=1)
+    offset: StrictInt | None = Field(default=None, ge=0)
+    has_more: StrictBool | None = None
+    next_offset: StrictInt | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_aliases(self) -> VNPlayGenerationRevisionListResponse:
+        validate_offset_pagination_aliases(self)
+        return self
+
+
+class VNPlayGenerationRevisionDebugResponse(BaseModel):
+    """Owner/admin-only generation revision diagnostics."""
+
+    id: StrictInt
+    generation_id: StrictInt
+    generation_request_id: StrictInt
+    generation_point_key: StrictStr
+    revision_number: StrictInt
+    status: StrictStr
+    output_schema: StrictStr
+    public_output: dict[str, Any] = Field(default_factory=dict)
+    raw_output_debug_state: VNPlayGenerationRawDebugState = "absent"
+    raw_output_debug: dict[str, Any] | None = None
+    parser_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    moderation_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    model_metadata: dict[str, Any] = Field(default_factory=dict)
+    usage_metadata: dict[str, Any] = Field(default_factory=dict)
+    request: dict[str, Any] = Field(default_factory=dict)
+    profile: VNPlayGenerationProfileSummary
+    created_at: StrictStr | None = None
 
 
 class VNPlayRestoreRequest(BaseModel):
@@ -504,6 +614,14 @@ class VNPlayBranchRestoreCapability(BaseModel):
     targets: dict[str, dict[str, StrictInt | None] | None] = Field(default_factory=dict)
 
 
+class VNPlayGeneratedChoiceRef(BaseModel):
+    """Reference to a generated choice's source revision."""
+
+    generation_id: StrictInt
+    revision_id: StrictInt
+    choice_id: StrictStr
+
+
 class VNPlayBranchPathStep(BaseModel):
     """One step in a VN Play branch path."""
 
@@ -511,6 +629,7 @@ class VNPlayBranchPathStep(BaseModel):
     branch_label: StrictStr | None = None
     choice_id: StrictStr | None = None
     choice_text: StrictStr | None = None
+    generated_choice: VNPlayGeneratedChoiceRef | None = None
     depth: StrictInt = Field(..., ge=0)
 
 
@@ -524,6 +643,7 @@ class VNPlayBranchNavigationNode(BaseModel):
     branch_label: StrictStr | None = None
     choice_id: StrictStr | None = None
     choice_text: StrictStr | None = None
+    generated_choice: VNPlayGeneratedChoiceRef | None = None
     branch_path: list[dict[str, Any]] = Field(default_factory=list)
     depth: StrictInt = Field(..., ge=0)
     status: StrictStr = "active"
@@ -612,6 +732,7 @@ __all__ = [
     "VNPlayBranchResponse",
     "VNPlayBranchWarning",
     "VNPlayBranchWarningSeverity",
+    "VNPlayGeneratedChoiceRef",
     "VNPlayCheckpointCreate",
     "VNPlayCheckpointResponse",
     "VNPlayEventResponse",
@@ -624,6 +745,13 @@ __all__ = [
     "VNPlaySceneStateResponse",
     "VNPlayScriptActionRequest",
     "VNPlayScriptActionResponse",
+    "VNPlayGenerationActionRequest",
+    "VNPlayGenerationHistoryItem",
+    "VNPlayGenerationHistoryResponse",
+    "VNPlayGenerationProfileSummary",
+    "VNPlayGenerationRawDebugState",
+    "VNPlayGenerationRevisionListResponse",
+    "VNPlayGenerationRevisionDebugResponse",
     "VNPlayScriptStateResponse",
     "VNPlaySessionCreate",
     "VNPlaySessionResponse",
