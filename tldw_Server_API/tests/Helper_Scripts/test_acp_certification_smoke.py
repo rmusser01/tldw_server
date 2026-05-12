@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -429,3 +430,206 @@ def test_stdio_sequence_runner_ignores_notification_before_initialize_success(mo
         "session/new",
         "session/prompt",
     ]
+
+
+def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypatch) -> None:
+    module = _load_module()
+    written = []
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def readline(self):
+            time.sleep(0.2)
+            return '{"jsonrpc":"2.0","id":1'
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 1
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    started = time.monotonic()
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+        ],
+        "timeout_seconds": 0.01,
+    }, module.ROOT)
+    elapsed = time.monotonic() - started
+
+    assert rc == 124
+    assert elapsed < 0.15
+    assert process.killed is True
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
+    assert len(written) == 1
+
+
+def test_stdio_sequence_runner_sanitizes_error_output_and_cleans_up(
+    monkeypatch,
+    capsys,
+) -> None:
+    module = _load_module()
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def readline(self):
+            return (
+                '{"jsonrpc":"2.0","id":1,'
+                '"error":{"code":-32000,"message":"bad secret-token-value",'
+                '"data":{"token":"SECRET_DATA_SHOULD_NOT_PRINT"}}}\n'
+            )
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 1
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+    captured = capsys.readouterr()
+
+    assert rc != 0
+    assert process.killed is True
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True
+    assert "code" in captured.err
+    assert "bad secret-token-value" in captured.err
+    assert "SECRET_DATA_SHOULD_NOT_PRINT" not in captured.err
+    assert "data" not in captured.err
+
+
+def test_stdio_sequence_runner_cleans_up_after_broken_pipe(monkeypatch) -> None:
+    module = _load_module()
+
+    class _Pipe:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Stdin(_Pipe):
+        def write(self, _text):
+            raise BrokenPipeError("closed")
+
+        def flush(self):
+            return None
+
+    class _Stdout(_Pipe):
+        def readline(self):
+            return ""
+
+    class _Process:
+        def __init__(self):
+            self.stdin = _Stdin()
+            self.stdout = _Stdout()
+            self.killed = False
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 1
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert process.killed is True
+    assert process.wait_calls >= 1
+    assert process.stdin.closed is True
+    assert process.stdout.closed is True

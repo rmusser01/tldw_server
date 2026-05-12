@@ -10,11 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import select
+import queue
 import shlex
 # subprocess is intentionally used to run static manifest argv with shell=False.
 import subprocess  # nosec B404
 import sys
+import threading
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -24,6 +25,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+_STDOUT_EOF = object()
+_ERROR_MESSAGE_LIMIT = 240
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -401,38 +404,133 @@ def _handle_missing_prerequisite(command: dict[str, Any], reason: str) -> int | 
     return 127
 
 
-def _read_jsonrpc_response(
+def _close_pipe(pipe: Any) -> None:
+    """Close a subprocess pipe if it exposes close()."""
+    if pipe is None or not hasattr(pipe, "close"):
+        return
+    try:
+        pipe.close()
+    except OSError:
+        pass
+
+
+def _cleanup_stdio_process(process: subprocess.Popen[str], *, force_kill: bool) -> None:
+    """Close stdio, stop the subprocess, and wait so failure paths do not leak."""
+    is_running = True
+    if hasattr(process, "poll"):
+        try:
+            is_running = process.poll() is None
+        except OSError:
+            is_running = True
+
+    if is_running:
+        try:
+            if force_kill:
+                process.kill()
+            elif hasattr(process, "terminate"):
+                process.terminate()
+            else:
+                process.kill()
+        except OSError:
+            pass
+
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=1)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    except OSError:
+        pass
+    finally:
+        _close_pipe(getattr(process, "stdin", None))
+        _close_pipe(getattr(process, "stdout", None))
+
+
+def _stdout_reader(
+    stdout: Any,
+    responses: queue.Queue[object],
+    stop_event: threading.Event,
+) -> None:
+    """Read complete stdout lines in a daemon thread."""
+    while not stop_event.is_set():
+        try:
+            line = stdout.readline()
+        except (OSError, ValueError):
+            responses.put(_STDOUT_EOF)
+            return
+        if not line:
+            responses.put(_STDOUT_EOF)
+            return
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            responses.put({"_reader_error": {"message": "invalid JSON-RPC response"}})
+            continue
+        if not isinstance(payload, dict):
+            responses.put({"_reader_error": {"message": "JSON-RPC response is not an object"}})
+            continue
+        responses.put(payload)
+
+
+def _finish_stdio_process(
     process: subprocess.Popen[str],
+    *,
+    force_kill: bool,
+    reader_stop: threading.Event | None = None,
+    reader_thread: threading.Thread | None = None,
+) -> None:
+    """Stop the stdout reader and clean up the subprocess."""
+    if reader_stop is not None:
+        reader_stop.set()
+    _cleanup_stdio_process(process, force_kill=force_kill)
+    if reader_thread is not None:
+        reader_thread.join(timeout=0.1)
+
+
+def _format_error_message(message: Any) -> str:
+    """Return a bounded single-line error message."""
+    text = str(message or "JSON-RPC error").replace("\r", " ").replace("\n", " ")
+    if len(text) > _ERROR_MESSAGE_LIMIT:
+        return text[: _ERROR_MESSAGE_LIMIT - 3] + "..."
+    return text
+
+
+def _sanitize_jsonrpc_error(error: Any) -> dict[str, Any]:
+    """Keep stable JSON-RPC error fields without printing arbitrary error data."""
+    if not isinstance(error, dict):
+        return {"message": _format_error_message(error)}
+    sanitized: dict[str, Any] = {"message": _format_error_message(error.get("message"))}
+    if "code" in error:
+        sanitized["code"] = error["code"]
+    return sanitized
+
+
+def _read_jsonrpc_response(
+    responses: queue.Queue[object],
     request_id: Any,
     deadline: float,
 ) -> dict[str, Any] | None:
     """Read the matching JSON-RPC response for a request id before the deadline."""
-    stdout = process.stdout
-    if stdout is None:
-        return None
-
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-
-        if hasattr(stdout, "fileno"):
-            try:
-                readable, _, _ = select.select([stdout], [], [], remaining)
-            except (OSError, ValueError):
-                readable = [stdout]
-            if not readable:
-                return None
-
-        line = stdout.readline()
-        if not line:
-            return None
         try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            return {"id": request_id, "error": {"message": f"invalid JSON-RPC response: {line.strip()}"}}
+            payload = responses.get(timeout=remaining)
+        except queue.Empty:
+            return None
+        if payload is _STDOUT_EOF:
+            return None
         if not isinstance(payload, dict):
-            return {"id": request_id, "error": {"message": "JSON-RPC response is not an object"}}
+            continue
+        if payload.get("_reader_error"):
+            return {"id": request_id, "error": payload["_reader_error"]}
         if payload.get("id") != request_id:
             continue
         return payload
@@ -456,50 +554,82 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
         handled = _handle_missing_prerequisite(command, str(exc))
         return 127 if handled is None else handled
 
+    responses: queue.Queue[object] = queue.Queue()
+    if process.stdout is None:
+        _finish_stdio_process(process, force_kill=True)
+        print(f"FAIL {command_id}: subprocess stdout is unavailable", file=sys.stderr)
+        return 1
+    reader_stop = threading.Event()
+    reader_thread = threading.Thread(
+        target=_stdout_reader,
+        args=(process.stdout, responses, reader_stop),
+        daemon=True,
+    )
+    reader_thread.start()
+
     for frame in command.get("stdin_jsonl", []):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            process.kill()
+            _finish_stdio_process(
+                process,
+                force_kill=True,
+                reader_stop=reader_stop,
+                reader_thread=reader_thread,
+            )
             print(f"FAIL {command_id}: timed out before {frame.get('method')}", file=sys.stderr)
             return 124
         if process.stdin is None:
-            process.kill()
+            _finish_stdio_process(
+                process,
+                force_kill=True,
+                reader_stop=reader_stop,
+                reader_thread=reader_thread,
+            )
             print(f"FAIL {command_id}: subprocess stdin is unavailable", file=sys.stderr)
             return 1
         try:
             process.stdin.write(json.dumps(frame) + "\n")
             process.stdin.flush()
         except BrokenPipeError:
-            process.kill()
+            _finish_stdio_process(
+                process,
+                force_kill=True,
+                reader_stop=reader_stop,
+                reader_thread=reader_thread,
+            )
             print(f"FAIL {command_id}: subprocess closed stdin before {frame.get('method')}", file=sys.stderr)
             return 1
 
-        response = _read_jsonrpc_response(process, frame.get("id"), deadline)
+        response = _read_jsonrpc_response(responses, frame.get("id"), deadline)
         if response is None:
-            process.kill()
+            _finish_stdio_process(
+                process,
+                force_kill=True,
+                reader_stop=reader_stop,
+                reader_thread=reader_thread,
+            )
             print(f"FAIL {command_id}: timed out waiting for {frame.get('method')} response", file=sys.stderr)
             return 124
         if response.get("error"):
-            process.kill()
+            _finish_stdio_process(
+                process,
+                force_kill=True,
+                reader_stop=reader_stop,
+                reader_thread=reader_thread,
+            )
             print(
                 f"FAIL {command_id}: {frame.get('method')} returned error: "
-                + json.dumps(response["error"], sort_keys=True),
+                + json.dumps(_sanitize_jsonrpc_error(response["error"]), sort_keys=True),
                 file=sys.stderr,
             )
             return 1
 
-    if process.stdin is not None:
-        try:
-            process.stdin.close()
-        except OSError:
-            pass
-
-    if process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            process.kill()
+    _finish_stdio_process(
+        process,
+        force_kill=False,
+        reader_stop=reader_stop,
+        reader_thread=reader_thread,
+    )
     return 0
 
 

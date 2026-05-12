@@ -4,7 +4,7 @@ title: Implement ACP downstream entrypoint strategy stages 1-3
 status: In Progress
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 05:20'
+updated_date: '2026-05-12 05:34'
 labels:
   - ACP
   - implementation
@@ -55,6 +55,10 @@ Task 3 red evidence: focused helper pytest initially failed with 4 missing-helpe
 Task 3 follow-up review fix plan: add regression coverage for interleaved JSON-RPC notifications before matching responses; verify red against current stdio runner; update runner to wait for the response id matching the just-sent frame while ignoring notifications and other ids within the existing timeout; re-run focused helper tests and commit a scoped follow-up.
 
 Task 3 follow-up red evidence: helper pytest failed with len(written)==2 after an interleaved notification before initialize error, proving session/new was written too early. Follow-up green evidence: helper pytest now reports 14 passed, 5 warnings. The stdio reader now waits for a matching JSON-RPC response id and ignores notifications and other ids inside the existing timeout. Scoped Bandit on acp_certification_smoke.py reports 0 results and git diff --check is clean.
+
+Task 3 code-quality follow-up plan: add red tests for partial-line timeout cleanup, JSON-RPC error cleanup with sanitized stderr, and broken-pipe cleanup; replace select/readline main-thread response reading with a reader-thread queue bounded by the existing deadline; add one cleanup helper that closes stdio, terminates or kills, waits, and is used on all timeout/error/broken-pipe paths; re-run focused helper tests, Bandit, and diff checks before committing.
+
+Task 3 code-quality follow-up red evidence: helper pytest failed 3 tests for partial-line timeout and missing cleanup on JSON-RPC error and broken pipe. Final green evidence: helper pytest reports 17 passed, 5 warnings in 2.87s. Bandit on acp_certification_smoke.py reports 0 findings. git diff --check is clean. Implementation now uses a daemon stdout reader thread plus queue/deadline matching, central cleanup for kill or terminate plus wait and stdio close, and sanitized bounded JSON-RPC error output that omits error.data.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
