@@ -43,13 +43,14 @@ Expected: fail because the `persona-chat-judge` command group does not exist.
 - [x] **Step 1: Add a focused command module**
 
 Create a module-level docstring explaining this is an offline review utility for Persona Chat judge harness reports. Define:
-- `DEFAULT_PERSONA_CHAT_JUDGE_FIXTURE_PATH`
+- `PERSONA_CHAT_JUDGE_FIXTURE_PACKAGE`
+- `PERSONA_CHAT_JUDGE_FIXTURE_RESOURCE`
 - `persona_chat_judge_group`
 - `review_persona_chat_judge_candidates`
 
 The command should accept:
 - required `--candidates` path
-- optional `--fixture` path defaulting to the checked-in V1 contract fixture
+- optional `--fixture` path overriding the packaged V1 contract fixture
 - optional `--output` path
 
 - [x] **Step 2: Implement JSON loading and validation**

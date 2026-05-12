@@ -534,6 +534,7 @@ tldw_Server_API = [
   "Config_Files/**/*",
   "app/static/**/*",
   "app/Setup_UI/*.html",
+  "app/core/Evaluations/data/*.json",
   "app/core/Evaluations/data/**/*.json",
   "app/core/Slides/revealjs/**/*",
   "Databases/**/*.sql",
