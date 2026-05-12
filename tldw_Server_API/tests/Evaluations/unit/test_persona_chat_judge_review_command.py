@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Evaluations.cli.persona_chat_judge_cli import (
     PERSONA_CHAT_JUDGE_FIXTURE_RESOURCE,
 )
 from tldw_Server_API.cli.evals_cli import main
+from tldw_Server_API.tests.Persona.persona_chat_quality_cases import case_by_id
 
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,35 @@ def _write_candidates(path: Path) -> dict[str, dict[str, Any]]:
     candidates = expected_candidate_outputs_from_fixture(_load_fixture())
     path.write_text(json.dumps(candidates), encoding="utf-8")
     return candidates
+
+
+def _write_quality_inputs(path: Path) -> None:
+    """Write one redaction-safe Persona Chat quality fixture input."""
+    path.write_text(json.dumps([case_by_id("PC-CASE-015")]), encoding="utf-8")
+
+
+def _write_execution_result(path: Path) -> None:
+    """Write a bounded Persona Chat judge execution-result payload."""
+    path.write_text(
+        json.dumps(
+            {
+                "provider": "/Users/private/token",
+                "model": "sk-secret-model",
+                "runtime_gating_allowed": True,
+                "predictions": [
+                    {
+                        "case_id": "PC-CASE-015",
+                        "dimension_key": "memory_expectation_alignment",
+                        "result": "Fail",
+                        "critique": "raw critique should not appear",
+                        "evidence": ["persona_memory_mode", "assistant_text"],
+                    }
+                ],
+                "failures": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_persona_chat_judge_review_command_outputs_bounded_report(tmp_path: Path) -> None:
@@ -137,3 +167,98 @@ def test_persona_chat_judge_review_command_requires_object_candidate_root(tmp_pa
 
     assert result.exit_code != 0  # nosec B101
     assert "Candidate outputs JSON must be an object" in result.output  # nosec B101
+
+
+def test_persona_chat_judge_artifact_command_outputs_trace_safe_artifact(tmp_path: Path) -> None:
+    """The artifact command should print bounded execution artifact JSON."""
+    inputs_path = tmp_path / "quality-inputs.json"
+    execution_result_path = tmp_path / "execution-result.json"
+    _write_quality_inputs(inputs_path)
+    _write_execution_result(execution_result_path)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "persona-chat-judge",
+            "artifact",
+            "--inputs",
+            str(inputs_path),
+            "--execution-result",
+            str(execution_result_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output  # nosec B101
+    artifact = json.loads(result.output)
+    serialized_artifact = json.dumps(artifact, sort_keys=True)
+    assert artifact["schema_version"] == "persona-chat-judge-execution-artifact.v1"  # nosec B101
+    assert artifact["offline_only"] is True  # nosec B101
+    assert artifact["runtime_gating_allowed"] is False  # nosec B101
+    assert artifact["provider"] == "redacted"  # nosec B101
+    assert artifact["model"] == "redacted"  # nosec B101
+    assert artifact["total_inputs"] == 1  # nosec B101
+    assert artifact["prediction_count"] == 1  # nosec B101
+    assert artifact["failure_count"] == 0  # nosec B101
+    assert artifact["calibration"]["warning_keys"] == [  # nosec B101
+        "calibration_sample_too_small",
+        "tpr_tnr_unavailable",
+    ]
+    assert "warnings" not in artifact["calibration"]  # nosec B101
+    assert "raw critique should not appear" not in serialized_artifact  # nosec B101
+    assert "/Users/private/token" not in serialized_artifact  # nosec B101
+    assert "sk-secret-model" not in serialized_artifact  # nosec B101
+    assert "Remember that my patio tomatoes" not in serialized_artifact  # nosec B101
+
+
+def test_persona_chat_judge_artifact_command_writes_explicit_output_file(tmp_path: Path) -> None:
+    """The artifact command should optionally persist the same bounded JSON."""
+    inputs_path = tmp_path / "quality-inputs.json"
+    execution_result_path = tmp_path / "execution-result.json"
+    output_path = tmp_path / "artifact.json"
+    _write_quality_inputs(inputs_path)
+    _write_execution_result(execution_result_path)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "persona-chat-judge",
+            "artifact",
+            "--inputs",
+            str(inputs_path),
+            "--execution-result",
+            str(execution_result_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output  # nosec B101
+    assert output_path.exists()  # nosec B101
+    assert json.loads(result.output) == json.loads(  # nosec B101
+        output_path.read_text(encoding="utf-8")
+    )
+
+
+def test_persona_chat_judge_artifact_command_requires_object_execution_result(
+    tmp_path: Path,
+) -> None:
+    """Execution result JSON roots should be objects."""
+    inputs_path = tmp_path / "quality-inputs.json"
+    execution_result_path = tmp_path / "execution-result.json"
+    _write_quality_inputs(inputs_path)
+    execution_result_path.write_text("[]", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "persona-chat-judge",
+            "artifact",
+            "--inputs",
+            str(inputs_path),
+            "--execution-result",
+            str(execution_result_path),
+        ],
+    )
+
+    assert result.exit_code != 0  # nosec B101
+    assert "Execution result JSON must be an object" in result.output  # nosec B101
