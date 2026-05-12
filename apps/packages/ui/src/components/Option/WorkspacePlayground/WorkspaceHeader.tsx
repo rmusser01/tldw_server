@@ -42,6 +42,7 @@ import type {
 } from "@/types/workspace"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useConnectionStore } from "@/store/connection"
+import { getDesignSystemState } from "@/design-system"
 import { deriveConnectionUxState } from "@/types/connection"
 import {
   buildWorkspacePlaygroundConfusionDashboardSnapshot,
@@ -387,8 +388,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       uxState === "connected_degraded" ||
       uxState === "demo_mode"
     ) {
+      const degradedState = getDesignSystemState("degraded")
       return {
-        label: t("playground:workspace.connectionDegraded", "Degraded"),
+        label: degradedState.label,
         detail: t(
           "playground:workspace.connectionDegradedDetail",
           "Connection degraded or still checking"

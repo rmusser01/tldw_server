@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
+import { getDesignSystemState } from "@/design-system"
 import {
   clearWorkspaceUndoActionsForTests,
   getWorkspaceUndoPendingCount
 } from "../undo-manager"
 import { WorkspaceHeader } from "../WorkspaceHeader"
+import { ConnectionPhase, type ConnectionState } from "@/types/connection"
 import {
   FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS,
   FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY
@@ -38,6 +40,9 @@ const mockNormalizeWorkspaceBannerImage = vi.fn()
 const mockTrackWorkspacePlaygroundTelemetry = vi.fn()
 const mockGetWorkspacePlaygroundTelemetryState = vi.fn()
 const mockResetWorkspacePlaygroundTelemetryState = vi.fn()
+const registryLabels = vi.hoisted(() => ({
+  degraded: "Registry Degraded"
+}))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
 
@@ -127,9 +132,9 @@ const mockStoreState = {
   restoreUndoSnapshot: mockRestoreUndoSnapshot
 }
 
-const mockConnectionStoreState = {
+const mockConnectionStoreState: { state: ConnectionState } = {
   state: {
-    phase: "connected" as const,
+    phase: ConnectionPhase.CONNECTED,
     serverUrl: "http://127.0.0.1:8000",
     lastCheckedAt: Date.now(),
     lastError: null as string | null,
@@ -145,6 +150,7 @@ const mockConnectionStoreState = {
     configStep: "none" as const,
     errorKind: "none" as const,
     hasCompletedFirstRun: true,
+    userPersona: null,
     lastConfigUpdatedAt: Date.now(),
     checksSinceConfigChange: 0
   }
@@ -182,6 +188,22 @@ vi.mock("@/store/connection", () => ({
     selector: (state: typeof mockConnectionStoreState) => unknown
   ) => selector(mockConnectionStoreState)
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+        return {
+          ...state,
+          label: key === "degraded" ? registryLabels.degraded : state.label
+        }
+      }
+    )
+  }
+})
 
 vi.mock("@/store/workspace-bundle", async () => {
   const actual = await vi.importActual<typeof import("@/store/workspace-bundle")>(
@@ -283,7 +305,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     mockConnectionStoreState.state = {
       ...mockConnectionStoreState.state,
-      phase: "connected",
+      phase: ConnectionPhase.CONNECTED,
       isConnected: true,
       isChecking: false,
       errorKind: "none",
@@ -885,9 +907,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     expect(shortcutsModal).toBeInTheDocument()
     expect(within(shortcutsModal).getByText("Search workspace")).toBeInTheDocument()
-    expect(within(shortcutsModal).getByText("Focus sources")).toBeInTheDocument()
-    expect(within(shortcutsModal).getByText("Focus chat")).toBeInTheDocument()
-    expect(within(shortcutsModal).getByText("Focus studio")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus sources pane")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus chat pane")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus studio pane")).toBeInTheDocument()
   })
 
   it("opens telemetry summary modal from settings menu", async () => {
@@ -985,6 +1007,35 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(firstBlob.type).toContain("application/json")
     expect(secondBlob.type).toContain("text/csv")
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-telemetry")
+  })
+
+  it("uses the design-system registry label for degraded connectivity telemetry", async () => {
+    mockConnectionStoreState.state = {
+      ...mockConnectionStoreState.state,
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      errorKind: "partial",
+      knowledgeStatus: "ready"
+    }
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "connectivity_state_changed",
+          to: registryLabels.degraded.toLowerCase()
+        })
+      )
+    })
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 
   it("loads rollout execution controls from localStorage in telemetry modal", async () => {
