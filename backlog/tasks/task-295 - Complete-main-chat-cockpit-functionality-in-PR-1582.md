@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-12 13:49'
+updated_date: '2026-05-12 14:37'
 labels:
   - webui
   - chat
@@ -69,6 +69,10 @@ Reopened for PR #1582 review-follow-up: validate current inline comments, fix an
 PR #1582 review follow-up: verified current review comments against dcba5633a. Previously raised provider-qualified selection, provider usability flags, backend config flag assignment, PEP8 wrapping, and a11y source assertion issues were already fixed. Fixed remaining valid scoped settings issue by making updateSetting always delegate through the active scope path and added a regression test for scoped values that match the global default.
 
 Review-follow-up verification: model.scoped-settings test first failed before the store fix, then passed. Targeted UI review tests passed: modelSelectorUtils, useModelSelector capabilities, Playground cockpit a11y, and model scoped settings (19 tests). Backend model metadata filters passed (6 tests) using the repo virtualenv. Real-server /chat Playwright cockpit spec passed against http://127.0.0.1:8000 with no route interception (3 tests). git diff --check passed. Bandit was not rerun because this follow-up touched only TypeScript test/store code and the task record.
+
+Reopened for CI failure follow-up: Playground Device/A11y/Composer Gates failed before tests during bun install. Root cause investigation found the workflow times out in workspace install while running extension WXT prepare; the same install completes locally when SKIP_WXT_PREPARE=1, and this Playground gate does not need extension preparation.
+
+CI failure follow-up fix: added SKIP_WXT_PREPARE=1 at the UI Playground Quality Gates job level so the Playground-only workflow install does not run extension WXT preparation. Verification: SKIP_WXT_PREPARE=1 bun install --frozen-lockfile from apps completed with no changes; exact gate scripts passed locally: composer 31 tests, device matrix 14 tests, accessibility 19 tests; git diff --check passed. actionlint is not installed in this environment, so workflow validation is via YAML shape review and rerun CI after push.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -77,6 +81,8 @@ Review-follow-up verification: model.scoped-settings test first failed before th
 Completed the main /chat cockpit single-PR slice for draft PR #1582: independent rail visibility, direct shared-state rail actions, degraded-health cockpit warnings, and real-server parity coverage are now in the PR branch. Verification includes focused component tests, readiness-gate tests, real-server Playwright without route mocks, and a real-server screenshot capture.
 
 Review follow-up fixed the remaining active scoped-settings defect and revalidated the PR review-comment surface with focused UI, backend, and real-server /chat coverage.
+
+CI follow-up scoped the Playground gate install away from extension WXT preparation and verified the exact gate scripts locally before pushing.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
