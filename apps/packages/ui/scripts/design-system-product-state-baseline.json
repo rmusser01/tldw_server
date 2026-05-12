@@ -5324,17 +5324,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Option/WorkspacePlayground/SourcesPane/index.tsx:Ready",
-    "path": "src/components/Option/WorkspacePlayground/SourcesPane/index.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/WorkspacePlayground/SourcesPane/index.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Option/WorkspacePlayground/WorkspaceHeader.tsx:Degraded",
     "path": "src/components/Option/WorkspacePlayground/WorkspaceHeader.tsx",
     "rule": "canonical-state-label",
