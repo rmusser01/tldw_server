@@ -56,7 +56,7 @@ V1 fixtures require `fail` outputs to include at least one expected failure labe
 
 A future executable judge must satisfy these rules before its output is considered usable:
 
-1. Run against the golden contract fixture in `tldw_Server_API/tests/fixtures/persona_chat_judge_contract_cases.json`.
+1. Run against the golden contract fixture in `tldw_Server_API/app/core/Evaluations/data/persona_chat_judge_contract_cases.json`.
 2. Run against a separate held-out set before any threshold tuning is accepted.
 3. Report agreement measures for each judged axis, including false-positive and false-negative examples.
 4. Preserve deterministic checks as hard preconditions before subjective scoring.
@@ -69,6 +69,18 @@ Judge execution remains deferred until these calibration requirements are implem
 The first executable layer is the offline harness in `tldw_Server_API/app/core/Evaluations/persona_chat_judge_harness.py`. It compares already-produced candidate judge outputs against the checked-in V1 contract fixture and returns a bounded report with case counts, per-verdict counts, verdict agreement, flag agreement, score schema validity, missing candidates, invalid candidates, extra candidates, and per-case mismatch keys.
 
 The harness does not call model providers, persist evaluation runs, enqueue Jobs, expose API endpoints, or gate Persona Chat responses. Future judge adapters should feed their outputs into this helper before any output is treated as calibrated.
+
+## Offline Review Command
+
+The unified evaluations CLI exposes an offline review command over the harness:
+
+```bash
+tldw-evals persona-chat-judge review --candidates candidate_outputs.json --output persona_chat_judge_report.json
+```
+
+`candidate_outputs.json` must be a JSON object keyed by `PC-JUDGE-###` case id. By default, the command loads the packaged V1 contract fixture from `tldw_Server_API/app/core/Evaluations/data/persona_chat_judge_contract_cases.json`; `--fixture` may point at an explicit local fixture during review. The command prints the bounded report JSON to stdout and, when `--output` is provided, writes the same JSON to that explicit file path.
+
+This file output is the V1 offline report persistence location. It is intentionally user-selected and file-based only: the command does not call providers, write databases, enqueue Jobs, expose API endpoints, update WebUI state, gate Persona Chat responses, or mutate chat output.
 
 ## Privacy And Redaction
 
@@ -99,12 +111,10 @@ Additional fixture cases should preserve the same envelope and continue mapping 
 - No Persona Live, avatar, visual pack, VN/CYOA, or native companion changes.
 - No parallel evaluation subsystem outside the existing Evaluations and Jobs direction.
 
-## Future Executable Harness Prerequisites
+## Remaining Executable Harness Prerequisites
 
-Before adding executable judge code, the next PR should define:
+Before adding executable judge code, follow-up PRs should still define:
 
 - The exact prompt and model input shape derived from this envelope.
-- The persistence location for offline reports.
-- The review command that can run without configured commercial providers.
 - The calibration report schema and threshold policy.
 - How judge reports link back to deterministic Persona Chat trace ids without storing sensitive content.
