@@ -174,6 +174,7 @@ describe("useModelSelector capability rendering", () => {
 
   it("uses provider-qualified menu keys and selected metadata when model ids collide", () => {
     chatModelSettingsState.apiProvider = "anthropic"
+    const setSelectedModel = vi.fn()
 
     const { result } = renderHook(() =>
       useModelSelector({
@@ -192,7 +193,7 @@ describe("useModelSelector capability rendering", () => {
           }
         ],
         selectedModel: "shared-model",
-        setSelectedModel: vi.fn(),
+        setSelectedModel,
         navigate: vi.fn()
       })
     )
@@ -202,5 +203,11 @@ describe("useModelSelector capability rendering", () => {
     expect(result.current.selectedModelMeta?.provider).toBe("anthropic")
     expect(result.current.selectedModelKey).toBe("anthropic:shared-model")
     expect(firstItem?.key).toBe("anthropic:shared-model")
+
+    act(() => {
+      firstItem?.onClick?.()
+    })
+
+    expect(setSelectedModel).toHaveBeenCalledWith("anthropic:shared-model")
   })
 })

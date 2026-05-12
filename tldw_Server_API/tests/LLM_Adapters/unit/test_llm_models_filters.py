@@ -147,7 +147,9 @@ def test_llm_models_metadata_includes_curated_qwen_models(monkeypatch, client_us
     assert ("qwen", "qwen-turbo") in provider_and_name
 
 
-def test_llm_models_metadata_marks_unconfigured_provider_catalog_models(monkeypatch, client_user_only):
+def test_llm_models_metadata_marks_unconfigured_provider_catalog_models(
+    monkeypatch, client_user_only
+):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
 
     _patch_llm_providers(monkeypatch)

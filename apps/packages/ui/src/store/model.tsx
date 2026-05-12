@@ -1,6 +1,7 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import {
   mergeGlobalAndScopedSettings,
+  normalizeModelSettingsScope,
   stripUndefinedScopedSettings
 } from "./model-settings-scope"
 
@@ -197,7 +198,19 @@ const EMPTY_GLOBAL_SETTINGS: ChatModelSettings = {}
 const trimScopeKey = (scopeKey?: string | null) => {
   if (typeof scopeKey !== "string") return undefined
   const trimmed = scopeKey.trim()
-  return trimmed.length > 0 ? trimmed : undefined
+  if (trimmed.length === 0) return undefined
+
+  const separatorIndex = trimmed.indexOf(":")
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
+    return trimmed.toLowerCase()
+  }
+
+  return (
+    normalizeModelSettingsScope(
+      trimmed.slice(0, separatorIndex),
+      trimmed.slice(separatorIndex + 1)
+    ) ?? trimmed.toLowerCase()
+  )
 }
 
 const withScopedSettings = (

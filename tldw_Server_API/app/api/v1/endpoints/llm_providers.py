@@ -2158,9 +2158,9 @@ async def get_models_metadata(
                     'provider': provider.get('name'),
                     **mi,
                 }
-                entry.setdefault('provider_is_configured', provider_is_configured)
-                entry.setdefault('is_configured', provider_is_configured)
-                entry.setdefault('catalog_only', not provider_is_configured)
+                entry['provider_is_configured'] = provider_is_configured
+                entry['is_configured'] = provider_is_configured
+                entry['catalog_only'] = not provider_is_configured
                 if not _model_matches_filters(
                     entry,
                     type_filters=type_filters,

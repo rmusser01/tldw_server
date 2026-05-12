@@ -1,12 +1,44 @@
 // @vitest-environment jsdom
-import fs from "node:fs"
-import path from "node:path"
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell"
+import { PlaygroundModelCatalogControls } from "../PlaygroundModelCatalogControls"
 import { PlaygroundStatusStrip } from "../PlaygroundStatusStrip"
+
+const translate = vi.hoisted(() => (
+  key: string,
+  fallbackOrOptions?: unknown,
+  maybeOptions?: Record<string, unknown>
+) => {
+  let template = key
+  let options: Record<string, unknown> | undefined
+
+  if (typeof fallbackOrOptions === "string") {
+    template = fallbackOrOptions
+    options = maybeOptions
+  } else if (
+    fallbackOrOptions &&
+    typeof fallbackOrOptions === "object" &&
+    "defaultValue" in (fallbackOrOptions as Record<string, unknown>)
+  ) {
+    template = String(
+      (fallbackOrOptions as { defaultValue?: unknown }).defaultValue ?? key
+    )
+    options = fallbackOrOptions as Record<string, unknown>
+  }
+
+  if (!options) return template
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, token) => {
+    const value = options?.[token]
+    return value == null ? "" : String(value)
+  })
+})
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: translate })
+}))
 
 describe("Playground cockpit accessibility", () => {
   it("labels cockpit landmarks and exposes the layout toggle state", () => {
@@ -24,8 +56,7 @@ describe("Playground cockpit accessibility", () => {
             streaming={false}
             selectedModel="openai:gpt-4o"
             messageCount={0}
-            serverChatId={null}
-            temporaryChat={false}
+            sessionLabel="Local chat"
             hasContext={false}
           />
         }
@@ -62,8 +93,7 @@ describe("Playground cockpit accessibility", () => {
         streaming
         selectedModel="anthropic:claude-sonnet-4"
         messageCount={2}
-        serverChatId="chat-1"
-        temporaryChat={false}
+        sessionLabel="Server chat"
         hasContext
       />
     )
@@ -76,14 +106,50 @@ describe("Playground cockpit accessibility", () => {
     expect(status).toHaveTextContent("Context active")
   })
 
-  it("keeps model catalog controls labeled", () => {
-    const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
-    const source = fs.readFileSync(sourcePath, "utf8")
+  it("keeps model catalog controls labeled in the rendered DOM", () => {
+    const setModelListScope = vi.fn()
+    const setModelSearchQuery = vi.fn()
+    const setModelSortMode = vi.fn()
+    const { rerender } = render(
+      <PlaygroundModelCatalogControls
+        t={translate}
+        modelListScope="configured"
+        setModelListScope={setModelListScope}
+        modelSearchQuery=""
+        setModelSearchQuery={setModelSearchQuery}
+        modelSortMode="provider"
+        setModelSortMode={setModelSortMode}
+      />
+    )
 
-    expect(source).toContain('data-testid="model-list-scope-toggle"')
-    expect(source).toContain("aria-pressed={modelListScope === \"catalog\"}")
-    expect(source).toContain("playground:composer.modelSearchLabel")
-    expect(source).toContain("\"Search models\"")
-    expect(source).toContain("Search all known models")
+    const toggle = screen.getByTestId("model-list-scope-toggle")
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(toggle).toHaveTextContent("Search all models")
+    fireEvent.click(toggle)
+    expect(setModelListScope).toHaveBeenCalledWith("catalog")
+
+    const configuredSearch = screen.getByLabelText("Search models")
+    expect(configuredSearch).toHaveAttribute("placeholder", "Search models")
+
+    rerender(
+      <PlaygroundModelCatalogControls
+        t={translate}
+        modelListScope="catalog"
+        setModelListScope={setModelListScope}
+        modelSearchQuery=""
+        setModelSearchQuery={setModelSearchQuery}
+        modelSortMode="provider"
+        setModelSortMode={setModelSortMode}
+      />
+    )
+
+    expect(screen.getByTestId("model-list-scope-toggle")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByLabelText("Search models")).toHaveAttribute(
+      "placeholder",
+      "Search all known models"
+    )
   })
 })

@@ -1425,8 +1425,7 @@ export const Playground = () => {
       streaming={streaming}
       selectedModel={selectedModel}
       messageCount={messages.length}
-      serverChatId={serverChatId}
-      temporaryChat={temporaryChat}
+      sessionLabel={sessionLabel}
       hasContext={hasChatContext}
     />
   );

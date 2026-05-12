@@ -133,6 +133,8 @@ export const isConfiguredUsableModel = (
     "is_configured",
     "isConfigured",
     "configured",
+    "provider_is_configured",
+    "providerIsConfigured",
     "provider_configured",
     "providerConfigured",
     "usable",

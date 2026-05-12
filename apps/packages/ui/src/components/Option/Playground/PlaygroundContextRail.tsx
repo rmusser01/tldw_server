@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 const railSectionClass = "rounded-md border border-border bg-surface px-3 py-2";
 const railHeadingClass = "text-[11px] font-semibold uppercase text-text-muted";
 const railValueClass = "mt-1 text-sm font-medium text-text";
@@ -26,39 +28,53 @@ export const PlaygroundContextRail = ({
   contextSummary,
   sessionLabel,
   historyLinked,
-}: PlaygroundContextRailProps) => (
-  <div
-    data-testid="playground-context-rail"
-    className="flex min-w-0 flex-col gap-2 text-sm"
-  >
-    <section className={railSectionClass} aria-label="Conversation context">
-      <h2 className={railHeadingClass}>Context</h2>
-      <p className={railValueClass}>
-        {hasContext ? "Context active" : "No extra context"}
-      </p>
-      {contextSummary.length > 0 ? (
-        <ul className="mt-2 space-y-1 text-xs text-text-muted">
-          {contextSummary.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      ) : null}
-      <button
-        type="button"
-        onClick={openSearchAndContext}
-        className={railActionClass}
-        aria-label="Open Search & Context"
-      >
-        Search & Context
-      </button>
-    </section>
+}: PlaygroundContextRailProps) => {
+  const { t } = useTranslation("playground");
 
-    <section className={railSectionClass} aria-label="Conversation session">
-      <h2 className={railHeadingClass}>Session</h2>
-      <p className={railValueClass}>{sessionLabel}</p>
-      <p className={railMutedClass}>
-        {historyLinked ? "History linked" : "No saved history yet"}
-      </p>
-    </section>
-  </div>
-);
+  return (
+    <div
+      data-testid="playground-context-rail"
+      className="flex min-w-0 flex-col gap-2 text-sm"
+    >
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.conversationContext", "Conversation context")}
+      >
+        <h2 className={railHeadingClass}>{t("cockpit.context", "Context")}</h2>
+        <p className={railValueClass}>
+          {hasContext
+            ? t("cockpit.contextActive", "Context active")
+            : t("cockpit.noExtraContext", "No extra context")}
+        </p>
+        {contextSummary.length > 0 ? (
+          <ul className="mt-2 space-y-1 text-xs text-text-muted">
+            {contextSummary.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        ) : null}
+        <button
+          type="button"
+          onClick={openSearchAndContext}
+          className={railActionClass}
+          aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
+        >
+          {t("cockpit.searchContext", "Search & Context")}
+        </button>
+      </section>
+
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.conversationSession", "Conversation session")}
+      >
+        <h2 className={railHeadingClass}>{t("cockpit.session", "Session")}</h2>
+        <p className={railValueClass}>{sessionLabel}</p>
+        <p className={railMutedClass}>
+          {historyLinked
+            ? t("cockpit.historyLinked", "History linked")
+            : t("cockpit.noSavedHistory", "No saved history yet")}
+        </p>
+      </section>
+    </div>
+  );
+};

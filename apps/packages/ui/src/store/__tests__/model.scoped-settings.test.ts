@@ -92,6 +92,21 @@ describe("provider:model scoped chat model settings", () => {
     ).toBe(0.4)
   })
 
+  it("canonicalizes scoped setting keys when casing or whitespace differs", () => {
+    const store = useStoreChatModelSettings.getState()
+
+    store.updateSettings({ temperature: 0.7 })
+    store.updateScopedSetting(" OpenAI:gpt-4o ", "temperature", 0.2)
+    store.setActiveSettingsScope("openai:gpt-4o")
+
+    expect(useStoreChatModelSettings.getState().temperature).toBe(0.2)
+    expect(
+      useStoreChatModelSettings.getState().scopedSettingsByModelKey[
+        "openai:gpt-4o"
+      ]
+    ).toMatchObject({ temperature: 0.2 })
+  })
+
   it("hydrates effective settings when switching active model scopes", () => {
     const store = useStoreChatModelSettings.getState()
 

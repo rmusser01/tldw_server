@@ -42,12 +42,16 @@ describe("model selector utilities", () => {
       configuredModel("openai", "gpt-4o"),
       configuredModel("openrouter", "catalog-only", { catalog_only: true }),
       configuredModel("anthropic", "unconfigured", { is_configured: false }),
+      configuredModel("google", "provider-unconfigured", {
+        provider_is_configured: false
+      }),
       configuredModel("ollama", "disabled", { enabled: false }),
       configuredModel("vllm", "not-usable", { usable: false })
     ]
 
     expect(models.map(isConfiguredUsableModel)).toEqual([
       true,
+      false,
       false,
       false,
       false,

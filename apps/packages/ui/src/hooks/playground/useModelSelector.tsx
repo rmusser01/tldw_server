@@ -539,7 +539,7 @@ export function useModelSelector({
         ),
         onClick: () => {
           recordModelUsage(model)
-          setSelectedModel(modelId)
+          setSelectedModel(modelKey)
         }
       }
     }

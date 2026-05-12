@@ -1,5 +1,6 @@
 import React from "react";
 import { Maximize2, PanelLeftOpen } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export type PlaygroundCockpitMode = "cockpit" | "focus";
 
@@ -20,9 +21,12 @@ export const PlaygroundCockpitShell = ({
   statusStrip,
   children,
 }: PlaygroundCockpitShellProps) => {
+  const { t } = useTranslation("playground");
   const focusMode = mode === "focus";
   const nextMode: PlaygroundCockpitMode = focusMode ? "cockpit" : "focus";
-  const toggleLabel = focusMode ? "Show cockpit panels" : "Enter focus chat";
+  const toggleLabel = focusMode
+    ? t("cockpit.showPanels", "Show cockpit panels")
+    : t("cockpit.enterFocus", "Enter focus chat");
 
   return (
     <div
@@ -31,12 +35,14 @@ export const PlaygroundCockpitShell = ({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg text-text"
     >
       <header
-        aria-label="Chat layout controls"
+        aria-label={t("cockpit.layoutControls", "Chat layout controls")}
         className="flex min-h-[42px] shrink-0 items-center justify-between gap-3 border-b border-border bg-surface/80 px-3 py-2 text-xs text-text-muted"
       >
         <div className="min-w-0">
           <p className="truncate font-semibold text-text">
-            {focusMode ? "Focus chat" : "Chat cockpit"}
+            {focusMode
+              ? t("cockpit.focusChat", "Focus chat")
+              : t("cockpit.chatCockpit", "Chat cockpit")}
           </p>
         </div>
         <button
@@ -52,7 +58,11 @@ export const PlaygroundCockpitShell = ({
           ) : (
             <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
           )}
-          <span>{focusMode ? "Cockpit" : "Focus"}</span>
+          <span>
+            {focusMode
+              ? t("cockpit.cockpit", "Cockpit")
+              : t("cockpit.focus", "Focus")}
+          </span>
         </button>
       </header>
 
@@ -63,13 +73,13 @@ export const PlaygroundCockpitShell = ({
         >
           <details className="rounded-md border border-border bg-surface">
             <summary className="cursor-pointer px-3 py-2 font-medium text-text">
-              Context
+              {t("cockpit.context", "Context")}
             </summary>
             <div className="border-t border-border p-2">{leftRail}</div>
           </details>
           <details className="rounded-md border border-border bg-surface">
             <summary className="cursor-pointer px-3 py-2 font-medium text-text">
-              Runtime
+              {t("cockpit.runtime", "Runtime")}
             </summary>
             <div className="border-t border-border p-2">{rightRail}</div>
           </details>
@@ -86,7 +96,7 @@ export const PlaygroundCockpitShell = ({
         {!focusMode && (
           <aside
             data-testid="playground-cockpit-left-rail"
-            aria-label="Chat cockpit context"
+            aria-label={t("cockpit.contextLandmark", "Chat cockpit context")}
             className="hidden min-h-0 overflow-y-auto border-r border-border bg-surface2/30 p-2 lg:block"
           >
             {leftRail}
@@ -105,7 +115,7 @@ export const PlaygroundCockpitShell = ({
         {!focusMode && (
           <aside
             data-testid="playground-cockpit-right-rail"
-            aria-label="Chat cockpit runtime"
+            aria-label={t("cockpit.runtimeLandmark", "Chat cockpit runtime")}
             className="hidden min-h-0 overflow-y-auto border-l border-border bg-surface2/30 p-2 lg:block"
           >
             {rightRail}

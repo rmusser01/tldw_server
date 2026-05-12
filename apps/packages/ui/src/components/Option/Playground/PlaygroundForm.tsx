@@ -16,7 +16,6 @@ import { getAllPrompts } from "@/db/dexie/helpers";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
   type CollapsedRange,
-  type ModelSortMode,
   useActionBarVisibility,
   useComposerTokens,
   useDeferredComposerInput,
@@ -164,6 +163,7 @@ import {
 } from "./PlaygroundChatErrorBanner";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
+import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
 import {
   PlaygroundAttachmentButton,
@@ -1208,7 +1208,14 @@ export const PlaygroundForm = ({
         setSendMenuOpen(false);
       }
     },
-    [setContextToolsOpen, setMcpPopoverOpen, setModelDropdownOpen],
+    [
+      setAttachmentMenuOpen,
+      setContextToolsOpen,
+      setMcpPopoverOpen,
+      setModelDropdownOpen,
+      setSendMenuOpen,
+      setToolsPopoverOpen,
+    ],
   );
 
   React.useEffect(() => {
@@ -1869,88 +1876,15 @@ export const PlaygroundForm = ({
       }}
       popupRender={(menu) => (
         <div className="bg-surface rounded-lg shadow-lg border border-border">
-          <div className="p-2 border-b border-border flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="model-list-scope-toggle"
-                aria-pressed={modelListScope === "catalog"}
-                className={`rounded border px-2 py-1 text-xs transition-colors ${
-                  modelListScope === "catalog"
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-surface2 text-text-muted hover:text-text"
-                }`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  setModelListScope(
-                    modelListScope === "catalog" ? "configured" : "catalog",
-                  );
-                }}
-              >
-                {modelListScope === "catalog"
-                  ? t("playground:composer.configuredModels", "Configured")
-                  : t("playground:composer.searchAllModels", "Search all models")}
-              </button>
-              <span className="text-[11px] text-text-subtle">
-                {modelListScope === "catalog"
-                  ? t(
-                      "playground:composer.catalogScopeHint",
-                      "All known models",
-                    )
-                  : t(
-                      "playground:composer.configuredScopeHint",
-                      "Usable configured models",
-                    )}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-            <Input
-              size="small"
-              placeholder={t(
-                modelListScope === "catalog"
-                  ? "playground:composer.modelCatalogSearchPlaceholder"
-                  : "playground:composer.modelSearchPlaceholder",
-                modelListScope === "catalog"
-                  ? "Search all known models"
-                  : "Search models",
-              )}
-              aria-label={t(
-                "playground:composer.modelSearchLabel",
-                "Search models",
-              )}
-              value={modelSearchQuery}
-              allowClear
-              className="flex-1"
-              onChange={(event) => setModelSearchQuery(event.target.value)}
-              onKeyDown={(event) => event.stopPropagation()}
-            />
-            <Select
-              size="small"
-              value={modelSortMode}
-              onChange={(value) => setModelSortMode(value as ModelSortMode)}
-              options={[
-                {
-                  value: "favorites",
-                  label: t("playground:composer.sort.favorites", "Favorites"),
-                },
-                { value: "az", label: t("playground:composer.sort.az", "A-Z") },
-                {
-                  value: "provider",
-                  label: t("playground:composer.sort.provider", "Provider"),
-                },
-                {
-                  value: "localFirst",
-                  label: t(
-                    "playground:composer.sort.localFirst",
-                    "Local-first",
-                  ),
-                },
-              ]}
-              className="min-w-[120px]"
-              onKeyDown={(event) => event.stopPropagation()}
-            />
-            </div>
-          </div>
+          <PlaygroundModelCatalogControls
+            t={t}
+            modelListScope={modelListScope}
+            setModelListScope={setModelListScope}
+            modelSearchQuery={modelSearchQuery}
+            setModelSearchQuery={setModelSearchQuery}
+            modelSortMode={modelSortMode}
+            setModelSortMode={setModelSortMode}
+          />
           <div className="max-h-[400px] overflow-y-auto no-scrollbar">
             {menu}
           </div>
