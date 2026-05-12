@@ -16,10 +16,13 @@ from typing import Any, Literal
 
 from tldw_Server_API.app.core.Evaluations.persona_chat_judge import (
     PERSONA_CHAT_JUDGE_DIMENSIONS,
+    PersonaChatJudgeCalibrationMetrics,
+    PersonaChatJudgeCalibrationReport,
     PersonaChatJudgeDimension,
     PersonaChatJudgeInput,
     PersonaChatJudgePrediction,
     build_persona_chat_judge_prompt,
+    calibrate_persona_chat_judge_predictions,
     get_persona_chat_judge_dimension,
 )
 
@@ -40,6 +43,8 @@ _VALID_RESULTS = frozenset(("Pass", "Fail"))
 _UNSAFE_METADATA_MARKERS = frozenset(
     ("api_key", "apikey", "credential", "password", "secret", "token")
 )
+_EXECUTION_ARTIFACT_SCHEMA_VERSION = "persona-chat-judge-execution-artifact.v1"
+_MIN_CASES_PER_CLASS_FOR_ARTIFACT = 20
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,45 @@ class PersonaChatJudgeExecutionResult:
                 for prediction in self.predictions
             ],
             "failures": [failure.to_dict() for failure in self.failures],
+        }
+
+
+@dataclass(frozen=True)
+class PersonaChatJudgeExecutionArtifact:
+    """Trace-safe review artifact for one offline judge execution batch."""
+
+    schema_version: str
+    offline_only: bool
+    provider: str
+    model: str
+    runtime_gating_allowed: bool
+    input_case_ids: tuple[str, ...]
+    dimension_keys: tuple[str, ...]
+    predictions: tuple[PersonaChatJudgePrediction, ...]
+    failures: tuple[PersonaChatJudgeExecutionFailure, ...]
+    calibration: PersonaChatJudgeCalibrationReport
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return bounded JSON data without prompts, responses, or exceptions."""
+        predictions = [
+            _prediction_to_artifact_dict(prediction)
+            for prediction in self.predictions
+        ]
+        failures = [_failure_to_artifact_dict(failure) for failure in self.failures]
+        return {
+            "schema_version": self.schema_version,
+            "offline_only": self.offline_only,
+            "runtime_gating_allowed": self.runtime_gating_allowed,
+            "provider": _safe_metadata_text(self.provider),
+            "model": _safe_metadata_text(self.model),
+            "total_inputs": len(self.input_case_ids),
+            "input_case_ids": list(self.input_case_ids),
+            "dimension_keys": list(self.dimension_keys),
+            "prediction_count": len(predictions),
+            "failure_count": len(failures),
+            "predictions": predictions,
+            "failures": failures,
+            "calibration": _calibration_to_artifact_dict(self.calibration),
         }
 
 
@@ -188,6 +232,40 @@ def execute_persona_chat_judge(
         predictions=tuple(predictions),
         failures=tuple(failures),
         runtime_gating_allowed=False,
+    )
+
+
+def build_persona_chat_judge_execution_artifact(
+    inputs: Sequence[PersonaChatJudgeInput],
+    execution_result: PersonaChatJudgeExecutionResult,
+    *,
+    min_cases_per_class: int = _MIN_CASES_PER_CLASS_FOR_ARTIFACT,
+) -> PersonaChatJudgeExecutionArtifact:
+    """Combine offline execution output with bounded calibration review data."""
+    input_case_ids = tuple(
+        dict.fromkeys(
+            _safe_identifier_text(judge_input.case_id) for judge_input in inputs
+        )
+    )
+    calibration = calibrate_persona_chat_judge_predictions(
+        inputs,
+        execution_result.predictions,
+        min_cases_per_class=min_cases_per_class,
+    )
+    return PersonaChatJudgeExecutionArtifact(
+        schema_version=_EXECUTION_ARTIFACT_SCHEMA_VERSION,
+        offline_only=True,
+        provider=_safe_metadata_text(execution_result.provider),
+        model=_safe_metadata_text(execution_result.model),
+        runtime_gating_allowed=False,
+        input_case_ids=input_case_ids,
+        dimension_keys=_artifact_dimension_keys(
+            execution_result=execution_result,
+            calibration=calibration,
+        ),
+        predictions=execution_result.predictions,
+        failures=execution_result.failures,
+        calibration=calibration,
     )
 
 
@@ -325,8 +403,146 @@ def _safe_identifier_text(value: str) -> str:
     return text
 
 
+def _artifact_dimension_keys(
+    *,
+    execution_result: PersonaChatJudgeExecutionResult,
+    calibration: PersonaChatJudgeCalibrationReport,
+) -> tuple[str, ...]:
+    """Return stable sanitized dimensions represented in the artifact."""
+    dimension_keys: list[str] = []
+    for prediction in execution_result.predictions:
+        dimension_keys.append(_safe_identifier_text(prediction.dimension_key))
+    for failure in execution_result.failures:
+        dimension_keys.append(_safe_identifier_text(failure.dimension_key))
+    dimension_keys.extend(
+        _safe_identifier_text(dimension_key)
+        for dimension_key in calibration.metrics_by_dimension
+    )
+    dimension_keys.extend(
+        _safe_identifier_text(dimension_key)
+        for _, dimension_key in calibration.missing_predictions
+    )
+    dimension_keys.extend(
+        _safe_identifier_text(dimension_key)
+        for _, dimension_key in calibration.unknown_predictions
+    )
+    return tuple(dict.fromkeys(dimension_keys))
+
+
+def _prediction_to_artifact_dict(
+    prediction: PersonaChatJudgePrediction,
+) -> dict[str, Any]:
+    """Return trace-safe prediction fields for execution artifacts."""
+    return {
+        "case_id": _safe_identifier_text(prediction.case_id),
+        "dimension_key": _safe_identifier_text(prediction.dimension_key),
+        "result": prediction.result,
+        "critique": "provided" if prediction.critique else "omitted",
+        "evidence": [_safe_artifact_reference(item) for item in prediction.evidence],
+    }
+
+
+def _failure_to_artifact_dict(
+    failure: PersonaChatJudgeExecutionFailure,
+) -> dict[str, str]:
+    """Return trace-safe failure fields for execution artifacts."""
+    return {
+        "case_id": _safe_identifier_text(failure.case_id),
+        "dimension_key": _safe_identifier_text(failure.dimension_key),
+        "provider": _safe_metadata_text(failure.provider),
+        "model": _safe_metadata_text(failure.model),
+        "error_key": failure.error_key,
+    }
+
+
+def _calibration_to_artifact_dict(
+    calibration: PersonaChatJudgeCalibrationReport,
+) -> dict[str, Any]:
+    """Return JSON-safe calibration data with bounded identifiers."""
+    return {
+        "production_calibrated": calibration.production_calibrated,
+        "missing_predictions": _case_dimension_pairs(calibration.missing_predictions),
+        "unknown_predictions": _case_dimension_pairs(calibration.unknown_predictions),
+        "warnings": [_safe_warning_text(warning) for warning in calibration.warnings],
+        "metrics_by_dimension": {
+            _safe_identifier_text(dimension_key): _metrics_to_artifact_dict(metrics)
+            for dimension_key, metrics in sorted(calibration.metrics_by_dimension.items())
+        },
+    }
+
+
+def _case_dimension_pairs(
+    pairs: Sequence[tuple[str, str]],
+) -> list[dict[str, str]]:
+    """Return sanitized case/dimension pair dictionaries."""
+    return [
+        {
+            "case_id": _safe_identifier_text(case_id),
+            "dimension_key": _safe_identifier_text(dimension_key),
+        }
+        for case_id, dimension_key in pairs
+    ]
+
+
+def _metrics_to_artifact_dict(
+    metrics: PersonaChatJudgeCalibrationMetrics,
+) -> dict[str, Any]:
+    """Return bounded calibration metrics for one dimension."""
+    return {
+        "dimension_key": _safe_identifier_text(metrics.dimension_key),
+        "evaluated_cases": metrics.evaluated_cases,
+        "expected_passes": metrics.expected_passes,
+        "expected_fails": metrics.expected_fails,
+        "true_passes": metrics.true_passes,
+        "true_fails": metrics.true_fails,
+        "false_passes": metrics.false_passes,
+        "false_fails": metrics.false_fails,
+        "tpr": metrics.tpr,
+        "tnr": metrics.tnr,
+        "production_calibrated": metrics.production_calibrated,
+        "warnings": [_safe_warning_text(warning) for warning in metrics.warnings],
+    }
+
+
+def _safe_artifact_reference(value: str) -> str:
+    """Return evidence field references only when they look like identifiers."""
+    text = str(value).strip()
+    lowered = text.lower()
+    if (
+        not text
+        or len(text) > 128
+        or text.startswith(("/", "~"))
+        or "\\" in text
+        or "\n" in text
+        or "\r" in text
+        or any(marker in lowered for marker in _UNSAFE_METADATA_MARKERS)
+        or not all(char.isalnum() or char in "._-" for char in text)
+    ):
+        return "redacted"
+    return text
+
+
+def _safe_warning_text(value: str) -> str:
+    """Return bounded calibration warning text or a redaction marker."""
+    text = str(value).strip()
+    lowered = text.lower()
+    if (
+        not text
+        or len(text) > 256
+        or text.startswith(("/", "~"))
+        or "\\" in text
+        or "\n" in text
+        or "\r" in text
+        or any(marker in lowered for marker in _UNSAFE_METADATA_MARKERS)
+    ):
+        return "redacted"
+    return text
+
+
 __all__ = [
+    "build_persona_chat_judge_execution_artifact",
     "CompletionFn",
+    "PersonaChatJudgeExecutionArtifact",
     "PersonaChatJudgeExecutionErrorKey",
     "PersonaChatJudgeExecutionFailure",
     "PersonaChatJudgeExecutionResult",

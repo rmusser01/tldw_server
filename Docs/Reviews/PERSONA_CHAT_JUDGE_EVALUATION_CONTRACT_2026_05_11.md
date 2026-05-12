@@ -62,6 +62,14 @@ Fail-closed execution results use stable error keys only: `malformed_json`, `inv
 
 The execution adapter feeds `calibrate_persona_chat_judge_predictions()` for per-dimension calibration. The offline harness, review command, and policy helper remain the separate report-review path for already-produced V1 contract candidate outputs.
 
+## Execution Artifact Contract
+
+`build_persona_chat_judge_execution_artifact()` wraps an explicit offline execution result with the existing per-dimension calibration report. The artifact is a review record only. It is JSON-serializable, sets `offline_only=true`, keeps `runtime_gating_allowed=false`, and includes bounded provider/model metadata, input case ids, represented dimension keys, prediction/failure counts, sanitized prediction fields, stable failure error keys, and calibration metrics.
+
+The artifact does not include prompts, user input, assistant text, expected context dumps, response observation dumps, exemplar bodies, raw critique text, provider exception strings, local paths, secrets, or database content. Evidence entries are field references only; anything that does not look like a bounded identifier is redacted. Calibration missing/unknown prediction links are serialized as bounded `case_id` and `dimension_key` pairs.
+
+Execution artifacts do not persist themselves and do not imply production trust. Callers that write the artifact to disk remain responsible for choosing an explicit review path and for keeping raw judge inputs/results out of adjacent files.
+
 ## Calibration Contract
 
 `calibrate_persona_chat_judge_predictions()` compares predicted judge results to expected fixture labels before outputs can be treated as useful quality signals.
@@ -102,7 +110,7 @@ The policy result is intentionally trace-safe. It contains status fields, stable
 - Unknown prediction scope: unregistered dimensions and unknown case IDs are reported as unknown predictions rather than counted as calibration evidence.
 - Model and prompt drift: any model, prompt, dimension, or fixture-schema change requires a fresh calibration run before comparing results across revisions.
 - Report trust drift: review-command reports can be generated from malformed or partial candidate files. The policy blocks malformed reports, malformed case rows, missing candidates, extra candidates, invalid candidates, and low-agreement reports before maintainers treat them as calibrated.
-- Trace leakage: judge review artifacts can become privacy risks if they copy raw prompt or response content. The policy result is restricted to bounded identifiers and reason keys.
+- Trace leakage: judge review artifacts can become privacy risks if they copy raw prompt or response content. Execution artifacts and policy results are restricted to bounded identifiers, sanitized prediction/failure fields, calibration metrics, and reason keys.
 - Subjective boundary cases: the V1 dimensions cover selected Persona Chat failure families only. They do not replace human review for nuanced style, safety, or intent disagreements outside the registered dimensions.
 - Grounding and factuality limits: this judge evaluates observed Persona Chat behavior against fixture evidence. It does not prove factual correctness, retrieval grounding, or broader RAG quality.
 - Runtime limits: this layer is optional and offline. It does not gate live chat responses, enforce moderation, or protect runtime Persona Chat behavior.
@@ -128,4 +136,4 @@ Focused tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge
 
 Policy tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py` and cover advisory classification for the synthetic fixture, blocked invalid/missing/extra/low-agreement reports, dict report input compatibility, stable JSON serialization, and raw-text exclusion.
 
-Execution tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_execution.py` and cover valid prediction parsing, bounded malformed JSON and shape failures, invalid result and evidence handling, unknown dimension rejection, duplicate execution-key handling, provider exception redaction, and feeding predictions into the existing calibration helper.
+Execution tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge_execution.py` and cover valid prediction parsing, bounded malformed JSON and shape failures, invalid result and evidence handling, unknown dimension rejection, duplicate execution-key handling, provider exception redaction, feeding predictions into the existing calibration helper, trace-safe execution artifact serialization, failure-only artifacts, calibration warning serialization, and raw-content leak resistance.

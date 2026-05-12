@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.Evaluations.persona_chat_judge import (
     calibrate_persona_chat_judge_predictions,
 )
 from tldw_Server_API.app.core.Evaluations.persona_chat_judge_execution import (
+    build_persona_chat_judge_execution_artifact,
     execute_persona_chat_judge,
 )
 from tldw_Server_API.tests.Persona.persona_chat_quality_cases import case_by_id
@@ -316,3 +317,105 @@ def test_execute_persona_chat_judge_predictions_feed_calibration() -> None:
     metrics = report.metrics_by_dimension["memory_expectation_alignment"]
     assert metrics.true_fails == 1  # nosec B101
     assert report.production_calibrated is False  # nosec B101
+
+
+def test_build_execution_artifact_serializes_successful_calibration() -> None:
+    """Execution artifacts should combine bounded predictions and calibration."""
+    judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-015"))
+    execution_result = execute_persona_chat_judge(
+        [judge_input],
+        dimension_keys=["memory_expectation_alignment"],
+        completion=lambda _request: _valid_response(),
+        provider="fake-provider",
+        model="fake-model",
+    )
+
+    artifact = build_persona_chat_judge_execution_artifact(
+        [judge_input],
+        execution_result,
+        min_cases_per_class=1,
+    )
+    payload = artifact.to_dict()
+
+    assert payload["schema_version"] == "persona-chat-judge-execution-artifact.v1"  # nosec B101
+    assert payload["offline_only"] is True  # nosec B101
+    assert payload["runtime_gating_allowed"] is False  # nosec B101
+    assert payload["provider"] == "fake-provider"  # nosec B101
+    assert payload["model"] == "fake-model"  # nosec B101
+    assert payload["input_case_ids"] == ["PC-CASE-015"]  # nosec B101
+    assert payload["dimension_keys"] == ["memory_expectation_alignment"]  # nosec B101
+    assert payload["prediction_count"] == 1  # nosec B101
+    assert payload["failure_count"] == 0  # nosec B101
+    assert payload["predictions"][0]["critique"] == "provided"  # nosec B101
+    calibration = payload["calibration"]
+    assert calibration["production_calibrated"] is False  # nosec B101
+    assert calibration["missing_predictions"] == []  # nosec B101
+    metrics = calibration["metrics_by_dimension"]["memory_expectation_alignment"]
+    assert metrics["true_fails"] == 1  # nosec B101
+    assert metrics["warnings"]  # nosec B101
+
+
+def test_build_execution_artifact_serializes_failure_only_result() -> None:
+    """Execution artifacts should preserve bounded failure keys for review."""
+    judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-015"))
+    execution_result = execute_persona_chat_judge(
+        [judge_input],
+        dimension_keys=["memory_expectation_alignment"],
+        completion=lambda _request: "not json",
+        provider="fake-provider",
+        model="fake-model",
+    )
+
+    payload = build_persona_chat_judge_execution_artifact(
+        [judge_input],
+        execution_result,
+        min_cases_per_class=1,
+    ).to_dict()
+
+    assert payload["prediction_count"] == 0  # nosec B101
+    assert payload["failure_count"] == 1  # nosec B101
+    assert payload["failures"] == [  # nosec B101
+        {
+            "case_id": "PC-CASE-015",
+            "dimension_key": "memory_expectation_alignment",
+            "provider": "fake-provider",
+            "model": "fake-model",
+            "error_key": "malformed_json",
+        }
+    ]
+    assert payload["calibration"]["missing_predictions"] == [  # nosec B101
+        {
+            "case_id": "PC-CASE-015",
+            "dimension_key": "memory_expectation_alignment",
+        }
+    ]
+
+
+def test_build_execution_artifact_redacts_unsafe_metadata_and_raw_content() -> None:
+    """Execution artifacts should not leak raw prompts, responses, paths, or secrets."""
+    fixture_case = case_by_id("PC-CASE-015")
+    fixture_case["case_id"] = "/Users/private/token\nPC-CASE-015"
+    judge_input = build_persona_chat_judge_input(fixture_case)
+    execution_result = execute_persona_chat_judge(
+        [judge_input],
+        dimension_keys=["memory_expectation_alignment"],
+        completion=lambda _request: "I will remember that permanently",
+        provider="/Users/private/token",
+        model="sk-secret-model",
+    )
+
+    payload = build_persona_chat_judge_execution_artifact(
+        [judge_input],
+        execution_result,
+        min_cases_per_class=1,
+    ).to_dict()
+    serialized = json.dumps(payload, sort_keys=True)
+
+    assert payload["provider"] == "redacted"  # nosec B101
+    assert payload["model"] == "redacted"  # nosec B101
+    assert payload["input_case_ids"] == ["redacted"]  # nosec B101
+    assert payload["failures"][0]["case_id"] == "redacted"  # nosec B101
+    assert "/Users/private/token" not in serialized  # nosec B101
+    assert "sk-secret-model" not in serialized  # nosec B101
+    assert "I will remember that permanently" not in serialized  # nosec B101
+    assert "Remember that my patio tomatoes" not in serialized  # nosec B101
