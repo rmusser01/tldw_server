@@ -61,6 +61,46 @@ describe('VN play scene components', () => {
     expect(screen.getByText(/asset_not_found/i)).toBeInTheDocument();
   });
 
+  it('renders backend scene metadata, depth layer, and visual fallback copy', () => {
+    const sceneState = {
+      scene_version: 1,
+      background: { content_url: '/bg.png', labels: { location: 'archive' } },
+      depth: { content_url: '/depth.png' },
+      active_sprite_items: [
+        { item_id: 3, content_url: '/sprite.png', metadata: { pose: 'thinking' } },
+      ],
+      location_key: 'library',
+      mood: 'tense',
+      time_of_day: 'night',
+      weather: 'rain',
+      warnings: [
+        {
+          code: 'visual_directive_rejected',
+          message: 'Sprite expression was unavailable.',
+          slot_key: 'sprite.mira.angry',
+          asset_type: 'sprite',
+        },
+      ],
+    } satisfies VNPlaySceneState;
+
+    render(<SceneStage events={[]} sceneState={sceneState} />);
+
+    expect(screen.getByAltText(/scene depth layer/i)).toHaveAttribute('src', '/depth.png');
+    expect(screen.getByText('Location: library')).toBeInTheDocument();
+    expect(screen.getByText('Mood: tense')).toBeInTheDocument();
+    expect(screen.getByText('Time: night')).toBeInTheDocument();
+    expect(screen.getByText('Weather: rain')).toBeInTheDocument();
+    expect(screen.getByText(/Sprite expression was unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/sprite.mira.angry/i)).toBeInTheDocument();
+  });
+
+  it('renders a user-safe fallback when no scene visuals are available', () => {
+    render(<SceneStage events={[]} sceneState={{ scene_version: 1 }} />);
+
+    expect(screen.getByText('No scene visuals available')).toBeInTheDocument();
+    expect(screen.getByText(/The backend did not provide a background or active sprite/i)).toBeInTheDocument();
+  });
+
   it('submits a story choice with current scene version', async () => {
     const user = userEvent.setup();
     const onTurn = vi.fn();
@@ -84,5 +124,45 @@ describe('VN play scene components', () => {
       }));
     });
     expect(onTurn).toHaveBeenCalledWith(expect.objectContaining({ scene_version: 2 }));
+  });
+
+  it('labels generated choices from backend metadata', () => {
+    const choices: VNPlayChoice[] = [
+      {
+        id: 'c1',
+        text: 'Ask about the generated map',
+        metadata: {
+          source: 'generated',
+          generation_point_key: 'intro:choices',
+          status: 'succeeded',
+        },
+      },
+    ];
+
+    render(
+      <ChoicePanel
+        choices={choices}
+        sceneVersion={1}
+        sessionId={1}
+        onTurn={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /ask about the generated map/i })).toBeInTheDocument();
+    expect(screen.getByText('Generated')).toBeInTheDocument();
+    expect(screen.getByText('intro:choices')).toBeInTheDocument();
+  });
+
+  it('uses play-focused copy when no choices are available', () => {
+    render(
+      <ChoicePanel
+        choices={[]}
+        sceneVersion={1}
+        sessionId={1}
+        onTurn={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('No choices are available yet.')).toBeInTheDocument();
   });
 });

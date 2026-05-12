@@ -880,6 +880,45 @@ describe('VNPlayWorkspace', () => {
     );
   });
 
+  it('keeps scene playback usable while the generation inspector stays separate', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 3,
+      scene_state: {
+        scene_version: 3,
+        background: { content_url: '/scene-bg.png' },
+        active_sprites: [{ item_id: 2, content_url: '/mira.png' }],
+        location_key: 'archive',
+        visible_choices: [
+          {
+            id: 'ask-map',
+            text: 'Ask about the map',
+            metadata: {
+              source: 'generated',
+              generation_point_key: 'intro:choices',
+            },
+          },
+        ],
+      },
+    };
+    mockVNPlayApi({ sessions: [session] });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByAltText(/scene background/i)).toHaveAttribute('src', '/scene-bg.png');
+    expect(screen.getByRole('button', { name: /ask about the map/i })).toBeInTheDocument();
+    expect(screen.getByText('Generated')).toBeInTheDocument();
+    expect(screen.getByText('intro:choices')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open generation inspector/i })).toHaveAttribute(
+      'href',
+      '/vn-play/sessions/1/generations'
+    );
+  });
+
   it('selects the requested session for the dedicated generation inspector route', async () => {
     mockVNPlayApi({
       sessions: [
