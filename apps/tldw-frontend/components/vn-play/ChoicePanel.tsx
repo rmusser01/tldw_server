@@ -29,7 +29,11 @@ function metadataString(metadata: Record<string, unknown>, key: string): string 
 
 function isGeneratedChoice(choice: VNPlayChoice): boolean {
   const metadata = choiceMetadata(choice);
-  return metadataString(metadata, 'source') === 'generated' || Boolean(metadataString(metadata, 'generation_point_key'));
+  return (
+    choice.source === 'generated' ||
+    metadataString(metadata, 'source') === 'generated' ||
+    Boolean(metadataString(metadata, 'generation_point_key'))
+  );
 }
 
 export default function ChoicePanel({

@@ -90,8 +90,10 @@ export default function SceneStage({ events, sceneState, showDialogue = true }: 
   const backgroundUrl = assetUrl(sceneState.background);
   const depthUrl = assetUrl(sceneState.depth);
   const sprites = sceneState.active_sprites ?? sceneState.active_sprite_items ?? [];
-  const spriteUrls = sprites.map((sprite) => ({ sprite, url: assetUrl(sprite) }));
-  const hasVisuals = Boolean(backgroundUrl || depthUrl || spriteUrls.some((sprite) => sprite.url));
+  const spriteUrls = sprites
+    .map((sprite) => ({ sprite, url: assetUrl(sprite) }))
+    .filter((item): item is { sprite: (typeof sprites)[number]; url: string } => Boolean(item.url));
+  const hasVisuals = Boolean(backgroundUrl || depthUrl || spriteUrls.length > 0);
   const dialogue = useMemo(() => latestDialogue(events), [events]);
   const metadata = sceneMetadata(sceneState);
   const warnings = sceneState.warnings ?? [];
@@ -107,10 +109,14 @@ export default function SceneStage({ events, sceneState, showDialogue = true }: 
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-sm text-text-muted">
-            <p className="font-medium text-text">No scene visuals available</p>
-            <p className="mt-1 max-w-md">
-              The backend did not provide a background or active sprite for this scene.
-            </p>
+            {!hasVisuals && (
+              <>
+                <p className="font-medium text-text">No scene visuals available</p>
+                <p className="mt-1 max-w-md">
+                  The backend did not provide a background or active sprite for this scene.
+                </p>
+              </>
+            )}
           </div>
         )}
 

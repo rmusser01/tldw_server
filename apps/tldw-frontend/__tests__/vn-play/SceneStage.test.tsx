@@ -101,6 +101,24 @@ describe('VN play scene components', () => {
     expect(screen.getByText(/The backend did not provide a background or active sprite/i)).toBeInTheDocument();
   });
 
+  it('does not show the no-visuals fallback when sprites render without a background', () => {
+    render(
+      <SceneStage
+        events={[]}
+        sceneState={{
+          scene_version: 1,
+          active_sprites: [
+            { item_id: 1, content_url: '' },
+            { item_id: 2, content_url: '/sprite.png' },
+          ],
+        }}
+      />
+    );
+
+    expect(screen.getByAltText('Character sprite 1')).toHaveAttribute('src', '/sprite.png');
+    expect(screen.queryByText('No scene visuals available')).not.toBeInTheDocument();
+  });
+
   it('submits a story choice with current scene version', async () => {
     const user = userEvent.setup();
     const onTurn = vi.fn();
@@ -151,6 +169,28 @@ describe('VN play scene components', () => {
     expect(screen.getByRole('button', { name: /ask about the generated map/i })).toBeInTheDocument();
     expect(screen.getByText('Generated')).toBeInTheDocument();
     expect(screen.getByText('intro:choices')).toBeInTheDocument();
+  });
+
+  it('labels generated choices from the top-level source field', () => {
+    const choices: VNPlayChoice[] = [
+      {
+        id: 'c1',
+        text: 'Follow the generated clue',
+        source: 'generated',
+      },
+    ];
+
+    render(
+      <ChoicePanel
+        choices={choices}
+        sceneVersion={1}
+        sessionId={1}
+        onTurn={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /follow the generated clue/i })).toBeInTheDocument();
+    expect(screen.getByText('Generated')).toBeInTheDocument();
   });
 
   it('uses play-focused copy when no choices are available', () => {
