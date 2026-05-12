@@ -4,7 +4,7 @@ title: Verify /chat cockpit parity before PR merge
 status: Done
 assignee: []
 created_date: '2026-05-12 01:23'
-updated_date: '2026-05-12 02:21'
+updated_date: '2026-05-12 02:56'
 labels:
   - webui
   - chat
@@ -42,19 +42,17 @@ Kept legacy composer controls immediately below the textarea and before transien
 
 Hardened in-flight model metadata fetch failures so transient backend warmup errors resolve through cached/empty fallback instead of surfacing a Next dev runtime overlay over /chat.
 
-Rendered browser verification on http://127.0.0.1:18012/chat with backend http://127.0.0.1:8000 confirmed: no runtime overlay, cockpit Search & Context close/open works, MCP tools opens, Advanced controls toggles, model selector opens, Prompt selector opens, character selector opens, More tools opens, sidepanel model settings opens the model/character workflow, and sidepanel character settings opens the character workflow.
+Real-server correction pass: added apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts. This Playwright spec intentionally uses no page.route, route.fulfill, or __tldw_test_bypass hooks. It seeds only the real server URL/API key and exercises /chat through the browser against http://127.0.0.1:8000.
 
-Rendered focus verification confirmed Enter focus chat hides both cockpit side panels while preserving composer textarea, Send, MCP tools, Search & Context, and Current Chat Model Settings; Show cockpit panels restores both side panels without runtime overlay.
+Real server evidence collected 2026-05-12: /api/v1/health returned HTTP 206 with JSON status degraded; degraded check was chacha_notes while database and metrics were healthy. /api/v1/llm/providers returned HTTP 200 with total_configured 26, configured_count 20, default_provider openai. /api/v1/llm/models/metadata returned HTTP 200 with total 852.
 
-Focused frontend suite passed: 17 files, 89 tests. Backend model filter pytest passed: 6 tests. Bandit on llm_providers.py wrote /tmp/bandit_chat_cockpit_parity.json with 0 errors and 0 results. git diff --check passed.
-
-Known baseline/environment notes: focused tests still log mocked 'tldw server not configured' 400s in server chat settings paths while passing; the live browser environment can show the existing no-provider empty-state copy if no real LLM API key is configured.
+Real-server Playwright verification passed after formatting: TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line. Result: 2 passed in 10.4s. Desktop covered degraded warning pass-through, cockpit controls, Search & Context, MCP unavailable disabled state, advanced controls, model/prompt/character selectors, tools menu, Current Chat Model Settings, Scene Director, focus mode hide/restore. Mobile covered default focus composer, opening cockpit rails, Context/Runtime summaries, model/character sidepanel actions, and returning to focus.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Verified and patched PR #1582 for /chat merge readiness. Existing chat composer controls remain reachable in cockpit and focus layouts; new cockpit sidepanel actions invoke the existing Search & Context, model settings, and character workflows; degraded health now permits /chat with a warning instead of collapsing the app viewport; transient model metadata failures fall back without masking /chat behind a dev runtime overlay. Validation: focused frontend suite 17 files / 89 tests passed, backend llm model filter tests 6 passed, Bandit on llm_providers.py found 0 results, git diff --check passed, and rendered browser verification covered desktop cockpit controls plus focus-mode panel dismissal/restoration. Mobile behavior is covered by the existing focused responsive/mobile component tests in the same suite.
+Verified PR #1582 with a no-stub Playwright spec against the real running server at http://127.0.0.1:8000. The live server reported degraded health via HTTP 206 because chacha_notes was degraded while database and metrics were healthy; /chat remained usable and showed the degraded warning instead of blocking. Real provider/model endpoints returned configured data: /llm/providers HTTP 200 with total_configured 26 and default_provider openai, and /llm/models/metadata HTTP 200 with total 852. The new real-server Playwright spec passed 2/2 after formatting and covers desktop cockpit/focus controls plus mobile focus/cockpit rail behavior without page.route, route.fulfill, or __tldw_test_bypass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
