@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsReposit
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_payload_hash
 from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety_definition
+from tldw_Server_API.app.core.VN_Scripts.templates import instantiate_template, list_template_catalog
 from tldw_Server_API.app.core.VN_Scripts.validator import VNScriptValidationContext, validate_script_program
 
 ManifestResolver = Callable[[int], Mapping[str, Any]]
@@ -78,6 +79,53 @@ class VNScriptService:
     def list_scripts(self, *, limit: int = 50, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
         """List scripts owned by the current user."""
         return self.repo.list_scripts(owner_user_id=self.owner_user_id, limit=limit, offset=offset)
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        """List built-in starter templates as preview-safe catalog entries."""
+        return list_template_catalog()
+
+    def create_script_from_template(
+        self,
+        template_id: str,
+        *,
+        title: str,
+        primary_asset_pack_id: int,
+        policy_profile_id: str = "local_default",
+        generation_profile_id: str = "story_default",
+        generation_profiles: Mapping[str, str] | None = None,
+        description: str | None = None,
+        content_rating: str = "general",
+        audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
+        policy_profile: ProfileRow | None = None,
+        generation_profile: ProfileRow | None = None,
+        resolved_generation_profiles: Mapping[str, ProfileRow] | None = None,
+    ) -> dict[str, Any]:
+        """Create a normal script and store a validated template draft."""
+        script = self.create_script(
+            title=title,
+            description=description,
+            primary_asset_pack_id=primary_asset_pack_id,
+            policy_profile_id=policy_profile_id,
+            generation_profile_id=generation_profile_id,
+            generation_profiles=generation_profiles,
+            content_rating=content_rating,
+        )
+        draft = instantiate_template(
+            template_id,
+            title=title,
+            primary_asset_pack_id=primary_asset_pack_id,
+            generation_profile_id=generation_profile_id,
+        )
+        draft_response = self.replace_draft(
+            int(script["id"]),
+            if_revision=0,
+            draft=draft,
+            audio_refs=audio_refs,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            generation_profiles=resolved_generation_profiles,
+        )
+        return {"script": script, "draft": draft_response}
 
     def get_script(self, script_id: int) -> dict[str, Any]:
         """Return an owned script or raise not found."""

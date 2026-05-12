@@ -12,6 +12,8 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptCreate,
+    VNScriptCreateFromTemplateRequest,
+    VNScriptCreateFromTemplateResponse,
     VNScriptDiagnosticsResponse,
     VNScriptDraftPutRequest,
     VNScriptDraftResponse,
@@ -21,6 +23,8 @@ from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptPublishRequest,
     VNScriptPublishResponse,
     VNScriptResponse,
+    VNScriptTemplateListResponse,
+    VNScriptTemplateSummary,
     VNScriptValidateRequest,
     VNScriptValidationResponse,
     VNScriptVersionListResponse,
@@ -28,6 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptVersionPolicyEvaluateResponse,
     VNScriptVersionResponse,
 )
+from tldw_Server_API.app.core.VN_Scripts.templates import get_template
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
@@ -93,6 +98,70 @@ async def create_script(
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
     return VNScriptResponse.model_validate(row)
+
+
+@router.get("/templates", response_model=VNScriptTemplateListResponse)
+async def list_templates(service: VNScriptService = Depends(_service)) -> VNScriptTemplateListResponse:
+    """List preview-safe VN script starter templates."""
+    return VNScriptTemplateListResponse(
+        items=[VNScriptTemplateSummary.model_validate(item) for item in service.list_templates()]
+    )
+
+
+@router.post(
+    "/templates/{template_id}/scripts",
+    response_model=VNScriptCreateFromTemplateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_script_from_template(
+    template_id: str,
+    request: VNScriptCreateFromTemplateRequest,
+    service: VNScriptService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    profile_store: VNPolicyProfileStore = Depends(_profile_store),
+) -> VNScriptCreateFromTemplateResponse:
+    """Create a normal VN script and store a validated starter-template draft."""
+    try:
+        template = get_template(template_id)
+        title = request.title or template.default_title
+        description = request.description if request.description is not None else template.default_description
+        policy_profile, generation_profile, generation_profiles = await _resolve_request_profiles(
+            policy_profile_id=request.policy_profile_id,
+            generation_profile_id=request.generation_profile_id,
+            generation_profiles=request.generation_profiles,
+            profile_store=profile_store,
+        )
+        draft_preview = service.create_script_from_template(
+            template_id,
+            title=title,
+            description=description,
+            primary_asset_pack_id=request.primary_asset_pack_id,
+            policy_profile_id=request.policy_profile_id,
+            generation_profile_id=request.generation_profile_id,
+            generation_profiles=request.generation_profiles,
+            content_rating=request.content_rating,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            resolved_generation_profiles=generation_profiles,
+        )
+        audio_refs = await _resolve_accessible_audio_refs(
+            draft_preview["draft"]["draft"],
+            files_repo=files_repo,
+            owner_user_id=service.owner_user_id,
+        )
+        if audio_refs:
+            draft_preview["draft"] = service.replace_draft(
+                int(draft_preview["script"]["id"]),
+                if_revision=int(draft_preview["draft"]["revision"]),
+                draft=draft_preview["draft"]["draft"],
+                audio_refs=audio_refs,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+    return VNScriptCreateFromTemplateResponse.model_validate(draft_preview)
 
 
 @router.get("/scripts", response_model=VNScriptListResponse)
@@ -511,7 +580,7 @@ def _is_accessible_audio_record(record: Mapping[str, Any] | None, *, owner_user_
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
     reason = str(exc) or "invalid_request"
-    if reason in {"script_not_found", "script_version_not_found"}:
+    if reason in {"script_not_found", "script_version_not_found", "template_not_found"}:
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=vn_error_detail(ERROR_NOT_FOUND, reason, details={"reason": reason}),

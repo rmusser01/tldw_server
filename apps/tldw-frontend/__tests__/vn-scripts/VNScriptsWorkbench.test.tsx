@@ -3,11 +3,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
+  createVNScriptFromTemplate: vi.fn(),
   createVNScript: vi.fn(),
   evaluateVNScriptVersionPolicy: vi.fn(),
   getVNScriptDiagnostics: vi.fn(),
   getVNScriptDraft: vi.fn(),
   getVNScriptManifestSnapshot: vi.fn(),
+  listVNScriptTemplates: vi.fn(),
   listVNScripts: vi.fn(),
   listVNScriptVersions: vi.fn(),
   publishVNScript: vi.fn(),
@@ -16,11 +18,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@web/lib/api/vnScripts', () => ({
+  createVNScriptFromTemplate: (...args: unknown[]) => mocks.createVNScriptFromTemplate(...args),
   createVNScript: (...args: unknown[]) => mocks.createVNScript(...args),
   evaluateVNScriptVersionPolicy: (...args: unknown[]) => mocks.evaluateVNScriptVersionPolicy(...args),
   getVNScriptDiagnostics: (...args: unknown[]) => mocks.getVNScriptDiagnostics(...args),
   getVNScriptDraft: (...args: unknown[]) => mocks.getVNScriptDraft(...args),
   getVNScriptManifestSnapshot: (...args: unknown[]) => mocks.getVNScriptManifestSnapshot(...args),
+  listVNScriptTemplates: (...args: unknown[]) => mocks.listVNScriptTemplates(...args),
   listVNScripts: (...args: unknown[]) => mocks.listVNScripts(...args),
   listVNScriptVersions: (...args: unknown[]) => mocks.listVNScriptVersions(...args),
   publishVNScript: (...args: unknown[]) => mocks.publishVNScript(...args),
@@ -123,6 +127,53 @@ const secondVersionResponse = {
   generation_profile_snapshot_id: 323,
 };
 
+const linearTemplate = {
+  id: 'linear_scene',
+  label: 'Linear scene',
+  description: 'Start with one authored scene.',
+  category: 'starter',
+  recommended_content_rating: 'general',
+  required_capabilities: ['dialogue'],
+  preview: { scenes: 1, choices: 0 },
+  default_title: 'Linear scene',
+  default_description: 'A simple authored opener.',
+};
+
+const choiceTemplate = {
+  id: 'authored_choices',
+  label: 'Authored choices',
+  description: 'Start with player choices.',
+  category: 'starter',
+  recommended_content_rating: 'teen',
+  required_capabilities: ['dialogue', 'choices'],
+  preview: { scenes: 2, choices: 2 },
+  default_title: 'Choice scene',
+  default_description: 'An opener with two choices.',
+};
+
+const templateScript = {
+  id: 21,
+  title: 'Template Route',
+  description: 'A simple authored opener.',
+  status: 'draft',
+  primary_asset_pack_id: 55,
+  policy_profile_id: 'teen-policy',
+  generation_profile_id: 'story-default',
+  generation_profiles: {},
+  content_rating: 'general',
+};
+
+const templateDraftResponse = {
+  script_id: 21,
+  revision: 1,
+  draft: {
+    version: 'vn_script_program.v1',
+    primary_asset_pack_id: 55,
+    scenes: [{ id: 'template_start', text: 'Template opening.' }],
+  },
+  diagnostics: { valid: true },
+};
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -144,10 +195,15 @@ function mockList(items = [openingScript, secondScript]) {
   });
 }
 
+function mockTemplates(items = [linearTemplate, choiceTemplate]) {
+  mocks.listVNScriptTemplates.mockResolvedValue({ items });
+}
+
 describe('VNScriptsWorkbench', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockList();
+    mockTemplates();
     mocks.createVNScript.mockResolvedValue({
       ...secondScript,
       id: 9,
@@ -156,6 +212,10 @@ describe('VNScriptsWorkbench', () => {
       policy_profile_id: 'policy-explicit',
       generation_profile_id: 'gen-explicit',
       content_rating: 'mature',
+    });
+    mocks.createVNScriptFromTemplate.mockResolvedValue({
+      script: templateScript,
+      draft: templateDraftResponse,
     });
     mocks.getVNScriptDraft.mockResolvedValue(draftResponse);
     mocks.putVNScriptDraft.mockResolvedValue({
@@ -264,6 +324,78 @@ describe('VNScriptsWorkbench', () => {
     expect(await screen.findByText('Script #9')).toBeInTheDocument();
     expect(mocks.getVNScriptDraft).toHaveBeenCalledWith(9);
     expect(mocks.listVNScriptVersions).toHaveBeenCalledWith(9);
+  });
+
+  it('loads templates on mount and renders starter options', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    expect(await screen.findByLabelText('Starter template')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.listVNScriptTemplates).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('option', { name: 'Blank/custom JSON' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Linear scene' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Authored choices' })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Starter template'), 'linear_scene');
+    expect(screen.getByText('Start with one authored scene.')).toBeInTheDocument();
+  });
+
+  it('creates from a selected template and shows the returned draft immediately', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.selectOptions(screen.getByLabelText('Starter template'), 'linear_scene');
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Template Route');
+    await user.clear(screen.getByLabelText('Primary asset pack ID'));
+    await user.type(screen.getByLabelText('Primary asset pack ID'), '55');
+    await user.clear(screen.getByLabelText('Policy profile ID'));
+    await user.type(screen.getByLabelText('Policy profile ID'), 'teen-policy');
+    await user.clear(screen.getByLabelText('Generation profile ID'));
+    await user.type(screen.getByLabelText('Generation profile ID'), 'story-default');
+    await user.selectOptions(screen.getByLabelText('Content rating'), 'general');
+    await user.click(screen.getByRole('button', { name: 'Create script' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNScriptFromTemplate).toHaveBeenCalledWith('linear_scene', {
+        title: 'Template Route',
+        description: 'A simple authored opener.',
+        primary_asset_pack_id: 55,
+        policy_profile_id: 'teen-policy',
+        generation_profile_id: 'story-default',
+        content_rating: 'general',
+      });
+    });
+    expect(mocks.createVNScript).not.toHaveBeenCalled();
+    expect(await screen.findByText('Script #21')).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/template_start/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Template Route/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Validate' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
+  });
+
+  it('keeps the blank custom JSON path on the normal create endpoint', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.selectOptions(screen.getByLabelText('Starter template'), 'blank');
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Blank Route');
+    await user.clear(screen.getByLabelText('Primary asset pack ID'));
+    await user.type(screen.getByLabelText('Primary asset pack ID'), '46');
+    await user.click(screen.getByRole('button', { name: 'Create script' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNScript).toHaveBeenCalledWith({
+        title: 'Blank Route',
+        primary_asset_pack_id: 46,
+        content_rating: 'teen',
+      });
+    });
+    expect(mocks.createVNScriptFromTemplate).not.toHaveBeenCalled();
   });
 
   it('omits empty optional profile IDs when creating a script shell', async () => {

@@ -1,6 +1,8 @@
 import { apiClient } from '@web/lib/api';
 import type {
   VNScriptCreate,
+  VNScriptCreateFromTemplateRequest,
+  VNScriptCreateFromTemplateResponse,
   VNScriptDiagnosticsResponse,
   VNScriptDraftPutRequest,
   VNScriptDraftResponse,
@@ -11,6 +13,7 @@ import type {
   VNScriptPublishRequest,
   VNScriptPublishResponse,
   VNScriptResponse,
+  VNScriptTemplateListResponse,
   VNScriptValidateRequest,
   VNScriptValidationResponse,
   VNScriptVersionListQuery,
@@ -32,6 +35,17 @@ function toQueryParams<T extends object>(query: T): QueryParams {
 
 export function createVNScript(request: VNScriptCreate): Promise<VNScriptResponse> {
   return apiClient.post(`${VN_SCRIPTS_BASE}/scripts`, request);
+}
+
+export function listVNScriptTemplates(): Promise<VNScriptTemplateListResponse> {
+  return apiClient.get(`${VN_SCRIPTS_BASE}/templates`);
+}
+
+export function createVNScriptFromTemplate(
+  templateId: string,
+  request: VNScriptCreateFromTemplateRequest
+): Promise<VNScriptCreateFromTemplateResponse> {
+  return apiClient.post(`${VN_SCRIPTS_BASE}/templates/${templateId}/scripts`, request);
 }
 
 export function listVNScripts(query: VNScriptListQuery = {}): Promise<VNScriptListResponse> {

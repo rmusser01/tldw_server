@@ -152,6 +152,145 @@ def _create_script(client: TestClient, *, asset_pack_id: int) -> int:
     return int(response.json()["id"])
 
 
+def _contains_key(value: Any, key: str) -> bool:
+    if isinstance(value, dict):
+        return key in value or any(_contains_key(child, key) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_key(child, key) for child in value)
+    return False
+
+
+def test_template_catalog_lists_preview_safe_starter_templates(client: TestClient) -> None:
+    response = client.get("/api/v1/vn/vn-scripts/templates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    template_ids = {item["id"] for item in payload["items"]}
+    assert template_ids == {
+        "linear_scene",
+        "authored_choices",
+        "generated_choice_set",
+        "scene_update",
+        "confirm_gated_generation",
+    }
+    for item in payload["items"]:
+        assert set(item) == {
+            "id",
+            "label",
+            "description",
+            "category",
+            "recommended_content_rating",
+            "required_capabilities",
+            "preview",
+            "default_title",
+            "default_description",
+        }
+        assert "draft" not in item
+        assert "raw_prompt" not in item
+        assert "policy_profile_id" not in item
+        assert "generation_profile_id" not in item
+        assert "generation_profiles" not in item
+
+
+def test_create_script_from_template_stores_valid_draft(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    response = client.post(
+        "/api/v1/vn/vn-scripts/templates/linear_scene/scripts",
+        json={
+            "title": "Template Route",
+            "primary_asset_pack_id": asset_pack_id,
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 201
+    script = response.json()["script"]
+    draft_response = response.json()["draft"]
+    script_id = script["id"]
+    stored_draft = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft").json()
+    assert script["title"] == "Template Route"
+    assert draft_response["revision"] == 1
+    assert draft_response["diagnostics"]["valid"] is True
+    assert stored_draft["revision"] == 1
+    assert stored_draft["diagnostics"]["valid"] is True
+    assert stored_draft["draft"]["primary_asset_pack_id"] == asset_pack_id
+    assert _contains_key(stored_draft["draft"], "provider") is False
+    assert _contains_key(stored_draft["draft"], "model") is False
+    assert _contains_key(stored_draft["draft"], "policy_profile_id") is False
+
+
+def test_create_script_from_unknown_template_returns_not_found(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/vn/vn-scripts/templates/missing-template/scripts",
+        json={
+            "title": "Template Route",
+            "primary_asset_pack_id": 1,
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["details"]["reason"] == "template_not_found"
+
+
+def test_create_script_from_template_rejects_unknown_profiles(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    response = client.post(
+        "/api/v1/vn/vn-scripts/templates/linear_scene/scripts",
+        json={
+            "title": "Template Route",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "missing_policy",
+            "generation_profile_id": "story_default",
+            "content_rating": "general",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["details"]["reason"] == "policy_profile_not_found"
+
+
+def test_generated_choice_template_validates_and_publishes(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    create_response = client.post(
+        "/api/v1/vn/vn-scripts/templates/generated_choice_set/scripts",
+        json={
+            "title": "Generated Choice Route",
+            "primary_asset_pack_id": asset_pack_id,
+            "content_rating": "general",
+        },
+    )
+    script_id = create_response.json()["script"]["id"]
+
+    diagnostics_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/diagnostics")
+    publish_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "template-v1",
+            "idempotency_key": "generated-choice-template-v1",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+
+    assert create_response.status_code == 201
+    assert diagnostics_response.status_code == 200
+    assert diagnostics_response.json()["diagnostics"]["valid"] is True
+    assert publish_response.status_code == 201
+    assert publish_response.json()["validation"]["valid"] is True
+
+
 def test_create_rejects_unknown_profiles(
     client: TestClient,
     chacha_dbs: dict[int, CharactersRAGDB],

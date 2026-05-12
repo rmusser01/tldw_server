@@ -54,6 +54,29 @@ export interface VNScriptListResponse {
   pagination: VNScriptOffsetPagination;
 }
 
+export interface VNScriptTemplateSummary {
+  id: string;
+  label: string;
+  description: string;
+  category: string;
+  recommended_content_rating: VNScriptContentRating;
+  required_capabilities: string[];
+  preview: Record<string, unknown>;
+  default_title: string;
+  default_description?: string | null;
+}
+
+export interface VNScriptTemplateListResponse {
+  items: VNScriptTemplateSummary[];
+}
+
+export type VNScriptCreateFromTemplateRequest = VNScriptCreate;
+
+export interface VNScriptCreateFromTemplateResponse {
+  script: VNScriptResponse;
+  draft: VNScriptDraftResponse;
+}
+
 export interface VNScriptDraftResponse {
   script_id: number;
   revision: number;

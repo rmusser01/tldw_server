@@ -4,11 +4,13 @@ import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
 import JsonEditor from '@web/components/ui/JsonEditor';
 import {
+  createVNScriptFromTemplate,
   createVNScript,
   evaluateVNScriptVersionPolicy,
   getVNScriptDiagnostics,
   getVNScriptDraft,
   getVNScriptManifestSnapshot,
+  listVNScriptTemplates,
   listVNScripts,
   listVNScriptVersions,
   publishVNScript,
@@ -20,6 +22,7 @@ import type {
   VNScriptDiagnosticsResponse,
   VNScriptDraftResponse,
   VNScriptResponse,
+  VNScriptTemplateSummary,
   VNScriptValidationResponse,
   VNScriptVersionResponse,
 } from '@web/types/vn-scripts';
@@ -98,6 +101,7 @@ function summaryLines(value: unknown): string[] {
 
 export default function VNScriptsWorkbench() {
   const [scripts, setScripts] = useState<VNScriptResponse[]>([]);
+  const [templates, setTemplates] = useState<VNScriptTemplateSummary[]>([]);
   const [selectedScript, setSelectedScript] = useState<VNScriptResponse | null>(null);
   const [draft, setDraft] = useState<VNScriptDraftResponse | null>(null);
   const [draftText, setDraftText] = useState('{}');
@@ -107,6 +111,7 @@ export default function VNScriptsWorkbench() {
   const [manifestSnapshots, setManifestSnapshots] = useState<Record<number, unknown>>({});
   const [policySummaries, setPolicySummaries] = useState<Record<number, unknown>>({});
   const [isLoadingScripts, setIsLoadingScripts] = useState(true);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -121,8 +126,10 @@ export default function VNScriptsWorkbench() {
   const [policyProfileId, setPolicyProfileId] = useState('');
   const [generationProfileId, setGenerationProfileId] = useState('');
   const [contentRating, setContentRating] = useState<VNScriptContentRating>('teen');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [publishLabel, setPublishLabel] = useState('');
   const selectedScriptIdRef = useRef<number | null>(null);
+  const draftHydrationRef = useRef<VNScriptDraftResponse | null>(null);
   const publishKeyRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -139,11 +146,46 @@ export default function VNScriptsWorkbench() {
     ];
   }, [selectedScript]);
 
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
+    [selectedTemplateId, templates]
+  );
+
+  const handleTemplateChange = useCallback((templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const nextTemplate = templates.find((template) => template.id === templateId);
+    if (!nextTemplate) return;
+    setTitle(nextTemplate.default_title);
+    setContentRating(nextTemplate.recommended_content_rating);
+  }, [templates]);
+
   const refreshVersions = useCallback(async (scriptId: number) => {
     const nextVersions = await listVNScriptVersions(scriptId);
     if (selectedScriptIdRef.current === scriptId) {
       setVersions(nextVersions.items ?? []);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTemplates() {
+      setIsLoadingTemplates(true);
+      try {
+        const response = await listVNScriptTemplates();
+        if (cancelled) return;
+        setTemplates(response.items ?? []);
+      } catch (loadError) {
+        if (!cancelled) setError(errorMessage(loadError, 'Failed to load VN script templates'));
+      } finally {
+        if (!cancelled) setIsLoadingTemplates(false);
+      }
+    }
+
+    void loadTemplates();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -185,6 +227,27 @@ export default function VNScriptsWorkbench() {
 
     let cancelled = false;
     async function loadScriptDetails() {
+      const hydratedDraft = draftHydrationRef.current;
+      if (hydratedDraft?.script_id === selectedScript.id) {
+        draftHydrationRef.current = null;
+        setDraft(hydratedDraft);
+        setDraftText(formatJson(hydratedDraft.draft));
+        setVersions([]);
+        setError(null);
+        setEditorError(null);
+        setStatusMessage(null);
+        setValidation(null);
+        setDiagnostics(null);
+        setManifestSnapshots({});
+        setPolicySummaries({});
+        try {
+          const nextVersions = await listVNScriptVersions(selectedScript.id);
+          if (!cancelled) setVersions(nextVersions.items ?? []);
+        } catch {
+          if (!cancelled) setVersions([]);
+        }
+        return;
+      }
       setDraft(null);
       setDraftText('{}');
       setVersions([]);
@@ -249,22 +312,51 @@ export default function VNScriptsWorkbench() {
     setError(null);
     setStatusMessage(null);
     try {
-      const created = await createVNScript({
+      const request = {
         title: title.trim(),
+        ...(selectedTemplate?.default_description
+          ? { description: selectedTemplate.default_description }
+          : {}),
         primary_asset_pack_id: parsedAssetPackId,
         ...(policyProfileId.trim() ? { policy_profile_id: policyProfileId.trim() } : {}),
         ...(generationProfileId.trim() ? { generation_profile_id: generationProfileId.trim() } : {}),
         content_rating: contentRating,
-      });
-      setScripts((previous) => [created, ...previous.filter((script) => script.id !== created.id)]);
-      setSelectedScript(created);
-      setStatusMessage(`Created script #${created.id}.`);
+      };
+      const created =
+        selectedTemplateId === 'blank'
+          ? await createVNScript(request)
+          : await createVNScriptFromTemplate(selectedTemplateId, request);
+      const createdScript = 'script' in created ? created.script : created;
+      if ('draft' in created) {
+        draftHydrationRef.current = created.draft;
+        setDraft(created.draft);
+        setDraftText(formatJson(created.draft.draft));
+        setVersions([]);
+        setValidation(null);
+        setDiagnostics(null);
+        setManifestSnapshots({});
+        setPolicySummaries({});
+      }
+      setScripts((previous) => [
+        createdScript,
+        ...previous.filter((script) => script.id !== createdScript.id),
+      ]);
+      setSelectedScript(createdScript);
+      setStatusMessage(`Created script #${createdScript.id}.`);
     } catch (createError) {
       setError(errorMessage(createError, 'Failed to create VN script'));
     } finally {
       setIsCreating(false);
     }
-  }, [contentRating, generationProfileId, policyProfileId, primaryAssetPackId, title]);
+  }, [
+    contentRating,
+    generationProfileId,
+    policyProfileId,
+    primaryAssetPackId,
+    selectedTemplate,
+    selectedTemplateId,
+    title,
+  ]);
 
   const handleSaveDraft = useCallback(async () => {
     if (!selectedScript || !draft) return;
@@ -479,6 +571,28 @@ export default function VNScriptsWorkbench() {
             <form onSubmit={handleCreateScript} className="rounded-md border border-border bg-surface p-3">
               <h2 className="mb-3 text-sm font-semibold">Create script</h2>
               <div className="space-y-3">
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="block text-sm font-medium text-text" htmlFor="vn-script-template">
+                      Starter template
+                    </label>
+                    {isLoadingTemplates && <span className="text-xs text-text-muted">Loading...</span>}
+                  </div>
+                  <select
+                    id="vn-script-template"
+                    className="block w-full rounded-md border-border bg-bg shadow-sm focus:border-primary focus:ring-primary"
+                    value={selectedTemplateId}
+                    onChange={(event) => handleTemplateChange(event.target.value)}
+                  >
+                    <option value="blank">Blank/custom JSON</option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>{template.label}</option>
+                    ))}
+                  </select>
+                  {selectedTemplate && (
+                    <p className="mt-1 text-xs text-text-muted">{selectedTemplate.description}</p>
+                  )}
+                </div>
                 <Input label="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
                 <Input
                   label="Primary asset pack ID"
