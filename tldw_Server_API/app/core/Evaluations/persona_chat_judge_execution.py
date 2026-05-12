@@ -109,13 +109,15 @@ def execute_persona_chat_judge(
     safe_model = _safe_metadata_text(model)
 
     for judge_input in inputs:
+        safe_case_id = _safe_identifier_text(judge_input.case_id)
         for dimension_key in dimension_keys:
             prediction_key = (judge_input.case_id, dimension_key)
+            safe_dimension_key = _safe_identifier_text(dimension_key)
             if prediction_key in seen_prediction_keys:
                 failures.append(
                     _failure(
-                        judge_input=judge_input,
-                        dimension_key=dimension_key,
+                        case_id=safe_case_id,
+                        dimension_key=safe_dimension_key,
                         provider=safe_provider,
                         model=safe_model,
                         error_key="duplicate_prediction",
@@ -127,8 +129,8 @@ def execute_persona_chat_judge(
             if dimension_key not in PERSONA_CHAT_JUDGE_DIMENSIONS:
                 failures.append(
                     _failure(
-                        judge_input=judge_input,
-                        dimension_key=dimension_key,
+                        case_id=safe_case_id,
+                        dimension_key=safe_dimension_key,
                         provider=safe_provider,
                         model=safe_model,
                         error_key="unknown_dimension",
@@ -138,8 +140,8 @@ def execute_persona_chat_judge(
 
             prompt = build_persona_chat_judge_prompt(judge_input, dimension_key)
             request = {
-                "case_id": judge_input.case_id,
-                "dimension_key": dimension_key,
+                "case_id": safe_case_id,
+                "dimension_key": safe_dimension_key,
                 "provider": safe_provider,
                 "model": safe_model,
                 "offline_only": True,
@@ -150,8 +152,8 @@ def execute_persona_chat_judge(
             except Exception:
                 failures.append(
                     _failure(
-                        judge_input=judge_input,
-                        dimension_key=dimension_key,
+                        case_id=safe_case_id,
+                        dimension_key=safe_dimension_key,
                         provider=safe_provider,
                         model=safe_model,
                         error_key="provider_call_failed",
@@ -164,12 +166,13 @@ def execute_persona_chat_judge(
                 judge_input=judge_input,
                 dimension=dimension,
                 response_text=response_text,
+                safe_case_id=safe_case_id,
             )
             if error_key is not None:
                 failures.append(
                     _failure(
-                        judge_input=judge_input,
-                        dimension_key=dimension_key,
+                        case_id=safe_case_id,
+                        dimension_key=safe_dimension_key,
                         provider=safe_provider,
                         model=safe_model,
                         error_key=error_key,
@@ -193,6 +196,7 @@ def _prediction_from_response(
     judge_input: PersonaChatJudgeInput,
     dimension: PersonaChatJudgeDimension,
     response_text: str,
+    safe_case_id: str,
 ) -> tuple[PersonaChatJudgePrediction | None, PersonaChatJudgeExecutionErrorKey | None]:
     """Convert one strict JSON response to a sanitized prediction or error key."""
     try:
@@ -228,7 +232,7 @@ def _prediction_from_response(
 
     return (
         PersonaChatJudgePrediction(
-            case_id=judge_input.case_id,
+            case_id=safe_case_id,
             dimension_key=dimension.key,
             result=result,
             critique="provided",
@@ -253,9 +257,10 @@ def _valid_evidence_references(
             "case_id",
             "assistant_kind",
             "assistant_id",
+            "persona_memory_mode",
             "user_input",
-            *dimension.evidence_fields,
-            *judge_input.expected_evidence,
+            "expected_context",
+            "response_observation",
             *judge_input.expected_context.keys(),
             *judge_input.response_observation.keys(),
         )
@@ -270,7 +275,7 @@ def _valid_evidence_references(
 
 def _failure(
     *,
-    judge_input: PersonaChatJudgeInput,
+    case_id: str,
     dimension_key: str,
     provider: str,
     model: str,
@@ -278,7 +283,7 @@ def _failure(
 ) -> PersonaChatJudgeExecutionFailure:
     """Build a bounded failure row for one execution attempt."""
     return PersonaChatJudgeExecutionFailure(
-        case_id=judge_input.case_id,
+        case_id=case_id,
         dimension_key=dimension_key,
         provider=provider,
         model=model,
@@ -288,6 +293,23 @@ def _failure(
 
 def _safe_metadata_text(value: str) -> str:
     """Return provider/model metadata only when it is bounded and non-sensitive."""
+    text = str(value).strip()
+    lowered = text.lower()
+    if (
+        not text
+        or len(text) > 128
+        or text.startswith(("/", "~"))
+        or "\\" in text
+        or "\n" in text
+        or "\r" in text
+        or any(marker in lowered for marker in _UNSAFE_METADATA_MARKERS)
+    ):
+        return "redacted"
+    return text
+
+
+def _safe_identifier_text(value: str) -> str:
+    """Return trace identifiers only when bounded and free of unsafe markers."""
     text = str(value).strip()
     lowered = text.lower()
     if (

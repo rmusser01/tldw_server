@@ -179,6 +179,28 @@ def test_execute_persona_chat_judge_records_invalid_evidence() -> None:
     assert "I will remember that permanently" not in serialized  # nosec B101
 
 
+def test_execute_persona_chat_judge_rejects_absent_evidence_reference() -> None:
+    """Evidence references must point at fields actually present in the prompt data."""
+    judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-002"))
+
+    result = execute_persona_chat_judge(
+        [judge_input],
+        dimension_keys=["memory_expectation_alignment"],
+        completion=lambda _request: json.dumps(
+            {
+                "critique": "cites absent conversation id",
+                "result": "Pass",
+                "evidence": ["conversation_id"],
+            }
+        ),
+        provider="fake-provider",
+        model="fake-model",
+    )
+
+    assert result.predictions == ()  # nosec B101
+    assert result.failures[0].error_key == "invalid_evidence"  # nosec B101
+
+
 def test_execute_persona_chat_judge_records_provider_call_failure() -> None:
     """Provider errors should not leak exception text into execution output."""
     judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-015"))
@@ -226,20 +248,51 @@ def test_execute_persona_chat_judge_redacts_unsafe_provider_metadata() -> None:
     assert "sk-secret-model" not in serialized  # nosec B101
 
 
+def test_execute_persona_chat_judge_redacts_unsafe_case_and_dimension_metadata() -> None:
+    """Case and dimension ids should stay bounded in metadata and outputs."""
+    fixture_case = case_by_id("PC-CASE-015")
+    fixture_case["case_id"] = "/Users/private/token\nPC-CASE-015"
+    judge_input = build_persona_chat_judge_input(fixture_case)
+    calls: list[dict[str, Any]] = []
+
+    def fake_completion(request: dict[str, Any]) -> str:
+        calls.append(request)
+        return _valid_response()
+
+    result = execute_persona_chat_judge(
+        [judge_input],
+        dimension_keys=["memory_expectation_alignment"],
+        completion=fake_completion,
+        provider="fake-provider",
+        model="fake-model",
+    )
+    serialized = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert calls[0]["case_id"] == "redacted"  # nosec B101
+    assert result.predictions[0].case_id == "redacted"  # nosec B101
+    assert "/Users/private/token" not in serialized  # nosec B101
+
+
 def test_execute_persona_chat_judge_rejects_unknown_dimension() -> None:
     """Unknown dimensions should fail closed before calling the completion seam."""
     judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-015"))
+    calls: list[dict[str, Any]] = []
+
+    def fake_completion(request: dict[str, Any]) -> str:
+        calls.append(request)
+        return _valid_response()
 
     result = execute_persona_chat_judge(
         [judge_input],
         dimension_keys=["not_registered"],
-        completion=lambda _request: _valid_response(),
+        completion=fake_completion,
         provider="fake-provider",
         model="fake-model",
     )
 
     assert result.predictions == ()  # nosec B101
     assert result.failures[0].error_key == "unknown_dimension"  # nosec B101
+    assert calls == []  # nosec B101
 
 
 def test_execute_persona_chat_judge_predictions_feed_calibration() -> None:
