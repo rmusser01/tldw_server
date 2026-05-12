@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
+    VNScriptAuthoringCatalogResponse,
     VNScriptCreate,
     VNScriptCreateFromTemplateRequest,
     VNScriptCreateFromTemplateResponse,
@@ -23,6 +24,10 @@ from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptPublishRequest,
     VNScriptPublishResponse,
     VNScriptResponse,
+    VNScriptSnippetApplyRequest,
+    VNScriptSnippetApplyResponse,
+    VNScriptSnippetPreviewRequest,
+    VNScriptSnippetPreviewResponse,
     VNScriptTemplateListResponse,
     VNScriptTemplateSummary,
     VNScriptValidateRequest,
@@ -43,6 +48,7 @@ from tldw_Server_API.app.core.VN_Platform.errors import (
     ERROR_NOT_FOUND,
     vn_error_detail,
 )
+from tldw_Server_API.app.core.VN_Scripts.authoring_errors import VNScriptAuthoringError
 from tldw_Server_API.app.core.VN_Scripts.service import VNScriptService
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
@@ -106,6 +112,12 @@ async def list_templates(service: VNScriptService = Depends(_service)) -> VNScri
     return VNScriptTemplateListResponse(
         items=[VNScriptTemplateSummary.model_validate(item) for item in service.list_templates()]
     )
+
+
+@router.get("/vn-authoring-catalog", response_model=VNScriptAuthoringCatalogResponse)
+async def get_authoring_catalog(service: VNScriptService = Depends(_service)) -> VNScriptAuthoringCatalogResponse:
+    """Return preview-safe VN script operation and snippet metadata."""
+    return VNScriptAuthoringCatalogResponse.model_validate(service.get_authoring_catalog())
 
 
 @router.post(
@@ -287,6 +299,97 @@ async def validate_draft(
         )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
+
+
+@router.post("/scripts/{script_id}/draft/snippet-preview", response_model=VNScriptSnippetPreviewResponse)
+async def preview_snippet(
+    script_id: int,
+    request: VNScriptSnippetPreviewRequest,
+    service: VNScriptService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    profile_store: VNPolicyProfileStore = Depends(_profile_store),
+) -> VNScriptSnippetPreviewResponse:
+    """Preview a snippet patch without mutating stored draft or diagnostics."""
+    try:
+        build = service.build_snippet_patch(
+            script_id,
+            request.snippet_id,
+            request.anchor.model_dump(exclude_none=True),
+            request.parameters,
+            draft=request.draft,
+            draft_revision=request.draft_revision,
+        )
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
+            build["script"],
+            profile_store=profile_store,
+        )
+        patched_draft = build["patch"].draft
+        audio_refs = await _resolve_accessible_audio_refs(
+            patched_draft,
+            files_repo=files_repo,
+            owner_user_id=service.owner_user_id,
+        )
+        return VNScriptSnippetPreviewResponse.model_validate(
+            service.preview_snippet_patch(
+                script_id,
+                request.snippet_id,
+                build["base_revision"],
+                build["patch"],
+                audio_refs=audio_refs,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+        )
+    except VNScriptAuthoringError as exc:
+        raise _handle_authoring_error(exc) from exc
+    except ValueError as exc:
+        raise _handle_value_error(exc, service=service, script_id=script_id) from exc
+
+
+@router.post("/scripts/{script_id}/draft/snippet-apply", response_model=VNScriptSnippetApplyResponse)
+async def apply_snippet(
+    script_id: int,
+    request: VNScriptSnippetApplyRequest,
+    service: VNScriptService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    profile_store: VNPolicyProfileStore = Depends(_profile_store),
+) -> VNScriptSnippetApplyResponse:
+    """Apply a snippet patch to the stored draft using optimistic revision control."""
+    try:
+        build = service.build_snippet_patch(
+            script_id,
+            request.snippet_id,
+            request.anchor.model_dump(exclude_none=True),
+            request.parameters,
+            if_revision=request.if_revision,
+        )
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
+            build["script"],
+            profile_store=profile_store,
+        )
+        patched_draft = build["patch"].draft
+        audio_refs = await _resolve_accessible_audio_refs(
+            patched_draft,
+            files_repo=files_repo,
+            owner_user_id=service.owner_user_id,
+        )
+        return VNScriptSnippetApplyResponse.model_validate(
+            service.apply_snippet_patch_result(
+                script_id,
+                request.snippet_id,
+                request.if_revision,
+                build["patch"],
+                audio_refs=audio_refs,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+        )
+    except VNScriptAuthoringError as exc:
+        raise _handle_authoring_error(exc) from exc
+    except ValueError as exc:
+        raise _handle_value_error(exc, service=service, script_id=script_id) from exc
 
 
 @router.get("/scripts/{script_id}/draft/diagnostics", response_model=VNScriptDiagnosticsResponse)
@@ -576,7 +679,25 @@ def _is_accessible_audio_record(record: Mapping[str, Any] | None, *, owner_user_
     return str(record.get("mime_type") or "").startswith("audio/")
 
 
-def _handle_value_error(exc: ValueError) -> HTTPException:
+def _handle_authoring_error(exc: VNScriptAuthoringError) -> HTTPException:
+    status_code = status.HTTP_404_NOT_FOUND if exc.code == "snippet_not_found" else exc.status_code
+    details = {"reason": exc.code, **dict(exc.details)}
+    return HTTPException(
+        status_code=status_code,
+        detail=vn_error_detail(
+            ERROR_NOT_FOUND if status_code == status.HTTP_404_NOT_FOUND else ERROR_INVALID_REQUEST,
+            exc.code,
+            details=details,
+        ),
+    )
+
+
+def _handle_value_error(
+    exc: ValueError,
+    *,
+    service: VNScriptService | None = None,
+    script_id: int | None = None,
+) -> HTTPException:
     reason = str(exc) or "invalid_request"
     if reason in {"script_not_found", "script_version_not_found", "template_not_found"}:
         return HTTPException(
@@ -584,11 +705,25 @@ def _handle_value_error(exc: ValueError) -> HTTPException:
             detail=vn_error_detail(ERROR_NOT_FOUND, reason, details={"reason": reason}),
         )
     if reason in {"draft_revision_conflict", "idempotency_key_conflict"}:
+        details: dict[str, Any] = {"reason": reason}
+        if reason == "draft_revision_conflict":
+            current_revision = _current_draft_revision(service, script_id)
+            if current_revision is not None:
+                details["current_revision"] = current_revision
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=vn_error_detail(ERROR_INVALID_REQUEST, reason, details={"reason": reason}),
+            detail=vn_error_detail(ERROR_INVALID_REQUEST, reason, details=details),
         )
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=vn_error_detail(ERROR_INVALID_REQUEST, reason, details={"reason": reason}),
     )
+
+
+def _current_draft_revision(service: VNScriptService | None, script_id: int | None) -> int | None:
+    if service is None or script_id is None:
+        return None
+    try:
+        return int(service.get_draft(script_id)["revision"])
+    except (TypeError, ValueError, KeyError):
+        return None

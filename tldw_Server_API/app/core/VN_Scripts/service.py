@@ -103,11 +103,14 @@ class VNScriptService:
         *,
         draft: Mapping[str, Any] | None = None,
         draft_revision: int | None = None,
+        if_revision: int | None = None,
     ) -> dict[str, Any]:
         """Build a side-effect-free snippet patch against a stored or supplied draft."""
         script = self._require_script(script_id)
         draft_row = self.get_draft(script_id)
         stored_revision = int(draft_row["revision"])
+        if if_revision is not None and int(if_revision) != stored_revision:
+            raise ValueError("draft_revision_conflict")
         if draft is not None:
             if draft_revision is None:
                 raise ValueError("draft_revision_required")

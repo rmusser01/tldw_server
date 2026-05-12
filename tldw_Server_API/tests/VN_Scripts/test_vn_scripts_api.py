@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.endpoints.vn_scripts import (
     _resolve_accessible_audio_refs,
     router as vn_scripts_router,
 )
+from tldw_Server_API.app.api.v1.endpoints.vn_capabilities import router as vn_capabilities_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetPackCreate,
     VNAssetReviewRequest,
@@ -72,6 +73,7 @@ def client(
     authnz_pool: DatabasePool,
 ) -> Iterator[TestClient]:
     app = FastAPI()
+    app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
     app.include_router(vn_scripts_router, prefix="/api/v1/vn")
 
     async def override_user() -> User:
@@ -201,6 +203,298 @@ def test_template_catalog_returns_isolated_preview_payloads() -> None:
     second_catalog = list_template_catalog()
 
     assert "mutated" not in second_catalog[0]["preview"]["flow"]
+
+
+def test_authoring_catalog_returns_preview_safe_metadata(client: TestClient) -> None:
+    response = client.get("/api/v1/vn/vn-scripts/vn-authoring-catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "vn_script_authoring_catalog.v1"
+    assert "script_authoring_catalog" in payload["capability_tokens"]
+    assert {operation["op"] for operation in payload["operations"]} >= {"narrate", "generate", "choice"}
+    assert {snippet["id"] for snippet in payload["snippets"]} >= {"narration", "generated_choice_set"}
+    assert _contains_key(payload, "api_key") is False
+    assert _contains_key(payload, "provider") is False
+    assert _contains_key(payload, "model") is False
+    assert _contains_key(payload, "raw_prompt") is False
+
+
+def test_snippet_preview_supports_stored_and_supplied_draft(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+    stored_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "op_index": 0, "mode": "after"},
+            "parameters": {"text": "Stored draft line."},
+        },
+    )
+    supplied_draft = _program(asset_pack_id)
+    supplied_draft["labels"]["start"][0]["text"] = "Supplied opening."
+    supplied_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "op_index": 0, "mode": "after"},
+            "parameters": {"text": "Supplied draft line."},
+            "draft": supplied_draft,
+            "draft_revision": 1,
+        },
+    )
+
+    assert stored_response.status_code == 200
+    stored_payload = stored_response.json()
+    assert stored_payload["base_revision"] == 1
+    assert stored_payload["draft"]["labels"]["start"][1] == {"op": "narrate", "text": "Stored draft line."}
+    assert stored_payload["diagnostics"]["valid"] is True
+    assert stored_payload["patch_summary"]["inserted_ops"] == 1
+    assert supplied_response.status_code == 200
+    supplied_payload = supplied_response.json()
+    assert supplied_payload["base_revision"] == 1
+    assert supplied_payload["draft"]["labels"]["start"][0]["text"] == "Supplied opening."
+    assert supplied_payload["draft"]["labels"]["start"][1] == {"op": "narrate", "text": "Supplied draft line."}
+
+
+def test_snippet_preview_is_non_mutating(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+    before = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft").json()
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "append"},
+            "parameters": {"text": "Preview only."},
+        },
+    )
+    after = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft").json()
+
+    assert response.status_code == 200
+    assert after["revision"] == before["revision"]
+    assert after["draft"] == before["draft"]
+    assert after["diagnostics"] == before["diagnostics"]
+
+
+def test_snippet_apply_requires_revision_persists_patch_and_returns_diagnostics(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+
+    missing_revision_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-apply",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "append"},
+            "parameters": {"text": "Missing revision."},
+        },
+    )
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-apply",
+        json={
+            "if_revision": 1,
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "op_index": 0, "mode": "after"},
+            "parameters": {"text": "Applied line."},
+        },
+    )
+    stored = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft").json()
+
+    assert missing_revision_response.status_code == 422
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["revision"] == 2
+    assert payload["draft"]["labels"]["start"][1] == {"op": "narrate", "text": "Applied line."}
+    assert payload["diagnostics"]["valid"] is True
+    assert payload["patch_summary"]["inserted_ops"] == 1
+    assert stored["revision"] == 2
+    assert stored["draft"] == payload["draft"]
+    assert stored["diagnostics"] == payload["diagnostics"]
+
+
+def test_snippet_preview_unknown_snippet_returns_not_found(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "missing_snippet",
+            "anchor": {"label": "start", "mode": "append"},
+            "parameters": {},
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["details"]["reason"] == "snippet_not_found"
+
+
+def test_snippet_preview_parameter_errors_return_field_path(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+    too_deep: dict[str, Any] = {}
+    cursor = too_deep
+    for depth in range(10):
+        cursor[f"level_{depth}"] = {}
+        cursor = cursor[f"level_{depth}"]
+    cases = [
+        {"text": "Line.", "unexpected": True},
+        {"text": "x" * 9000},
+        too_deep,
+    ]
+
+    for parameters in cases:
+        response = client.post(
+            f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+            json={
+                "snippet_id": "narration",
+                "anchor": {"label": "start", "mode": "append"},
+                "parameters": parameters,
+            },
+        )
+        assert response.status_code == 400
+        details = response.json()["detail"]["details"]
+        assert details["reason"] == "snippet_parameter_invalid"
+        assert details["field_path"].startswith("$.parameters")
+
+
+def test_snippet_preview_anchor_errors_return_anchor_details(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+    cases = [
+        ({"label": "start", "mode": "beside"}, "snippet_anchor_invalid"),
+        ({"label": "missing", "mode": "append"}, "snippet_anchor_not_found"),
+    ]
+
+    for anchor, expected_reason in cases:
+        response = client.post(
+            f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+            json={
+                "snippet_id": "narration",
+                "anchor": anchor,
+                "parameters": {"text": "Line."},
+            },
+        )
+        assert response.status_code == 400
+        details = response.json()["detail"]["details"]
+        assert details["reason"] == expected_reason
+        assert details["anchor"] == anchor
+
+
+def test_snippet_apply_stale_revision_returns_current_revision(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-apply",
+        json={
+            "if_revision": 0,
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "append"},
+            "parameters": {"text": "Stale line."},
+        },
+    )
+
+    assert response.status_code == 409
+    details = response.json()["detail"]["details"]
+    assert details["reason"] == "draft_revision_conflict"
+    assert details["current_revision"] == 1
+
+
+def test_snippet_apply_stale_revision_conflicts_before_anchor_validation(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    revision_one_draft = _program(asset_pack_id)
+    revision_two_draft = {
+        **_program(asset_pack_id),
+        "entry_label": "renamed",
+        "labels": {"renamed": [{"op": "narrate", "text": "Renamed opening."}, {"op": "end"}]},
+    }
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": revision_one_draft},
+    )
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 1, "draft": revision_two_draft},
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-apply",
+        json={
+            "if_revision": 1,
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "append"},
+            "parameters": {"text": "Line for stale draft."},
+        },
+    )
+
+    assert response.status_code == 409
+    details = response.json()["detail"]["details"]
+    assert details["reason"] == "draft_revision_conflict"
+    assert details["current_revision"] == 2
+
+
+def test_vn_capabilities_include_script_authoring_catalog_when_scripts_routes_registered(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/vn/vn-capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["features"]["script_authoring_catalog"] is True
 
 
 def test_create_script_from_template_stores_valid_draft(
