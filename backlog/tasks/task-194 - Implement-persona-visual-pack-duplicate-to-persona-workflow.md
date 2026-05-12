@@ -1,10 +1,10 @@
 ---
 id: TASK-194
 title: Implement persona visual pack duplicate-to-persona workflow
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 21:42'
-updated_date: '2026-05-09 22:29'
+updated_date: '2026-05-12 05:57'
 labels:
   - persona
   - buddy
