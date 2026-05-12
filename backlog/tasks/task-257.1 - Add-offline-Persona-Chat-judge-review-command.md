@@ -1,11 +1,11 @@
 ---
 id: TASK-257.1
 title: Add offline Persona Chat judge review command
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-12 01:12'
-updated_date: '2026-05-12 01:35'
+updated_date: '2026-05-12 01:22'
 labels:
   - persona-chat
   - evaluations
@@ -48,7 +48,19 @@ Add a no-provider review command for the Persona Chat judge harness. The command
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented TDD red/green for the offline review command. Red run failed with No such command persona-chat-judge. Green/closeout verification passed: python -m pytest tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_contract.py -q (23 passed, 5 warnings); python -m bandit -r tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -f json -o /tmp/bandit_persona_chat_judge_review_command.json (0 issues); placeholder scan returned no matches; git diff --check passed.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1583. PR is draft because this AI-authored change still needs the required human-written Change summary before merge readiness.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added an offline `tldw-evals persona-chat-judge review` command that loads candidate outputs keyed by PC-JUDGE case id, validates JSON object roots, reuses the existing harness for bounded comparison reports, prints sorted JSON to stdout, and can write the same report to an explicit file. The contract doc now shows the workflow and reiterates the offline-only boundary: no model provider calls, database persistence, Jobs, API endpoint, WebUI state, runtime chat gating, or response mutation.
+
+Known skips/blockers: none.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1583
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -59,11 +71,3 @@ Implemented TDD red/green for the offline review command. Red run failed with No
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added an offline `tldw-evals persona-chat-judge review` command that loads candidate outputs keyed by PC-JUDGE case id, validates JSON object roots, reuses the existing harness for bounded comparison reports, prints sorted JSON to stdout, and can write the same report to an explicit file. The contract doc now shows the workflow and reiterates the offline-only boundary: no model provider calls, database persistence, Jobs, API endpoint, WebUI state, runtime chat gating, or response mutation.
-
-Known skips/blockers: none.
-<!-- SECTION:FINAL_SUMMARY:END -->

@@ -98,6 +98,6 @@ Run:
 - `rg -n "TO[D]O|TB[D]|FIX[M]E|PLACE[H]OLDER|\\?\\?" Docs/Reviews/PERSONA_CHAT_JUDGE_EVAL_CONTRACT_2026_05_11.md Docs/superpowers/plans/2026-05-12-persona-chat-judge-review-command.md tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py`
 - `git diff --check`
 
-- [ ] **Step 2: Commit and open PR**
+- [x] **Step 2: Commit and open PR**
 
 Commit the task, plan, CLI, tests, and docs together. Open a PR against `dev` and link GitHub issue #1579 plus parent trackers #1566, #1543, and #1510.
