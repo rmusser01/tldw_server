@@ -392,7 +392,7 @@ export default function NewSessionDialog({
       mode === 'scripted_story' && selectedScriptVersion
         ? [
             selectedScriptVersion.id,
-            ...requiredAcknowledgementWarningCodes(selectedScriptVersion.warning_summary),
+            ...acknowledgementWarningCodes(selectedScriptVersion.warning_summary),
           ].join(':')
         : acknowledgementKey(selectedPack),
     [mode, selectedPack, selectedScriptVersion]
@@ -488,7 +488,7 @@ export default function NewSessionDialog({
       request.script_id = selectedScriptVersion.script_id;
       request.script_version_id = selectedScriptVersion.id;
       if (selectedScriptRequiresAcknowledgement && acknowledgedSetupWarnings) {
-        request.acknowledgements = requiredAcknowledgementWarningCodes(selectedScriptVersion.warning_summary);
+        request.acknowledgements = acknowledgementWarningCodes(selectedScriptVersion.warning_summary);
       }
     } else if (usingManualIds && mode === 'scripted_story' && parsedScriptId && parsedScriptVersionId) {
       request.script_id = parsedScriptId;
@@ -611,7 +611,7 @@ export default function NewSessionDialog({
                     workspaceLabel="VN scripts"
                   />
                 )}
-                {!isLoadingSelectors && scriptVersions.length === 0 && (
+                {!isLoadingSelectors && scriptVersions.length === 0 && scriptEmptyStates.length === 0 && (
                   <div className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
                     No published VN script versions are available.{' '}
                     <Link className="underline" href="/vn-scripts">

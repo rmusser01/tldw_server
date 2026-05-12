@@ -58,6 +58,10 @@ function sessionModeLabel(mode: VNPlayMode): string {
   return mode === 'story' ? 'Story/CYOA' : 'Freeform';
 }
 
+function hasBranchNavigation(mode?: VNPlayMode | null): boolean {
+  return mode === 'story' || mode === 'scripted_story';
+}
+
 function isVNPlayChoice(choice: VNPlayChoice | Record<string, unknown>): choice is VNPlayChoice {
   return (
     choice !== null &&
@@ -182,7 +186,7 @@ export default function VNPlayWorkspace({
     sessionId: number,
     mode?: VNPlayMode | null
   ): Promise<{ error: string | null; navigation: VNPlayBranchNavigationResponse | null }> => {
-    if (mode !== 'story' && mode !== 'scripted_story') {
+    if (!hasBranchNavigation(mode)) {
       return { error: null, navigation: null };
     }
 
@@ -201,7 +205,7 @@ export default function VNPlayWorkspace({
     sessionId: number,
     mode?: VNPlayMode | null
   ): Promise<VNPlayBranchNavigationResponse | null> => {
-    setIsLoadingBranchNavigation(mode === 'story');
+    setIsLoadingBranchNavigation(hasBranchNavigation(mode));
     try {
       const result = await fetchBranchNavigation(sessionId, mode);
       setBranchTimelineError(result.error);
@@ -269,9 +273,7 @@ export default function VNPlayWorkspace({
     let cancelled = false;
     async function loadSessionCollections() {
       setIsLoadingGenerations(true);
-      setIsLoadingBranchNavigation(
-        selectedSession?.mode === 'story' || selectedSession?.mode === 'scripted_story'
-      );
+      setIsLoadingBranchNavigation(hasBranchNavigation(selectedSession?.mode));
       try {
         const [
           nextEvents,

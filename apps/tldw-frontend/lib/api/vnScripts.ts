@@ -25,7 +25,9 @@ const VN_SCRIPTS_BASE = '/vn/vn-scripts';
 type QueryParams = Record<string, string | number | boolean | null | undefined>;
 
 function toQueryParams<T extends object>(query: T): QueryParams {
-  return { ...query } as QueryParams;
+  return Object.fromEntries(
+    Object.entries(query).filter(([, value]) => value !== undefined && value !== null)
+  ) as QueryParams;
 }
 
 export function createVNScript(request: VNScriptCreate): Promise<VNScriptResponse> {

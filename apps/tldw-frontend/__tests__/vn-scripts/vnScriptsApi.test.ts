@@ -129,4 +129,19 @@ describe('vnScripts api client', () => {
       { context: { mode: 'preview' } }
     );
   });
+
+  it('omits nullish query values before passing params to the API client', async () => {
+    await listVNScripts({ limit: 10, offset: undefined } as Parameters<typeof listVNScripts>[0]);
+    await listVNScriptVersions(1, {
+      limit: undefined,
+      offset: undefined,
+    } as Parameters<typeof listVNScriptVersions>[1]);
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-scripts/scripts', {
+      params: { limit: 10 },
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-scripts/scripts/1/versions', {
+      params: {},
+    });
+  });
 });

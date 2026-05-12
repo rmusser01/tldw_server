@@ -111,6 +111,28 @@ const versionResponse = {
   created_at: '2026-05-12T10:15:00Z',
 };
 
+const secondVersionResponse = {
+  ...versionResponse,
+  id: 22,
+  script_id: 2,
+  version_number: 4,
+  label: 'Second launch',
+  asset_pack_id: 8,
+  manifest_snapshot_id: 121,
+  policy_snapshot_id: 222,
+  generation_profile_snapshot_id: 323,
+};
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, reject, resolve };
+}
+
 function mockList(items = [openingScript, secondScript]) {
   mocks.listVNScripts.mockResolvedValue({
     items,
@@ -149,7 +171,11 @@ describe('VNScriptsWorkbench', () => {
     mocks.getVNScriptDiagnostics.mockResolvedValue({
       script_id: 1,
       revision: 3,
-      diagnostics: { graph: { nodes: 1 }, unreachable: ['unused'] },
+      diagnostics: {
+        graph: { nodes: 1 },
+        raw_debug_payload: 'secret raw payload',
+        unreachable: ['unused'],
+      },
     });
     mocks.publishVNScript.mockResolvedValue({
       script_id: 1,
@@ -177,14 +203,14 @@ describe('VNScriptsWorkbench', () => {
       script_id: 1,
       version_id: 12,
       asset_pack_id: 7,
-      manifest: { slots: ['background.interior'] },
+      manifest: { slots: ['background.interior'], raw_prompt: 'hidden prompt text' },
       manifest_hash: 'hash-101',
       created_at: '2026-05-12T10:15:00Z',
     });
     mocks.evaluateVNScriptVersionPolicy.mockResolvedValue({
       decision: 'allow',
       profile_id: 'teen-policy',
-      reasons: [{ code: 'ok' }],
+      reasons: [{ code: 'ok', internal_notes: 'hidden policy details' }],
       blocked: false,
       requires_acknowledgement: false,
       remediation: [],
@@ -318,7 +344,7 @@ describe('VNScriptsWorkbench', () => {
     expect(screen.getByText(/unused_scene/)).toBeInTheDocument();
   });
 
-  it('loads diagnostics and renders the backend JSON payload', async () => {
+  it('loads diagnostics and renders a sanitized backend summary', async () => {
     const user = userEvent.setup();
     render(<VNScriptsWorkbench />);
 
@@ -328,6 +354,8 @@ describe('VNScriptsWorkbench', () => {
     await waitFor(() => expect(mocks.getVNScriptDiagnostics).toHaveBeenCalledWith(1));
     expect(await screen.findByText(/unreachable/)).toBeInTheDocument();
     expect(screen.getByText(/unused/)).toBeInTheDocument();
+    expect(screen.getByText(/\[redacted\]/)).toBeInTheDocument();
+    expect(screen.queryByText(/secret raw payload/)).not.toBeInTheDocument();
   });
 
   it('publishes with an idempotency key and current draft revision without inferred acknowledgements', async () => {
@@ -342,11 +370,66 @@ describe('VNScriptsWorkbench', () => {
       expect(mocks.publishVNScript).toHaveBeenCalledWith(1, {
         draft_revision: 3,
         label: 'Playable v1',
-        idempotency_key: expect.stringMatching(/^vn-script-publish-1-/),
+        idempotency_key: expect.stringMatching(/^vn-script-publish-1-3-/),
         acknowledgements: [],
       });
     });
     expect(mocks.listVNScriptVersions).toHaveBeenCalledWith(1);
+  });
+
+  it('reuses the draft-scoped publish idempotency key when a publish is retried', async () => {
+    const user = userEvent.setup();
+    mocks.publishVNScript
+      .mockRejectedValueOnce(new Error('script_publish_acknowledgement_required'))
+      .mockResolvedValueOnce({
+        script_id: 1,
+        version_id: 13,
+        version_number: 3,
+        status: 'published',
+        asset_pack_id: 7,
+        manifest_snapshot_id: 111,
+        policy_snapshot_id: 222,
+        generation_profile_snapshot_id: 333,
+        generation_profile_snapshots: {},
+        validation: { valid: true },
+        created_at: '2026-05-12T10:20:00Z',
+      });
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    expect(await screen.findByText('script_publish_acknowledgement_required')).toBeInTheDocument();
+    const firstKey = mocks.publishVNScript.mock.calls[0][1].idempotency_key;
+
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(mocks.publishVNScript).toHaveBeenCalledTimes(2));
+    expect(mocks.publishVNScript.mock.calls[1][1].idempotency_key).toBe(firstKey);
+  });
+
+  it('keeps the optimistic publish result when version refresh fails after publish succeeds', async () => {
+    const user = userEvent.setup();
+    let versionListCalls = 0;
+    mocks.listVNScriptVersions.mockImplementation(async () => {
+      versionListCalls += 1;
+      if (versionListCalls === 1) {
+        return {
+          items: [versionResponse],
+          limit: 25,
+          offset: 0,
+          total: 1,
+          has_more: false,
+          pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+        };
+      }
+      throw new Error('Failed to fetch versions from backend with internal stack payload');
+    });
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+
+    expect(await screen.findByText('Version 3')).toBeInTheDocument();
+    expect(screen.getByText('Published, but failed to refresh versions')).toBeInTheDocument();
   });
 
   it('surfaces publish acknowledgement-required errors without inferring codes', async () => {
@@ -375,5 +458,68 @@ describe('VNScriptsWorkbench', () => {
     await waitFor(() => expect(mocks.evaluateVNScriptVersionPolicy).toHaveBeenCalledWith(1, 12));
     expect(await screen.findByText(/background.interior/)).toBeInTheDocument();
     expect(screen.getByText(/allow/)).toBeInTheDocument();
+    expect(screen.queryByText(/hidden prompt text/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hidden policy details/)).not.toBeInTheDocument();
+  });
+
+  it('does not let a stale publish version refresh overwrite a newly selected script', async () => {
+    const user = userEvent.setup();
+    const staleRefresh = createDeferred<{
+      items: typeof versionResponse[];
+      limit: number;
+      offset: number;
+      total: number;
+      has_more: boolean;
+      pagination: { limit: number; offset: number; total: number; has_more: boolean };
+    }>();
+    let openingVersionCalls = 0;
+    mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) =>
+      scriptId === 2
+        ? { ...draftResponse, script_id: 2, draft: { scenes: [{ id: 'second' }] } }
+        : draftResponse
+    );
+    mocks.listVNScriptVersions.mockImplementation((scriptId: number) => {
+      if (scriptId === 2) {
+        return Promise.resolve({
+          items: [secondVersionResponse],
+          limit: 25,
+          offset: 0,
+          total: 1,
+          has_more: false,
+          pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+        });
+      }
+      openingVersionCalls += 1;
+      if (openingVersionCalls === 1) {
+        return Promise.resolve({
+          items: [versionResponse],
+          limit: 25,
+          offset: 0,
+          total: 1,
+          has_more: false,
+          pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+        });
+      }
+      return staleRefresh.promise;
+    });
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(mocks.publishVNScript).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole('button', { name: /Second Route/ }));
+    await screen.findByText('Script #2');
+
+    staleRefresh.resolve({
+      items: [versionResponse],
+      limit: 25,
+      offset: 0,
+      total: 1,
+      has_more: false,
+      pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+    });
+
+    expect(await screen.findByTestId('version-22')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('version-12')).not.toBeInTheDocument());
   });
 });

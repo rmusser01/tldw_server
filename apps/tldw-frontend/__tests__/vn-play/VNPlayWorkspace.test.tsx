@@ -588,6 +588,50 @@ describe('VNPlayWorkspace', () => {
     );
   });
 
+  it('falls back to all script warning codes when scripted-story acknowledgement is required at summary level', async () => {
+    const user = userEvent.setup();
+    mockVNPlayApi({ sessions: [] });
+    mocks.listVNPlaySetupOptions.mockResolvedValue(
+      setupOptions({
+        script_versions: [
+          setupScriptVersion({
+            warning_summary: {
+              highest_severity: 'high_risk',
+              requires_acknowledgement: true,
+              warnings: [
+                {
+                  code: 'script_summary_review',
+                  severity: 'high_risk',
+                  message: 'Review script summary warnings before launch.',
+                  requires_acknowledgement: false,
+                },
+              ],
+            },
+          }),
+        ],
+      })
+    );
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
+
+    expect(await screen.findByText(/Review script summary warnings before launch/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /I understand and want to proceed/i }));
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Summary Acknowledged Script');
+    await user.click(screen.getByRole('button', { name: 'Create session' }));
+
+    await waitFor(() => {
+      expect(mocks.createVNPlaySession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'scripted_story',
+          acknowledgements: ['script_summary_review'],
+        })
+      );
+    });
+  });
+
   it('shows VN scripts guidance when no published script versions exist', async () => {
     const user = userEvent.setup();
     mockVNPlayApi({ sessions: [] });
@@ -609,10 +653,9 @@ describe('VNPlayWorkspace', () => {
     await user.click(await screen.findByRole('button', { name: /new scripted story/i }));
 
     expect(await screen.findByText(/No published VN script versions were found/i)).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /Open VN scripts/i })[0]).toHaveAttribute(
-      'href',
-      '/vn-scripts'
-    );
+    const scriptLinks = screen.getAllByRole('link', { name: /Open VN scripts/i });
+    expect(scriptLinks).toHaveLength(1);
+    expect(scriptLinks[0]).toHaveAttribute('href', '/vn-scripts');
     expect(screen.getByRole('button', { name: 'Create session' })).toBeDisabled();
   });
 
@@ -1161,6 +1204,41 @@ describe('VNPlayWorkspace', () => {
     expect(screen.getAllByText('Open the archive door').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /resume branch: step inside/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /return to choice: step inside/i })).toBeInTheDocument();
+    expect(mocks.getVNPlayBranchNavigation).toHaveBeenCalledWith(1);
+  });
+
+  it('renders player-facing branch navigation for scripted-story sessions', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'scripted_story',
+      title: 'Scripted Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      script_id: 44,
+      script_version_id: 5,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      ...emptyBranchNavigation,
+      mode: 'scripted_story',
+      scene_version: 6,
+      active_path: [
+        {
+          branch_id: 12,
+          branch_label: 'Scripted step',
+          choice_id: 'scripted-door',
+          choice_text: 'Follow the scripted branch',
+          depth: 1,
+        },
+      ],
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Branch timeline')).toBeInTheDocument();
+    expect(screen.getAllByText('Follow the scripted branch').length).toBeGreaterThan(0);
     expect(mocks.getVNPlayBranchNavigation).toHaveBeenCalledWith(1);
   });
 

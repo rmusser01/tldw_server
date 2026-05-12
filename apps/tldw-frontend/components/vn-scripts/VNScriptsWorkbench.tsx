@@ -1,9 +1,8 @@
-import React, { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
 import JsonEditor from '@web/components/ui/JsonEditor';
-import JsonViewer from '@web/components/ui/JsonViewer';
 import {
   createVNScript,
   evaluateVNScriptVersionPolicy,
@@ -20,10 +19,8 @@ import type {
   VNScriptContentRating,
   VNScriptDiagnosticsResponse,
   VNScriptDraftResponse,
-  VNScriptManifestSnapshotResponse,
   VNScriptResponse,
   VNScriptValidationResponse,
-  VNScriptVersionPolicyEvaluateResponse,
   VNScriptVersionResponse,
 } from '@web/types/vn-scripts';
 
@@ -34,16 +31,29 @@ function formatJson(value: unknown): string {
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof Error && error.message) {
+    const message = error.message.trim();
+    if (/^[a-z0-9_.:-]{1,120}$/i.test(message)) return message;
+  }
   return fallback;
 }
 
-function createPublishIdempotencyKey(scriptId: number): string {
-  const suffix =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2);
-  return `vn-script-publish-${scriptId}-${Date.now()}-${suffix}`;
+function randomIdSuffix(): string {
+  const randomSource = globalThis.crypto;
+  if (randomSource && 'randomUUID' in randomSource) {
+    return randomSource.randomUUID();
+  }
+  if (randomSource && 'getRandomValues' in randomSource) {
+    const values = new Uint32Array(2);
+    randomSource.getRandomValues(values);
+    return Array.from(values, (value) => value.toString(36)).join('-');
+  }
+  const highResolutionTime = globalThis.performance?.now?.() ?? Date.now();
+  return `${Date.now()}-${highResolutionTime.toString(36).replace('.', '')}`;
+}
+
+function createPublishIdempotencyKey(scriptId: number, draftRevision: number): string {
+  return `vn-script-publish-${scriptId}-${draftRevision}-${randomIdSuffix()}`;
 }
 
 function validationBadge(validation: Record<string, unknown>): string {
@@ -61,6 +71,31 @@ function statusVariant(status: string): 'neutral' | 'success' | 'warning' | 'dan
   return 'info';
 }
 
+function isSensitiveKey(key: string): boolean {
+  return /(raw|debug|secret|token|credential|internal|prompt)/i.test(key);
+}
+
+function summarizeValue(value: unknown, depth = 0): unknown {
+  if (depth > 3) return '[truncated]';
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((item) => summarizeValue(item, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        key,
+        isSensitiveKey(key) ? '[redacted]' : summarizeValue(nestedValue, depth + 1),
+      ])
+    );
+  }
+  return value;
+}
+
+function summaryLines(value: unknown): string[] {
+  const summarized = summarizeValue(value);
+  return (JSON.stringify(summarized ?? null, null, 2) ?? 'null').split('\n');
+}
+
 export default function VNScriptsWorkbench() {
   const [scripts, setScripts] = useState<VNScriptResponse[]>([]);
   const [selectedScript, setSelectedScript] = useState<VNScriptResponse | null>(null);
@@ -69,8 +104,8 @@ export default function VNScriptsWorkbench() {
   const [versions, setVersions] = useState<VNScriptVersionResponse[]>([]);
   const [validation, setValidation] = useState<VNScriptValidationResponse | null>(null);
   const [diagnostics, setDiagnostics] = useState<VNScriptDiagnosticsResponse | null>(null);
-  const [manifestSnapshots, setManifestSnapshots] = useState<Record<number, VNScriptManifestSnapshotResponse>>({});
-  const [policySummaries, setPolicySummaries] = useState<Record<number, VNScriptVersionPolicyEvaluateResponse>>({});
+  const [manifestSnapshots, setManifestSnapshots] = useState<Record<number, unknown>>({});
+  const [policySummaries, setPolicySummaries] = useState<Record<number, unknown>>({});
   const [isLoadingScripts, setIsLoadingScripts] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -87,6 +122,12 @@ export default function VNScriptsWorkbench() {
   const [generationProfileId, setGenerationProfileId] = useState('');
   const [contentRating, setContentRating] = useState<VNScriptContentRating>('teen');
   const [publishLabel, setPublishLabel] = useState('');
+  const selectedScriptIdRef = useRef<number | null>(null);
+  const publishKeyRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    selectedScriptIdRef.current = selectedScript?.id ?? null;
+  }, [selectedScript?.id]);
 
   const selectedMeta = useMemo(() => {
     if (!selectedScript) return null;
@@ -100,7 +141,9 @@ export default function VNScriptsWorkbench() {
 
   const refreshVersions = useCallback(async (scriptId: number) => {
     const nextVersions = await listVNScriptVersions(scriptId);
-    setVersions(nextVersions.items ?? []);
+    if (selectedScriptIdRef.current === scriptId) {
+      setVersions(nextVersions.items ?? []);
+    }
   }, []);
 
   useEffect(() => {
@@ -142,6 +185,9 @@ export default function VNScriptsWorkbench() {
 
     let cancelled = false;
     async function loadScriptDetails() {
+      setDraft(null);
+      setDraftText('{}');
+      setVersions([]);
       setError(null);
       setEditorError(null);
       setStatusMessage(null);
@@ -279,20 +325,56 @@ export default function VNScriptsWorkbench() {
 
   const handlePublish = useCallback(async () => {
     if (!selectedScript || !draft) return;
+    const scriptId = selectedScript.id;
+    const publishScope = `${scriptId}:${draft.revision}`;
+    const idempotencyKey =
+      publishKeyRef.current[publishScope] ?? createPublishIdempotencyKey(scriptId, draft.revision);
+    publishKeyRef.current[publishScope] = idempotencyKey;
+
     setIsPublishing(true);
     setError(null);
     setStatusMessage(null);
+    let response: Awaited<ReturnType<typeof publishVNScript>>;
     try {
-      const response = await publishVNScript(selectedScript.id, {
+      response = await publishVNScript(scriptId, {
         draft_revision: draft.revision,
         label: publishLabel.trim() || null,
-        idempotency_key: createPublishIdempotencyKey(selectedScript.id),
+        idempotency_key: idempotencyKey,
         acknowledgements: [],
       });
-      setStatusMessage(`Published version ${response.version_number}.`);
-      await refreshVersions(selectedScript.id);
     } catch (publishError) {
       setError(errorMessage(publishError, 'Failed to publish script'));
+      setIsPublishing(false);
+      return;
+    }
+
+    delete publishKeyRef.current[publishScope];
+    setVersions((previous) => {
+      if (selectedScriptIdRef.current !== scriptId) return previous;
+      const optimisticVersion: VNScriptVersionResponse = {
+        id: response.version_id,
+        script_id: response.script_id,
+        version_number: response.version_number,
+        label: publishLabel.trim() || null,
+        draft_revision: draft.revision,
+        program: {},
+        asset_pack_id: response.asset_pack_id,
+        manifest_snapshot_id: response.manifest_snapshot_id,
+        policy_snapshot_id: response.policy_snapshot_id,
+        generation_profile_snapshot_id: response.generation_profile_snapshot_id,
+        generation_profile_snapshots: response.generation_profile_snapshots,
+        script_defaults: {},
+        validation: response.validation,
+        created_at: response.created_at,
+      };
+      return [optimisticVersion, ...previous.filter((version) => version.id !== optimisticVersion.id)];
+    });
+
+    try {
+      setStatusMessage(`Published version ${response.version_number}.`);
+      await refreshVersions(scriptId);
+    } catch (refreshError) {
+      setError(errorMessage(refreshError, 'Published, but failed to refresh versions'));
     } finally {
       setIsPublishing(false);
     }
@@ -303,7 +385,16 @@ export default function VNScriptsWorkbench() {
     setError(null);
     try {
       const snapshot = await getVNScriptManifestSnapshot(selectedScript.id, version.id);
-      setManifestSnapshots((previous) => ({ ...previous, [version.id]: snapshot }));
+      setManifestSnapshots((previous) => ({
+        ...previous,
+        [version.id]: {
+          id: snapshot.id,
+          asset_pack_id: snapshot.asset_pack_id,
+          manifest_hash: snapshot.manifest_hash,
+          manifest_summary: summarizeValue(snapshot.manifest),
+          created_at: snapshot.created_at,
+        },
+      }));
     } catch (manifestError) {
       setError(errorMessage(manifestError, 'Failed to load manifest snapshot'));
     }
@@ -314,7 +405,17 @@ export default function VNScriptsWorkbench() {
     setError(null);
     try {
       const summary = await evaluateVNScriptVersionPolicy(selectedScript.id, version.id);
-      setPolicySummaries((previous) => ({ ...previous, [version.id]: summary }));
+      setPolicySummaries((previous) => ({
+        ...previous,
+        [version.id]: {
+          decision: summary.decision,
+          profile_id: summary.profile_id,
+          blocked: summary.blocked,
+          requires_acknowledgement: summary.requires_acknowledgement,
+          reasons: summarizeValue(summary.reasons),
+          remediation: summary.remediation,
+        },
+      }));
     } catch (policyError) {
       setError(errorMessage(policyError, 'Failed to evaluate version policy'));
     }
@@ -455,7 +556,9 @@ export default function VNScriptsWorkbench() {
                   </Button>
                 </div>
               </div>
-              <JsonEditor value={draftText} onChange={setDraftText} height="52vh" readOnly={!selectedScript} />
+              <div className="min-h-[420px] flex-1">
+                <JsonEditor value={draftText} onChange={setDraftText} height="100%" readOnly={!selectedScript} />
+              </div>
             </div>
           </section>
 
@@ -509,7 +612,9 @@ export default function VNScriptsWorkbench() {
                 </Button>
               </div>
               {diagnostics ? (
-                <JsonViewer data={diagnostics.diagnostics} className="max-h-56 rounded-md bg-bg p-2 text-xs" />
+                <pre className="max-h-56 overflow-auto rounded-md bg-bg p-2 text-xs">
+                  {summaryLines(diagnostics.diagnostics).join('\n')}
+                </pre>
               ) : (
                 <p className="text-sm text-text-muted">Diagnostics are loaded on demand from the draft endpoint.</p>
               )}
@@ -579,13 +684,17 @@ export default function VNScriptsWorkbench() {
                     {manifestSnapshots[version.id] && (
                       <div className="mt-3">
                         <h4 className="mb-1 text-xs font-semibold uppercase text-text-muted">Manifest summary</h4>
-                        <JsonViewer data={manifestSnapshots[version.id]} className="max-h-48 rounded-md bg-surface2 p-2 text-xs" />
+                        <pre className="max-h-48 overflow-auto rounded-md bg-surface2 p-2 text-xs">
+                          {summaryLines(manifestSnapshots[version.id]).join('\n')}
+                        </pre>
                       </div>
                     )}
                     {policySummaries[version.id] && (
                       <div className="mt-3">
                         <h4 className="mb-1 text-xs font-semibold uppercase text-text-muted">Policy summary</h4>
-                        <JsonViewer data={policySummaries[version.id]} className="max-h-48 rounded-md bg-surface2 p-2 text-xs" />
+                        <pre className="max-h-48 overflow-auto rounded-md bg-surface2 p-2 text-xs">
+                          {summaryLines(policySummaries[version.id]).join('\n')}
+                        </pre>
                       </div>
                     )}
                   </article>
