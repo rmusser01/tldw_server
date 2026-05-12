@@ -57,6 +57,7 @@ import {
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
 import {
+  parseProviderQualifiedModelSelection,
   resolveApiProviderForModel,
   resolveExplicitProviderForSelectedModel
 } from "@/utils/resolve-api-provider"
@@ -139,6 +140,12 @@ import {
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
 }
+
+const applySelectionProviderToSettings = (
+  settings: ChatModelSettingsStore,
+  provider?: string
+): ChatModelSettingsStore =>
+  provider ? { ...settings, apiProvider: provider } : settings
 
 type ChatModeOverrides = {
   historyId?: string | null
@@ -867,8 +874,12 @@ export const useChatActions = ({
       serverChatId: resolvedServerChatId
     })
 
-    const effectiveSelectedModel = getEffectiveSelectedModel(
-      overrides.selectedModel
+    const effectiveModelSelection = parseProviderQualifiedModelSelection(
+      getEffectiveSelectedModel(overrides.selectedModel)
+    )
+    const effectiveChatModelSettings = applySelectionProviderToSettings(
+      currentChatModelSettings,
+      effectiveModelSelection.provider
     )
     const resolvedSelectedSystemPrompt = Object.prototype.hasOwnProperty.call(
       overrides,
@@ -890,12 +901,12 @@ export const useChatActions = ({
         : webSearch
 
     return {
-      selectedModel: effectiveSelectedModel || "",
+      selectedModel: effectiveModelSelection.modelId || "",
       useOCR: resolvedUseOCR,
       selectedSystemPrompt: resolvedSelectedSystemPrompt,
       selectedKnowledge,
       toolChoice: resolvedToolChoice,
-      currentChatModelSettings,
+      currentChatModelSettings: effectiveChatModelSettings,
       setMessages,
       setIsSearchingInternet,
       saveMessageOnSuccess,
@@ -2064,7 +2075,9 @@ export const useChatActions = ({
   }
 
   const validateBeforeSubmitFn = () => {
-    const effectiveSelectedModel = getEffectiveSelectedModel()
+    const effectiveModelSelection = parseProviderQualifiedModelSelection(
+      getEffectiveSelectedModel()
+    )
     if (compareModeActive) {
       const maxModels =
         typeof compareMaxModels === "number" && compareMaxModels > 0
@@ -2094,7 +2107,11 @@ export const useChatActions = ({
       }
       return true
     }
-    return validateBeforeSubmit(effectiveSelectedModel || "", t, notification)
+    return validateBeforeSubmit(
+      effectiveModelSelection.modelId || "",
+      t,
+      notification
+    )
   }
 
   const onSubmit = async ({
@@ -2146,6 +2163,14 @@ export const useChatActions = ({
   }): Promise<ChatSubmitResult> => {
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
+    )
+    const effectiveModelSelection = parseProviderQualifiedModelSelection(
+      effectiveSelectedModel
+    )
+    const effectiveRequestModel = effectiveModelSelection.modelId || ""
+    const effectiveProviderSettings = applySelectionProviderToSettings(
+      currentChatModelSettings,
+      effectiveModelSelection.provider
     )
     setStreaming(true)
     const trimmedImageBackendOverride =
@@ -2331,17 +2356,17 @@ export const useChatActions = ({
       const imageBackendCandidates = hasExplicitImageBackend
         ? [trimmedImageBackendOverride]
         : resolveImageBackendCandidates(
-            currentChatModelSettings?.apiProvider,
-            effectiveSelectedModel
+            effectiveProviderSettings?.apiProvider,
+            effectiveRequestModel
           )
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         const resolvedImageModelLabel = hasExplicitImageBackend
           ? trimmedImageBackendOverride ||
-            (effectiveSelectedModel || "").trim() ||
-            currentChatModelSettings?.apiProvider ||
+            effectiveRequestModel ||
+            effectiveProviderSettings?.apiProvider ||
             "image-generation"
-          : (effectiveSelectedModel || "").trim() ||
-            currentChatModelSettings?.apiProvider ||
+          : effectiveRequestModel ||
+            effectiveProviderSettings?.apiProvider ||
             "image-generation"
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
@@ -2430,7 +2455,7 @@ export const useChatActions = ({
         if (!compareModeActive) {
           const resolvedSelectedCharacter = await resolveSelectedCharacter()
           if (resolvedSelectedCharacter?.id) {
-            const resolvedModel = effectiveSelectedModel?.trim()
+            const resolvedModel = effectiveRequestModel
             if (!resolvedModel) {
               notification.error({
                 message: t("error"),
@@ -2459,7 +2484,7 @@ export const useChatActions = ({
           }
 
           if (isPersonaAssistantSelection(selectedAssistant)) {
-            const resolvedModel = effectiveSelectedModel?.trim()
+            const resolvedModel = effectiveRequestModel
             if (!resolvedModel) {
               notification.error({
                 message: t("error"),
@@ -2527,8 +2552,8 @@ export const useChatActions = ({
           const modelsRaw =
             compareSelectedModels && compareSelectedModels.length > 0
               ? compareSelectedModels
-              : effectiveSelectedModel
-                ? [effectiveSelectedModel]
+              : effectiveRequestModel
+                ? [effectiveRequestModel]
                 : []
           if (modelsRaw.length === 0) {
             throw new Error("No models selected for Compare mode")
@@ -2599,8 +2624,11 @@ export const useChatActions = ({
             }
             activeHistoryId = "temp"
           } else if (!activeHistoryId) {
+            const firstModelSelection = parseProviderQualifiedModelSelection(
+              uniqueModels[0] || effectiveRequestModel
+            )
             const title = await generateTitle(
-              uniqueModels[0] || effectiveSelectedModel || "",
+              firstModelSelection.modelId || effectiveRequestModel,
               message,
               message
             )
@@ -2616,7 +2644,7 @@ export const useChatActions = ({
             await saveMessage({
               id: compareUserMessageId,
               history_id: activeHistoryId,
-              name: effectiveSelectedModel || uniqueModels[0] || "You",
+              name: effectiveRequestModel || uniqueModels[0] || "You",
               role: "user",
               content: message,
               images: resolvedImage ? [resolvedImage] : [],
@@ -2649,7 +2677,10 @@ export const useChatActions = ({
             uploadedFiles: uploadedFiles
           }
 
-          const comparePromises = models.map(async (modelId) => {
+          const comparePromises = models.map(async (modelKey) => {
+            const modelSelection =
+              parseProviderQualifiedModelSelection(modelKey)
+            const modelId = modelSelection.modelId || modelKey
             const historyForModel = buildHistoryForModel(baseMessages, modelId)
             try {
               return toChatSubmitResult(
@@ -2662,6 +2693,11 @@ export const useChatActions = ({
                   signal,
                   {
                     ...compareEnhancedParams,
+                    currentChatModelSettings:
+                      applySelectionProviderToSettings(
+                        compareEnhancedParams.currentChatModelSettings,
+                        modelSelection.provider
+                      ),
                     selectedModel: modelId,
                     clusterId,
                     assistantMessageType: "compare:reply",

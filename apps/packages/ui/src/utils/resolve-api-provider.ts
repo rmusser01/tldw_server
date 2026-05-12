@@ -13,6 +13,13 @@ type ResolveExplicitProviderForSelectedModelOptions = {
   explicitProvider?: string | null
 }
 
+export type ProviderQualifiedModelSelection = {
+  raw: string
+  modelId: string
+  provider?: string
+  isProviderQualified: boolean
+}
+
 const PROVIDER_ALIASES: Record<string, string> = {
   "custom_openai_api": "custom-openai-api",
   "custom-openai-api2": "custom-openai-api-2",
@@ -46,6 +53,7 @@ const KNOWN_PROVIDER_KEYS = new Set<string>([
   "mlx",
   "custom-openai-api",
   "custom-openai-api-2",
+  "custom",
   "together",
   "xai",
   "siliconflow",
@@ -94,22 +102,68 @@ const normalizeKnownProvider = (value: unknown): string => {
   return normalized
 }
 
+export const parseProviderQualifiedModelSelection = (
+  value: unknown
+): ProviderQualifiedModelSelection => {
+  const raw = String(value || "").trim()
+  const fallback = {
+    raw,
+    modelId: raw,
+    provider: undefined,
+    isProviderQualified: false
+  }
+  const separatorIndex = raw.indexOf(":")
+  if (separatorIndex <= 0 || separatorIndex === raw.length - 1) {
+    return fallback
+  }
+
+  const provider = normalizeKnownProvider(raw.slice(0, separatorIndex))
+  if (!provider) return fallback
+
+  const modelId = raw.slice(separatorIndex + 1).trim()
+  if (!modelId) return fallback
+
+  return {
+    raw,
+    modelId,
+    provider,
+    isProviderQualified: true
+  }
+}
+
 export const resolveExplicitProviderForSelectedModel = ({
   currentSelectedModel,
   requestedSelectedModel,
   explicitProvider
 }: ResolveExplicitProviderForSelectedModelOptions): string | undefined => {
+  const requestedSelection = parseProviderQualifiedModelSelection(
+    requestedSelectedModel
+  )
+  if (requestedSelection.provider) {
+    return requestedSelection.provider
+  }
+
   const normalizedExplicitProvider = normalizeProvider(explicitProvider)
   if (!normalizedExplicitProvider) return undefined
 
-  const normalizedRequestedModel = normalizeModelId(requestedSelectedModel)
+  const normalizedRequestedModel = normalizeModelId(requestedSelection.modelId)
   if (!normalizedRequestedModel) {
     return normalizedExplicitProvider
   }
 
-  const normalizedCurrentModel = normalizeModelId(currentSelectedModel)
+  const currentSelection = parseProviderQualifiedModelSelection(
+    currentSelectedModel
+  )
+  const normalizedCurrentModel = normalizeModelId(currentSelection.modelId)
   if (!normalizedCurrentModel) {
     return undefined
+  }
+
+  if (
+    currentSelection.provider &&
+    normalizedRequestedModel === normalizedCurrentModel
+  ) {
+    return currentSelection.provider
   }
 
   return normalizedRequestedModel === normalizedCurrentModel
@@ -159,10 +213,12 @@ export const resolveApiProviderForModel = async ({
   providerHint,
   explicitProvider
 }: ResolveApiProviderOptions): Promise<string | undefined> => {
-  const explicit = normalizeProvider(explicitProvider)
+  const modelSelection = parseProviderQualifiedModelSelection(modelId)
+  const explicit =
+    modelSelection.provider || normalizeProvider(explicitProvider)
   if (explicit) return explicit
 
-  const rawModelId = String(modelId || "").trim()
+  const rawModelId = modelSelection.modelId
   const normalizedModelId = normalizeModelId(rawModelId)
   const isTldwScopedModel = /^tldw:/i.test(rawModelId)
   if (isAutoModelId(rawModelId)) {

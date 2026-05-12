@@ -20,6 +20,7 @@ import {
   consumeStreamingChunk,
   type StreamingChunk
 } from "@/utils/streaming-chunks"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { buildMessageSteeringSnippet } from "@/utils/message-steering"
 import { useStoreMessageOption } from "@/store/option"
 import type { ChatHistory, Message, ToolChoice } from "~/store/option"
@@ -158,7 +159,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   params: TParams
 ): Promise<ChatSubmitResult> => {
   const {
-    selectedModel,
+    selectedModel: rawSelectedModel,
     toolChoice,
     setMessages,
     saveMessageOnSuccess,
@@ -172,7 +173,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     clusterId,
     userMessageType,
     assistantMessageType,
-    modelIdOverride,
+    modelIdOverride: rawModelIdOverride,
     userMessageId,
     assistantMessageId,
     userParentMessageId,
@@ -182,6 +183,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     imageEventSyncPolicy,
     conversationId
   } = params
+  const selectedModelSelection =
+    parseProviderQualifiedModelSelection(rawSelectedModel)
+  const selectedModel =
+    selectedModelSelection.modelId || rawSelectedModel
+  const modelIdOverride = rawModelIdOverride
+    ? parseProviderQualifiedModelSelection(rawModelIdOverride).modelId
+    : undefined
 
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
@@ -209,6 +217,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const context: ChatModeContext<TParams> = {
     ...params,
+    selectedModel,
+    modelIdOverride,
     message,
     image,
     isRegenerate,
