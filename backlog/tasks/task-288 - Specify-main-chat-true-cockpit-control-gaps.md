@@ -4,7 +4,7 @@ title: Specify main /chat true cockpit control gaps
 status: In Progress
 assignee: []
 created_date: '2026-05-12 04:21'
-updated_date: '2026-05-12 04:30'
+updated_date: '2026-05-12 04:34'
 labels:
   - webui
   - chat
@@ -40,6 +40,8 @@ Create a design/spec artifact for the main WebUI /chat page that defines the mis
 Created design spec at Docs/superpowers/specs/2026-05-12-main-chat-cockpit-controls-gap-design.md in the chat-degraded-health worktree. Scope is main WebUI /chat only, excludes extension sidepanel/sidebar, separates merge-blocking parity from true cockpit-control maturity, and defines real-server/functionality test coverage. Verification so far: git diff --check passed for the worktree; docs-only change, no Bandit needed.
 
 Design review pass found and addressed three spec risks: real-server requirements could be misread as allowing mocked browser data, cockpit scope was too broad for one implementation pass, and open questions lacked default decisions. The spec now adds a shared control contract, a narrow first implementation slice, explicit no page.route/synthetic payload language for merge-critical Playwright coverage, interim degraded-health classification, and default answers for persistence/runtime/submit-test scope.
+
+Clarified the spec is only the first implementation slice toward the longer-term main /chat cockpit target. Added a First Slice Boundary section with explicit in-scope and out-of-scope lists, renamed broader items to Cockpit Maturity Backlog, and added a boundary warning not to implement later cockpit-maturity items without explicit user approval.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
