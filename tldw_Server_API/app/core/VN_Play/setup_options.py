@@ -363,14 +363,19 @@ def _script_version_options(
             policy_blocked = bool(decision.get("blocked"))
             warnings.extend(_policy_warnings(decision))
 
-        generation_snapshot = profile_snapshots.get_profile_snapshot(
-            int(version["generation_profile_snapshot_id"]),
-            owner_user_id=owner_user_id,
-        )
-        generation_definition = _profile_definition(generation_snapshot)
+        generation_snapshot_id = _optional_int(version.get("generation_profile_snapshot_id"))
+        generation_snapshot = None
+        if generation_snapshot_id is not None:
+            generation_snapshot = profile_snapshots.get_profile_snapshot(
+                generation_snapshot_id,
+                owner_user_id=owner_user_id,
+            )
+        generation_definition = _profile_definition(generation_snapshot) if generation_snapshot else {}
         generation_requirements = _script_generation_requirements(version.get("program"))
         generation_blocked = generation_snapshot is None
-        if generation_snapshot is None:
+        if generation_snapshot_id is None:
+            warnings.append(_warning("generation_profile_snapshot_missing", "high_risk"))
+        elif generation_snapshot is None:
             warnings.append(_warning("generation_profile_snapshot_unavailable", "high_risk"))
         generation_warnings, generation_requirements_blocked = _generation_profile_warnings(
             profile_snapshots=profile_snapshots,
@@ -393,7 +398,7 @@ def _script_version_options(
                 asset_pack_id=int(version["asset_pack_id"]),
                 manifest_snapshot_id=int(version["manifest_snapshot_id"]),
                 policy_snapshot_id=int(version["policy_snapshot_id"]),
-                generation_profile_snapshot_id=int(version["generation_profile_snapshot_id"]),
+                generation_profile_snapshot_id=generation_snapshot_id,
                 policy_profile_id=str(version.get("policy_profile_id") or ""),
                 generation_profile_id=str(version.get("generation_profile_id") or ""),
                 generation_profile_key="default",
@@ -589,7 +594,10 @@ def _generation_profile_warnings(
 
 
 def _generation_snapshot_ids(version: Mapping[str, Any]) -> dict[str, int]:
-    snapshot_ids = {"default": int(version["generation_profile_snapshot_id"])}
+    snapshot_ids: dict[str, int] = {}
+    default_snapshot_id = _optional_int(version.get("generation_profile_snapshot_id"))
+    if default_snapshot_id is not None:
+        snapshot_ids["default"] = default_snapshot_id
     raw_map = version.get("generation_profile_snapshots")
     if isinstance(raw_map, Mapping):
         for key, value in raw_map.items():

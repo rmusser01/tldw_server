@@ -39,7 +39,7 @@ Expose backend-owned scripted VN generation confirmation, cancellation, regenera
 <!-- SECTION:NOTES:BEGIN -->
 Implemented Task 8 API slice for scripted VN generation runtime: confirm/cancel/regenerate/activate command endpoints, generation history and revision list/detail endpoints, owner/admin debug detail, public state metadata, and raw-output redaction rules.
 
-Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py tldw_Server_API/tests/VN_Play/test_vn_play_scripted_generation_runtime.py -q --tb=short -> 65 passed, 8 warnings.
+Verification: .venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py tldw_Server_API/tests/VN_Play/test_vn_play_scripted_generation_runtime.py -q --tb=short -> 65 passed, 8 warnings.
 
 Verification: compileall over touched VN Play endpoint/schema/service/repository files -> exit 0; git diff --check -> exit 0; Bandit touched backend scope -> results 0, errors [].
 <!-- SECTION:NOTES:END -->

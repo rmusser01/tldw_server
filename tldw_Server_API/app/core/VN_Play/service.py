@@ -2235,6 +2235,7 @@ class VNPlayService:
         generation_id: int,
         revision_id: int,
         include_blocked_raw: bool = False,
+        allow_blocked_raw_reveal: bool = False,
         confirm: str | None = None,
     ) -> dict[str, Any]:
         """Return owner-visible diagnostics for one generation revision."""
@@ -2261,6 +2262,7 @@ class VNPlayService:
         reveal_raw = (
             is_moderation_blocked
             and include_blocked_raw
+            and allow_blocked_raw_reveal
             and confirm == "REVEAL_MODERATION_BLOCKED"
         )
         if isinstance(raw_output_debug, Mapping):

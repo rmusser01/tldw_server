@@ -31,12 +31,6 @@ Create a detailed implementation plan for the backend runtime/API PR that implem
 - [x] #4 Plan is reviewed and updated before execution handoff.
 <!-- AC:END -->
 
-## Implementation Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-Plan review completed with subagent review. Addressed findings for provider-call transaction recovery, scene_update resolver outcome persistence, profile-map authoring/API source, setup metadata, debug reveal/audit behavior, and usage accounting/rate-limit integration.
-<!-- SECTION:NOTES:END -->
-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -45,6 +39,7 @@ Created backend-only VN scripted generation runtime implementation plan at Docs/
 
 ## Notes
 <!-- SECTION:NOTES:BEGIN -->
+- Plan review completed with subagent review. Addressed findings for provider-call transaction recovery, scene_update resolver outcome persistence, profile-map authoring/API source, setup metadata, debug reveal/audit behavior, and usage accounting/rate-limit integration.
 - Created plan at `Docs/superpowers/plans/2026-05-10-vn-scripted-generation-backend-runtime.md`.
 - Mapped current VN Play, VN Scripts, VN Policy, DB, API schema, pagination, adapter, and test seams before proposing task slices.
 <!-- SECTION:NOTES:END -->

@@ -215,6 +215,8 @@ def _validation_error_code(exc: ValidationError) -> str:
         return "metadata_too_large"
     if "visual_labels_too_large" in messages:
         return "visual_labels_too_large"
+    if "duplicate_choice_id" in messages:
+        return "duplicate_choice_id"
     return "invalid_generation_output"
 
 

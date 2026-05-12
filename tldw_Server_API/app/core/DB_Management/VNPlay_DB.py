@@ -1821,12 +1821,15 @@ class VNPlayRepository:
                     UPDATE vn_play_generations
                     SET status = ?,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND owner_user_id = ?
+                    WHERE id = ?
+                      AND owner_user_id = ?
+                      AND latest_request_id = ?
                     """,
                     (
                         fields["status"],
                         int(current["generation_id"]),
                         int(current["owner_user_id"]),
+                        generation_request_id,
                     ),
                 )
         return self.get_generation_request(
@@ -3496,6 +3499,13 @@ def _apply_active_generation_revision_map(
         """,
         (session_id, owner_user_id),
     ).fetchall()
+    existing_point_keys = {
+        str(generation_row["generation_point_key"])
+        for generation_row in generation_rows
+    }
+    unknown_point_keys = set(normalized_map) - existing_point_keys
+    if unknown_point_keys:
+        raise ValueError("generation_point_not_found")
     for generation_row in generation_rows:
         generation_id = int(generation_row["id"])
         point_key = str(generation_row["generation_point_key"])

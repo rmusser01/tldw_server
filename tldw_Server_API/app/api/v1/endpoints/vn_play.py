@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_BRANCH_RESTORE_AMBIGUOUS,
     ERROR_BRANCH_RESTORE_NOT_ALLOWED,
     ERROR_BRANCH_RESTORE_TARGET_UNAVAILABLE,
+    ERROR_GENERATION_ATTEMPT_ABANDONED,
     ERROR_GENERATION_REQUEST_IN_PROGRESS,
     ERROR_GENERATION_REQUEST_NOT_PENDING,
     ERROR_GENERATION_REVISION_ACTIVATION_BLOCKED,
@@ -85,6 +86,7 @@ CONFLICT_ERROR_CODES = {
     ERROR_RESTORE_ACTION_IN_PROGRESS,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
+    ERROR_GENERATION_ATTEMPT_ABANDONED,
     ERROR_GENERATION_REQUEST_IN_PROGRESS,
     ERROR_GENERATION_REQUEST_NOT_PENDING,
     ERROR_GENERATION_REVISION_ACTIVATION_BLOCKED,
@@ -255,6 +257,7 @@ async def retry_last_turn(
 @router.get(
     "/sessions/{session_id}/branch-navigation",
     response_model=VNPlayBranchNavigationResponse,
+    response_model_exclude_none=True,
 )
 def get_branch_navigation(
     session_id: int,
@@ -774,6 +777,19 @@ async def get_script_generation_revision_debug(
             revision_id,
         )
         raise _vn_play_http_error(status.HTTP_403_FORBIDDEN, "debug_read_forbidden")
+    if include_blocked_raw and not _debug_read_raw_authorized(
+        principal=principal,
+        owner_user_id=target_owner_user_id,
+    ):
+        logger.warning(
+            "vn.script_generation.debug_raw_read denied principal_id={} owner_user_id={} session_id={} generation_id={} revision_id={}",
+            principal.principal_id,
+            target_owner_user_id,
+            session_id,
+            generation_id,
+            revision_id,
+        )
+        raise _vn_play_http_error(status.HTTP_403_FORBIDDEN, "debug_raw_read_forbidden")
     if target_owner_user_id == principal.user_id:
         service = owner_service
     else:
@@ -790,6 +806,10 @@ async def get_script_generation_revision_debug(
                 generation_id=generation_id,
                 revision_id=revision_id,
                 include_blocked_raw=include_blocked_raw,
+                allow_blocked_raw_reveal=_debug_read_raw_authorized(
+                    principal=principal,
+                    owner_user_id=target_owner_user_id,
+                ),
                 confirm=confirm,
             )
         )
@@ -898,6 +918,18 @@ def _debug_read_authorized(*, principal: AuthPrincipal, owner_user_id: int) -> b
         or "vn_play.debug.read" in permissions
         or "vn_play.debug.read_raw" in permissions
     )
+
+
+def _debug_read_raw_authorized(*, principal: AuthPrincipal, owner_user_id: int) -> bool:
+    if principal.user_id == owner_user_id:
+        return True
+    roles = {str(role).strip().lower() for role in principal.roles if str(role).strip()}
+    permissions = {
+        str(permission).strip().lower()
+        for permission in principal.permissions
+        if str(permission).strip()
+    }
+    return bool(principal.is_admin or "admin" in roles or "vn_play.debug.read_raw" in permissions)
 
 
 def _http_error_for_service_exception(exc: Exception) -> HTTPException:

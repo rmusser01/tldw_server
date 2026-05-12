@@ -9,7 +9,9 @@ from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import (
     LOCAL_DEFAULT_POLICY_DEFINITION,
     STORY_DEFAULT_GENERATION_DEFINITION,
     VNPolicyRepository,
+    VNProfileSnapshotRepository,
 )
+from tldw_Server_API.app.core.DB_Management.VNScripts_DB import _publish_request_matches
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetPackCreate,
@@ -164,6 +166,73 @@ def test_publish_snapshots_manifest_and_effective_profiles(chacha_db: Characters
     )
     assert policy_snapshot["resource_id"] == published["version_id"]
     assert generation_snapshot["resource_id"] == published["version_id"]
+
+
+def test_create_version_links_all_generation_profile_snapshots(chacha_db: CharactersRAGDB) -> None:
+    service = VNScriptService(
+        chacha_db,
+        owner_user_id=42,
+        manifest_resolver=lambda asset_pack_id: _manifest(),
+    )
+    script = service.create_script(
+        title="Archive Door",
+        description=None,
+        primary_asset_pack_id=7,
+        policy_profile_id="local_default",
+        generation_profile_id="story_default",
+        content_rating="general",
+    )
+    snapshot_repo = VNProfileSnapshotRepository.initialized(chacha_db)
+    policy_snapshot = snapshot_repo.create_profile_snapshot(
+        owner_user_id=42,
+        snapshot_type="policy",
+        profile_id="local_default",
+        profile_version=1,
+        resource_type="script_version",
+        resource_id=None,
+        definition=LOCAL_DEFAULT_POLICY_DEFINITION,
+    )
+    default_generation_snapshot = snapshot_repo.create_profile_snapshot(
+        owner_user_id=42,
+        snapshot_type="generation",
+        profile_id="story_default",
+        profile_version=1,
+        resource_type="script_version",
+        resource_id=None,
+        definition=STORY_DEFAULT_GENERATION_DEFINITION,
+    )
+    choice_generation_snapshot = snapshot_repo.create_profile_snapshot(
+        owner_user_id=42,
+        snapshot_type="generation",
+        profile_id="choice_profile",
+        profile_version=1,
+        resource_type="script_version",
+        resource_id=None,
+        definition={**STORY_DEFAULT_GENERATION_DEFINITION, "supported_output_schemas": ["choice_set"]},
+    )
+
+    version = service.repo.create_version(
+        script_id=script["id"],
+        owner_user_id=42,
+        label="manual",
+        draft_revision=0,
+        program=_generation_program_with_profile_key(),
+        asset_pack_id=7,
+        manifest=_manifest(),
+        manifest_hash="manual-manifest-hash",
+        policy_snapshot_id=policy_snapshot["id"],
+        generation_profile_snapshot_id=default_generation_snapshot["id"],
+        generation_profile_snapshots={
+            "default": default_generation_snapshot["id"],
+            "choice_writer": choice_generation_snapshot["id"],
+        },
+        script_defaults={},
+        validation={"valid": True, "errors": [], "warnings": []},
+    )
+
+    for snapshot in (policy_snapshot, default_generation_snapshot, choice_generation_snapshot):
+        refreshed = snapshot_repo.get_profile_snapshot(snapshot["id"], owner_user_id=42)
+        assert refreshed["resource_id"] == version["id"]
 
 
 def test_publish_snapshots_resolved_custom_profile_versions(chacha_db: CharactersRAGDB) -> None:
@@ -347,6 +416,19 @@ def test_publish_idempotency_replays_same_key_after_profile_map_changes(chacha_d
     )
 
     assert replayed == first
+
+
+def test_publish_request_match_rejects_missing_payload_when_existing_is_structured() -> None:
+    existing = {
+        "request_payload": {"draft_revision": 1, "label": "v1"},
+        "payload_hash": "legacy-hash",
+    }
+
+    assert _publish_request_matches(
+        existing,
+        request_payload=None,
+        legacy_payload_hash="legacy-hash",
+    ) is False
 
 
 def test_service_validation_resolves_declared_audio_refs(chacha_db: CharactersRAGDB) -> None:

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints import vn_play as vn_play_endpoint
 from tldw_Server_API.app.api.v1.endpoints.vn_play import (
     _service as vn_play_service_dependency,
     router as vn_play_router,
@@ -28,6 +29,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
+from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Play.adapters import (
     VNGenerationCallRequest,
@@ -1248,6 +1250,70 @@ def test_setup_options_warns_when_generation_profile_snapshot_is_missing(
     assert "generation_profile_snapshot_unavailable" in warning_codes
 
 
+def test_setup_options_handles_unset_generation_profile_snapshot_id(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack_id = _create_pack(
+        chacha_db,
+        owner_user_id=42,
+        character_id=character_id,
+    )
+    _publish_script_version(
+        chacha_db,
+        owner_user_id=42,
+        pack_id=pack_id,
+        program={
+            "schema_version": "vn_script_program.v1",
+            "entry_label": "start",
+            "primary_asset_pack_id": pack_id,
+            "variables": {},
+            "labels": {
+                "start": [
+                    {"op": "generate", "id": "line", "prompt": "Write a line."},
+                    {"op": "end"},
+                ]
+            },
+        },
+    )
+    original_list_versions = VNScriptsRepository.list_latest_versions_for_setup
+
+    def list_versions_with_missing_generation_snapshot(
+        self: VNScriptsRepository,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        rows = original_list_versions(self, *args, **kwargs)
+        assert rows
+        row = dict(rows[0])
+        row["generation_profile_snapshot_id"] = None
+        row["generation_profile_snapshots"] = {}
+        return [row]
+
+    monkeypatch.setattr(
+        VNScriptsRepository,
+        "list_latest_versions_for_setup",
+        list_versions_with_missing_generation_snapshot,
+    )
+
+    response = client.get(
+        "/api/v1/vn-play/setup-options"
+        f"?mode=scripted_story&selected_character_id={character_id}"
+    )
+
+    assert response.status_code == 200
+    script_option = response.json()["script_versions"][0]
+    assert script_option["ready"] is False
+    assert script_option["generation_profile_snapshot_id"] is None
+    warning_codes = {
+        warning["code"]
+        for warning in script_option["warning_summary"]["warnings"]
+    }
+    assert "generation_profile_snapshot_missing" in warning_codes
+
+
 def test_setup_options_returns_script_empty_state_for_scripted_story(
     client: TestClient,
 ) -> None:
@@ -2280,6 +2346,7 @@ def test_script_generation_confirmation_cancel_and_history_api(
 
 def test_script_generation_confirm_regenerate_activate_and_debug_api_redaction(
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = _ScriptedGenerationAdapter(
         raw_content='{"schema":"choice_set","choices":[{"id":"first","text":"First choice"}]}'
@@ -2442,6 +2509,45 @@ def test_script_generation_confirm_regenerate_activate_and_debug_api_redaction(
     )
     assert forbidden.status_code == 403
     assert forbidden.json()["detail"]["code"] == "debug_read_forbidden"
+
+    async def test_owner_db(user_id: int) -> CharactersRAGDB:
+        assert user_id == 42
+        return chacha_db
+
+    async def override_debug_reader() -> AuthPrincipal:
+        return AuthPrincipal(
+            kind="user",
+            user_id=99,
+            username="user-99",
+            permissions=["vn_play.debug.read"],
+        )
+
+    async def override_raw_debug_reader() -> AuthPrincipal:
+        return AuthPrincipal(
+            kind="user",
+            user_id=99,
+            username="user-99",
+            permissions=["vn_play.debug.read_raw"],
+        )
+
+    monkeypatch.setattr(vn_play_endpoint, "get_chacha_db_for_user_id", test_owner_db)
+    api_client.app.dependency_overrides[get_auth_principal] = override_debug_reader
+    raw_forbidden = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{blocked_revision_id}/debug?owner_user_id=42"
+        "&include_blocked_raw=true&confirm=REVEAL_MODERATION_BLOCKED"
+    )
+    assert raw_forbidden.status_code == 403
+    assert raw_forbidden.json()["detail"]["code"] == "debug_raw_read_forbidden"
+
+    api_client.app.dependency_overrides[get_auth_principal] = override_raw_debug_reader
+    raw_allowed = api_client.get(
+        f"/api/v1/vn-play/sessions/{session_id}/script/generations/{generation_id}/"
+        f"revisions/{blocked_revision_id}/debug?owner_user_id=42"
+        "&include_blocked_raw=true&confirm=REVEAL_MODERATION_BLOCKED"
+    )
+    assert raw_allowed.status_code == 200
+    assert raw_allowed.json()["raw_output_debug_state"] == "revealed"
 
 
 def test_delete_session_endpoint_soft_deletes(

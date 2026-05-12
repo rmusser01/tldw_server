@@ -70,6 +70,20 @@ def test_narrative_dialogue_requires_generated_text() -> None:
         )
 
 
+def test_choice_set_duplicate_choice_id_preserves_error_code() -> None:
+    with pytest.raises(VNGenerationOutputParseError, match="duplicate_choice_id"):
+        parse_vn_generation_output(
+            {
+                "schema": "choice_set",
+                "choices": [
+                    {"id": "ask_map", "text": "Ask about the map"},
+                    {"id": "ask_map", "text": "Ask about it again"},
+                ],
+            },
+            output_schema="choice_set",
+        )
+
+
 def test_attached_character_validation_hook_rejects_unknown_character_id() -> None:
     def is_attached(character_id: str) -> bool:
         return character_id == "character_mira"
@@ -132,13 +146,6 @@ def test_choice_set_validates_choice_ids_uniqueness_and_public_payload() -> None
         {
             "schema": "choice_set",
             "choices": [{"id": "bad id", "text": "Invalid"}],
-        },
-        {
-            "schema": "choice_set",
-            "choices": [
-                {"id": "same", "text": "First"},
-                {"id": "same", "text": "Second"},
-            ],
         },
         {
             "schema": "choice_set",

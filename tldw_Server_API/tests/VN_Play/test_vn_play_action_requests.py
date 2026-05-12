@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
 from tldw_Server_API.app.core.VN_Play.models import TurnResult
 from tldw_Server_API.app.core.VN_Play.service import (
     DeterministicVNPlayTurnAdapter,
+    VNPlaySession,
     VNPlayConflictError,
     VNPlayService,
     VNPlayTurnContext,
@@ -91,7 +92,7 @@ class CountingGenerationAdapter:
         )
 
 
-def _scripted_session(service: VNPlayService):
+def _scripted_session(service: VNPlayService) -> VNPlaySession:
     row = service.repo.create_session(
         owner_user_id=42,
         mode=MODE_SCRIPTED_STORY,

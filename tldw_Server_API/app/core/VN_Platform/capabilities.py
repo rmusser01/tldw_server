@@ -32,6 +32,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
         key: _has_registered_resource(route_paths, path)
         for key, path in VN_RESOURCE_PATHS.items()
     }
+    scripted_generation_enabled = enabled_modules["scripts"] and enabled_modules["play"]
 
     return {
         "schema_version": "vn_capabilities.v1",
@@ -42,9 +43,9 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
         "features": {
             "asset_generation": enabled_modules["assets"],
             "asset_portability": enabled_modules["assets"],
-            "scripted_story": enabled_modules["scripts"] and enabled_modules["play"],
-            "scripted_generation": enabled_modules["scripts"] and enabled_modules["play"],
-            "scripted_generation_confirmation": enabled_modules["scripts"] and enabled_modules["play"],
+            "scripted_story": scripted_generation_enabled,
+            "scripted_generation": scripted_generation_enabled,
+            "scripted_generation_confirmation": scripted_generation_enabled,
             "scripted_generation_revision_activation": enabled_modules["play"],
             "scripted_generation_history": enabled_modules["play"],
             "scripted_generation_debug_detail": enabled_modules["play"],
@@ -74,16 +75,16 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "audio": list(VN_SUPPORTED_AUDIO_MEDIA_TYPES),
         },
         "scripted_generation": {
-            "enabled": enabled_modules["scripts"] and enabled_modules["play"],
+            "enabled": scripted_generation_enabled,
             "output_schemas": list(VN_SCRIPTED_GENERATION_OUTPUT_SCHEMAS),
-            "confirmation_supported": enabled_modules["scripts"] and enabled_modules["play"],
+            "confirmation_supported": scripted_generation_enabled,
             "revision_activation_supported": enabled_modules["play"],
             "history_supported": enabled_modules["play"],
             "debug_detail_supported": enabled_modules["play"],
-            "dynamic_choice_supported": True,
-            "scene_update_supported": True,
+            "dynamic_choice_supported": scripted_generation_enabled,
+            "scene_update_supported": scripted_generation_enabled,
             "max_automatic_generation_batch_count": VN_SCRIPTED_GENERATION_AUTOMATIC_BATCH_LIMIT,
-            "moderation_blocked_raw_reveal_supported": True,
+            "moderation_blocked_raw_reveal_supported": scripted_generation_enabled,
         },
         "route_migration": {
             "canonical": "/api/v1/vn/vn-*",

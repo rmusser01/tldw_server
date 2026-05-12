@@ -670,6 +670,54 @@ def test_generation_request_status_update_syncs_parent_generation_status(
     assert updated_generation["status"] == "model_failed"
 
 
+def test_generation_request_status_update_does_not_regress_from_stale_request(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Generated stale status",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        seed="seed",
+    )
+    generation = repo.get_or_create_generation(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_point_key="archive:3:map-clue",
+        output_schema="choice_set",
+        generation_profile_key="choice_writer",
+        generation_profile_snapshot_id=44,
+    )
+    stale_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="automatic",
+        client_scene_version=2,
+        status="in_progress",
+    )
+    latest_request = repo.create_generation_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        generation_id=generation["id"],
+        request_kind="regenerate",
+        client_scene_version=3,
+        status="pending_confirmation",
+    )
+
+    repo.update_generation_request(
+        stale_request["id"],
+        {"status": "abandoned"},
+        owner_user_id=42,
+    )
+
+    updated_generation = repo.get_generation(generation["id"], owner_user_id=42)
+    assert updated_generation["latest_request_id"] == latest_request["id"]
+    assert updated_generation["status"] == "pending_confirmation"
+
+
 def test_generation_requests_and_revisions_store_public_error_debug_and_usage_json(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -1347,6 +1395,45 @@ def test_scene_branches_and_checkpoints_round_trip_json(chacha_db: CharactersRAG
     assert repo.get_scene_state(session["id"])["location_key"] == "museum"
     assert repo.list_branches(session["id"]) == [branch]
     assert repo.list_checkpoints(session["id"]) == [checkpoint]
+
+
+def test_restore_active_generation_revision_map_rejects_unknown_point_key(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="story",
+        title="Restore generated choice",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+    )
+    action = repo.create_session_action(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_type="checkpoint_restore",
+        idempotency_key="restore-unknown-generation",
+        request_payload_hash="restore-unknown-generation-hash",
+    )
+    assert repo.try_acquire_session_action_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        action_id=action["id"],
+        expected_scene_version=0,
+    ) is True
+
+    with pytest.raises(ValueError, match="generation_point_not_found"):
+        repo.commit_session_restore_action(
+            session_id=session["id"],
+            owner_user_id=42,
+            action_id=action["id"],
+            event_payload={"restore": "checkpoint"},
+            scene_state={},
+            scene_version=1,
+            response_payload_factory=lambda payload: {"event_id": payload["event"]["id"]},
+            active_generation_revisions={"missing:point": None},
+        )
 
 
 def test_record_story_choice_selection_creates_branch_event_turn_and_state(

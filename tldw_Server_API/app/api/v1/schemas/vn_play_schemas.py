@@ -241,7 +241,7 @@ class VNPlaySetupScriptVersionOption(BaseModel):
     asset_pack_id: StrictInt
     manifest_snapshot_id: StrictInt
     policy_snapshot_id: StrictInt
-    generation_profile_snapshot_id: StrictInt
+    generation_profile_snapshot_id: StrictInt | None = None
     policy_profile_id: StrictStr
     generation_profile_id: StrictStr
     generation_profile_key: StrictStr = "default"
@@ -614,6 +614,14 @@ class VNPlayBranchRestoreCapability(BaseModel):
     targets: dict[str, dict[str, StrictInt | None] | None] = Field(default_factory=dict)
 
 
+class VNPlayGeneratedChoiceRef(BaseModel):
+    """Reference to a generated choice's source revision."""
+
+    generation_id: StrictInt
+    revision_id: StrictInt
+    choice_id: StrictStr
+
+
 class VNPlayBranchPathStep(BaseModel):
     """One step in a VN Play branch path."""
 
@@ -621,6 +629,7 @@ class VNPlayBranchPathStep(BaseModel):
     branch_label: StrictStr | None = None
     choice_id: StrictStr | None = None
     choice_text: StrictStr | None = None
+    generated_choice: VNPlayGeneratedChoiceRef | None = None
     depth: StrictInt = Field(..., ge=0)
 
 
@@ -634,6 +643,7 @@ class VNPlayBranchNavigationNode(BaseModel):
     branch_label: StrictStr | None = None
     choice_id: StrictStr | None = None
     choice_text: StrictStr | None = None
+    generated_choice: VNPlayGeneratedChoiceRef | None = None
     branch_path: list[dict[str, Any]] = Field(default_factory=list)
     depth: StrictInt = Field(..., ge=0)
     status: StrictStr = "active"
@@ -722,6 +732,7 @@ __all__ = [
     "VNPlayBranchResponse",
     "VNPlayBranchWarning",
     "VNPlayBranchWarningSeverity",
+    "VNPlayGeneratedChoiceRef",
     "VNPlayCheckpointCreate",
     "VNPlayCheckpointResponse",
     "VNPlayEventResponse",

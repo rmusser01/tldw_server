@@ -36,7 +36,7 @@ Implement Task 9 from the VN scripted generation backend runtime plan: expose ca
 <!-- SECTION:NOTES:BEGIN -->
 Implemented Task 9 capability/setup metadata and docs. VN capabilities now advertise scripted generation support, output schemas, confirmation, revision activation, history, debug detail, reveal support, and batch limits. Scripted-story setup options now include generation profile key/snapshot metadata, provider class, moderation/cost/batch metadata, supported output schemas, derived dynamic choice and scene update support, and confirmation requirements. Setup readiness now warns and blocks when required generation profile snapshots are unavailable or incompatible with generated output requirements.
 
-Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts tldw_Server_API/tests/VN_Play tldw_Server_API/tests/VN_Platform -q --tb=short -> 251 passed, 8 warnings.
+Verification: .venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts tldw_Server_API/tests/VN_Play tldw_Server_API/tests/VN_Platform -q --tb=short -> 251 passed, 8 warnings.
 
 Verification: compileall over VN Play, VN Scripts, DB management, VN Play/capabilities endpoints, and VN Play/capabilities schemas -> exit 0; git diff --check -> exit 0; Bandit VN scripted-generation backend scope -> results 0, errors [].
 <!-- SECTION:NOTES:END -->

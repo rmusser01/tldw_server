@@ -71,3 +71,21 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert "visible_generation_profiles" in body
     assert "image/png" in body["supported_media_types"]["image"]
     assert "audio/mpeg" in body["supported_media_types"]["audio"]
+
+
+def test_vn_capabilities_disable_scripted_generation_details_without_scripts() -> None:
+    app = FastAPI()
+    app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
+    app.include_router(vn_play_router, prefix="/api/v1/vn")
+    response = TestClient(app).get("/api/v1/vn/vn-capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled_modules"]["play"] is True
+    assert body["enabled_modules"]["scripts"] is False
+    assert body["features"]["scripted_generation"] is False
+    assert body["scripted_generation"]["enabled"] is False
+    assert body["scripted_generation"]["confirmation_supported"] is False
+    assert body["scripted_generation"]["dynamic_choice_supported"] is False
+    assert body["scripted_generation"]["scene_update_supported"] is False
+    assert body["scripted_generation"]["moderation_blocked_raw_reveal_supported"] is False

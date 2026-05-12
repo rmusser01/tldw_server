@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import VNPlayBranchNavigationResponse
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
@@ -1086,6 +1087,9 @@ async def test_generated_choice_metadata_is_stored_in_branch_events(
     }
     assert branch["branch_path"][-1]["generated_choice"] == branch["generated_choice"]
     assert navigation["active_path"][0]["generated_choice"] == branch["generated_choice"]
+    validated_navigation = VNPlayBranchNavigationResponse.model_validate(navigation).model_dump(mode="json")
+    assert validated_navigation["branches"][0]["generated_choice"] == branch["generated_choice"]
+    assert validated_navigation["active_path"][0]["generated_choice"] == branch["generated_choice"]
     assert "metadata" not in branch["generated_choice"]
 
     branch_events = [
@@ -1157,11 +1161,16 @@ async def test_generated_choice_from_inactive_revision_cannot_be_selected(
         idempotency_key="inactive-choice-generate",
     )
     active_choice = first["script_state"]["waiting_choice"]["choices"][0]
+    active_revision = service.repo.get_generation_revision(
+        int(active_choice["revision_id"]),
+        owner_user_id=42,
+    )
+    assert active_revision is not None
     inactive_revision = service.repo.create_generation_revision(
         session_id=session.id,
         owner_user_id=42,
         generation_id=int(active_choice["generation_id"]),
-        generation_request_id=1,
+        generation_request_id=int(active_revision["generation_request_id"]),
         status="succeeded",
         output_schema="choice_set",
         public_output={

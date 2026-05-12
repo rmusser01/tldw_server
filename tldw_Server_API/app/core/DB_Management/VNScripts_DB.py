@@ -543,6 +543,10 @@ class VNScriptsRepository:
         validation: Mapping[str, Any],
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        normalized_generation_snapshots = _normalize_generation_profile_snapshots(
+            generation_profile_snapshot_id,
+            generation_profile_snapshots,
+        )
         with self.db.transaction() as conn:
             number_row = conn.execute(
                 """
@@ -603,7 +607,7 @@ class VNScriptsRepository:
                     manifest_snapshot_id,
                     policy_snapshot_id,
                     generation_profile_snapshot_id,
-                    _json_dump(_normalize_generation_profile_snapshots(generation_profile_snapshot_id, generation_profile_snapshots)),
+                    _json_dump(normalized_generation_snapshots),
                     _json_dump(dict(script_defaults)),
                     _json_dump(dict(validation)),
                 ),
@@ -617,19 +621,30 @@ class VNScriptsRepository:
                 """,
                 (version_id, manifest_snapshot_id),
             )
+            snapshot_ids = list(
+                dict.fromkeys(
+                    [
+                        int(policy_snapshot_id),
+                        *[
+                            int(snapshot_id)
+                            for snapshot_id in normalized_generation_snapshots.values()
+                        ],
+                    ]
+                )
+            )
+            placeholders = ", ".join("?" for _ in snapshot_ids)
             conn.execute(
-                """
+                f"""
                 UPDATE vn_profile_snapshots
                 SET resource_id = ?
                 WHERE owner_user_id = ?
                   AND resource_type = 'script_version'
-                  AND id IN (?, ?)
-                """,
+                  AND id IN ({placeholders})
+                """,  # nosec B608 - placeholders are generated for bound parameters only.
                 (
                     version_id,
                     owner_user_id,
-                    policy_snapshot_id,
-                    generation_profile_snapshot_id,
+                    *snapshot_ids,
                 ),
             )
         version = self.get_version(script_id, version_id, owner_user_id=owner_user_id)
@@ -1232,6 +1247,8 @@ def _publish_request_matches(
     legacy_payload_hash: str,
 ) -> bool:
     existing_payload = existing.get("request_payload")
-    if isinstance(existing_payload, Mapping) and request_payload is not None:
+    if isinstance(existing_payload, Mapping):
+        if request_payload is None:
+            return False
         return dict(existing_payload) == dict(request_payload)
     return existing.get("payload_hash") == legacy_payload_hash
