@@ -44,7 +44,7 @@ Create the implementation plan for the approved Persona Buddy renderer capabilit
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-buddy-renderer-capability-spec
+Worktree: <local_worktree_path_redacted>
 
 Branch: codex/persona-buddy-renderer-capability-spec
 

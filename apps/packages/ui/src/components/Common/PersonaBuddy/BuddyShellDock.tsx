@@ -18,7 +18,7 @@ import {
   getPersonaVisualRenderer,
   PersonaVisualRendererHost
 } from "./personaVisualRenderers"
-import type { PersonaVisualRenderError } from "./SpriteFrameRenderer"
+import type { PersonaVisualRenderError } from "./personaVisualTypes"
 
 type BuddyShellDockProps = {
   buddySummary: PersonaBuddySummary

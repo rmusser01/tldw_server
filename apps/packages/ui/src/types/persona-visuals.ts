@@ -16,7 +16,7 @@ export type PersonaVisualRendererType =
   | "live2d"
 
 export interface PersonaVisualRendererCapability {
-  renderer_type: PersonaVisualRendererType
+  renderer_type: string
   display_name: string
   manifest_versions: number[]
   can_validate: boolean

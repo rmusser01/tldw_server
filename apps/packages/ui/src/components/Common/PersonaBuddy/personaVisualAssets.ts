@@ -5,11 +5,18 @@ import type {
   PersonaVisualPack
 } from "@/types/persona-visuals"
 
+const hasOwnRecordEntry = (record: Record<string, unknown>): boolean => {
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) return true
+  }
+  return false
+}
+
 export const getAssetsById = (
   pack: PersonaVisualPack | null | undefined
 ): Record<string, PersonaVisualAsset> => {
   if (!pack) return {}
-  if (pack.assets_by_id && Object.keys(pack.assets_by_id).length > 0) {
+  if (pack.assets_by_id && hasOwnRecordEntry(pack.assets_by_id)) {
     return pack.assets_by_id
   }
   const assets: Record<string, PersonaVisualAsset> = {}
@@ -27,6 +34,7 @@ export const normalizeFrames = (
     return animation.frames.filter((frame) => Boolean(frame?.asset_id))
   }
   return (animation.asset_ids || [])
-    .filter((assetId) => Boolean(String(assetId || "").trim()))
-    .map((assetId) => ({ asset_id: String(assetId) }))
+    .map((assetId) => String(assetId || "").trim())
+    .filter((assetId) => Boolean(assetId))
+    .map((assetId) => ({ asset_id: assetId }))
 }

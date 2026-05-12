@@ -44,7 +44,7 @@ Implementation completed from the reviewed staged plan. The transient plan file 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-buddy-renderer-capability-spec
+Worktree: <local_worktree_path_redacted>
 
 Branch: codex/persona-buddy-renderer-capability-spec
 

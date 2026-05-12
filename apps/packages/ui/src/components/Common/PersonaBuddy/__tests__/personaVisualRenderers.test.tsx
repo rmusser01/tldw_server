@@ -54,6 +54,7 @@ describe("persona visual renderer registry", () => {
       expect.objectContaining({ rendererType: "sprite_frames" })
     )
     expect(getPersonaVisualRenderer("live2d")).toBeNull()
+    expect(getPersonaVisualRenderer("__proto__")).toBeNull()
   })
 
   it("reports renderability from the registered renderer", () => {
@@ -83,6 +84,25 @@ describe("persona visual renderer registry", () => {
         })
       )
     ).toBe(false)
+  })
+
+  it("normalizes legacy asset_ids before checking renderability", () => {
+    const basePack = buildPack()
+
+    expect(
+      canRenderPersonaVisualPack(
+        buildPack({
+          manifest: {
+            ...basePack.manifest,
+            animations: {
+              idle: {
+                asset_ids: [" idle-1 "]
+              }
+            }
+          }
+        })
+      )
+    ).toBe(true)
   })
 
   it("renders sprite frame packs through the registered component", () => {

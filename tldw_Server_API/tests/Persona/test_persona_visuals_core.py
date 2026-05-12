@@ -1,9 +1,11 @@
 import pytest
 
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    PersonaVisualRendererCapability,
     get_persona_visual_renderer_capability,
     list_persona_visual_renderer_capabilities,
 )
+from tldw_Server_API.app.core.Persona import visuals as visuals_module
 from tldw_Server_API.app.core.Persona.visuals import (
     MAX_FRAMES_PER_ANIMATION,
     PersonaVisualManifestError,
@@ -114,6 +116,76 @@ def test_manifest_rejects_whitespace_padded_renderer_type() -> None:
             },
             require_activatable=True,
         )
+
+
+def test_manifest_rejects_validation_only_capability_for_activation(monkeypatch) -> None:
+    manifest = _activatable_manifest()
+    validation_only_capability = PersonaVisualRendererCapability(
+        renderer_type="sprite_frames",
+        display_name="Sprite frames",
+        manifest_versions=(1,),
+        can_validate=True,
+        can_activate=False,
+        buddy_runtime_supported=True,
+        import_supported=True,
+        export_supported=True,
+    )
+    monkeypatch.setattr(
+        visuals_module,
+        "get_persona_visual_renderer_capability",
+        lambda renderer_type: validation_only_capability,
+    )
+
+    result = validate_visual_manifest(
+        manifest,
+        available_asset_ids={
+            "asset-idle",
+            "asset-listen",
+            "asset-think",
+            "asset-speak",
+            "asset-error",
+        },
+        require_activatable=False,
+    )
+    assert result.manifest["renderer_type"] == "sprite_frames"
+
+    with pytest.raises(
+        PersonaVisualManifestError,
+        match="unsupported renderer_type for activation",
+    ):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+def test_manifest_error_sanitizes_renderer_type_for_messages() -> None:
+    manifest = _activatable_manifest()
+    manifest["renderer_type"] = "live2d\nsecret"
+
+    with pytest.raises(PersonaVisualManifestError) as exc_info:
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+    message = str(exc_info.value)
+    assert "\n" not in message
+    assert "live2d\\nsecret" in message
 
 
 def test_activation_rejects_missing_required_state() -> None:

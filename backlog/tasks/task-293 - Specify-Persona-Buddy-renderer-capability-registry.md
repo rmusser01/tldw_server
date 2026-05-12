@@ -43,7 +43,7 @@ Write the approved design spec for an end-to-end thin slice that adds a Persona/
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-buddy-renderer-capability-spec
+Worktree: <local_worktree_path_redacted>
 
 Branch: codex/persona-buddy-renderer-capability-spec
 

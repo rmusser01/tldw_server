@@ -7,17 +7,15 @@ import type {
 } from "@/types/persona-visuals"
 
 import { getAssetsById, normalizeFrames } from "./personaVisualAssets"
-import {
-  SpriteFrameRenderer,
-  type PersonaVisualRenderError
-} from "./SpriteFrameRenderer"
+import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
+import type { PersonaVisualRenderErrorHandler } from "./personaVisualTypes"
 
 export type PersonaVisualRendererComponentProps = {
   pack: PersonaVisualPack
   state: PersonaVisualStateId
   fallbackLabel: string
   className?: string
-  onRenderError?: (error: PersonaVisualRenderError | null) => void
+  onRenderError?: PersonaVisualRenderErrorHandler
 }
 
 export type PersonaVisualRendererRegistration = {
@@ -63,11 +61,17 @@ const RENDERERS: Partial<
   sprite_frames: SPRITE_FRAME_REGISTRATION
 }
 
+const isRegisteredRendererType = (
+  rendererType: string
+): rendererType is PersonaVisualRendererType =>
+  Object.prototype.hasOwnProperty.call(RENDERERS, rendererType)
+
 export const getPersonaVisualRenderer = (
   rendererType: PersonaVisualRendererType | string | null | undefined
 ): PersonaVisualRendererRegistration | null => {
   if (!rendererType) return null
-  return RENDERERS[String(rendererType) as PersonaVisualRendererType] ?? null
+  const rendererKey = String(rendererType)
+  return isRegisteredRendererType(rendererKey) ? RENDERERS[rendererKey] ?? null : null
 }
 
 export const canRenderPersonaVisualPack = (

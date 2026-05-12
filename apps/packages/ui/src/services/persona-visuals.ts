@@ -253,7 +253,7 @@ export async function listPersonaVisualDuplicateTargets(): Promise<
   const payload = await fetchPersonaVisualJson<unknown>("/api/v1/persona/catalog")
   if (!Array.isArray(payload)) return []
   return payload
-    .map((item) => {
+    .map((item): PersonaVisualDuplicateTarget | null => {
       if (!item || typeof item !== "object") return null
       const candidate = item as { id?: unknown; name?: unknown }
       const id = String(candidate.id || "").trim()
