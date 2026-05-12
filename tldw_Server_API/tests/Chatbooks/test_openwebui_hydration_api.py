@@ -95,7 +95,7 @@ async def _other_user() -> User:
 
 
 async def _single_user_principal() -> AuthPrincipal:
-    return AuthPrincipal(kind="user", user_id=1, subject="single_user", roles=["admin"], permissions=["*"])
+    return AuthPrincipal(kind="user", user_id=1, subject="single_user", roles=[], permissions=[])
 
 
 async def _admin_principal() -> AuthPrincipal:
@@ -150,7 +150,7 @@ def test_hydration_schema_rejects_blank_source_user_id():
     with pytest.raises(ValidationError):
         chatbook_schemas.OpenWebUIHydrationPreviewRequest(
             openwebui_data_root="/srv/openwebui",
-            scope={"source_user_id": "   "},
+            scope={"conversation_ids": ["conv-a"], "source_user_id": "   "},
         )
 
 

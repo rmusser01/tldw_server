@@ -153,6 +153,17 @@ async def test_handle_openwebui_hydration_caps_and_redacts_warnings(monkeypatch)
     assert "/private/openwebui" not in repr(result["warnings"])
 
 
+def test_redact_hydration_warning_redacts_windows_and_unc_paths():
+    warning = jobs_worker._redact_hydration_warning(
+        r"Failed C:\OpenWebUI\uploads\file.png and \\server\share\secret.pdf and /srv/openwebui/file.txt"
+    )
+
+    assert "C:\\OpenWebUI" not in warning
+    assert "\\\\server\\share" not in warning
+    assert "/srv/openwebui" not in warning
+    assert warning.count("[redacted-path]") == 3
+
+
 @pytest.mark.asyncio
 async def test_handle_job_unsupported_job_type_still_errors(monkeypatch):
     service = _FakeHydrationService()

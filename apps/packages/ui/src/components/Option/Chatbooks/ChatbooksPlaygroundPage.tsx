@@ -1078,6 +1078,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
   const [importFile, setImportFile] = React.useState<File | null>(null)
   const [importSourceFormat, setImportSourceFormat] = React.useState<ImportSourceFormat>("chatbook")
+  const [importPreviewVersion, setImportPreviewVersion] = React.useState(0)
   const [previewManifest, setPreviewManifest] = React.useState<any | null>(null)
   const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
   const [openwebuiDbPreview, setOpenwebuiDbPreview] = React.useState<any | null>(null)
@@ -1128,6 +1129,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
     setOpenwebuiDbPreview(null)
+    setImportPreviewVersion(0)
     setSelectedOpenWebUIUserId("")
     setPreviewError(null)
     setPreviewLoading(false)
@@ -1210,8 +1212,18 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   ])
 
   const hydrationPayloadSignature = React.useMemo(
-    () => JSON.stringify(hydrationPayload),
-    [hydrationPayload]
+    () =>
+      JSON.stringify({
+        hydrationPayload,
+        import_preview: {
+          source_format: importSourceFormat,
+          version: importPreviewVersion,
+          file_name: importFile?.name || "",
+          file_size: importFile?.size || 0,
+          file_last_modified: importFile?.lastModified || 0
+        }
+      }),
+    [hydrationPayload, importFile, importPreviewVersion, importSourceFormat]
   )
 
   const hydrationPreviewIsCurrent = Boolean(
@@ -1518,10 +1530,16 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setPreviewManifest(null)
     setOpenwebuiPreview(null)
     setOpenwebuiDbPreview(null)
+    setImportPreviewVersion(requestId)
     setSelectedOpenWebUIUserId("")
     setImportFile(file)
     setImportSelections(buildSelectionState(() => [] as string[]))
     setImportIncludeAll(buildSelectionState(() => true))
+    setHydrationPreview(null)
+    setHydrationPreviewSignature("")
+    setHydrationPreviewError(null)
+    setHydrationJob(null)
+    setHydrationJobError(null)
     try {
       await tldwClient.initialize().catch(() => null)
       const res = await tldwClient.previewChatbook(file, {

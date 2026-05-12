@@ -2626,8 +2626,9 @@ class ChatbookService:
             for item in items
             if item.get("warning_code")
         ]
+        total_warning_count = len(warnings) + len(item_warnings)
         warnings.extend(item_warnings[:MAX_PREVIEW_WARNING_ITEMS])
-        summary["warning_count"] = len(warnings)
+        summary["warning_count"] = total_warning_count
         returned_items, omitted_items = self._cap_openwebui_hydration_items(items)
         summary["returned_items"] = len(returned_items)
         summary["omitted_items"] = omitted_items
@@ -2655,7 +2656,9 @@ class ChatbookService:
                 storage_root = (ACTUAL_PROJECT_ROOT / storage_root).resolve(strict=False)
         else:
             storage_root = ACTUAL_PROJECT_ROOT / "Databases" / "media_storage"
-        storage_root.mkdir(parents=True, exist_ok=True)
+        storage_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with contextlib.suppress(OSError):
+            storage_root.chmod(0o700)
         return storage_root
 
     @staticmethod

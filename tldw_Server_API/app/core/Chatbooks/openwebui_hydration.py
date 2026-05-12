@@ -365,12 +365,16 @@ def hydrate_image_reference(
     if resolved_file.path is None or resolved_file.status != "resolved":
         return _image_result_item(reference, resolved_file.status, job_id=job_id)
 
+    image_limit = max_image_bytes if max_image_bytes is not None else _default_max_image_bytes()
     try:
-        image_bytes = resolved_file.path.read_bytes()
+        handle = open_safe_local_path(resolved_file.path, resolved_file.path.parent, mode="rb")
+        if handle is None:
+            return _image_result_item(reference, "missing_file", job_id=job_id)
+        with handle:
+            image_bytes = handle.read(image_limit + 1)
     except OSError:
         return _image_result_item(reference, "missing_file", job_id=job_id)
 
-    image_limit = max_image_bytes if max_image_bytes is not None else _default_max_image_bytes()
     if len(image_bytes) > image_limit:
         return _image_result_item(reference, "oversized", job_id=job_id)
 

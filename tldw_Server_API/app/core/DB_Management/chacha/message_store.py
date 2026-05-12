@@ -231,7 +231,7 @@ class MessageStore:
                 f"Message image attachment exceeds maximum size of {max_image_bytes} bytes"
             )
 
-        def _append() -> int:
+        def _append_once() -> int:
             cursor = self._db.execute_query(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM message_images WHERE message_id = ?",
                 (message_id,),
@@ -248,10 +248,24 @@ class MessageStore:
             )
             return position
 
+        def _append_with_retries(*, transactional: bool) -> int:
+            last_error: Exception | None = None
+            for _ in range(5):
+                try:
+                    if transactional:
+                        with self._db.transaction():
+                            return _append_once()
+                    return _append_once()
+                except sqlite3.IntegrityError as exc:
+                    last_error = exc
+                    continue
+            raise ConflictError(  # noqa: TRY003
+                f"Concurrent append conflict for message image positions on message_id={message_id}",
+            ) from last_error
+
         if not commit:
-            return _append()
-        with self._db.transaction():
-            return _append()
+            return _append_with_retries(transactional=False)
+        return _append_with_retries(transactional=True)
 
     def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
         """Fetch all images associated with a message, ordered by position."""

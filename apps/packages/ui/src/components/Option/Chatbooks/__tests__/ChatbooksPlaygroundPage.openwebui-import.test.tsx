@@ -447,6 +447,85 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     expect(screen.getByText("queued")).toBeInTheDocument()
   })
 
+  it("requires a fresh hydration preview after selecting a new OpenWebUI preview file", async () => {
+    tldwClientMock.previewChatbook.mockResolvedValue({
+      openwebui_preview: {
+        chat_count: 1,
+        message_count: 2,
+        branched_chat_count: 0,
+        duplicate_chat_count: 0,
+        attachment_reference_count: 1,
+        malformed_chat_count: 0,
+        warnings: []
+      }
+    })
+    tldwClientMock.previewOpenWebUIHydration.mockResolvedValue({
+      summary: {
+        referenced_files: 1,
+        resolved_files: 1,
+        image_files: 1,
+        media_files: 0,
+        missing_files: 0,
+        unsupported_files: 0,
+        failed_files: 0,
+        hydrated_images: 0,
+        registered_media_files: 0,
+        already_hydrated: 0,
+        processed_files: 0,
+        warning_count: 0
+      },
+      warnings: []
+    })
+
+    const { container } = render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+
+    const uploadInput = container.querySelector(".ant-upload-drag input[type=\"file\"]") as HTMLInputElement
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(["[]"], "first.json", { type: "application/json" })]
+      }
+    })
+    await waitFor(() => {
+      expect(tldwClientMock.previewChatbook).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(screen.getByText("OpenWebUI preview")).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByLabelText("OpenWebUI data root"), {
+      target: { value: "/srv/openwebui" }
+    })
+    fireEvent.change(screen.getByLabelText("Imported conversation IDs"), {
+      target: { value: "conv-a" }
+    })
+
+    const runButton = screen.getByRole("button", { name: "Run hydration job" })
+    fireEvent.click(screen.getByRole("button", { name: "Preview attachments" }))
+    await waitFor(() => {
+      expect(runButton).toBeEnabled()
+    })
+
+    const secondUploadInput = container.querySelector(".ant-upload-drag input[type=\"file\"]") as HTMLInputElement
+    fireEvent.change(secondUploadInput, {
+      target: {
+        files: [new File(["[]"], "second.json", { type: "application/json" })]
+      }
+    })
+    await waitFor(() => {
+      expect(tldwClientMock.previewChatbook).toHaveBeenCalledTimes(2)
+    })
+
+    expect(runButton).toBeDisabled()
+    fireEvent.click(runButton)
+    expect(tldwClientMock.createOpenWebUIHydrationJob).not.toHaveBeenCalled()
+  }, 10000)
+
   it("requires a fresh hydration preview after opting into supported-file processing", async () => {
     tldwClientMock.previewOpenWebUIHydration.mockResolvedValue({
       summary: {

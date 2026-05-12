@@ -1,6 +1,7 @@
 import hashlib
 import json
 import sqlite3
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -526,9 +527,54 @@ def test_append_message_image_enforces_existing_message_image_byte_cap(real_hydr
         real_hydration_db.append_message_image("msg-a", oversized, "image/png")
 
 
+def test_append_message_image_retries_transient_position_conflict(real_hydration_db, monkeypatch):
+    original_execute_query = real_hydration_db.execute_query
+    conflicts = {"count": 0}
+
+    def flaky_execute_query(query, *args, **kwargs):
+        if "INSERT INTO message_images" in str(query) and conflicts["count"] == 0:
+            conflicts["count"] += 1
+            raise sqlite3.IntegrityError(
+                "UNIQUE constraint failed: message_images.message_id, message_images.position"
+            )
+        return original_execute_query(query, *args, **kwargs)
+
+    monkeypatch.setattr(real_hydration_db, "execute_query", flaky_execute_query)
+
+    position = real_hydration_db.append_message_image("msg-a", PNG_BYTES, "image/png")
+
+    assert conflicts["count"] == 1
+    assert position == 1
+    assert len(real_hydration_db.get_message_images("msg-a")) == 2
+
+
 def test_hydrate_image_ref_reports_oversized_without_inserting(real_hydration_db, tmp_path):
     image_path = tmp_path / "large.png"
     image_path.write_bytes(PNG_BYTES + b"x" * 32)
+
+    item = hydration.hydrate_image_reference(
+        real_hydration_db,
+        _reference(file_id="file-large"),
+        _resolved_file(image_path, file_id="file-large"),
+        job_id="job-a",
+        max_image_bytes=8,
+    )
+
+    assert item.status == "oversized"
+    assert len(real_hydration_db.get_message_images("msg-a")) == 1
+
+
+def test_hydrate_image_ref_checks_size_with_bounded_read(real_hydration_db, tmp_path, monkeypatch):
+    image_path = tmp_path / "large.png"
+    image_path.write_bytes(PNG_BYTES + b"x" * 32)
+    original_read_bytes = Path.read_bytes
+
+    def fail_unbounded_read(path: Path) -> bytes:
+        if path == image_path:
+            raise AssertionError("image hydration must not read the full file before size checks")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_unbounded_read)
 
     item = hydration.hydrate_image_reference(
         real_hydration_db,
@@ -811,6 +857,7 @@ def test_preview_and_run_hydration_cap_response_items(tmp_path, monkeypatch):
     _write_openwebui_hydration_db(data_root)
     _patch_allowed_roots(monkeypatch, allowed_root)
     monkeypatch.setattr(chatbook_service_mod, "MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS", 3)
+    monkeypatch.setattr(chatbook_service_mod, "MAX_PREVIEW_WARNING_ITEMS", 3)
     refs = [{"id": f"missing-{index}"} for index in range(5)]
     db = FakeChaChaDB(
         messages_by_conversation={"conv-a": [{"id": "msg-a", "conversation_id": "conv-a"}]},
@@ -836,7 +883,26 @@ def test_preview_and_run_hydration_cap_response_items(tmp_path, monkeypatch):
     assert result["summary"]["referenced_files"] == 5
     assert result["summary"]["returned_items"] == 3
     assert result["summary"]["omitted_items"] == 2
+    assert result["summary"]["warning_count"] == 5
     assert len(result["items"]) == 3
+    assert len(result["warnings"]) == 3
+
+
+def test_openwebui_attachment_storage_root_is_private(tmp_path, monkeypatch):
+    storage_root = tmp_path / "media-storage"
+    storage_root.mkdir(mode=0o755)
+    storage_root.chmod(0o755)
+    monkeypatch.setenv("OPENWEBUI_HYDRATION_MEDIA_STORAGE_PATH", str(storage_root))
+    service = ChatbookService(
+        "101",
+        FakeChaChaDB(messages_by_conversation={}, metadata_by_message_id={}),
+        user_id_int=101,
+    )
+
+    resolved = service._openwebui_attachment_storage_root()
+
+    assert resolved == storage_root
+    assert stat.S_IMODE(resolved.stat().st_mode) == 0o700
 
 
 def test_run_openwebui_attachment_hydration_hydrates_resolved_image(

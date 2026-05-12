@@ -52,7 +52,13 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 
 _CHATBOOKS_DOMAIN = "chatbooks"
 _MAX_HYDRATION_JOB_WARNINGS = 100
-_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^\s,;:)\"']+/?)+")
+_POSIX_ABS_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^\s,;:)\"']+/?)+")
+_WINDOWS_ABS_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/](?:[^\s,;:)\"']+[\\/]?)+"
+)
+_UNC_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])\\\\[^\\/\s,;:)\"']+(?:[\\/][^\s,;:)\"']+)+"
+)
 
 # Ensure worker runs in core backend mode.
 if os.getenv("CHATBOOKS_JOBS_BACKEND") not in {"", "core"}:
@@ -160,7 +166,10 @@ def _raise_import_job_failed(service: ChatbookService, job_id: str, message: str
 
 def _redact_hydration_warning(value: object) -> str:
     """Redact local absolute paths before persisting hydration warnings to Jobs."""
-    return _ABSOLUTE_PATH_RE.sub("[redacted-path]", str(value))
+    text = str(value)
+    text = _POSIX_ABS_PATH_RE.sub("[redacted-path]", text)
+    text = _WINDOWS_ABS_PATH_RE.sub("[redacted-path]", text)
+    return _UNC_PATH_RE.sub("[redacted-path]", text)
 
 
 def _hydration_job_id(job: dict[str, Any]) -> str | None:
