@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MessageSquarePlus } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@web/components/ui/Badge';
@@ -82,6 +82,39 @@ function recoveryCopy(status: string | null): string | null {
   return null;
 }
 
+function recoverableConflictStatus(errorInfo: ReturnType<typeof getVNPlayErrorInfo>): string {
+  if (errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)) {
+    return 'turn_in_progress';
+  }
+  if (
+    errorInfo.code === 'restore_action_in_progress' ||
+    /restore_action_in_progress/i.test(errorInfo.message)
+  ) {
+    return 'restore_action_in_progress';
+  }
+  return 'stale_scene_version';
+}
+
+function mergeSessionScene(
+  session: VNPlaySession,
+  scene: VNPlaySceneState | null | undefined,
+  sceneVersion?: number
+): VNPlaySession {
+  const nextSceneVersion = sceneVersion ?? scene?.scene_version ?? session.scene_version;
+  if (!scene) {
+    return {
+      ...session,
+      scene_version: nextSceneVersion,
+    };
+  }
+  return {
+    ...session,
+    scene_version: nextSceneVersion,
+    scene_state: scene,
+    current_scene: scene,
+  };
+}
+
 function canViewDebugForCurrentUser(): boolean {
   if (typeof window === 'undefined') return true;
   const hasJwtToken = Boolean(window.localStorage.getItem('access_token'));
@@ -128,7 +161,21 @@ export default function VNPlayWorkspace({
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selectedSessionId = selectedSession?.id;
+  const selectedSessionIdRef = useRef<number | null>(selectedSessionId ?? null);
+  const restoreOperationRef = useRef(0);
+  const restoreInFlightRef = useRef(false);
   const canViewGenerationDebug = useMemo(() => canViewDebugForCurrentUser(), []);
+
+  useEffect(() => {
+    const nextSelectedSessionId = selectedSessionId ?? null;
+    if (selectedSessionIdRef.current !== nextSelectedSessionId) {
+      restoreOperationRef.current += 1;
+      restoreInFlightRef.current = false;
+      setRestoringBranchId(null);
+      setRestoringBranchTarget(null);
+    }
+    selectedSessionIdRef.current = nextSelectedSessionId;
+  }, [selectedSessionId]);
 
   const fetchBranchNavigation = useCallback(async (
     sessionId: number,
@@ -302,14 +349,24 @@ export default function VNPlayWorkspace({
     }
   }, []);
 
-  const reloadSessionCollections = useCallback(async (sessionId: number, mode?: VNPlayMode | null) => {
+  const reloadSessionCollections = useCallback(async (
+    sessionId: number,
+    mode?: VNPlayMode | null,
+    nextBranchNavigation?: VNPlayBranchNavigationResponse | null
+  ) => {
     const [nextEvents, nextCheckpoints, nextBranches, nextGenerations] = await Promise.all([
       listVNPlayEvents(sessionId),
       listVNPlayCheckpoints(sessionId),
       listVNPlayBranches(sessionId),
       listVNPlayGenerations(sessionId, { limit: GENERATION_HISTORY_PAGE_SIZE, offset: 0 }),
     ]);
-    await reloadBranchNavigation(sessionId, mode ?? selectedSession?.mode);
+    if (nextBranchNavigation !== undefined) {
+      setBranchNavigation(nextBranchNavigation);
+      setBranchTimelineError(null);
+      setIsLoadingBranchNavigation(false);
+    } else {
+      await reloadBranchNavigation(sessionId, mode ?? selectedSession?.mode);
+    }
     setEvents(nextEvents);
     setCheckpoints(nextCheckpoints);
     setBranches(nextBranches);
@@ -419,13 +476,7 @@ export default function VNPlayWorkspace({
     const isConflict = isRecoverableVNPlayConflict(turnError);
 
     if (isConflict && selectedSession) {
-      setTurnStatus(
-        errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)
-          ? 'turn_in_progress'
-          : errorInfo.code === 'restore_action_in_progress' || /restore_action_in_progress/i.test(errorInfo.message)
-            ? 'restore_action_in_progress'
-          : 'stale_scene_version'
-      );
+      setTurnStatus(recoverableConflictStatus(errorInfo));
       setError(null);
       try {
         await reloadSelectedSession(selectedSession.id);
@@ -491,48 +542,63 @@ export default function VNPlayWorkspace({
     branchId: number,
     target: VNPlayBranchRestoreTarget
   ) => {
-    if (!selectedSession) return;
+    if (!selectedSession || restoringBranchId !== null || restoreInFlightRef.current) return;
 
+    const sessionId = selectedSession.id;
+    const operationId = restoreOperationRef.current + 1;
+    restoreOperationRef.current = operationId;
+    restoreInFlightRef.current = true;
+    const isCurrentRestore = () =>
+      restoreOperationRef.current === operationId && selectedSessionIdRef.current === sessionId;
     setRestoringBranchId(branchId);
     setRestoringBranchTarget(target);
     setError(null);
     try {
-      const restored = await restoreVNPlayBranch(selectedSession.id, branchId, {
+      const restored = await restoreVNPlayBranch(sessionId, branchId, {
         client_scene_version: sceneVersion,
         idempotency_key: createVNPlayIdempotencyKey('restore-branch'),
         target,
       });
+      if (!isCurrentRestore()) return;
+      const nextSession = mergeSessionScene(restored.session, restored.current_scene, restored.scene_version);
       setTurnStatus(restored.status);
-      setSelectedSession(restored.session);
+      setSelectedSession(nextSession);
       setSessions((previous) =>
-        previous.map((session) => (session.id === restored.session.id ? restored.session : session))
+        previous.map((session) => (session.id === nextSession.id ? nextSession : session))
       );
       setBranchNavigation(restored.branch_navigation);
-      await reloadSessionCollections(restored.session.id, restored.session.mode);
+      await reloadSessionCollections(nextSession.id, nextSession.mode, restored.branch_navigation);
     } catch (restoreError) {
       const errorInfo = getVNPlayErrorInfo(restoreError);
       if (isRecoverableVNPlayConflict(restoreError)) {
-        setTurnStatus(
-          errorInfo.code === 'turn_in_progress' || /turn_in_progress/i.test(errorInfo.message)
-            ? 'turn_in_progress'
-            : errorInfo.code === 'restore_action_in_progress' || /restore_action_in_progress/i.test(errorInfo.message)
-              ? 'restore_action_in_progress'
-              : 'stale_scene_version'
-        );
+        if (!isCurrentRestore()) return;
+        setTurnStatus(recoverableConflictStatus(errorInfo));
         setError(null);
         try {
-          await reloadSelectedSession(selectedSession.id);
+          await reloadSelectedSession(sessionId);
+          if (!isCurrentRestore()) return;
         } catch {
+          if (!isCurrentRestore()) return;
           setError(errorInfo.message);
         }
         return;
       }
+      if (!isCurrentRestore()) return;
       setError(errorInfo.message);
     } finally {
-      setRestoringBranchId(null);
-      setRestoringBranchTarget(null);
+      if (isCurrentRestore()) {
+        restoreInFlightRef.current = false;
+        setRestoringBranchId(null);
+        setRestoringBranchTarget(null);
+      }
     }
-  }, [reloadSelectedSession, reloadSessionCollections, sceneVersion, selectedSession]);
+  }, [
+    reloadSelectedSession,
+    reloadSessionCollections,
+    restoringBranchId,
+    sceneVersion,
+    selectedSession,
+  ]);
 
   const handleRetryLastTurn = useCallback(async () => {
     if (!selectedSession) return;

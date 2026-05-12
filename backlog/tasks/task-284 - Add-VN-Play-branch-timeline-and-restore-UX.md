@@ -57,6 +57,18 @@ Verification:
 - `bun run lint -- components/vn-play/BranchTimelinePanel.tsx components/vn-play/VNPlayWorkspace.tsx __tests__/vn-play/BranchTimelinePanel.test.tsx __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/vnPlayApi.test.ts` exited 0 with existing repo-wide warnings only.
 - `git diff --check` exited 0.
 - Bandit skipped because this slice touched TypeScript/React, Markdown, and Backlog metadata only.
+
+Review fix pass for PR #1595:
+- Merged `branch_restore.current_scene` into the selected session and session list state so the Scene panel uses the authoritative restore scene even when the response session omits embedded scene state.
+- Added restore in-flight and operation/session guards to prevent overlapping restore requests and ignore stale async completions after session changes.
+- Reused restore response branch navigation in collection refresh to avoid an immediate redundant branch-navigation request.
+- Extracted recoverable conflict status mapping and made warning list keys collision-safe with event/index fallback.
+- Added regression coverage for duplicate warning keys, scene-state merge from `current_scene`, and overlapping branch restore suppression.
+
+Review verification:
+- `bun run test:run __tests__/vn-play/vnPlayApi.test.ts __tests__/vn-play/BranchTimelinePanel.test.tsx __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/SceneStage.test.tsx __tests__/vn-play/vnPlayRuntime.test.ts` passed: 5 files, 56 tests.
+- `bun run lint -- components/vn-play/BranchTimelinePanel.tsx components/vn-play/VNPlayWorkspace.tsx __tests__/vn-play/BranchTimelinePanel.test.tsx __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/vnPlayApi.test.ts` exited 0 with existing repo-wide warnings only.
+- `git diff --check` exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -3,6 +3,7 @@ import { GitBranch, RotateCcw } from 'lucide-react';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import type {
+  VNPlayBranchWarning,
   VNPlayBranchNavigationNode,
   VNPlayBranchNavigationResponse,
   VNPlayBranchRestoreTarget,
@@ -34,6 +35,14 @@ function eventRangeLabel(branch: VNPlayBranchNavigationNode): string | null {
     return `Latest event ${latest}`;
   }
   return null;
+}
+
+function warningKey(
+  warning: VNPlayBranchWarning,
+  index: number,
+  scope: string | number
+): string {
+  return `${scope}-${warning.code}-${warning.branch_id ?? 'global'}-${warning.event_id ?? 'no-event'}-${index}`;
 }
 
 export default function BranchTimelinePanel({
@@ -81,8 +90,8 @@ export default function BranchTimelinePanel({
 
       {navigation?.warnings?.length ? (
         <ul className="mb-4 grid gap-2">
-          {navigation.warnings.map((warning) => (
-            <li key={`${warning.code}-${warning.branch_id ?? 'global'}`} className="text-sm text-warn">
+          {navigation.warnings.map((warning, index) => (
+            <li key={warningKey(warning, index, 'global')} className="text-sm text-warn">
               {warning.message || warning.code}
             </li>
           ))}
@@ -114,8 +123,8 @@ export default function BranchTimelinePanel({
                     </p>
                     {branch.warnings.length > 0 && (
                       <ul className="mt-2 grid gap-1">
-                        {branch.warnings.map((warning) => (
-                          <li key={`${branch.branch_id}-${warning.code}`} className="text-xs text-warn">
+                        {branch.warnings.map((warning, index) => (
+                          <li key={warningKey(warning, index, branch.branch_id)} className="text-xs text-warn">
                             {warning.message || warning.code}
                           </li>
                         ))}

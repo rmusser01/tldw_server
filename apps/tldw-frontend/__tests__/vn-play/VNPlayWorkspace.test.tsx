@@ -943,8 +943,10 @@ describe('VNPlayWorkspace', () => {
     const restoredSession: VNPlaySession = {
       ...session,
       scene_version: 7,
-      scene_state: { scene_version: 7 },
+      scene_state: undefined,
+      current_scene: undefined,
     };
+    const restoredScene = { scene_version: 7, location_key: 'restored-branch' };
     const branchNavigation: VNPlayBranchNavigationResponse = {
       session_id: 1,
       mode: 'story',
@@ -1004,7 +1006,7 @@ describe('VNPlayWorkspace', () => {
       target_event_id: 17,
       scene_version: 7,
       session: restoredSession,
-      current_scene: restoredSession.scene_state,
+      current_scene: restoredScene,
       branch_navigation: restoredNavigation,
       branch_id: 12,
       target: 'choice_point',
@@ -1026,6 +1028,7 @@ describe('VNPlayWorkspace', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Scene 7').length).toBeGreaterThan(0);
     });
+    expect(await screen.findByText('restored-branch')).toBeInTheDocument();
   });
 
   it('surfaces branch restore in-progress conflicts as recoverable play state', async () => {
@@ -1100,6 +1103,99 @@ describe('VNPlayWorkspace', () => {
     expect(await screen.findByText(/branch restore is already in progress/i)).toBeInTheDocument();
     expect(screen.queryByText('restore_action_in_progress')).not.toBeInTheDocument();
     expect(mocks.getVNPlaySession).toHaveBeenCalledWith(1);
+  });
+
+  it('does not submit overlapping branch restore requests', async () => {
+    const deferred = createDeferred<{
+      status: 'completed';
+      replayed: false;
+      restore_event_id: number;
+      target_event_id: number;
+      scene_version: number;
+      session: VNPlaySession;
+      current_scene: { scene_version: number };
+      branch_navigation: VNPlayBranchNavigationResponse;
+      branch_id: number;
+      target: 'branch_latest';
+    }>();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 6,
+      scene_state: { scene_version: 6 },
+    };
+    const branchNavigation: VNPlayBranchNavigationResponse = {
+      session_id: 1,
+      mode: 'story',
+      scene_version: 6,
+      last_event_id: 26,
+      active_branch_node_id: 12,
+      active_path: [],
+      branches: [
+        {
+          branch_id: 12,
+          parent_branch_id: null,
+          parent_event_id: 17,
+          choice_selected_event_id: 18,
+          branch_label: 'Step inside',
+          choice_id: 'open-door',
+          choice_text: 'Open the archive door',
+          branch_path: [],
+          depth: 1,
+          status: 'active',
+          is_active: true,
+          is_on_active_path: true,
+          event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          subtree_event_range: {
+            start_event_id: 18,
+            start_sequence_number: 18,
+            latest_event_id: 26,
+            latest_sequence_number: 26,
+          },
+          restore: {
+            supported: true,
+            default_target: 'branch_latest',
+            target_names: ['branch_latest'],
+            targets: {
+              branch_latest: { event_id: 26, scene_version: 6 },
+            },
+          },
+          warnings: [],
+        },
+      ],
+      warnings: [],
+    };
+    mockVNPlayApi({ branchNavigation, sessions: [session] });
+    mocks.restoreVNPlayBranch.mockReturnValue(deferred.promise);
+
+    render(<VNPlayWorkspace />);
+
+    const restoreButton = await screen.findByRole('button', { name: /resume branch: step inside/i });
+    fireEvent.click(restoreButton);
+    fireEvent.click(restoreButton);
+
+    expect(mocks.restoreVNPlayBranch).toHaveBeenCalledTimes(1);
+    deferred.resolve({
+      status: 'completed',
+      replayed: false,
+      restore_event_id: 51,
+      target_event_id: 26,
+      scene_version: 7,
+      session: { ...session, scene_version: 7 },
+      current_scene: { scene_version: 7 },
+      branch_navigation: { ...branchNavigation, scene_version: 7 },
+      branch_id: 12,
+      target: 'branch_latest',
+    });
+    await waitFor(() => expect(screen.getAllByText('Scene 7').length).toBeGreaterThan(0));
   });
 
   it('renders scripted generation history without raw debug payloads', async () => {

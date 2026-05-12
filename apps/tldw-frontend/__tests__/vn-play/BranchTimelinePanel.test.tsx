@@ -133,4 +133,65 @@ describe('BranchTimelinePanel', () => {
 
     expect(onRestoreBranch).toHaveBeenCalledWith(12, 'choice_point');
   });
+
+  it('renders duplicate warning codes without duplicate React keys', () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      render(
+        <BranchTimelinePanel
+          navigation={navigation({
+            warnings: [
+              {
+                code: 'branch_warning',
+                severity: 'warning',
+                recoverable: true,
+                message: 'Global warning A',
+              },
+              {
+                code: 'branch_warning',
+                severity: 'warning',
+                recoverable: true,
+                message: 'Global warning B',
+              },
+            ],
+            branches: [
+              {
+                ...navigation().branches[0],
+                warnings: [
+                  {
+                    code: 'branch_warning',
+                    severity: 'warning',
+                    recoverable: true,
+                    message: 'Branch warning A',
+                    branch_id: 12,
+                  },
+                  {
+                    code: 'branch_warning',
+                    severity: 'warning',
+                    recoverable: true,
+                    message: 'Branch warning B',
+                    branch_id: 12,
+                  },
+                ],
+              },
+            ],
+          })}
+          onRestoreBranch={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText('Global warning A')).toBeInTheDocument();
+      expect(screen.getByText('Global warning B')).toBeInTheDocument();
+      expect(screen.getByText('Branch warning A')).toBeInTheDocument();
+      expect(screen.getByText('Branch warning B')).toBeInTheDocument();
+      expect(
+        consoleErrorSpy.mock.calls.some((call) =>
+          call.some((value) => String(value).includes('Encountered two children with the same key'))
+        )
+      ).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
 });
