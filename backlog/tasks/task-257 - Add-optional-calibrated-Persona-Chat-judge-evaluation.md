@@ -54,6 +54,8 @@ PR opened: https://github.com/rmusser01/tldw_server/pull/1570
 PR review fixes: documented known judge failure modes and residual V1 risks, added required identity-field validation for judge inputs, rejected blank/duplicate calibration keys, and rejected invalid judge result values before metric calculation.
 
 PR review verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Persona/test_persona_chat_quality_fixtures.py -v passed with 20 tests; python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge.py reported no issues; git diff --check passed.
+
+Docstring follow-up: added concise helper docstrings in persona_chat_judge.py to address the CodeRabbit docstring coverage warning for the new module.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

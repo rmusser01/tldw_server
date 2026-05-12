@@ -420,6 +420,7 @@ def _expected_result_for_dimension(
     judge_input: PersonaChatJudgeInput,
     dimension: PersonaChatJudgeDimension,
 ) -> JudgeResult:
+    """Derive the expected binary result for one input and dimension."""
     if set(judge_input.labels).intersection(dimension.failure_labels):
         return "Fail"
     return "Pass"
@@ -429,6 +430,7 @@ def _required_dimension_keys(
     inputs: Sequence[PersonaChatJudgeInput],
     predictions_by_key: Mapping[tuple[str, str], PersonaChatJudgePrediction],
 ) -> set[str]:
+    """Return dimensions that must be evaluated for this calibration batch."""
     required_keys = {dimension_key for _, dimension_key in predictions_by_key}
     for judge_input in inputs:
         labels = set(judge_input.labels)
@@ -439,12 +441,14 @@ def _required_dimension_keys(
 
 
 def _mapping_or_empty(value: Any) -> dict[str, Any]:
+    """Return a plain dict when value is mapping-like, otherwise an empty dict."""
     if isinstance(value, Mapping):
         return dict(value)
     return {}
 
 
 def _require_non_empty_text(value: Any, *, field_name: str) -> str:
+    """Return stripped text or raise when a required contract field is blank."""
     text = "" if value is None else str(value).strip()
     if not text:
         raise ValueError(
@@ -454,6 +458,7 @@ def _require_non_empty_text(value: Any, *, field_name: str) -> str:
 
 
 def _sequence_or_empty(value: Any) -> tuple[Any, ...]:
+    """Return tuple data for non-string sequences and an empty tuple otherwise."""
     if isinstance(value, (str, bytes)) or value is None:
         return ()
     if isinstance(value, Sequence):
@@ -462,6 +467,7 @@ def _sequence_or_empty(value: Any) -> tuple[Any, ...]:
 
 
 def _validate_judge_result(result: Any) -> None:
+    """Require runtime judge results to match the binary output contract."""
     if not isinstance(result, str) or result not in _VALID_JUDGE_RESULTS:
         raise ValueError(
             'Persona Chat judge prediction result must be "Pass" or "Fail".'
@@ -469,6 +475,7 @@ def _validate_judge_result(result: Any) -> None:
 
 
 def _safe_rate(numerator: int, denominator: int) -> float | None:
+    """Compute a rounded rate while preserving undefined zero-denominator cases."""
     if denominator <= 0:
         return None
     return round(numerator / denominator, 6)
