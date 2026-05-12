@@ -6,7 +6,7 @@ Feature: User-owned animated 2D visual packs for Persona Buddy and Persona Live
 Location: WebUI Persona Garden and shared Persona Buddy shell
 Status: Draft product record
 Owner: Product / WebUI / Persona
-Last Updated: 2026-05-10
+Last Updated: 2026-05-12
 
 ---
 
@@ -43,9 +43,11 @@ The implementation now covers the core data model, renderer, API, editor, Jobs
 flow, MCP module, E2E runtime behavior, Buddy entry point, diagnostics, setup
 states, ownership/help copy, duplicate-to-persona drafts, and a reference-backed
 personal pack library, import conflict choices, and reusable Persona Garden
-affordances. The remaining product gap is optional Phase 3 externalization:
-external visual providers, shared/cross-device libraries, and future renderer
-adapters.
+affordances. PR #1608 also added the renderer capability contract and Buddy
+renderer registry while keeping `sprite_frames` as the only enabled V1 runtime
+renderer. The remaining product gap is optional Phase 3 externalization:
+external visual providers, shared/cross-device libraries, non-sprite manifest
+design, and future renderer adapters.
 
 ---
 
@@ -85,7 +87,7 @@ adapters.
 
 ## 5. Current Implementation Snapshot
 
-As of 2026-05-10:
+As of 2026-05-12:
 
 1. The durable implementation from PR #1393 is merged into `dev`.
 2. The closeout documentation and E2E verification from PR #1400 is merged into
@@ -95,6 +97,8 @@ As of 2026-05-10:
 4. PR #1447 is merged and closes the ordered Product Hardening tracker from
    #1428: reliability diagnostics (#1430), generation/setup UX (#1431), and
    ownership/help copy (#1429).
+5. PR #1608 is merged and adds the Persona visual renderer capability registry,
+   authenticated renderer capability API, and local Buddy renderer registry.
 
 Implemented foundations include:
 
@@ -141,6 +145,11 @@ Implemented foundations include:
     draft, personal library, import archive preview, and duplicate-to-persona
     actions into the existing controls while preserving draft/review-before-
     activation semantics.
+19. Renderer capability reporting through
+    `GET /api/v1/persona/visual-renderers`, with only `sprite_frames` enabled
+    for V1 validation, activation, import/export, and Buddy runtime rendering.
+20. Buddy rendering and diagnostics route through the local renderer registry
+    instead of separate hardcoded renderer checks.
 
 ---
 
@@ -432,6 +441,7 @@ Current persona-scoped API routes include:
 19. `PATCH /api/v1/persona/visual-library/{item_id}`
 20. `DELETE /api/v1/persona/visual-library/{item_id}`
 21. `POST /api/v1/persona/visual-library/{item_id}/use`
+22. `GET /api/v1/persona/visual-renderers`
 
 ---
 
@@ -572,8 +582,11 @@ baseline. The first reference-backed V1 slices are now covered:
 7. External MCP-compatible visual providers remain future work.
 8. Renderer/provider adapter evaluation for Live2D and other future paths is
    tracked by #1497 and the 2026-05-10 design evaluation.
-9. Live2D or other renderer adapter implementation remains future work after the
-   sprite/frame path and renderer capability contract are stable.
+9. Renderer capability registry/API and Buddy renderer registry are complete in
+   PR #1608, with `sprite_frames` still the only enabled V1 runtime renderer.
+10. Live2D or other renderer adapter implementation remains future work after
+    non-sprite manifest V2, import-preview validation hooks, dependency gates,
+    licensing review, and fallback requirements are separately scoped.
 
 ---
 
@@ -591,7 +604,9 @@ baseline. The first reference-backed V1 slices are now covered:
      loading.
 
 4. Risk: Future renderer types force a schema rewrite.
-   - Mitigation: Keep manifest versioned and renderer typed.
+   - Mitigation: Keep manifests versioned and route renderer support through
+     the capability registry before activation/import/runtime support is
+     exposed.
 
 5. Risk: Cross-persona asset leakage.
    - Mitigation: Enforce user/persona/pack ownership checks at API, service, and
@@ -677,3 +692,5 @@ E2E:
 15. Issue #1497: Persona visual-pack renderer/provider adapter evaluation.
 16. Renderer/provider adapter evaluation:
     `Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md`
+17. PR #1608: Persona Buddy renderer capability registry.
+18. Issue #1609: Renderer capability docs and tracker refresh after PR #1608.

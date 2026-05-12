@@ -5,18 +5,26 @@ Tracks GitHub issue #1497 under the Persona/Buddy visual-pack epic #1449.
 ## Decision Summary
 
 Do not implement Live2D or another non-sprite renderer as the next code slice.
-The current Persona/Buddy system should first add a renderer/provider capability
-contract that keeps V1 `sprite_frames` behavior unchanged, then pursue a
-feature-flagged Live2D spike only after licensing, bundle validation, and
-fallback rules are explicit.
+The Persona/Buddy system should keep using the renderer/provider capability
+contract introduced in PR #1608 and keep V1 `sprite_frames` behavior unchanged.
+Only pursue a feature-flagged Live2D spike after licensing, bundle validation,
+and fallback rules are explicit.
+
+Status update as of 2026-05-12: PR #1608 completed the renderer capability
+registry, authenticated capability endpoint, and local Buddy renderer registry.
+`sprite_frames` remains the only enabled V1 activatable and Buddy-runtime
+renderer. Sprite-sheet frame regions already work inside `sprite_frames`; future
+renderer work should reuse the registry and stay behind explicit validation,
+dependency, licensing, and fallback gates.
 
 Recommended sequencing:
 
 1. Keep `sprite_frames` as the only activatable runtime renderer for V1.
-2. Add a renderer registry/capabilities contract before accepting new
+2. Use the renderer registry/capabilities contract before accepting new
    `renderer_type` values in manifests or imports.
-3. Add a sprite atlas/sprite-sheet performance extension inside the existing
-   sprite family before adding skeletal/model renderers.
+3. Treat any further sprite atlas/sprite-sheet work as an optimization or
+   authoring improvement inside the existing sprite family before adding
+   skeletal/model renderers.
 4. Run a Live2D adapter spike behind a feature flag, using local bundled assets
    only and preserving review-before-activation.
 5. Treat external providers as draft-pack or generated-candidate producers, not
@@ -29,11 +37,12 @@ explicit.
 
 ## Current Persona/Buddy Contract
 
-The implementation is already renderer-named but not renderer-pluggable:
+The implementation is registry-backed but intentionally exposes only the
+sprite/frame renderer:
 
 1. `tldw_Server_API/app/core/Persona/visuals.py` defines the supported visual
-   states, validates manifest version `1`, and only accepts
-   `renderer_type == "sprite_frames"` for activatable manifests.
+   states, validates manifest version `1`, and consults the renderer capability
+   registry before activation/import-preview validation.
 2. `tldw_Server_API/app/core/Persona/visual_service.py` validates uploads as
    raster images, validates manifests during activation and candidate accept,
    and creates duplicated packs as inactive drafts.
@@ -44,9 +53,12 @@ The implementation is already renderer-named but not renderer-pluggable:
    renders state-resolved frame sequences or sprite-sheet regions and falls
    back to text when an animation, asset, or region is invalid.
 5. `apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellDock.tsx`
-   gates runtime rendering on `visualPack.renderer_type === "sprite_frames"`.
+   renders through the local Buddy renderer registry and falls back cleanly when
+   a pack uses an unsupported renderer.
 6. `apps/packages/ui/src/components/Common/PersonaBuddy/personaVisualState.ts`
    resolves named Persona visual states independently of renderer format.
+7. `GET /api/v1/persona/visual-renderers` reports the server-supported renderer
+   capabilities to authenticated clients.
 
 The TypeScript and Pydantic renderer unions already include reserved labels such
 as `static_image`, `sprite_sheet`, and `live2d`, but those are not support
@@ -365,11 +377,13 @@ All renderer/provider follow-ups should enforce:
 ## Follow-Up Issue Slices
 
 1. Renderer capability registry for Persona Visual Packs:
-   define backend/frontend/MCP capability reporting while preserving
-   `sprite_frames` as the only activatable renderer.
+   completed by PR #1608 for backend capability reporting, Persona API
+   exposure, and local Buddy renderer selection while preserving `sprite_frames`
+   as the only activatable renderer.
 2. Sprite atlas/sprite-sheet V1.1:
-   formalize atlas validation and Buddy rendering as a safe performance
-   extension.
+   keep any remaining work focused on optimization, authoring ergonomics, and
+   import/export clarity inside `sprite_frames`; region validation and Buddy
+   rendering already exist.
 3. Non-sprite manifest V2 design:
    define renderer-specific asset roles, fallback requirements, and import
    preview validation hooks.
