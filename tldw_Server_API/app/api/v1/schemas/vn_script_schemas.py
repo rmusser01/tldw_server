@@ -28,6 +28,7 @@ class VNScriptCreate(BaseModel):
 
     @model_validator(mode="after")
     def _merge_generation_profile_ids(self) -> "VNScriptCreate":
+        """Let legacy generation_profile_ids override generation_profiles when supplied."""
         if self.generation_profile_ids is not None:
             self.generation_profiles = dict(self.generation_profile_ids)
         return self
@@ -50,6 +51,7 @@ class VNScriptPatch(BaseModel):
 
     @model_validator(mode="after")
     def _merge_generation_profile_ids(self) -> "VNScriptPatch":
+        """Map legacy generation_profile_ids onto generation_profiles for patch compatibility."""
         if self.generation_profile_ids is not None:
             self.generation_profiles = dict(self.generation_profile_ids)
         return self
@@ -117,6 +119,7 @@ class VNScriptCreateFromTemplateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _merge_generation_profile_ids(self) -> "VNScriptCreateFromTemplateRequest":
+        """Let legacy generation_profile_ids override generation_profiles for template creates."""
         if self.generation_profile_ids is not None:
             self.generation_profiles = dict(self.generation_profile_ids)
         return self

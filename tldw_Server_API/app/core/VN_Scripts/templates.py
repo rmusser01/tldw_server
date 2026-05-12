@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -31,7 +32,7 @@ class VNScriptTemplate:
             "category": self.category,
             "recommended_content_rating": self.recommended_content_rating,
             "required_capabilities": list(self.required_capabilities),
-            "preview": dict(self.preview),
+            "preview": deepcopy(self.preview),
             "default_title": self.default_title,
             "default_description": self.default_description,
         }
@@ -132,6 +133,7 @@ def instantiate_template(
 
 
 def _template_labels(template_id: str) -> dict[str, list[dict[str, Any]]]:
+    """Return deterministic label operation blocks for a known starter template."""
     if template_id == "linear_scene":
         return {
             "start": [

@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import (
     VNPolicyProfileStore,
 )
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+from tldw_Server_API.app.core.VN_Scripts.templates import list_template_catalog
 
 pytestmark = pytest.mark.integration
 
@@ -153,6 +154,7 @@ def _create_script(client: TestClient, *, asset_pack_id: int) -> int:
 
 
 def _contains_key(value: Any, key: str) -> bool:
+    """Return true when a nested dict or list contains the requested dictionary key."""
     if isinstance(value, dict):
         return key in value or any(_contains_key(child, key) for child in value.values())
     if isinstance(value, list):
@@ -190,6 +192,15 @@ def test_template_catalog_lists_preview_safe_starter_templates(client: TestClien
         assert "policy_profile_id" not in item
         assert "generation_profile_id" not in item
         assert "generation_profiles" not in item
+
+
+def test_template_catalog_returns_isolated_preview_payloads() -> None:
+    first_catalog = list_template_catalog()
+    first_catalog[0]["preview"]["flow"].append("mutated")
+
+    second_catalog = list_template_catalog()
+
+    assert "mutated" not in second_catalog[0]["preview"]["flow"]
 
 
 def test_create_script_from_template_stores_valid_draft(

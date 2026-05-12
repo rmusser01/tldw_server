@@ -202,4 +202,18 @@ describe('vnScripts api client', () => {
       request
     );
   });
+
+  it('allows create-from-template requests to rely on server template title defaults', async () => {
+    const request = {
+      primary_asset_pack_id: 7,
+      content_rating: 'general' as const,
+    };
+
+    await createVNScriptFromTemplate('linear_scene', request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/templates/linear_scene/scripts',
+      request
+    );
+  });
 });

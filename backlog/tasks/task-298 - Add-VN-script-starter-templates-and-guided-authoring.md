@@ -61,8 +61,8 @@ Implementation will proceed in an isolated worktree on branch codex/vn-script-te
 ## Verification
 
 <!-- SECTION:VERIFICATION:BEGIN -->
-- `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/VN_Scripts -q` -> 48 passed, 5 warnings.
-- `bunx vitest run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend` -> 24 passed.
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/VN_Scripts -q` -> 49 passed, 5 warnings.
+- `bunx vitest run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend` -> 25 passed.
 - `bunx eslint components/vn-scripts/VNScriptsWorkbench.tsx lib/api/vnScripts.ts types/vn-scripts.ts __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend` -> passed.
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/vn_scripts.py tldw_Server_API/app/api/v1/schemas/vn_script_schemas.py tldw_Server_API/app/core/VN_Scripts tldw_Server_API/app/core/DB_Management/VNScripts_DB.py -f json -o /tmp/bandit_vn_script_templates_review.json` -> passed, 0 findings.
 - `git diff --check` -> passed.

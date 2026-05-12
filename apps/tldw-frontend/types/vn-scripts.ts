@@ -70,7 +70,9 @@ export interface VNScriptTemplateListResponse {
   items: VNScriptTemplateSummary[];
 }
 
-export type VNScriptCreateFromTemplateRequest = VNScriptCreate;
+export type VNScriptCreateFromTemplateRequest = Omit<VNScriptCreate, 'title'> & {
+  title?: string | null;
+};
 
 export interface VNScriptCreateFromTemplateResponse {
   script: VNScriptResponse;
