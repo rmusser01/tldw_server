@@ -45,6 +45,9 @@ _UNSAFE_METADATA_MARKERS = frozenset(
 )
 _EXECUTION_ARTIFACT_SCHEMA_VERSION = "persona-chat-judge-execution-artifact.v1"
 _MIN_CASES_PER_CLASS_FOR_ARTIFACT = 20
+_CALIBRATION_WARNING_SAMPLE_TOO_SMALL = "calibration_sample_too_small"
+_CALIBRATION_WARNING_TPR_TNR_UNAVAILABLE = "tpr_tnr_unavailable"
+_CALIBRATION_WARNING_UNKNOWN = "calibration_warning"
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,7 @@ class PersonaChatJudgeExecutionArtifact:
     provider: str
     model: str
     runtime_gating_allowed: bool
+    total_inputs: int
     input_case_ids: tuple[str, ...]
     dimension_keys: tuple[str, ...]
     predictions: tuple[PersonaChatJudgePrediction, ...]
@@ -115,20 +119,33 @@ class PersonaChatJudgeExecutionArtifact:
 
     def to_dict(self) -> dict[str, Any]:
         """Return bounded JSON data without prompts, responses, or exceptions."""
+        input_case_ids = tuple(
+            dict.fromkeys(
+                _safe_identifier_text(case_id) for case_id in self.input_case_ids
+            )
+        )
+        dimension_keys = tuple(
+            sorted(
+                dict.fromkeys(
+                    _safe_identifier_text(dimension_key)
+                    for dimension_key in self.dimension_keys
+                )
+            )
+        )
         predictions = [
             _prediction_to_artifact_dict(prediction)
             for prediction in self.predictions
         ]
         failures = [_failure_to_artifact_dict(failure) for failure in self.failures]
         return {
-            "schema_version": self.schema_version,
-            "offline_only": self.offline_only,
-            "runtime_gating_allowed": self.runtime_gating_allowed,
+            "schema_version": _safe_identifier_text(self.schema_version),
+            "offline_only": True,
+            "runtime_gating_allowed": False,
             "provider": _safe_metadata_text(self.provider),
             "model": _safe_metadata_text(self.model),
-            "total_inputs": len(self.input_case_ids),
-            "input_case_ids": list(self.input_case_ids),
-            "dimension_keys": list(self.dimension_keys),
+            "total_inputs": _safe_non_negative_int(self.total_inputs),
+            "input_case_ids": list(input_case_ids),
+            "dimension_keys": list(dimension_keys),
             "prediction_count": len(predictions),
             "failure_count": len(failures),
             "predictions": predictions,
@@ -155,8 +172,8 @@ def execute_persona_chat_judge(
     for judge_input in inputs:
         safe_case_id = _safe_identifier_text(judge_input.case_id)
         for dimension_key in dimension_keys:
-            prediction_key = (judge_input.case_id, dimension_key)
             safe_dimension_key = _safe_identifier_text(dimension_key)
+            prediction_key = (safe_case_id, safe_dimension_key)
             if prediction_key in seen_prediction_keys:
                 failures.append(
                     _failure(
@@ -258,6 +275,7 @@ def build_persona_chat_judge_execution_artifact(
         provider=_safe_metadata_text(execution_result.provider),
         model=_safe_metadata_text(execution_result.model),
         runtime_gating_allowed=False,
+        total_inputs=len(inputs),
         input_case_ids=input_case_ids,
         dimension_keys=_artifact_dimension_keys(
             execution_result=execution_result,
@@ -398,9 +416,19 @@ def _safe_identifier_text(value: str) -> str:
         or "\n" in text
         or "\r" in text
         or any(marker in lowered for marker in _UNSAFE_METADATA_MARKERS)
+        or not all(char.isalnum() or char in "._-" for char in text)
     ):
         return "redacted"
     return text
+
+
+def _safe_non_negative_int(value: int) -> int:
+    """Return non-negative integer counts and fail closed on malformed values."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
 
 
 def _artifact_dimension_keys(
@@ -409,24 +437,24 @@ def _artifact_dimension_keys(
     calibration: PersonaChatJudgeCalibrationReport,
 ) -> tuple[str, ...]:
     """Return stable sanitized dimensions represented in the artifact."""
-    dimension_keys: list[str] = []
+    dimension_keys: set[str] = set()
     for prediction in execution_result.predictions:
-        dimension_keys.append(_safe_identifier_text(prediction.dimension_key))
+        dimension_keys.add(_safe_identifier_text(prediction.dimension_key))
     for failure in execution_result.failures:
-        dimension_keys.append(_safe_identifier_text(failure.dimension_key))
-    dimension_keys.extend(
+        dimension_keys.add(_safe_identifier_text(failure.dimension_key))
+    dimension_keys.update(
         _safe_identifier_text(dimension_key)
         for dimension_key in calibration.metrics_by_dimension
     )
-    dimension_keys.extend(
+    dimension_keys.update(
         _safe_identifier_text(dimension_key)
         for _, dimension_key in calibration.missing_predictions
     )
-    dimension_keys.extend(
+    dimension_keys.update(
         _safe_identifier_text(dimension_key)
         for _, dimension_key in calibration.unknown_predictions
     )
-    return tuple(dict.fromkeys(dimension_keys))
+    return tuple(sorted(dimension_keys))
 
 
 def _prediction_to_artifact_dict(
@@ -436,7 +464,11 @@ def _prediction_to_artifact_dict(
     return {
         "case_id": _safe_identifier_text(prediction.case_id),
         "dimension_key": _safe_identifier_text(prediction.dimension_key),
-        "result": prediction.result,
+        "result": (
+            prediction.result
+            if isinstance(prediction.result, str) and prediction.result in _VALID_RESULTS
+            else "redacted"
+        ),
         "critique": "provided" if prediction.critique else "omitted",
         "evidence": [_safe_artifact_reference(item) for item in prediction.evidence],
     }
@@ -463,7 +495,7 @@ def _calibration_to_artifact_dict(
         "production_calibrated": calibration.production_calibrated,
         "missing_predictions": _case_dimension_pairs(calibration.missing_predictions),
         "unknown_predictions": _case_dimension_pairs(calibration.unknown_predictions),
-        "warnings": [_safe_warning_text(warning) for warning in calibration.warnings],
+        "warning_keys": _calibration_warning_keys(calibration),
         "metrics_by_dimension": {
             _safe_identifier_text(dimension_key): _metrics_to_artifact_dict(metrics)
             for dimension_key, metrics in sorted(calibration.metrics_by_dimension.items())
@@ -500,7 +532,7 @@ def _metrics_to_artifact_dict(
         "tpr": metrics.tpr,
         "tnr": metrics.tnr,
         "production_calibrated": metrics.production_calibrated,
-        "warnings": [_safe_warning_text(warning) for warning in metrics.warnings],
+        "warning_keys": _metric_warning_keys(metrics),
     }
 
 
@@ -522,21 +554,33 @@ def _safe_artifact_reference(value: str) -> str:
     return text
 
 
-def _safe_warning_text(value: str) -> str:
-    """Return bounded calibration warning text or a redaction marker."""
-    text = str(value).strip()
-    lowered = text.lower()
-    if (
-        not text
-        or len(text) > 256
-        or text.startswith(("/", "~"))
-        or "\\" in text
-        or "\n" in text
-        or "\r" in text
-        or any(marker in lowered for marker in _UNSAFE_METADATA_MARKERS)
-    ):
-        return "redacted"
-    return text
+def _calibration_warning_keys(
+    calibration: PersonaChatJudgeCalibrationReport,
+) -> list[str]:
+    """Return stable warning keys for the aggregate calibration report."""
+    warning_keys = _warning_keys_from_texts(calibration.warnings)
+    for metrics in calibration.metrics_by_dimension.values():
+        warning_keys.extend(_metric_warning_keys(metrics))
+    return list(dict.fromkeys(warning_keys))
+
+
+def _metric_warning_keys(metrics: PersonaChatJudgeCalibrationMetrics) -> list[str]:
+    """Return stable warning keys for one dimension's calibration metrics."""
+    return _warning_keys_from_texts(metrics.warnings)
+
+
+def _warning_keys_from_texts(warnings: Sequence[str]) -> list[str]:
+    """Map internal calibration warning text to trace-safe warning keys."""
+    warning_keys: list[str] = []
+    for warning in warnings:
+        text = str(warning)
+        if "calibration sample is too small for production use" in text:
+            warning_keys.append(_CALIBRATION_WARNING_SAMPLE_TOO_SMALL)
+        elif "requires both pass and fail labels to report TPR/TNR" in text:
+            warning_keys.append(_CALIBRATION_WARNING_TPR_TNR_UNAVAILABLE)
+        else:
+            warning_keys.append(_CALIBRATION_WARNING_UNKNOWN)
+    return list(dict.fromkeys(warning_keys))
 
 
 __all__ = [

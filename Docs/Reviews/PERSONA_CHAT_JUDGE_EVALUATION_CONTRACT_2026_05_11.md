@@ -64,9 +64,9 @@ The execution adapter feeds `calibrate_persona_chat_judge_predictions()` for per
 
 ## Execution Artifact Contract
 
-`build_persona_chat_judge_execution_artifact()` wraps an explicit offline execution result with the existing per-dimension calibration report. The artifact is a review record only. It is JSON-serializable, sets `offline_only=true`, keeps `runtime_gating_allowed=false`, and includes bounded provider/model metadata, input case ids, represented dimension keys, prediction/failure counts, sanitized prediction fields, stable failure error keys, and calibration metrics.
+`build_persona_chat_judge_execution_artifact()` wraps an explicit offline execution result with the existing per-dimension calibration report. The artifact is a review record only. It is JSON-serializable, sets `offline_only=true`, keeps `runtime_gating_allowed=false`, and includes bounded provider/model metadata, the actual input row count, deduplicated input case ids, sorted represented dimension keys, prediction/failure counts, sanitized prediction fields, stable failure error keys, and calibration metrics.
 
-The artifact does not include prompts, user input, assistant text, expected context dumps, response observation dumps, exemplar bodies, raw critique text, provider exception strings, local paths, secrets, or database content. Evidence entries are field references only; anything that does not look like a bounded identifier is redacted. Calibration missing/unknown prediction links are serialized as bounded `case_id` and `dimension_key` pairs.
+The artifact does not include prompts, user input, assistant text, expected context dumps, response observation dumps, exemplar bodies, raw critique text, provider exception strings, local paths, secrets, or database content. Evidence entries are field references only; anything that does not look like a bounded identifier is redacted. Calibration missing/unknown prediction links are serialized as bounded `case_id` and `dimension_key` pairs. Calibration warnings are serialized as stable `warning_keys`, not free-form warning sentences.
 
 Execution artifacts do not persist themselves and do not imply production trust. Callers that write the artifact to disk remain responsible for choosing an explicit review path and for keeping raw judge inputs/results out of adjacent files.
 
@@ -86,7 +86,7 @@ The report includes:
 - TNR: fail-labeled cases predicted as fail.
 - Missing predictions for dimensions represented by predictions or fixture labels in the batch.
 - Unknown predictions for unregistered dimensions or unknown case ids.
-- Warnings when class counts are too small for production calibration.
+- Stable warning keys when class counts are too small for production calibration or TPR/TNR cannot be computed.
 
 The default production threshold is 20 pass and 20 fail cases per dimension. The current synthetic fixture set is useful for contract and smoke calibration, but it is not enough to claim production-calibrated judge accuracy.
 
