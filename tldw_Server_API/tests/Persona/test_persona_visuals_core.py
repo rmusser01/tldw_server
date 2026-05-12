@@ -342,6 +342,34 @@ def test_activatable_manifest_accepts_sprite_sheet_regions_with_known_dimensions
         assert frame["region"]["height"] == 64
 
 
+def test_accepts_atlas_regions_without_known_dimensions_for_activation() -> None:
+    manifest = _activatable_manifest()
+    manifest["animations"] = {
+        state: {
+            "frames": [
+                {
+                    "asset_id": "atlas",
+                    "region": {"x": index * 64, "y": 0, "width": 64, "height": 64},
+                    "duration_ms": 100,
+                }
+            ],
+            "frame_rate": 8,
+            "preview_frame": 0,
+        }
+        for index, state in enumerate(["idle", "listen", "think", "speak", "error"])
+    }
+
+    result = validate_visual_manifest(
+        manifest,
+        available_asset_ids={"atlas"},
+        available_asset_dimensions={},
+        require_activatable=True,
+    )
+
+    assert set(result.resolved_required_states) == REQUIRED_VISUAL_STATES
+    assert result.manifest["animations"]["idle"]["frames"][0]["region"]["width"] == 64
+
+
 def test_rejects_sprite_sheet_regions_outside_asset_bounds() -> None:
     manifest = {
         "manifest_version": 1,
@@ -400,6 +428,38 @@ def test_accepts_sprite_sheet_regions_without_dimensions_until_asset_metadata_ex
         "width": 128,
         "height": 128,
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("x", 1.5),
+        ("y", "0"),
+        ("width", 0),
+        ("height", -1),
+    ],
+)
+def test_rejects_malformed_atlas_region_values(field: str, value: object) -> None:
+    region = {"x": 0, "y": 0, "width": 64, "height": 64}
+    region[field] = value
+    manifest = {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": {"idle": {"animation_id": "idle"}},
+        "animations": {
+            "idle": {
+                "frames": [{"asset_id": "atlas", "region": region}],
+            }
+        },
+    }
+
+    with pytest.raises(PersonaVisualManifestError, match="region"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={"atlas"},
+            available_asset_dimensions={"atlas": (256, 256)},
+            require_activatable=False,
+        )
 
 
 def test_rejects_preview_frame_out_of_range() -> None:
