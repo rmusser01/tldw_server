@@ -4,7 +4,7 @@ title: Add offline Persona Chat judge harness
 status: Done
 assignee: []
 created_date: '2026-05-11 05:48'
-updated_date: '2026-05-12 00:04'
+updated_date: '2026-05-12 00:12'
 labels:
   - persona
   - chat
@@ -61,12 +61,16 @@ Implemented offline Persona Chat judge harness under app/core/Evaluations with p
 No known skips or blockers for this slice.
 
 Opened PR #1576 for review and linked it from #1566, #1543, and #1510.
+
+Review-fix pass for PR #1576 started. Actionable threads: add per-verdict counts, make mismatched/invalid counts mutually exclusive, harden malformed fixture score extraction, skip empty case IDs, and update tests.
+
+PR #1576 review fixes completed. Addressed Qodo and Gemini threads by adding immutable per-verdict report counts, computing mismatched_cases directly from mismatched statuses, skipping empty fixture case IDs, and hardening malformed fixture score extraction. Verification on 2026-05-12: harness+contract pytest passed 16 tests; Bandit reported zero findings on touched Python; placeholder scan found no matches; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a deterministic offline Persona Chat judge harness for issue #1572. The helper compares already-produced candidate judge outputs with the V1 contract fixture, validates verdict/flag/score envelopes, returns bounded agreement and mismatch reports, and avoids provider calls, persistence, Jobs, endpoints, WebUI changes, or runtime Persona Chat gating. Documentation now records that boundary and tests cover agreement, mismatch, invalid labels, and invalid score schema.
+Added the offline Persona Chat judge harness and completed the PR #1576 review-fix pass. The report now includes per-verdict counts, keeps matched/mismatched/missing/invalid status counts mutually exclusive, ignores empty fixture case IDs, and safely normalizes malformed fixture score data. Local verification passed for focused judge tests, Bandit, placeholder scan, and diff hygiene.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

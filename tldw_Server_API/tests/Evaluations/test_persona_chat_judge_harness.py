@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.Evaluations.persona_chat_judge_harness import (
+    VERDICT_ORDER,
     build_persona_chat_judge_report,
     expected_candidate_outputs_from_fixture,
 )
@@ -32,6 +33,16 @@ def _candidate_outputs() -> dict[str, dict[str, Any]]:
     return json.loads(json.dumps(expected_candidate_outputs_from_fixture(_load_fixture())))
 
 
+def _copy_fixture() -> dict[str, Any]:
+    """Return a mutable fixture payload copy for malformed-input checks."""
+    return json.loads(json.dumps(_load_fixture()))
+
+
+def _verdict_counts(pass_count: int, fail_count: int, inconclusive_count: int) -> dict[str, int]:
+    """Return expected verdict counts without repeating verdict labels in tests."""
+    return dict(zip(VERDICT_ORDER, (pass_count, fail_count, inconclusive_count), strict=True))
+
+
 def test_expected_candidate_outputs_from_fixture_indexes_outputs_by_case_id() -> None:
     """Fixture expectations should become candidate-shaped outputs keyed by case id."""
     candidates = expected_candidate_outputs_from_fixture(_load_fixture())
@@ -52,6 +63,7 @@ def test_report_matches_expected_contract_outputs() -> None:
     _require(report["mismatched_cases"] == 0, "matching candidates should not produce mismatches")
     _require(report["missing_candidate_count"] == 0, "all expected candidates are present")
     _require(report["invalid_candidate_count"] == 0, "expected fixture outputs are valid candidates")
+    _require(report["verdict_counts"] == _verdict_counts(1, 1, 0), "verdicts must be counted")
     _require(report["verdict_agreement"] == 1.0, "all verdicts match")
     _require(report["flag_agreement"] == 1.0, "all expected flags match")
     _require(report["extra_candidate_ids"] == [], "no extra candidates are present")
@@ -98,7 +110,33 @@ def test_invalid_candidate_schema_records_invalid_result() -> None:
     case_result = report["cases"][0]
 
     _require(report["invalid_candidate_count"] == 1, "invalid candidate should be counted")
-    _require(report["mismatched_cases"] == 1, "invalid candidate should prevent a full match")
+    _require(report["mismatched_cases"] == 0, "invalid candidate should not be counted as a simple mismatch")
+    _require(
+        report["matched_cases"]
+        + report["mismatched_cases"]
+        + report["missing_candidate_count"]
+        + report["invalid_candidate_count"]
+        == report["total_cases"],
+        "summary status counts should partition total cases",
+    )
     _require(case_result["status"] == "invalid_candidate", "case status should identify invalid candidate")
     _require("invalid_expected_flags" in case_result["mismatches"], "invalid labels should be reported")
     _require("invalid_scores" in case_result["mismatches"], "invalid scores should be reported")
+
+
+def test_malformed_fixture_rows_are_bounded_and_empty_case_ids_are_skipped() -> None:
+    """Malformed fixture scores should not crash extraction, and empty ids are ignored."""
+    fixture = _copy_fixture()
+    malformed_case = json.loads(json.dumps(fixture["cases"][0]))
+    malformed_case["case_id"] = "PC-JUDGE-999"
+    malformed_case["expected_judge_output"]["scores"] = "not-a-score-object"
+    empty_id_case = json.loads(json.dumps(fixture["cases"][0]))
+    empty_id_case["case_id"] = " "
+    fixture["cases"].extend([malformed_case, empty_id_case])
+
+    candidates = expected_candidate_outputs_from_fixture(fixture)
+    report = build_persona_chat_judge_report(fixture, candidates).to_dict()
+
+    _require(candidates["PC-JUDGE-999"]["scores"] == {}, "malformed fixture scores should normalize to empty")
+    _require(report["total_cases"] == 3, "empty fixture case ids should be skipped")
+    _require(report["verdict_counts"] == _verdict_counts(2, 1, 0), "skipped rows should not count")

@@ -14,7 +14,8 @@ import re
 from typing import Any, Literal
 
 
-ALLOWED_VERDICTS = frozenset({"pass", "fail", "inconclusive"})
+VERDICT_ORDER = ("pass", "fail", "inconclusive")
+ALLOWED_VERDICTS = frozenset(VERDICT_ORDER)
 REQUIRED_SCORE_NAMES = frozenset(
     {
         "role_adherence",
@@ -64,6 +65,7 @@ class PersonaChatJudgeHarnessReport:
     mismatched_cases: int
     missing_candidate_count: int
     invalid_candidate_count: int
+    verdict_counts: tuple[tuple[str, int], ...]
     extra_candidate_ids: tuple[str, ...]
     verdict_agreement: float
     flag_agreement: float
@@ -79,6 +81,7 @@ class PersonaChatJudgeHarnessReport:
             "mismatched_cases": self.mismatched_cases,
             "missing_candidate_count": self.missing_candidate_count,
             "invalid_candidate_count": self.invalid_candidate_count,
+            "verdict_counts": dict(self.verdict_counts),
             "extra_candidate_ids": list(self.extra_candidate_ids),
             "verdict_agreement": self.verdict_agreement,
             "flag_agreement": self.flag_agreement,
@@ -95,7 +98,7 @@ def expected_candidate_outputs_from_fixture(fixture_payload: Mapping[str, Any]) 
         if case_id and isinstance(output, Mapping):
             candidates[case_id] = {
                 "verdict": output.get("verdict"),
-                "scores": dict(output.get("scores") or {}),
+                "scores": dict(_mapping_or_empty(output.get("scores"))),
                 "expected_flags": list(output.get("expected_flags") or []),
                 "rationale": output.get("rationale"),
                 "evidence": list(output.get("evidence") or []),
@@ -110,11 +113,15 @@ def build_persona_chat_judge_report(
     """Compare candidate judge outputs with fixture expectations."""
     case_results: list[PersonaChatJudgeCaseResult] = []
     fixture_case_ids: set[str] = set()
+    verdict_counts = _empty_verdict_counts()
     for case in _case_rows(fixture_payload):
         case_id = _string_or_empty(case.get("case_id"))
+        if not case_id:
+            continue
         source_case_id = _string_or_empty(case.get("source_case_id"))
         fixture_case_ids.add(case_id)
         expected_output = _mapping_or_empty(case.get("expected_judge_output"))
+        _count_verdict(verdict_counts, expected_output.get("verdict"))
         candidate_output = candidate_outputs_by_case_id.get(case_id)
         case_results.append(
             _compare_case(
@@ -127,6 +134,7 @@ def build_persona_chat_judge_report(
 
     total_cases = len(case_results)
     matched_cases = sum(1 for result in case_results if result.status == "matched")
+    mismatched_cases = sum(1 for result in case_results if result.status == "mismatched")
     missing_candidate_count = sum(1 for result in case_results if result.status == "missing_candidate")
     invalid_candidate_count = sum(1 for result in case_results if result.status == "invalid_candidate")
     verdict_matches = sum(1 for result in case_results if result.verdict_match)
@@ -140,9 +148,10 @@ def build_persona_chat_judge_report(
         offline_only=bool(fixture_payload.get("offline_only")),
         total_cases=total_cases,
         matched_cases=matched_cases,
-        mismatched_cases=total_cases - matched_cases - missing_candidate_count,
+        mismatched_cases=mismatched_cases,
         missing_candidate_count=missing_candidate_count,
         invalid_candidate_count=invalid_candidate_count,
+        verdict_counts=_freeze_verdict_counts(verdict_counts),
         extra_candidate_ids=extra_candidate_ids,
         verdict_agreement=_ratio(verdict_matches, total_cases),
         flag_agreement=_ratio(flag_matches, total_cases),
@@ -268,6 +277,22 @@ def _normalized_flags(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
     return tuple(sorted({flag for flag in value if isinstance(flag, str)}))
+
+
+def _empty_verdict_counts() -> dict[str, int]:
+    """Return zeroed pass/fail/inconclusive counts in stable key order."""
+    return {verdict: 0 for verdict in VERDICT_ORDER}
+
+
+def _count_verdict(verdict_counts: dict[str, int], verdict: Any) -> None:
+    """Increment known expected verdict counts and ignore malformed verdicts."""
+    if isinstance(verdict, str) and verdict in verdict_counts:
+        verdict_counts[verdict] += 1
+
+
+def _freeze_verdict_counts(verdict_counts: Mapping[str, int]) -> tuple[tuple[str, int], ...]:
+    """Return immutable verdict counts in stable pass/fail/inconclusive order."""
+    return tuple((verdict, int(verdict_counts.get(verdict, 0))) for verdict in VERDICT_ORDER)
 
 
 def _ratio(numerator: int, denominator: int) -> float:
