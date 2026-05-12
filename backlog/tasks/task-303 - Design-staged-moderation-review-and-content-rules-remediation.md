@@ -4,7 +4,7 @@ title: Design staged moderation review and content rules remediation
 status: In Progress
 assignee: []
 created_date: '2026-05-12 15:02'
-updated_date: '2026-05-12 15:11'
+updated_date: '2026-05-12 15:34'
 labels:
   - ux
   - moderation
@@ -38,12 +38,16 @@ Create an implementation-ready design spec for splitting moderation IA so `/mode
 Design spec drafted and reviewed at Docs/superpowers/specs/2026-05-12-moderation-review-rules-remediation-design.md. Review revisions added an explicit backend review contract stage before frontend review MVP, minimal endpoint/query/permission contracts, separate queue status and decision action vocabulary, backend-sanitized/permission-gated review content requirements, and a Stage 2 minimum recovery requirement for destructive rules edits.
 
 Focused spec review loop completed: first pass found sequencing/API/status/sensitive-context/recovery issues; second pass approved after revisions. Applied the minor approved-review note by tightening recommended_action to the decision-action enum or null.
+
+Second self-review before implementation planning found four planning gaps and patched the spec: explicit extension-sidepanel behavior after the route split, backend event-capture/idempotency for production review items, retention/minimization requirements for stored review data, and stage dependency rules clarifying which work can proceed in parallel versus what blocks the review queue MVP.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Created and reviewed the staged moderation remediation design spec. The spec establishes `/moderation` as the review queue, `/moderation/rules` as the rules configuration surface, and `/moderation-playground` as a compatibility redirect. It includes route/naming remediation, rules hardening, accessibility/responsive fixes, backend review contract sequencing, review queue MVP, audit/recovery, power-user workflows, and fixture/regression coverage. Verification was document review plus focused spec-review subagent approval; Bandit is not applicable because no code was changed.
+
+Second self-review patch added extension behavior, event-capture/idempotency, retention/minimization, and explicit stage dependency rules before implementation planning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
