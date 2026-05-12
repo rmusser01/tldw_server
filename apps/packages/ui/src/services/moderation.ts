@@ -54,6 +54,14 @@ export interface ModerationUserOverrideLookupResponse {
 export interface BlocklistManagedItem {
   id: number
   line: string
+  pattern_type?: "literal" | "regex" | "comment" | "empty"
+  action?: "block" | "redact" | "warn"
+  replacement?: string | null
+  categories?: string[]
+  sample?: string | null
+  ok?: boolean
+  warning?: string | null
+  error?: string | null
 }
 
 export interface BlocklistManagedResponse {
@@ -78,11 +86,11 @@ export interface BlocklistLintItem {
   ok: boolean
   pattern_type?: "literal" | "regex" | "comment" | "empty"
   action?: "block" | "redact" | "warn"
-  replacement?: string
+  replacement?: string | null
   categories?: string[]
-  error?: string
-  warning?: string
-  sample?: string
+  error?: string | null
+  warning?: string | null
+  sample?: string | null
 }
 
 export interface BlocklistLintResponse {

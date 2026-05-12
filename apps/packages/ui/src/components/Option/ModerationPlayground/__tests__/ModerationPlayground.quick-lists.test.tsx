@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import * as moderationService from "@/services/moderation"
@@ -73,8 +74,15 @@ describe("ModerationPlayground quick phrase lists", () => {
     await screen.findByText("User Override Editor")
   }
 
+  const renderShell = () =>
+    render(
+      <MemoryRouter initialEntries={["/moderation/rules"]}>
+        <ModerationPlaygroundShell />
+      </MemoryRouter>
+    )
+
   it("renders phrase composer in user overrides tab after loading a user", async () => {
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     expect(screen.getByText("Add Phrase Rule")).toBeInTheDocument()
@@ -82,7 +90,7 @@ describe("ModerationPlayground quick phrase lists", () => {
   })
 
   it("adds ban and notify items to separate lists", async () => {
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     const phraseInput = screen.getByTestId("phrase-pattern-input")
@@ -103,7 +111,7 @@ describe("ModerationPlayground quick phrase lists", () => {
   })
 
   it("prevents duplicate quick rules", async () => {
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     const phraseInput = screen.getByTestId("phrase-pattern-input")
@@ -118,7 +126,7 @@ describe("ModerationPlayground quick phrase lists", () => {
   })
 
   it("allows regex quick rule without browser syntax validation", async () => {
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     // Check the Regex checkbox
@@ -144,7 +152,7 @@ describe("ModerationPlayground quick phrase lists", () => {
       }
     } as any)
 
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     // Phase labels are displayed as the raw phase value in the new panel
@@ -160,14 +168,14 @@ describe("ModerationPlayground quick phrase lists", () => {
       }
     } as any)
 
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     expect(screen.queryByText("alpha")).not.toBeInTheDocument()
   })
 
   it("includes rules in setUserOverride payload on save", async () => {
-    render(<ModerationPlaygroundShell />)
+    renderShell()
     await switchToUserScopeAndLoadUser()
 
     fireEvent.change(screen.getByTestId("phrase-pattern-input"), {

@@ -80,6 +80,44 @@ function truncate(str: string, max: number): string {
   return str.length > max ? str.slice(0, max) + "..." : str
 }
 
+function hasUserOverride(effective: Record<string, any>): boolean {
+  return Boolean(
+    effective.user_override ||
+    effective.user_overrides ||
+    effective.override_applied ||
+    effective.per_user_override_applied ||
+    effective.user_id
+  )
+}
+
+function explainModerationResult(
+  result: ModerationTestResponse,
+  phase: string
+): string {
+  const effective = result.effective || {}
+  if (effective.enabled === false) {
+    return "The moderation engine is disabled in the effective policy, so the sample was allowed without rule checks."
+  }
+  if (phase === "input" && effective.input_enabled === false) {
+    return "User message moderation is disabled for the effective policy, so input rules were skipped."
+  }
+  if (phase === "output" && effective.output_enabled === false) {
+    return "AI response moderation is disabled for the effective policy, so output rules were skipped."
+  }
+  if (!result.flagged && result.action === "pass") {
+    return "No active rule matched this sample, so the content passed moderation."
+  }
+  if (hasUserOverride(effective)) {
+    return `A per-user override influenced this ${phase} decision and produced the ${result.action} action.`
+  }
+  if (result.sample || result.category) {
+    const category = result.category ? `${result.category} ` : ""
+    const sample = result.sample ? ` with sample "${result.sample}"` : ""
+    return `The sample matched an active ${category}rule${sample}, so the policy returned ${result.action}.`
+  }
+  return `No specific matched rule was returned; the global policy fallback produced the ${result.action} action.`
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -151,6 +189,18 @@ const ResultDetails: React.FC<{ result: ModerationTestResponse; text: string; ph
         )}
       </div>
     </div>
+  </div>
+)
+
+const ResultExplanation: React.FC<{
+  result: ModerationTestResponse
+  phase: string
+}> = ({ result, phase }) => (
+  <div className="rounded-lg border border-border bg-surface/50 p-3">
+    <h4 className="text-sm font-semibold text-text">Why this result?</h4>
+    <p className="mt-1 text-sm text-text-muted">
+      {explainModerationResult(result, phase)}
+    </p>
   </div>
 )
 
@@ -278,6 +328,8 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
 
           {/* Match details + Before/After */}
           <ResultDetails result={result} text={text} phase={phase} />
+
+          <ResultExplanation result={result} phase={phase} />
 
           {/* Effective Policy */}
           <details className="mt-4">

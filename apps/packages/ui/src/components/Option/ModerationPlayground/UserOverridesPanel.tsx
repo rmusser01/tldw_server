@@ -149,7 +149,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
   const handleDelete = () => {
     Modal.confirm({
       title: "Delete user override?",
-      content: `This will permanently remove the override for "${ctx.activeUserId}". This cannot be undone.`,
+      content: `This will permanently remove the override for "${ctx.activeUserId}" and return that user to the global moderation policy. This cannot be undone from the UI.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
@@ -179,7 +179,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
     if (!ids.length) return
     Modal.confirm({
       title: `Delete ${ids.length} override(s)?`,
-      content: "This will permanently remove the selected overrides.",
+      content: `This will permanently remove overrides for: ${ids.join(", ")}. Affected users will fall back to the global moderation policy.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
@@ -207,7 +207,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
   const handleDeleteUser = (userId: string) => {
     Modal.confirm({
       title: "Delete user override?",
-      content: `Remove override for "${userId}"?`,
+      content: `Remove override for "${userId}" and return this user to the global moderation policy? This cannot be undone from the UI.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
@@ -264,6 +264,8 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
     if (ruleCount > 0) parts.push(`${ruleCount} rule(s)`)
     return parts.join(" | ")
   }
+
+  const activeDraftSummary = summarizeOverride(draft as Record<string, any>)
 
   // ---------------------------------------------------------------------------
   // Render
@@ -423,6 +425,14 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                 value={Array.isArray(draft.categories_enabled) ? draft.categories_enabled : []}
                 onChange={(cats) => updateDraft({ categories_enabled: cats })}
               />
+            </section>
+
+            <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+              <h4 className="text-sm font-semibold mb-1">Effective After Save</h4>
+              <p className="text-sm">{activeDraftSummary}</p>
+              <p className="mt-1 text-xs opacity-80">
+                This summary applies only to {ctx.activeUserId}; other users keep the global policy unless they have their own override.
+              </p>
             </section>
           </div>
 

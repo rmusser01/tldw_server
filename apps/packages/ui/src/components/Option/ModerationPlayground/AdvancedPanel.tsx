@@ -1,8 +1,9 @@
 import React from "react"
-import { Tooltip } from "antd"
+import { Modal, Tooltip } from "antd"
 import { Download, Upload, RefreshCw } from "lucide-react"
 
 import { setUserOverride } from "@/services/moderation"
+import type { RawReplacePreview } from "./hooks/useBlocklist"
 import type { ModerationSettingsState } from "./hooks/useModerationSettings"
 import type { BlocklistState } from "./hooks/useBlocklist"
 import type { UserOverridesState } from "./hooks/useUserOverrides"
@@ -51,6 +52,26 @@ function PerfField({ label, value, description }: PerfFieldProps) {
     </div>
   )
 }
+
+const pluralize = (count: number, singular: string, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`
+
+const BlocklistUploadPreview: React.FC<{ preview: RawReplacePreview }> = ({ preview }) => (
+  <div className="space-y-3 text-sm">
+    <p>Uploading this file will replace the current blocklist.</p>
+    <div className="grid grid-cols-2 gap-2">
+      <span>{pluralize(preview.lint.valid_count, "valid row")}</span>
+      <span>{pluralize(preview.lint.invalid_count, "invalid row")}</span>
+      <span>{pluralize(preview.addedCount, "added line")}</span>
+      <span>{pluralize(preview.removedCount, "removed line")}</span>
+    </div>
+    {preview.lint.invalid_count > 0 && (
+      <p className="text-red-600 dark:text-red-400">
+        Fix invalid rows before replacing the blocklist.
+      </p>
+    )}
+  </div>
+)
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -108,10 +129,21 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
       reader.onload = async () => {
         try {
           const content = reader.result as string
-          await blocklist.saveRawText(content)
-          messageApi.success("Blocklist replaced successfully")
-        } catch {
-          messageApi.error("Failed to import blocklist")
+          const preview = await blocklist.previewRawReplace(content)
+          Modal.confirm({
+            title: "Confirm blocklist upload",
+            content: <BlocklistUploadPreview preview={preview} />,
+            okText: "Replace blocklist",
+            cancelText: "Cancel",
+            okButtonProps: { danger: true, disabled: preview.lint.invalid_count > 0 },
+            onCancel: blocklist.cancelRawReplace,
+            onOk: async () => {
+              await blocklist.confirmRawReplace()
+              messageApi.success("Blocklist replaced successfully")
+            }
+          })
+        } catch (err: any) {
+          messageApi.error(err?.message || "Failed to import blocklist")
         }
       }
       reader.readAsText(file)

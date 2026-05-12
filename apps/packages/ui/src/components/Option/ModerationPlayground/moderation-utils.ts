@@ -1,4 +1,8 @@
-import type { ModerationOverrideRule, ModerationUserOverride } from "@/services/moderation"
+import type {
+  BlocklistManagedItem,
+  ModerationOverrideRule,
+  ModerationUserOverride
+} from "@/services/moderation"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,6 +14,19 @@ export interface SettingsDraft {
   piiEnabled: boolean
   categoriesEnabled: string[]
   persist: boolean
+}
+
+export type ManagedBlocklistRowKind = "literal" | "regex" | "comment" | "empty"
+
+export interface NormalizedManagedBlocklistRow extends BlocklistManagedItem {
+  rowKind: ManagedBlocklistRowKind
+  pattern: string
+  action: "block" | "redact" | "warn"
+  replacement: string | null
+  categories: string[]
+  isActive: boolean
+  isValid: boolean
+  statusLabel: "Active" | "Invalid" | "Comment" | "Blank"
 }
 
 // ---------------------------------------------------------------------------
@@ -205,3 +222,86 @@ export const getErrorStatus = (error: unknown): number | null => {
   if (typeof maybeError.response?.status === "number") return maybeError.response.status
   return null
 }
+
+const parseLegacyRegexPattern = (pattern: string): boolean => {
+  const trimmed = pattern.trim()
+  return trimmed.startsWith("/") && /\/[gimsxy]*$/.test(trimmed)
+}
+
+const parseLegacyManagedLine = (line: string) => {
+  const trimmed = line.trim()
+  if (!trimmed) {
+    return {
+      rowKind: "empty" as const,
+      pattern: "",
+      action: "block" as const,
+      replacement: null,
+      categories: [] as string[]
+    }
+  }
+  if (trimmed.startsWith("#")) {
+    return {
+      rowKind: "comment" as const,
+      pattern: trimmed,
+      action: "block" as const,
+      replacement: null,
+      categories: [] as string[]
+    }
+  }
+
+  let ruleBody = trimmed
+  let categories: string[] = []
+  const categorySeparator = ruleBody.lastIndexOf(" #")
+  if (categorySeparator >= 0) {
+    const categoryText = ruleBody.slice(categorySeparator + 2)
+    categories = normalizeCategories(categoryText)
+    ruleBody = ruleBody.slice(0, categorySeparator).trim()
+  }
+
+  const actionMatch = ruleBody.match(/\s+->\s*(block|redact|warn)(?::(.+))?$/)
+  const action = (actionMatch?.[1] ?? "block") as "block" | "redact" | "warn"
+  const replacement = action === "redact" ? actionMatch?.[2]?.trim() || null : null
+  const pattern = actionMatch
+    ? ruleBody.slice(0, actionMatch.index).trim()
+    : ruleBody.trim()
+  const rowKind = parseLegacyRegexPattern(pattern) ? "regex" as const : "literal" as const
+
+  return {
+    rowKind,
+    pattern,
+    action,
+    replacement,
+    categories
+  }
+}
+
+export const normalizeManagedBlocklistRows = (
+  items: BlocklistManagedItem[]
+): NormalizedManagedBlocklistRow[] =>
+  (items || []).map((item) => {
+    const parsed = parseLegacyManagedLine(item.line)
+    const rowKind = item.pattern_type ?? parsed.rowKind
+    const isValid = item.ok !== false
+    const isActive = (rowKind === "literal" || rowKind === "regex") && isValid
+    const statusLabel: NormalizedManagedBlocklistRow["statusLabel"] =
+      !isValid
+        ? "Invalid"
+        : rowKind === "comment"
+          ? "Comment"
+          : rowKind === "empty"
+            ? "Blank"
+            : "Active"
+
+    return {
+      ...item,
+      rowKind,
+      pattern: item.sample ?? parsed.pattern,
+      action: item.action ?? parsed.action,
+      replacement: item.replacement ?? parsed.replacement,
+      categories: item.categories ?? parsed.categories,
+      ok: item.ok ?? true,
+      isValid,
+      isActive,
+      statusLabel
+    }
+  })

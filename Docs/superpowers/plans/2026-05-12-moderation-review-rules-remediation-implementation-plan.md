@@ -163,7 +163,7 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: `/moderation` loads review state, `/moderation/rules` loads content rules, `/moderation-playground` redirects.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -239,7 +239,7 @@ Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationPlaygroun
 
 Expected: all tests pass and no raw replace service call occurs before preview confirmation.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 

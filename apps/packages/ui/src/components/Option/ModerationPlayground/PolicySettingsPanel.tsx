@@ -132,7 +132,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
           </Tooltip>
         </div>
         <p className="text-xs text-text-muted mt-2 italic">
-          Read-only — reflects the server policy snapshot.
+          Read-only global policy — this value comes from server configuration and is not changed by runtime overrides below.
         </p>
       </section>
 
@@ -168,7 +168,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
           </div>
         </div>
         <p className="text-xs text-text-muted mt-3 italic">
-          Read-only — reflects the server policy snapshot.
+          Read-only global defaults — user overrides can change the effective action for a selected user in the User Overrides tab.
         </p>
       </section>
 
@@ -178,7 +178,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
           <div>
             <h3 className="font-semibold text-text">Personal Data Protection</h3>
             <p className="text-sm text-text-muted mt-0.5">
-              Enable built-in rules to detect and redact personal information.
+              Runtime override for built-in personal-data detection. Saving applies immediately; persistence is controlled separately.
             </p>
           </div>
           <Toggle checked={draft.piiEnabled} onChange={handlePiiToggle} label="PII detection" />
@@ -189,7 +189,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
       <section className="rounded-lg border border-border bg-surface/50 p-4">
         <h3 className="font-semibold text-text mb-1">Content Categories</h3>
         <p className="text-sm text-text-muted mb-3">
-          Select which content categories the moderation engine should flag.
+          Runtime category override for this server session. Leave empty to use the server default category behavior.
         </p>
         <CategoryPicker value={draft.categoriesEnabled} onChange={handleCategoriesChange} />
       </section>
@@ -202,7 +202,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
               Persist to Disk
             </h3>
             <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-0.5">
-              Write settings to config file so they survive server restarts.
+              Write runtime overrides to the server config file so these changes survive restarts.
             </p>
           </div>
           <Toggle checked={draft.persist} onChange={handlePersistToggle} label="Persist to disk" />
