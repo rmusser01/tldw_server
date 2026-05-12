@@ -228,6 +228,134 @@ def test_profile_manifest_refuses_documented_candidate() -> None:
     assert "adapter_required" in manifest["blockers"]
 
 
+def test_profile_manifest_refuses_blocked_entrypoint() -> None:
+    module = _load_module()
+
+    manifest = module.build_agent_profile_manifest(
+        {
+            "type": "claude-code",
+            "name": "Claude Code",
+            "entrypoint_strategy": "adapter_acp",
+            "acp_command": "tldw-acp-claude",
+            "acp_args": ["--stdio"],
+            "probe_state": "blocked",
+            "primary_blocker": "adapter_missing",
+            "blockers": [],
+            "status_message": "Configured ACP adapter command is not available on PATH.",
+            "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+        }
+    )
+
+    assert manifest["profile"] == "claude-code"
+    assert manifest["requires_live_agent"] is True
+    assert manifest["commands"] == []
+    assert manifest["blockers"] == ["adapter_missing"]
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "adapter_acp"
+    assert manifest["entrypoint"]["probe_state"] == "blocked"
+    assert manifest["entrypoint"]["acp_command"] == "tldw-acp-claude"
+
+
+def test_profile_manifest_refuses_custom_template() -> None:
+    module = _load_module()
+
+    manifest = module.build_agent_profile_manifest(
+        {
+            "type": "custom",
+            "name": "Custom",
+            "entrypoint_strategy": "custom_template",
+            "acp_command": "",
+            "acp_args": [],
+            "probe_state": "custom_template",
+            "primary_blocker": None,
+            "blockers": [],
+            "status_message": "Custom agent templates require operator-supplied ACP entrypoint metadata.",
+            "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+        }
+    )
+
+    assert manifest["profile"] == "custom"
+    assert manifest["commands"] == []
+    assert manifest["blockers"] == []
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "custom_template"
+    assert manifest["entrypoint"]["probe_state"] == "custom_template"
+    assert manifest["entrypoint"]["acp_command"] == ""
+    assert "operator-supplied ACP entrypoint metadata" in manifest["notes"][0]
+
+
+def test_render_manifest_dict_prints_stdin_jsonl_and_blockers() -> None:
+    module = _load_module()
+    manifest = module.build_agent_profile_manifest(
+        {
+            "type": "opencode",
+            "name": "OpenCode",
+            "entrypoint_strategy": "native_acp",
+            "acp_command": "opencode",
+            "acp_args": ["acp"],
+            "probe_state": "ready_to_probe",
+            "primary_blocker": "manual_review_required",
+            "blockers": [],
+            "status_message": "Ready to probe native ACP entrypoint.",
+            "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+        }
+    )
+
+    rendered = module.render_manifest_dict(manifest)
+
+    assert "- blockers: `manual_review_required`" in rendered
+    assert "## Blockers" in rendered
+    assert "- manual_review_required" in rendered
+    assert "stdin_jsonl:" in rendered
+    assert "```jsonl" in rendered
+    assert '"method": "initialize"' in rendered
+    assert '"method": "session/new"' in rendered
+    assert '"method": "session/prompt"' in rendered
+
+
+def test_agent_profile_cli_uses_registry_classification_path(monkeypatch, capsys) -> None:
+    module = _load_module()
+    from tldw_Server_API.app.core.Agent_Client_Protocol import agent_registry
+
+    calls = []
+    entry = SimpleNamespace(type="opencode", name="OpenCode")
+
+    class _Registry:
+        def get_entry(self, profile):
+            calls.append(("get_entry", profile))
+            return entry
+
+    class _Classification:
+        def as_dict(self):
+            calls.append(("as_dict",))
+            return {
+                "entrypoint_strategy": "native_acp",
+                "acp_command": "opencode",
+                "acp_args": ["acp"],
+                "probe_state": "ready_to_probe",
+                "primary_blocker": None,
+                "blockers": [],
+                "status_message": "Configured ACP entrypoint is ready for a bounded initialize probe.",
+                "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+            }
+
+    def _classify_agent_entrypoint(received_entry):
+        calls.append(("classify", received_entry.type))
+        return _Classification()
+
+    monkeypatch.setattr(agent_registry, "get_agent_registry", lambda: _Registry())
+    monkeypatch.setattr(agent_registry, "classify_agent_entrypoint", _classify_agent_entrypoint)
+
+    rc = module.main(["--agent-profile", "opencode", "--format", "json"])
+    captured = capsys.readouterr()
+    manifest = json.loads(captured.out)
+
+    assert rc == 0
+    assert calls == [("get_entry", "opencode"), ("classify", "opencode"), ("as_dict",)]
+    assert manifest["profile"] == "opencode"
+    assert manifest["name"] == "OpenCode"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "native_acp"
+    assert manifest["commands"][0]["argv"] == ["opencode", "acp"]
+
+
 def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
     module = _load_module()
     sequences = []
