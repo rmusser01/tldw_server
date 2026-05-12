@@ -1,10 +1,10 @@
 ---
 id: TASK-287
 title: Implement ACP downstream entrypoint strategy stages 1-3
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 06:46'
+updated_date: '2026-05-12 10:27'
 labels:
   - ACP
   - implementation
@@ -30,11 +30,11 @@ Implement the approved ACP downstream entrypoint strategy design for the first p
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Registry entries, YAML rows, API registration/update schemas, and DB-backed dynamic registrations preserve entrypoint strategy metadata with conservative defaults for legacy rows.
-- [ ] #2 A deterministic classifier reports probe state, ACP command/args, primary blocker, blockers, status message, and docs URL without running live agent commands.
+- [x] #1 Registry entries, YAML rows, API registration/update schemas, and DB-backed dynamic registrations preserve entrypoint strategy metadata with conservative defaults for legacy rows.
+- [x] #2 A deterministic classifier reports probe state, ACP command/args, primary blocker, blockers, status message, and docs URL without running live agent commands.
 - [x] #3 Certification smoke helper can render profile-specific dry-run manifests for native, adapter-backed, documented-candidate, and custom-template profiles and refuses unsafe live runs without required env.
 - [x] #4 ACP agents, health, and setup-guide surfaces expose strategy and blocker metadata consistently for YAML, API-backed, runner, and static fallback rows.
-- [ ] #5 Focused unit, helper, integration, docs, and security checks pass for the touched scope.
+- [x] #5 Focused unit, helper, integration, docs, and security checks pass for the touched scope.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -69,12 +69,18 @@ Task 4 execution plan recorded before edits: add failing ACP endpoint tests for 
 Task 4 red evidence: focused ACP endpoint pytest failed 5 tests for missing entrypoint metadata in health, setup-guide, /agents registry, runner normalization, and static fallback. Task 4 green evidence: focused ACP endpoint pytest reports 41 passed and 5 warnings. git diff --check is clean. Scoped Bandit on agent_client_protocol endpoint and schema reports 0 findings. Implementation exposes classifier-backed entrypoint readiness metadata across health, setup-guide, registry/static/runner agent listing, and preserves dynamic registration forwarding.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented ACP downstream entrypoint strategy metadata, deterministic probe classification, profile-specific certification manifests, and setup/status/API exposure. Verification: focused ACP registry/API/helper tests passed, git diff --check clean, docs grep confirmed strategy/blocker coverage, and Bandit on touched Python scope showed no new findings beyond existing ACP_Sessions_DB baseline warnings.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
