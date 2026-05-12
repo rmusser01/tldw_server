@@ -1,11 +1,11 @@
 ---
 id: TASK-304
 title: Design Research Studio UX remediation plan series
-status: Done
+status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-12 15:35'
-updated_date: '2026-05-13 00:30'
+updated_date: '2026-05-12 15:49'
 labels:
   - design
   - research-studio
@@ -13,25 +13,13 @@ labels:
   - webui
   - extension
 dependencies: []
-documentation:
-  - Docs/superpowers/specs/2026-05-12-research-studio-ux-remediation-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-12-research-studio-ux-remediation-implementation-plan.md
 priority: medium
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create a repo-grounded design spec for addressing the Research Studio audit findings.
-
-The agreed direction is:
-- Make `/research-studio` the canonical user-facing route while preserving `/workspace-playground` and `/workspace-studio` as aliases.
-- Keep internal persisted workspace-playground identifiers stable unless separately migrated.
-- Support `?tab=studio` mobile deep links.
-- Hide planned work products until actionable and shift Studio to a work-product-first model.
-- Improve no-source/progressive-disclosure states.
-- Stage degraded-health handling without blocking on unresolved backend capability semantics.
+Create a repo-grounded design spec for addressing the Research Studio audit findings. The agreed direction is to make `/research-studio` the canonical user-facing route while preserving `/workspace-playground` and `/workspace-studio` as aliases, keep internal persisted workspace-playground identifiers stable unless separately migrated, support `?tab=studio` mobile deep links, hide planned work products until actionable, shift Studio to a work-product-first model, improve no-source/progressive-disclosure states, and stage degraded-health handling without blocking on unresolved backend capability semantics.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -61,24 +49,14 @@ The agreed direction is:
 2026-05-12: Design spec and task record were committed together. Per brainstorming workflow, implementation planning remains gated on user review of the written spec. Spec-review subagent was not dispatched because this session's tool policy only allows spawning subagents when explicitly requested by the user.
 
 2026-05-12: Follow-up design review found and patched four planning gaps before implementation planning: route aliases must preserve extension `search`/`hash` state; redirect-only legacy pages can be blocked by `ServerReadinessGate` unless degraded-health pass-through lands first or aliases bypass narrowly; naming sweep must inventory known handoff/entry-point callers before path edits; docs updates should target source docs rather than generated `Docs/site` unless the docs pipeline rebuild is in scope. Verification: `git diff --check -- Docs/superpowers/specs/2026-05-12-research-studio-ux-remediation-design.md` passed.
-
-Implementation planning child `TASK-304.1` is complete. Plan artifact: `Docs/superpowers/plans/2026-05-12-research-studio-ux-remediation-implementation-plan.md`. The plan orders degraded-health pass-through before browser-visible route alias verification and splits the work into independently reviewable stages.
-
-2026-05-13: Completed the staged Research Studio remediation series through TASK-304.10. Child tasks now cover degraded-health pass-through, canonical /research-studio aliases, mobile ?tab=studio state, user-facing naming, work-product-first Studio IA, no-source progressive disclosure, returning-user tab persistence, health-capability documentation, and release docs/verification. Final release verification is recorded in TASK-304.10.
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the staged Research Studio UX remediation series. The branch now makes /research-studio canonical while preserving /workspace-playground and /workspace-studio aliases, supports mobile ?tab=studio routing and tab persistence, shifts Studio toward a work-product-first/current-only model, improves no-source/source-readiness feedback, documents degraded-health capability semantics, and updates current release docs/tests/inventories with focused verification evidence.
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
