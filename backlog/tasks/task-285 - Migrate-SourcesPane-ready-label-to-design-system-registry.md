@@ -48,6 +48,8 @@ Replace the hardcoded ready source-status label in WorkspacePlayground SourcesPa
 - Red test first: `bunx vitest run src/components/Option/WorkspacePlayground/__tests__/SourcesPane.design-system.test.tsx --reporter=dot` failed because the source row still rendered `Ready` instead of the mocked registry label `Registry Ready`.
 - The ready status badge now reads the label from the design-system state registry; processing and error status labels remain on their existing translated text paths.
 - Removed the `canonical-state-label:src/components/Option/WorkspacePlayground/SourcesPane/index.tsx:Ready` baseline entry.
+- Review fix: updated the focused design-system test mock to preserve the real `@/design-system` module exports and override only `getDesignSystemState`, matching the existing registry-label test pattern.
+- Review disposition: did not apply optional chaining to `readyState.label` because `getDesignSystemState("ready")` is a typed lookup into the static design-system state registry; a missing `ready` key would violate the registry contract and should fail loudly instead of rendering an undefined badge.
 - Broad `SourcesPane` TypeScript filtering surfaced an existing unrelated error in `SourcesPane.stage5.transfer.test.tsx`; an exact touched-path filter for `SourcesPane/index.tsx`, `SourcesPane.design-system.test.tsx`, and the baseline file returned no output.
 - Bandit skipped: touched implementation is frontend TypeScript/test JSON only, with no Python code path.
 <!-- SECTION:NOTES:END -->
@@ -57,5 +59,5 @@ Replace the hardcoded ready source-status label in WorkspacePlayground SourcesPa
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Migrated the WorkspacePlayground SourcesPane ready source-status badge to the design-system state registry by resolving `getDesignSystemState("ready")` and rendering its label for ready rows. Added focused coverage that mocks the registry and scopes the assertion to a source row, proving the badge uses the registry-provided label without source-string assertions.
 
-Removed the now-obsolete canonical state label baseline exception. Verification passed with the focused SourcesPane design-system test, existing SourcesPane filters/sort coverage, the product-state guard unit suite, the design-system guard CLI, `git diff --check`, and an exact touched-path TypeScript error filter. Repo-wide TypeScript still has an unrelated pre-existing `SourcesPane.stage5.transfer.test.tsx` error.
+Removed the now-obsolete canonical state label baseline exception. Review feedback was addressed by preserving real design-system module exports in the test mock. Verification passed with the focused SourcesPane design-system test, existing SourcesPane filters/sort coverage, the product-state guard unit suite, the design-system guard CLI, `git diff --check`, and an exact touched-path TypeScript error filter. Repo-wide TypeScript still has an unrelated pre-existing `SourcesPane.stage5.transfer.test.tsx` error.
 <!-- SECTION:FINAL_SUMMARY:END -->

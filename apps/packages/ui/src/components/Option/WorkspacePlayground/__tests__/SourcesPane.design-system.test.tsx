@@ -1,15 +1,32 @@
 import { render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { getDesignSystemState } from "@/design-system"
 import type { WorkspaceSource } from "@/types/workspace"
 
 import { SourcesPane } from "../SourcesPane"
 
-const mockGetDesignSystemState = vi.hoisted(() => vi.fn())
-
-vi.mock("@/design-system", () => ({
-  getDesignSystemState: mockGetDesignSystemState
+const registryLabels = vi.hoisted(() => ({
+  ready: "Registry Ready"
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "ready" ? registryLabels.ready : state.label
+        }
+      }
+    )
+  }
+})
 
 const workspaceStoreState = {
   sources: [] as WorkspaceSource[],
@@ -89,11 +106,6 @@ vi.mock("../SourcesPane/AddSourceModal", () => ({
 describe("SourcesPane design-system state labels", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGetDesignSystemState.mockImplementation((key: string) => ({
-      key,
-      label: key === "ready" ? "Registry Ready" : key,
-      severity: key === "ready" ? "success" : "neutral"
-    }))
     workspaceStoreState.sources = [
       {
         id: "source-1",
@@ -121,7 +133,7 @@ describe("SourcesPane design-system state labels", () => {
       .getByText("Registry-backed source")
       .closest('[data-source-id="source-1"]') as HTMLElement
 
-    expect(within(sourceRow).getByText("Registry Ready")).toBeInTheDocument()
-    expect(mockGetDesignSystemState).toHaveBeenCalledWith("ready")
+    expect(within(sourceRow).getByText(registryLabels.ready)).toBeInTheDocument()
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
   })
 })
