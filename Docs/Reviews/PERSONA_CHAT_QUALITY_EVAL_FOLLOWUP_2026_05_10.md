@@ -196,7 +196,7 @@ Open the next implementation task as Slice 1: Persona Chat Trace And Error Taxon
 
 ## 2026-05-11 Contract-First Judge Update
 
-[Issue #1566](https://github.com/rmusser01/tldw_server/issues/1566) starts Slice 5 as a contract-first follow-up rather than an executable judge. The V1 contract lives in `Docs/Reviews/PERSONA_CHAT_JUDGE_EVAL_CONTRACT_2026_05_11.md`, with offline calibration fixtures in `tldw_Server_API/tests/fixtures/persona_chat_judge_contract_cases.json`.
+[Issue #1566](https://github.com/rmusser01/tldw_server/issues/1566) starts Slice 5 as a contract-first follow-up rather than an executable judge. The V1 contract lives in `Docs/Reviews/PERSONA_CHAT_JUDGE_EVAL_CONTRACT_2026_05_11.md`, with the packaged offline calibration fixture in `tldw_Server_API/app/core/Evaluations/data/persona_chat_judge_contract_cases.json` and a test mirror in `tldw_Server_API/tests/fixtures/persona_chat_judge_contract_cases.json`.
 
 This update defines judge input/output shape, calibration expectations, privacy rules, and taxonomy mapping only. Live judge execution, provider calls, runtime gating, and Persona Chat behavior changes remain deferred until the contract fixtures are reviewed and a held-out calibration path exists.
 
