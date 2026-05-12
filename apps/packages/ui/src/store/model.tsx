@@ -341,11 +341,7 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
 
     // Generic typed update methods
     updateSetting: (key, value) =>
-      set((state) =>
-        state[key] === value
-          ? state
-          : applyActiveSettingsUpdate(state, { [key]: value })
-      ),
+      set((state) => applyActiveSettingsUpdate(state, { [key]: value })),
     updateSettings: (updates) =>
       set((state) => applyActiveSettingsUpdate(state, updates)),
     reset: () =>

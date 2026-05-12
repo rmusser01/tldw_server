@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-12 05:58'
+updated_date: '2026-05-12 13:49'
 labels:
   - webui
   - chat
@@ -15,7 +15,8 @@ references:
   - 'https://github.com/rmusser01/tldw_server/pull/1582'
 documentation:
   - Docs/superpowers/specs/2026-05-12-main-chat-cockpit-controls-gap-design.md
-  - Docs/superpowers/plans/2026-05-12-main-chat-cockpit-single-pr-completion-plan.md
+  - >-
+    Docs/superpowers/plans/2026-05-12-main-chat-cockpit-single-pr-completion-plan.md
 priority: high
 ---
 
@@ -62,7 +63,21 @@ Expanded the real-server /chat Playwright spec to verify independent rail visibi
 Focused Vitest cockpit suite passed: 7 files, 34 tests. ServerReadinessGate degraded test passed: 1 file, 4 tests. Real-server Playwright cockpit spec passed: 3 tests against http://127.0.0.1:8000. A one-off real-server screenshot capture returned a 200 chat completion and saved /private/tmp/tldw-chat-cockpit-real-server-20260512.png.
 
 Known baseline: the focused Playground cockpit tests still log non-fatal mocked-server 400s from existing chat-settings fetch behavior. The repo-wide UI typecheck remains blocked by unrelated pre-existing errors outside this touched scope. Bandit was not applicable because this slice touched TypeScript, TSX, Markdown, and Playwright files only.
+
+Reopened for PR #1582 review-follow-up: validate current inline comments, fix any still-valid model/settings issues, rerun focused verification, and keep the PR draft.
+
+PR #1582 review follow-up: verified current review comments against dcba5633a. Previously raised provider-qualified selection, provider usability flags, backend config flag assignment, PEP8 wrapping, and a11y source assertion issues were already fixed. Fixed remaining valid scoped settings issue by making updateSetting always delegate through the active scope path and added a regression test for scoped values that match the global default.
+
+Review-follow-up verification: model.scoped-settings test first failed before the store fix, then passed. Targeted UI review tests passed: modelSelectorUtils, useModelSelector capabilities, Playground cockpit a11y, and model scoped settings (19 tests). Backend model metadata filters passed (6 tests) using the repo virtualenv. Real-server /chat Playwright cockpit spec passed against http://127.0.0.1:8000 with no route interception (3 tests). git diff --check passed. Bandit was not rerun because this follow-up touched only TypeScript test/store code and the task record.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the main /chat cockpit single-PR slice for draft PR #1582: independent rail visibility, direct shared-state rail actions, degraded-health cockpit warnings, and real-server parity coverage are now in the PR branch. Verification includes focused component tests, readiness-gate tests, real-server Playwright without route mocks, and a real-server screenshot capture.
+
+Review follow-up fixed the remaining active scoped-settings defect and revalidated the PR review-comment surface with focused UI, backend, and real-server /chat coverage.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -73,9 +88,3 @@ Known baseline: the focused Playground cockpit tests still log non-fatal mocked-
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the main /chat cockpit single-PR slice for draft PR #1582: independent rail visibility, direct shared-state rail actions, degraded-health cockpit warnings, and real-server parity coverage are now in the PR branch. Verification includes focused component tests, readiness-gate tests, real-server Playwright without route mocks, and a real-server screenshot capture.
-<!-- SECTION:FINAL_SUMMARY:END -->

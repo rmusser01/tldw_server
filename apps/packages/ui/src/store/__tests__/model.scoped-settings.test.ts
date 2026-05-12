@@ -107,6 +107,26 @@ describe("provider:model scoped chat model settings", () => {
     ).toMatchObject({ temperature: 0.2 })
   })
 
+  it("persists scoped updates even when they match the current global value", () => {
+    const store = useStoreChatModelSettings.getState()
+
+    store.updateSettings({ temperature: 0.7 })
+    store.setActiveSettingsScope("openai:gpt-4o")
+    useStoreChatModelSettings.getState().updateSetting("temperature", 0.7)
+
+    expect(
+      useStoreChatModelSettings.getState().scopedSettingsByModelKey[
+        "openai:gpt-4o"
+      ]
+    ).toMatchObject({ temperature: 0.7 })
+
+    useStoreChatModelSettings.getState().setActiveSettingsScope(undefined)
+    useStoreChatModelSettings.getState().updateSetting("temperature", 0.4)
+    useStoreChatModelSettings.getState().setActiveSettingsScope("openai:gpt-4o")
+
+    expect(useStoreChatModelSettings.getState().temperature).toBe(0.7)
+  })
+
   it("hydrates effective settings when switching active model scopes", () => {
     const store = useStoreChatModelSettings.getState()
 
