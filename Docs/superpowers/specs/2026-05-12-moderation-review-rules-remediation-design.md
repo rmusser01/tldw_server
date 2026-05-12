@@ -96,6 +96,13 @@ Entry and exit flows:
 - Rules route should link back to Review when test results or configuration status imply review work exists.
 - Empty review state should offer "Open Content Rules" only as a secondary action, not as the primary page purpose.
 
+Extension behavior:
+
+- The extension must not silently keep `/moderation` pointed at rules configuration after the split.
+- If the extension sidepanel cannot fit the full review queue in the first implementation slice, it should show a compact review entry state with counts, filters, and an "Open full review" action rather than pretending the route is unsupported.
+- `/moderation/rules` should keep parity with the existing shared configuration surface wherever the route is already shared.
+- Any route that intentionally differs between WebUI and extension must document that difference in page inventory and smoke mapping.
+
 ## Review Queue MVP
 
 The first review queue should be narrow and operational rather than a general analytics dashboard.
@@ -248,6 +255,16 @@ Review data should be backend-owned. The frontend should not infer moderation ev
 
 Review content must also be backend-sanitized. The frontend should render only fields the backend explicitly marks safe for the moderator's permission level. Raw unsafe content, private identifiers, full surrounding context, and unredacted matched samples should not be exposed or exported unless a backend capability explicitly authorizes that access for the current user.
 
+Review item creation must come from explicit moderation event producers in backend enforcement paths. The tester and local UI history can seed fixtures, but they must not become production review events unless the backend explicitly records them as such. Event producers should attach policy version, matched rule metadata, source provenance, phase, action, and an idempotency key so repeated moderation checks do not create duplicate queue items.
+
+Retention and minimization requirements:
+
+- Store sanitized excerpts and metadata by default, not raw content.
+- Store raw content only behind explicit backend configuration and permission checks.
+- Define a retention window for review items and audit records before production enablement.
+- Support deletion or redaction of review item content when source data is removed or a privacy policy requires it.
+- Audit exports must use the same sanitization and permission gates as the UI.
+
 Proposed review item shape:
 
 ```ts
@@ -347,6 +364,14 @@ If backend support is not ready, the first frontend implementation slice should 
 
 ## Staged Implementation Plan
 
+Stage dependency rules:
+
+- Stage 1 is the foundation for all later route work.
+- Stages 2 and 3 can proceed after Stage 1 and can be implemented before the review backend exists.
+- Stage 5, the production review queue frontend, is blocked on Stage 4 backend contract, event capture, permissions, and fixtures.
+- Stages 6 and 7 build on production review decisions and should not ship before the Stage 5 decision path exists.
+- Stage 8 should start early with fixtures for the current stage, then expand as each later stage lands.
+
 ### Stage 1: Route And Naming Foundation
 
 Goal: make routes match user intent.
@@ -401,15 +426,17 @@ Success criteria:
 - Inputs and selects expose usable labels.
 - Mobile `document.documentElement.scrollWidth <= window.innerWidth` for target routes.
 
-### Stage 4: Review Backend Contract And Seed Fixtures
+### Stage 4: Review Backend Contract, Event Capture, And Seed Fixtures
 
 Goal: create the minimum backend-owned review substrate before production review UI.
 
 Deliverables:
 
 - Review item list/detail/decision/undo/audit endpoints or equivalent route contract.
+- Event producer integration from backend moderation enforcement paths that can create review items with idempotency keys.
 - Pagination, filters, search, sort, and counts contract for the queue list.
 - Sanitized review item fields and permission-gated context exposure.
+- Retention/minimization behavior for review items and audit records.
 - Decision action vocabulary mapped to resulting queue statuses.
 - Minimal audit event persistence for review decisions.
 - Seed or fixture data for local smoke tests and empty/error states.
@@ -417,6 +444,7 @@ Deliverables:
 Success criteria:
 
 - Frontend can request review items without inventing production data from local tester history.
+- Production review items come from explicit backend moderation events, not UI-only test history.
 - A decision action returns the updated item, decision record, and undo affordance when available.
 - The contract prevents raw unsafe/private content exposure unless a backend permission explicitly allows it.
 
@@ -523,7 +551,7 @@ Success criteria:
 2. Content Rules blocklist display/search/filter and tester explainability.
 3. Content Rules destructive-action preview and recovery.
 4. Accessibility and responsive hardening for both moderation routes.
-5. Backend review item contract, permissions, audit persistence, and seed fixtures.
+5. Backend review item contract, event capture, permissions, retention, audit persistence, and seed fixtures.
 6. Review Queue MVP frontend.
 7. Audit trail, durable recovery, and export.
 8. Power-user bulk review and saved views.
