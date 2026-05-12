@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-12 15:35'
-updated_date: '2026-05-12 15:49'
+updated_date: '2026-05-12 16:11'
 labels:
   - design
   - research-studio
@@ -13,6 +13,10 @@ labels:
   - webui
   - extension
 dependencies: []
+documentation:
+  - Docs/superpowers/specs/2026-05-12-research-studio-ux-remediation-design.md
+  - >-
+    Docs/superpowers/plans/2026-05-12-research-studio-ux-remediation-implementation-plan.md
 priority: medium
 ---
 
@@ -49,6 +53,8 @@ Create a repo-grounded design spec for addressing the Research Studio audit find
 2026-05-12: Design spec and task record were committed together. Per brainstorming workflow, implementation planning remains gated on user review of the written spec. Spec-review subagent was not dispatched because this session's tool policy only allows spawning subagents when explicitly requested by the user.
 
 2026-05-12: Follow-up design review found and patched four planning gaps before implementation planning: route aliases must preserve extension `search`/`hash` state; redirect-only legacy pages can be blocked by `ServerReadinessGate` unless degraded-health pass-through lands first or aliases bypass narrowly; naming sweep must inventory known handoff/entry-point callers before path edits; docs updates should target source docs rather than generated `Docs/site` unless the docs pipeline rebuild is in scope. Verification: `git diff --check -- Docs/superpowers/specs/2026-05-12-research-studio-ux-remediation-design.md` passed.
+
+Implementation planning child `TASK-304.1` is complete. Plan artifact: `Docs/superpowers/plans/2026-05-12-research-studio-ux-remediation-implementation-plan.md`. The plan orders degraded-health pass-through before browser-visible route alias verification and splits the work into independently reviewable stages.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
