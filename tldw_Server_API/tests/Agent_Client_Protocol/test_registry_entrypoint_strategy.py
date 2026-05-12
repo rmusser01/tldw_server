@@ -57,6 +57,32 @@ agents:
     assert entry.acp_args == ["acp"]
 
 
+def test_registry_loads_null_yaml_acp_command_as_missing_entrypoint(tmp_path) -> None:
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(
+        """
+agents:
+  - type: null_command_agent
+    name: Null Command Agent
+    command: null-command-agent
+    entrypoint_strategy: native_acp
+    acp_command:
+"""
+    )
+
+    registry = AgentRegistry(yaml_path=str(yaml_file))
+    registry.load()
+
+    entry = registry.get_entry("null_command_agent")
+    assert entry is not None
+    assert entry.acp_command == ""
+
+    result = classify_agent_entrypoint(entry)
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "entrypoint_strategy_missing"
+    assert "binary_missing" not in result.blockers
+
+
 def test_dynamic_registration_preserves_entrypoint_strategy_fields(acp_db) -> None:
     registry = AgentRegistry(yaml_path="/missing.yaml", db=acp_db)
 

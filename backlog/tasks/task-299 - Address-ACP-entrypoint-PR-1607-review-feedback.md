@@ -4,7 +4,7 @@ title: 'Address ACP entrypoint PR #1607 review feedback'
 status: Done
 assignee: []
 created_date: '2026-05-12 13:51'
-updated_date: '2026-05-12 14:01'
+updated_date: '2026-05-12 14:06'
 labels:
   - ACP
   - PR-review
@@ -44,12 +44,14 @@ Review threads addressed in PR #1607:
 - Added DB-backed persistence coverage for entrypoint metadata and invalid-strategy coercion.
 - Replaced timing-sensitive partial-line timeout coverage with event-driven cleanup coverage.
 - Aggregated multiple classifier blockers and added requested docstrings.
+
+Follow-up refresh after push found one new Cubic finding. Fixed YAML null acp_command coercion so it remains an empty missing entrypoint instead of the literal string "None", with regression coverage for blocked classification.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed the actionable PR #1607 review feedback across ACP entrypoint classification, API status normalization, certification smoke manifests, and focused regression tests. Verification: 148 focused ACP tests passed, prior 89-test focused slice passed, git diff --check passed, and scoped Bandit on touched production files reported no findings. Review-fix commit is being pushed to the PR branch.
+Addressed the actionable PR #1607 review feedback across ACP entrypoint classification, API status normalization, certification smoke manifests, YAML null command handling, and focused regression tests. Verification: 149 focused ACP tests passed after the follow-up fix, prior 89-test focused slice passed, git diff --check passed, and scoped Bandit on touched production files reported no findings. Review-fix commits were pushed to the PR branch.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

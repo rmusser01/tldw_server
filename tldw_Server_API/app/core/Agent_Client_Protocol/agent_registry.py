@@ -344,7 +344,7 @@ class AgentRegistry:
                 ),
                 compatibility_docs_url=item.get("compatibility_docs_url", ACP_COMPATIBILITY_DOCS_URL),
                 entrypoint_strategy=_coerce_entrypoint_strategy(item.get("entrypoint_strategy")),
-                acp_command=str(item.get("acp_command", "")),
+                acp_command=str(item.get("acp_command") or ""),
                 acp_args=list(item.get("acp_args", [])),
                 adapter_source=item.get("adapter_source"),
                 adapter_docs_url=item.get("adapter_docs_url"),
