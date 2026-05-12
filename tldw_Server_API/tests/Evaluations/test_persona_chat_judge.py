@@ -155,6 +155,19 @@ def test_judge_prediction_rejects_invalid_result_values() -> None:
         )
 
 
+def test_calibration_rejects_invalid_result_values_from_untyped_predictions() -> None:
+    judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-010"))
+    prediction = object.__new__(PersonaChatJudgePrediction)
+    object.__setattr__(prediction, "case_id", "PC-CASE-010")
+    object.__setattr__(prediction, "dimension_key", "exemplar_synthesis")
+    object.__setattr__(prediction, "result", "PASS")
+    object.__setattr__(prediction, "critique", "Parsed result had invalid casing.")
+    object.__setattr__(prediction, "evidence", ("assistant_text",))
+
+    with pytest.raises(ValueError, match="result"):
+        calibrate_persona_chat_judge_predictions([judge_input], [prediction])
+
+
 def test_judge_input_rejects_blank_manual_case_id() -> None:
     with pytest.raises(ValueError, match="case_id"):
         PersonaChatJudgeInput(

@@ -56,6 +56,8 @@ PR review fixes: documented known judge failure modes and residual V1 risks, add
 PR review verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Persona/test_persona_chat_quality_fixtures.py -v passed with 20 tests; python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge.py reported no issues; git diff --check passed.
 
 Docstring follow-up: added concise helper docstrings in persona_chat_judge.py to address the CodeRabbit docstring coverage warning for the new module.
+
+Additional review follow-up: added a focused regression test proving calibrate_persona_chat_judge_predictions rejects invalid result values even when a prediction object bypasses dataclass post-init validation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
