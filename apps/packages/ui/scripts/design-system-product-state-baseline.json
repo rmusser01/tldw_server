@@ -3938,17 +3938,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Sources/SourceStatusPanels.tsx:Tag",
-    "path": "src/components/Option/Sources/SourceStatusPanels.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Tag",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Tag product-state UI in src/components/Option/Sources/SourceStatusPanels.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Sources/SourcesWorkspacePage.tsx:Alert",
     "path": "src/components/Option/Sources/SourcesWorkspacePage.tsx",
     "rule": "antd-product-state-import",
@@ -5342,17 +5331,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing hardcoded \"Degraded\" state label in src/components/Option/Sources/SourceItemsTable.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/Sources/SourceStatusPanels.tsx:Degraded",
-    "path": "src/components/Option/Sources/SourceStatusPanels.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Degraded",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Degraded\" state label in src/components/Option/Sources/SourceStatusPanels.tsx before the guard.",
     "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },
