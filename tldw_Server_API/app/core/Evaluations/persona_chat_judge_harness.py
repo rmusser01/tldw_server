@@ -185,7 +185,7 @@ def _compare_case(
             verdict_match=False,
             flag_match=False,
             score_schema_valid=False,
-            mismatches=("invalid_candidate_envelope",),
+            mismatches=("invalid_candidate",),
         )
 
     mismatches: list[str] = []

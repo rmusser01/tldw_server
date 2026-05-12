@@ -4,7 +4,7 @@ title: Add offline Persona Chat judge harness
 status: Done
 assignee: []
 created_date: '2026-05-11 05:48'
-updated_date: '2026-05-12 00:38'
+updated_date: '2026-05-12 00:44'
 labels:
   - persona
   - chat
@@ -73,12 +73,16 @@ Review-fix follow-up completed. Finding was still valid: offline_only was derive
 Additional PR #1576 sweep found two CodeRabbit threads after the offline_only push. The offline_only thread is already fixed by 5b8c7ca4d and only needs resolution. The non-mapping candidate envelope thread is still valid: _compare_case can call .get on non-mapping candidate values. Adding a regression test and a minimal invalid_candidate early return.
 
 Additional PR #1576 sweep completed. Resolved offline_only thread as already fixed. Verified non-mapping candidate envelope finding against current code, added a failing regression test, then added a minimal _compare_case guard that returns invalid_candidate with invalid_candidate_envelope instead of crashing. Verification on 2026-05-12: harness+contract pytest passed 18 tests; Bandit reported zero findings on touched Python; placeholder scan found no matches; git diff --check passed.
+
+Review-fix follow-up started. Verified current code already has the non-mapping candidate guard and only calls _candidate_validation_errors after Mapping validation. Still-valid issue: mismatch key is invalid_candidate_envelope while the review requested invalid_candidate. No second compare block exists in persona_chat_judge_harness.py, so that part is skipped as not applicable.
+
+Review-fix follow-up completed. Verified current code: non-mapping candidate guard already exists and _candidate_validation_errors is only called after Mapping validation. Still-valid issue was the mismatch key; changed invalid_candidate_envelope to invalid_candidate and updated the regression test. Skipped the requested second compare block because no second _compare_case/compare block exists in persona_chat_judge_harness.py. Verification on 2026-05-12: harness+contract pytest passed 18 tests; Bandit reported zero findings on touched Python; placeholder scan found no matches; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the offline Persona Chat judge harness and completed follow-up PR review fixes. The report now always marks harness output offline_only=True regardless of fixture metadata, includes per-verdict counts, keeps matched/mismatched/missing/invalid status counts mutually exclusive, ignores empty fixture case IDs, safely normalizes malformed fixture score data, and treats non-mapping candidate envelopes as invalid candidates instead of crashing. Local verification passed for focused judge tests, Bandit, placeholder scan, and diff hygiene.
+Added the offline Persona Chat judge harness and completed follow-up PR review fixes. The report always marks harness output offline_only=True regardless of fixture metadata, includes per-verdict counts, keeps matched/mismatched/missing/invalid status counts mutually exclusive, ignores empty fixture case IDs, safely normalizes malformed fixture score data, and treats non-mapping candidate envelopes as invalid candidates without crashing. Local verification passed for focused judge tests, Bandit, placeholder scan, and diff hygiene.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

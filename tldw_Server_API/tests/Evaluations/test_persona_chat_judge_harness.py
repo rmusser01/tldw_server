@@ -145,7 +145,7 @@ def test_non_mapping_candidate_envelope_records_invalid_result() -> None:
     _require(report["invalid_candidate_count"] == 1, "invalid candidate envelope should be counted")
     _require(report["mismatched_cases"] == 0, "invalid candidate envelope should not be a simple mismatch")
     _require(case_result["status"] == "invalid_candidate", "case status should identify invalid candidate")
-    _require("invalid_candidate_envelope" in case_result["mismatches"], "invalid envelope should be reported")
+    _require("invalid_candidate" in case_result["mismatches"], "invalid envelope should be reported")
 
 
 def test_malformed_fixture_rows_are_bounded_and_empty_case_ids_are_skipped() -> None:
