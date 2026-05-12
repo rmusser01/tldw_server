@@ -1,11 +1,13 @@
 """Tests for ACP Sessions SQLite persistence."""
 import json
 import os
+import sqlite3
 import tempfile
 from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB, _ensure_column
 
 
@@ -494,6 +496,79 @@ class TestAgentRegistry:
         db.save_agent_entry({"agent_type": "a1", "name": "Updated", "source": "api"})
         entry = db.get_agent_entry("a1")
         assert entry["name"] == "Updated"
+
+    def test_agent_entrypoint_strategy_fields_round_trip(self, db):
+        saved = db.save_agent_entry({
+            "agent_type": "adapter",
+            "name": "Adapter",
+            "entrypoint_strategy": "adapter_acp",
+            "acp_command": "adapter-acp",
+            "acp_args": '["--stdio"]',
+            "adapter_source": "example/adapter",
+            "adapter_docs_url": "https://example.test/adapter",
+            "certification_blocker": "adapter_missing",
+            "source": "api",
+        })
+
+        assert saved["entrypoint_strategy"] == "adapter_acp"
+        assert saved["acp_command"] == "adapter-acp"
+        assert saved["acp_args"] == '["--stdio"]'
+        assert saved["adapter_source"] == "example/adapter"
+        assert saved["certification_blocker"] == "adapter_missing"
+
+
+def test_legacy_agent_registry_rows_get_entrypoint_defaults(tmp_path):
+    db_path = tmp_path / "legacy_acp_sessions.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE agent_registry (
+            agent_type TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            command TEXT NOT NULL DEFAULT '',
+            args TEXT NOT NULL DEFAULT '[]',
+            env TEXT NOT NULL DEFAULT '{}',
+            requires_api_key TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            install_instructions TEXT NOT NULL DEFAULT '[]',
+            docs_url TEXT,
+            mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven',
+            mcp_entry_tool TEXT NOT NULL DEFAULT 'execute',
+            mcp_structured_response INTEGER NOT NULL DEFAULT 0,
+            mcp_llm_provider TEXT,
+            mcp_llm_model TEXT,
+            mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
+            mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'api',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO agent_registry (
+            agent_type, name, command, source, created_at, updated_at
+        ) VALUES ('legacy_api', 'Legacy API', 'legacy-cli', 'api', '2026-01-01', '2026-01-01');
+        PRAGMA user_version=13;
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = ACPSessionsDB(db_path=str(db_path))
+    try:
+        row = db.get_agent_entry("legacy_api")
+        assert row["entrypoint_strategy"] == "documented_candidate"
+        assert row["acp_command"] == ""
+        assert row["acp_args"] == "[]"
+
+        registry = AgentRegistry(yaml_path="/missing.yaml", db=db)
+        registry._load_api_entries()
+        entry = registry.get_entry("legacy_api")
+        assert entry is not None
+        assert entry.entrypoint_strategy == "documented_candidate"
+        assert entry.acp_command == ""
+        assert entry.acp_args == []
+    finally:
+        db.close()
 
 
 class TestHealthHistory:

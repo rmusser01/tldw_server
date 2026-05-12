@@ -2040,6 +2040,12 @@ async def acp_register_agent(
         mcp_llm_model=request.mcp_llm_model,
         mcp_max_iterations=request.mcp_max_iterations,
         mcp_refresh_tools=request.mcp_refresh_tools,
+        entrypoint_strategy=request.entrypoint_strategy,
+        acp_command=request.acp_command,
+        acp_args=request.acp_args,
+        adapter_source=request.adapter_source,
+        adapter_docs_url=request.adapter_docs_url,
+        certification_blocker=request.certification_blocker,
     )
     _acp_record_audit_event(
         action="agent_registered",
@@ -2102,7 +2108,7 @@ async def acp_update_agent(
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import get_agent_registry
 
     registry = get_agent_registry()
-    updates = request.model_dump(exclude_unset=True, exclude_none=True)
+    updates = request.model_dump(exclude_unset=True)
     entry = registry.update_agent(agent_type, **updates)
     if entry is None:
         raise HTTPException(
