@@ -93,26 +93,26 @@ _SNIPPETS: tuple[dict[str, Any], ...] = (
         "parameters_schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["id", "choices"],
+            "required": ["choice_id", "choices"],
             "properties": {
-                "id": {"type": "string", "minLength": 1},
+                "choice_id": {"type": "string", "minLength": 1},
                 "choices": {
                     "type": "array",
                     "minItems": 1,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["id", "text", "target"],
+                        "required": ["id", "text", "target_label"],
                         "properties": {
                             "id": {"type": "string", "minLength": 1},
                             "text": {"type": "string", "minLength": 1},
-                            "target": {"type": "string", "minLength": 1},
+                            "target_label": {"type": "string", "minLength": 1},
                         },
                     },
                 },
             },
         },
-        "preview": [{"op": "choice", "id": "{id}", "choices": []}],
+        "preview": [{"op": "choice", "choice_id": "{choice_id}", "choices": [{"target_label": "{target_label}"}]}],
     },
     {
         "id": "generated_choice_set",

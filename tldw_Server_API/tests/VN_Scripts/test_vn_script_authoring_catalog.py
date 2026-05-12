@@ -4,6 +4,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.VN_Scripts.authoring_catalog import list_authoring_catalog
+from tldw_Server_API.app.core.VN_Scripts.authoring_errors import VNScriptAuthoringError
+from tldw_Server_API.app.core.VN_Scripts.snippet_patcher import (
+    MAX_SNIPPET_PARAMETER_DEPTH,
+    MAX_SNIPPET_PARAMETER_PAYLOAD_BYTES,
+    MAX_SNIPPET_PARAMETER_STRING_LENGTH,
+    apply_snippet_patch,
+)
 from tldw_Server_API.app.core.VN_Scripts.validator import (
     forbidden_generation_routing_keys,
     known_script_ops,
@@ -52,6 +59,299 @@ def _forbidden_keys_present(value: Any) -> set[str]:
         for child in value:
             found.update(_forbidden_keys_present(child))
     return found
+
+
+def _draft() -> dict[str, Any]:
+    return {
+        "schema_version": "vn_script_program.v1",
+        "entry_label": "start",
+        "labels": {
+            "start": [
+                {"op": "narrate", "text": "Opening line."},
+                {"op": "end"},
+            ]
+        },
+    }
+
+
+def _assert_authoring_error(
+    exc_info: Any,
+    *,
+    code: str,
+    detail_key: str,
+    detail_value: Any,
+) -> None:
+    error = exc_info.value
+    assert isinstance(error, VNScriptAuthoringError)
+    assert error.code == code
+    assert error.status_code == 400
+    assert error.details[detail_key] == detail_value
+
+
+def test_generated_choice_set_patch_inserts_generate_and_handler_without_mutating_draft() -> None:
+    draft = _draft()
+    original = {
+        "schema_version": "vn_script_program.v1",
+        "entry_label": "start",
+        "labels": {"start": [{"op": "narrate", "text": "Opening line."}, {"op": "end"}]},
+    }
+
+    result = apply_snippet_patch(
+        draft,
+        "generated_choice_set",
+        {"label": "start", "op_index": 0, "mode": "after"},
+        {"handler_label": "generated_choice", "max_choices": 3, "scope": "turn"},
+    )
+
+    assert draft == original
+    assert result.draft is not draft
+    assert result.draft["labels"]["start"] == [
+        {"op": "narrate", "text": "Opening line."},
+        {
+            "op": "generate",
+            "scope": "turn",
+            "max_choices": 3,
+            "output_schema": "choice_set",
+            "on_generated_choice": "generated_choice",
+        },
+        {"op": "end"},
+    ]
+    assert result.draft["labels"]["generated_choice"] == [
+        {"op": "narrate", "text": "Handle the selected generated choice here."},
+        {"op": "end"},
+    ]
+    assert result.patch_summary == {
+        "inserted_ops": 1,
+        "created_labels": ["generated_choice"],
+        "changed_paths": ["$.labels.start[1]", "$.labels.generated_choice"],
+    }
+
+
+def test_patch_rejects_nested_raw_generation_routing_keys() -> None:
+    import pytest
+
+    with pytest.raises(VNScriptAuthoringError) as exc_info:
+        apply_snippet_patch(
+            _draft(),
+            "scene_update_generation",
+            {"label": "start", "mode": "append"},
+            {"safe": {"nested": {"model": "gpt-example"}}},
+        )
+
+    _assert_authoring_error(
+        exc_info,
+        code="snippet_parameter_invalid",
+        detail_key="field_path",
+        detail_value="$.parameters.safe.nested.model",
+    )
+
+
+def test_patch_rejects_root_and_nested_unknown_snippet_parameters() -> None:
+    import pytest
+
+    with pytest.raises(VNScriptAuthoringError) as root_exc:
+        apply_snippet_patch(
+            _draft(),
+            "narration",
+            {"label": "start", "mode": "append"},
+            {"text": "Line.", "unexpected": True},
+        )
+    _assert_authoring_error(
+        root_exc,
+        code="snippet_parameter_invalid",
+        detail_key="field_path",
+        detail_value="$.parameters.unexpected",
+    )
+
+    with pytest.raises(VNScriptAuthoringError) as nested_exc:
+        apply_snippet_patch(
+            _draft(),
+            "authored_choice",
+            {"label": "start", "mode": "append"},
+            {
+                "choice_id": "door",
+                "choices": [
+                    {
+                        "id": "open",
+                        "text": "Open it.",
+                        "target_label": "start",
+                        "unexpected": True,
+                    }
+                ],
+            },
+        )
+    _assert_authoring_error(
+        nested_exc,
+        code="snippet_parameter_invalid",
+        detail_key="field_path",
+        detail_value="$.parameters.choices[0].unexpected",
+    )
+
+
+def test_authored_choice_patch_accepts_public_shape_and_maps_to_internal_opcode() -> None:
+    result = apply_snippet_patch(
+        _draft(),
+        "authored_choice",
+        {"label": "start", "mode": "append"},
+        {
+            "choice_id": "door",
+            "choices": [
+                {"id": "open", "text": "Open it.", "target_label": "start"},
+                {"id": "wait", "text": "Wait.", "target_label": "start"},
+            ],
+        },
+    )
+
+    assert result.draft["labels"]["start"][-1] == {
+        "op": "choice",
+        "id": "door",
+        "choices": [
+            {"id": "open", "text": "Open it.", "target": "start"},
+            {"id": "wait", "text": "Wait.", "target": "start"},
+        ],
+    }
+
+
+def test_patch_rejects_invalid_and_missing_anchors_with_typed_errors() -> None:
+    import pytest
+
+    with pytest.raises(VNScriptAuthoringError) as invalid_exc:
+        apply_snippet_patch(_draft(), "narration", {"label": "start", "mode": "beside"}, {"text": "Line."})
+    _assert_authoring_error(
+        invalid_exc,
+        code="snippet_anchor_invalid",
+        detail_key="anchor",
+        detail_value={"label": "start", "mode": "beside"},
+    )
+
+    with pytest.raises(VNScriptAuthoringError) as missing_exc:
+        apply_snippet_patch(_draft(), "narration", {"label": "missing", "mode": "append"}, {"text": "Line."})
+    _assert_authoring_error(
+        missing_exc,
+        code="snippet_anchor_not_found",
+        detail_key="anchor",
+        detail_value={"label": "missing", "mode": "append"},
+    )
+
+
+def test_patch_rejects_bool_op_index_as_invalid_anchor() -> None:
+    import pytest
+
+    for mode in ("before", "after"):
+        anchor = {"label": "start", "op_index": True, "mode": mode}
+        with pytest.raises(VNScriptAuthoringError) as exc_info:
+            apply_snippet_patch(_draft(), "narration", anchor, {"text": "Line."})
+        _assert_authoring_error(
+            exc_info,
+            code="snippet_anchor_invalid",
+            detail_key="anchor",
+            detail_value=anchor,
+        )
+
+
+def test_patch_rejects_label_conflicts() -> None:
+    import pytest
+
+    with pytest.raises(VNScriptAuthoringError) as exc_info:
+        apply_snippet_patch(
+            _draft(),
+            "generated_choice_set",
+            {"label": "start", "mode": "append"},
+            {"handler_label": "start"},
+        )
+
+    _assert_authoring_error(
+        exc_info,
+        code="snippet_label_conflict",
+        detail_key="label",
+        detail_value="start",
+    )
+
+
+def test_patch_rejects_extremely_deep_parameters_with_typed_error_before_serialization() -> None:
+    import pytest
+
+    parameters: dict[str, Any] = {"text": "Line."}
+    cursor = parameters
+    for depth in range(1200):
+        cursor["nested"] = {}
+        cursor = cursor["nested"]
+
+    with pytest.raises(VNScriptAuthoringError) as exc_info:
+        apply_snippet_patch(_draft(), "narration", {"label": "start", "mode": "append"}, parameters)
+
+    error = exc_info.value
+    assert error.code == "snippet_parameter_invalid"
+    assert error.status_code == 400
+    assert "field_path" in error.details
+    assert error.details["field_path"].startswith("$.parameters.nested")
+
+
+def test_patch_rejects_excessive_parameter_limits_with_field_paths() -> None:
+    import pytest
+
+    too_deep: dict[str, Any] = {}
+    cursor = too_deep
+    for depth in range(MAX_SNIPPET_PARAMETER_DEPTH + 1):
+        cursor[f"level_{depth}"] = {}
+        cursor = cursor[f"level_{depth}"]
+    with pytest.raises(VNScriptAuthoringError) as depth_exc:
+        apply_snippet_patch(_draft(), "narration", {"label": "start", "mode": "append"}, too_deep)
+    _assert_authoring_error(
+        depth_exc,
+        code="snippet_parameter_invalid",
+        detail_key="field_path",
+        detail_value="$.parameters.level_0.level_1.level_2.level_3.level_4.level_5.level_6.level_7.level_8",
+    )
+
+    with pytest.raises(VNScriptAuthoringError) as string_exc:
+        apply_snippet_patch(
+            _draft(),
+            "narration",
+            {"label": "start", "mode": "append"},
+            {"text": "x" * (MAX_SNIPPET_PARAMETER_STRING_LENGTH + 1)},
+        )
+    _assert_authoring_error(
+        string_exc,
+        code="snippet_parameter_invalid",
+        detail_key="field_path",
+        detail_value="$.parameters.text",
+    )
+
+    with pytest.raises(VNScriptAuthoringError) as payload_exc:
+        apply_snippet_patch(
+            _draft(),
+            "narration",
+            {"label": "start", "mode": "append"},
+            {"items": ["x" * 1000 for _ in range((MAX_SNIPPET_PARAMETER_PAYLOAD_BYTES // 1000) + 2)]},
+        )
+    _assert_authoring_error(
+        payload_exc,
+        code="snippet_parameter_invalid",
+        detail_key="field_path",
+        detail_value="$.parameters",
+    )
+
+
+def test_patch_rejects_invalid_generation_scopes_with_field_path() -> None:
+    import pytest
+
+    cases = [
+        ("generated_choice_set", {"handler_label": "generated_choice", "scope": []}),
+        ("generated_choice_set", {"handler_label": "generated_choice", "scope": "session"}),
+        ("scene_update_generation", {"scope": []}),
+        ("scene_update_generation", {"scope": "session"}),
+    ]
+
+    for snippet_id, parameters in cases:
+        with pytest.raises(VNScriptAuthoringError) as exc_info:
+            apply_snippet_patch(_draft(), snippet_id, {"label": "start", "mode": "append"}, parameters)
+        _assert_authoring_error(
+            exc_info,
+            code="snippet_parameter_invalid",
+            detail_key="field_path",
+            detail_value="$.parameters.scope",
+        )
 
 
 def test_catalog_operations_exactly_match_validator_known_ops() -> None:
@@ -114,6 +414,23 @@ def test_generated_choice_snippet_exposes_handler_label_not_opcode_target() -> N
     assert "on_generated_choice" not in default_parameters
     assert "handler_label" in str(snippet["preview"])
     assert "on_generated_choice" not in str(snippet["preview"])
+
+
+def test_authored_choice_snippet_exposes_public_choice_fields_not_opcode_fields() -> None:
+    catalog = list_authoring_catalog()
+    snippet = next(snippet for snippet in catalog["snippets"] if snippet["id"] == "authored_choice")
+
+    schema = snippet["parameters_schema"]
+    choice_schema = schema["properties"]["choices"]["items"]
+
+    assert schema["required"] == ["choice_id", "choices"]
+    assert "choice_id" in schema["properties"]
+    assert "id" not in schema["properties"]
+    assert choice_schema["required"] == ["id", "text", "target_label"]
+    assert "target_label" in choice_schema["properties"]
+    assert "target" not in choice_schema["properties"]
+    assert "choice_id" in str(snippet["preview"])
+    assert "target_label" in str(snippet["preview"])
 
 
 def test_catalog_json_contains_no_validation_codes_or_routing_secrets() -> None:
