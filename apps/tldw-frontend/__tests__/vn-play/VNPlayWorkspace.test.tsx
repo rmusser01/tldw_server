@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type {
   VNPlayBranch,
   VNPlayCheckpoint,
+  VNPlayGenerationHistoryResponse,
+  VNPlayGenerationRevisionDebugResponse,
   VNPlaySession,
   VNPlaySetupAssetPackOption,
   VNPlaySetupOptionsResponse,
@@ -12,8 +14,11 @@ import type {
 const mocks = vi.hoisted(() => ({
   createVNPlayCheckpoint: vi.fn(),
   createVNPlaySession: vi.fn(),
+  getVNPlayGenerationRevisionDebug: vi.fn(),
   getVNPlaySession: vi.fn(),
   getVNAssetReadiness: vi.fn(),
+  listVNPlayGenerationRevisions: vi.fn(),
+  listVNPlayGenerations: vi.fn(),
   listVNPlayBranches: vi.fn(),
   listVNPlayCheckpoints: vi.fn(),
   listVNPlayEvents: vi.fn(),
@@ -21,20 +26,36 @@ const mocks = vi.hoisted(() => ({
   listVNPlaySetupOptions: vi.fn(),
   listCharacters: vi.fn(),
   listVNAssetPacks: vi.fn(),
+  regenerateVNPlayGeneration: vi.fn(),
   restoreVNPlaySession: vi.fn(),
   retryLastVNPlayTurn: vi.fn(),
   submitVNPlayTurn: vi.fn(),
+  activateVNPlayGenerationRevision: vi.fn(),
+  cancelVNPlayGenerationRequest: vi.fn(),
+  confirmVNPlayGenerationRequest: vi.fn(),
 }));
 
 vi.mock('@web/lib/api/vnPlay', () => ({
+  activateVNPlayGenerationRevision: (...args: unknown[]) =>
+    mocks.activateVNPlayGenerationRevision(...args),
+  cancelVNPlayGenerationRequest: (...args: unknown[]) =>
+    mocks.cancelVNPlayGenerationRequest(...args),
+  confirmVNPlayGenerationRequest: (...args: unknown[]) =>
+    mocks.confirmVNPlayGenerationRequest(...args),
   createVNPlayCheckpoint: (...args: unknown[]) => mocks.createVNPlayCheckpoint(...args),
   createVNPlaySession: (...args: unknown[]) => mocks.createVNPlaySession(...args),
+  getVNPlayGenerationRevisionDebug: (...args: unknown[]) =>
+    mocks.getVNPlayGenerationRevisionDebug(...args),
   getVNPlaySession: (...args: unknown[]) => mocks.getVNPlaySession(...args),
   listVNPlayBranches: (...args: unknown[]) => mocks.listVNPlayBranches(...args),
   listVNPlayCheckpoints: (...args: unknown[]) => mocks.listVNPlayCheckpoints(...args),
   listVNPlayEvents: (...args: unknown[]) => mocks.listVNPlayEvents(...args),
+  listVNPlayGenerationRevisions: (...args: unknown[]) =>
+    mocks.listVNPlayGenerationRevisions(...args),
+  listVNPlayGenerations: (...args: unknown[]) => mocks.listVNPlayGenerations(...args),
   listVNPlaySessions: (...args: unknown[]) => mocks.listVNPlaySessions(...args),
   listVNPlaySetupOptions: (...args: unknown[]) => mocks.listVNPlaySetupOptions(...args),
+  regenerateVNPlayGeneration: (...args: unknown[]) => mocks.regenerateVNPlayGeneration(...args),
   restoreVNPlaySession: (...args: unknown[]) => mocks.restoreVNPlaySession(...args),
   retryLastVNPlayTurn: (...args: unknown[]) => mocks.retryLastVNPlayTurn(...args),
   submitVNPlayTurn: (...args: unknown[]) => mocks.submitVNPlayTurn(...args),
@@ -123,6 +144,23 @@ const defaultSetupOptions: VNPlaySetupOptionsResponse = {
   generated_at: '2026-05-09T15:00:00Z',
 };
 
+const defaultGenerationHistory: VNPlayGenerationHistoryResponse = {
+  items: [],
+  total: 0,
+  limit: 25,
+  offset: 0,
+  has_more: false,
+  next_offset: null,
+  pagination: {
+    mode: 'offset',
+    total: 0,
+    limit: 25,
+    offset: 0,
+    has_more: false,
+    next_offset: null,
+  },
+};
+
 function setupPack(overrides: Partial<VNPlaySetupAssetPackOption> = {}): VNPlaySetupAssetPackOption {
   return {
     ...defaultSetupOptions.asset_packs[0],
@@ -181,16 +219,39 @@ function createDeferred<T>() {
 function mockVNPlayApi({
   branches = [],
   checkpoints = [],
+  generations = defaultGenerationHistory,
   sessions = [],
 }: {
   branches?: VNPlayBranch[];
   checkpoints?: VNPlayCheckpoint[];
+  generations?: VNPlayGenerationHistoryResponse;
   sessions?: VNPlaySession[];
 } = {}) {
   mocks.listVNPlaySessions.mockResolvedValue(sessions);
   mocks.listVNPlayEvents.mockResolvedValue([]);
   mocks.listVNPlayCheckpoints.mockResolvedValue(checkpoints);
   mocks.listVNPlayBranches.mockResolvedValue(branches);
+  mocks.listVNPlayGenerations.mockResolvedValue(generations);
+  mocks.listVNPlayGenerationRevisions.mockResolvedValue(defaultGenerationHistory);
+  mocks.getVNPlayGenerationRevisionDebug.mockResolvedValue({
+    id: 31,
+    generation_id: 12,
+    generation_request_id: 91,
+    generation_point_key: 'intro:2:choice',
+    revision_number: 1,
+    status: 'succeeded',
+    output_schema: 'choice_set',
+    public_output: {},
+    raw_output_debug_state: 'absent',
+    raw_output_debug: null,
+    parser_diagnostics: {},
+    moderation_diagnostics: {},
+    model_metadata: {},
+    usage_metadata: {},
+    request: {},
+    profile: { profile_key: 'default', snapshot_id: 44 },
+    created_at: '2026-05-12T01:00:00Z',
+  } satisfies VNPlayGenerationRevisionDebugResponse);
   mocks.getVNPlaySession.mockImplementation(async (sessionId: number) =>
     sessions.find((session) => session.id === sessionId) ?? sessions[0]
   );
@@ -240,11 +301,40 @@ function mockVNPlayApi({
     scene_state: { scene_version: 2 },
     events: [],
   });
+  mocks.regenerateVNPlayGeneration.mockResolvedValue({
+    turn_request_id: 21,
+    status: 'completed',
+    scene_version: 5,
+    scene_state: { scene_version: 5 },
+    events: [],
+  });
+  mocks.activateVNPlayGenerationRevision.mockResolvedValue({
+    turn_request_id: 22,
+    status: 'completed',
+    scene_version: 5,
+    scene_state: { scene_version: 5 },
+    events: [],
+  });
+  mocks.confirmVNPlayGenerationRequest.mockResolvedValue({
+    turn_request_id: 23,
+    status: 'completed',
+    scene_version: 5,
+    scene_state: { scene_version: 5 },
+    events: [],
+  });
+  mocks.cancelVNPlayGenerationRequest.mockResolvedValue({
+    turn_request_id: 24,
+    status: 'completed',
+    scene_version: 5,
+    scene_state: { scene_version: 5 },
+    events: [],
+  });
 }
 
 describe('VNPlayWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     mockVNPlayApi();
     mocks.listCharacters.mockResolvedValue(defaultCharacters);
     mocks.listVNAssetPacks.mockResolvedValue(defaultPacks);
@@ -727,6 +817,540 @@ describe('VNPlayWorkspace', () => {
     expect(screen.getByText('Door branch')).toBeInTheDocument();
     expect(mocks.listVNPlayCheckpoints).toHaveBeenCalledWith(1);
     expect(mocks.listVNPlayBranches).toHaveBeenCalledWith(1);
+  });
+
+  it('renders scripted generation history without raw debug payloads', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 3,
+      scene_state: { scene_version: 3 },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        total: 1,
+        items: [
+          {
+            id: 31,
+            generation_id: 12,
+            generation_point_key: 'intro:2:choice',
+            revision_number: 1,
+            status: 'succeeded',
+            active: true,
+            output_schema: 'choice_set',
+            public_output: {
+              lead_in: "The map trembles in Mira's hand.",
+              choices: [{ id: 'ask-map', text: 'Ask about the map', source: 'generated' }],
+              raw_output_debug: 'must not render',
+            },
+            applied_visuals: [],
+            rejected_visuals: [],
+            source: 'model',
+            profile: {
+              profile_key: 'choice_writer',
+              snapshot_id: 44,
+              provider_class: 'hosted',
+              moderation_required: true,
+              estimated_cost_class: 'low',
+            },
+            created_at: 'generated-at-time',
+          },
+        ],
+      },
+      sessions: [session],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Scripted generations')).toBeInTheDocument();
+    expect(screen.getByText('intro:2:choice')).toBeInTheDocument();
+    expect(screen.getByText("The map trembles in Mira's hand.")).toBeInTheDocument();
+    expect(screen.getByText('Ask about the map')).toBeInTheDocument();
+    expect(screen.getByText(/choice_writer/)).toBeInTheDocument();
+    expect(screen.getByText(/generated-at-time/)).toBeInTheDocument();
+    expect(screen.queryByText('must not render')).not.toBeInTheDocument();
+    expect(mocks.listVNPlayGenerations).toHaveBeenCalledWith(1, { limit: 25, offset: 0 });
+    expect(screen.getByRole('link', { name: /open generation inspector/i })).toHaveAttribute(
+      'href',
+      '/vn-play/sessions/1/generations'
+    );
+  });
+
+  it('selects the requested session for the dedicated generation inspector route', async () => {
+    mockVNPlayApi({
+      sessions: [
+        {
+          id: 1,
+          mode: 'story',
+          title: 'First Door',
+          primary_character_id: 1,
+          vn_asset_pack_id: 2,
+          scene_version: 1,
+          scene_state: { scene_version: 1 },
+        },
+        {
+          id: 2,
+          mode: 'story',
+          title: 'Second Door',
+          primary_character_id: 1,
+          vn_asset_pack_id: 2,
+          scene_version: 2,
+          scene_state: { scene_version: 2 },
+        },
+      ],
+    });
+
+    render(<VNPlayWorkspace generationInspectorRoute initialSessionId={2} />);
+
+    expect(await screen.findByText('Selected session: Second Door')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open generation inspector/i })).not.toBeInTheDocument();
+  });
+
+  it('loads additional generation history pages', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 3,
+      scene_state: { scene_version: 3 },
+    };
+    const firstPage: VNPlayGenerationHistoryResponse = {
+      ...defaultGenerationHistory,
+      items: [
+        {
+          id: 31,
+          generation_id: 12,
+          generation_point_key: 'intro:first',
+          revision_number: 1,
+          status: 'succeeded',
+          active: true,
+          output_schema: 'choice_set',
+          public_output: { lead_in: 'First generated line' },
+          profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+          created_at: 'first-page-time',
+        },
+      ],
+      pagination: {
+        mode: 'offset',
+        total: 2,
+        limit: 25,
+        offset: 0,
+        has_more: true,
+        next_offset: 25,
+      },
+    };
+    const secondPage: VNPlayGenerationHistoryResponse = {
+      ...defaultGenerationHistory,
+      items: [
+        {
+          id: 32,
+          generation_id: 13,
+          generation_point_key: 'intro:second',
+          revision_number: 1,
+          status: 'succeeded',
+          active: true,
+          output_schema: 'choice_set',
+          public_output: { lead_in: 'Second generated line' },
+          profile: { profile_key: 'choice_writer', snapshot_id: 45 },
+          created_at: 'second-page-time',
+        },
+      ],
+      pagination: {
+        mode: 'offset',
+        total: 2,
+        limit: 25,
+        offset: 25,
+        has_more: false,
+        next_offset: null,
+      },
+    };
+    mockVNPlayApi({ generations: firstPage, sessions: [session] });
+    mocks.listVNPlayGenerations.mockResolvedValueOnce(firstPage).mockResolvedValueOnce(secondPage);
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('First generated line')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /load more generations/i }));
+
+    expect(await screen.findByText('Second generated line')).toBeInTheDocument();
+    expect(mocks.listVNPlayGenerations).toHaveBeenLastCalledWith(1, { limit: 25, offset: 25 });
+  });
+
+  it('surfaces major generation error states with readable guidance', async () => {
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 3,
+      scene_state: { scene_version: 3 },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        items: [
+          {
+            id: 41,
+            generation_id: 20,
+            generation_point_key: 'provider',
+            revision_number: 1,
+            status: 'provider_unavailable',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: {},
+            public_error_code: 'provider_unavailable',
+            profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+          },
+          {
+            id: 42,
+            generation_id: 21,
+            generation_point_key: 'parser',
+            revision_number: 1,
+            status: 'parser_failed',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: {},
+            public_error_code: 'parser_failed',
+            profile: { profile_key: 'choice_writer', snapshot_id: 45 },
+          },
+          {
+            id: 43,
+            generation_id: 22,
+            generation_point_key: 'activation',
+            revision_number: 1,
+            status: 'activation_blocked',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: {},
+            public_error_code: 'activation_blocked',
+            profile: { profile_key: 'choice_writer', snapshot_id: 46 },
+          },
+          {
+            id: 44,
+            generation_id: 23,
+            generation_point_key: 'abandoned',
+            revision_number: 1,
+            status: 'abandoned',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: {},
+            public_error_code: 'abandoned',
+            profile: { profile_key: 'choice_writer', snapshot_id: 47 },
+          },
+        ],
+      },
+      sessions: [session],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText(/provider was unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not be parsed/i)).toBeInTheDocument();
+    expect(screen.getByText(/activation was blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/abandoned or timed out/i)).toBeInTheDocument();
+  });
+
+  it('runs generation regenerate and activate commands through backend actions', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 4,
+      scene_state: { scene_version: 4 },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        items: [
+          {
+            id: 31,
+            generation_id: 12,
+            generation_point_key: 'intro:2:choice',
+            revision_number: 1,
+            status: 'succeeded',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: { choices: [{ id: 'ask-map', text: 'Ask about the map' }] },
+            applied_visuals: [],
+            rejected_visuals: [],
+            source: 'model',
+            profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+            created_at: '2026-05-12T01:00:00Z',
+          },
+        ],
+        total: 1,
+      },
+      sessions: [session],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /regenerate intro:2:choice/i }));
+    await waitFor(() => {
+      expect(mocks.regenerateVNPlayGeneration).toHaveBeenCalledWith(1, 12, {
+        client_scene_version: 4,
+        idempotency_key: expect.stringMatching(/^generation-regenerate-/),
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: /activate revision 1 for intro:2:choice/i }));
+    await waitFor(() => {
+      expect(mocks.activateVNPlayGenerationRevision).toHaveBeenCalledWith(1, 12, 31, {
+        client_scene_version: 4,
+        idempotency_key: expect.stringMatching(/^generation-activate-/),
+      });
+    });
+  });
+
+  it('runs pending generation confirm and cancel commands through backend actions', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 6,
+      scene_state: {
+        scene_version: 6,
+        waiting_generation_request_id: 91,
+      },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        items: [
+          {
+            id: 31,
+            generation_id: 12,
+            generation_point_key: 'intro:2:choice',
+            revision_number: 1,
+            status: 'pending_confirmation',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: { lead_in: 'Review generated choice.' },
+            profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+          },
+        ],
+      },
+      sessions: [session],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /confirm generation/i }));
+    await waitFor(() => {
+      expect(mocks.confirmVNPlayGenerationRequest).toHaveBeenCalledWith(1, 91, {
+        client_scene_version: 6,
+        idempotency_key: expect.stringMatching(/^generation-confirm-/),
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => {
+      expect(mocks.cancelVNPlayGenerationRequest).toHaveBeenCalledWith(1, 91, {
+        client_scene_version: 6,
+        idempotency_key: expect.stringMatching(/^generation-cancel-/),
+      });
+    });
+  });
+
+  it('blocks repeated generation actions while a request is in flight', async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<{
+      turn_request_id: number;
+      status: 'completed';
+      scene_version: number;
+      scene_state: { scene_version: number };
+      events: [];
+    }>();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 4,
+      scene_state: { scene_version: 4 },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        items: [
+          {
+            id: 31,
+            generation_id: 12,
+            generation_point_key: 'intro:2:choice',
+            revision_number: 1,
+            status: 'succeeded',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: { choices: [{ id: 'ask-map', text: 'Ask about the map' }] },
+            profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+          },
+        ],
+      },
+      sessions: [session],
+    });
+    mocks.regenerateVNPlayGeneration.mockReturnValue(deferred.promise);
+
+    render(<VNPlayWorkspace />);
+
+    const regenerate = await screen.findByRole('button', { name: /regenerate intro:2:choice/i });
+    fireEvent.click(regenerate);
+    fireEvent.click(regenerate);
+
+    expect(mocks.regenerateVNPlayGeneration).toHaveBeenCalledTimes(1);
+    deferred.resolve({ turn_request_id: 30, status: 'completed', scene_version: 5, scene_state: { scene_version: 5 }, events: [] });
+    await waitFor(() => expect(regenerate).not.toBeDisabled());
+    await user.click(regenerate);
+    expect(mocks.regenerateVNPlayGeneration).toHaveBeenCalledTimes(2);
+  });
+
+  it('restricts debug controls for non-admin JWT users', async () => {
+    window.localStorage.setItem('access_token', 'jwt-token');
+    window.localStorage.setItem('user', JSON.stringify({ username: 'reader', role: 'user' }));
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 4,
+      scene_state: { scene_version: 4 },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        items: [
+          {
+            id: 31,
+            generation_id: 12,
+            generation_point_key: 'intro:2:choice',
+            revision_number: 1,
+            status: 'succeeded',
+            active: true,
+            output_schema: 'choice_set',
+            public_output: { lead_in: 'Public line' },
+            profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+          },
+        ],
+      },
+      sessions: [session],
+    });
+
+    render(<VNPlayWorkspace />);
+
+    expect(await screen.findByText('Public line')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /debug intro:2:choice/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Debug restricted')).toBeInTheDocument();
+  });
+
+  it('gates moderation-blocked raw debug reveal behind explicit confirmation', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'story',
+      title: 'Archive Door',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 4,
+      scene_state: { scene_version: 4 },
+    };
+    mockVNPlayApi({
+      generations: {
+        ...defaultGenerationHistory,
+        items: [
+          {
+            id: 31,
+            generation_id: 12,
+            generation_point_key: 'intro:2:choice',
+            revision_number: 1,
+            status: 'moderation_blocked',
+            active: false,
+            output_schema: 'choice_set',
+            public_output: {},
+            applied_visuals: [],
+            rejected_visuals: [],
+            public_error_code: 'moderation_blocked',
+            source: 'model',
+            profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+            created_at: '2026-05-12T01:00:00Z',
+          },
+        ],
+        total: 1,
+      },
+      sessions: [session],
+    });
+    mocks.getVNPlayGenerationRevisionDebug
+      .mockResolvedValueOnce({
+        id: 31,
+        generation_id: 12,
+        generation_request_id: 91,
+        generation_point_key: 'intro:2:choice',
+        revision_number: 1,
+        status: 'moderation_blocked',
+        output_schema: 'choice_set',
+        public_output: {},
+        raw_output_debug_state: 'redacted',
+        raw_output_debug: null,
+        parser_diagnostics: { error_code: 'ok' },
+        moderation_diagnostics: { reason: 'policy_block' },
+        model_metadata: { provider: 'hosted' },
+        usage_metadata: {},
+        request: {},
+        profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+        created_at: '2026-05-12T01:00:00Z',
+      } satisfies VNPlayGenerationRevisionDebugResponse)
+      .mockResolvedValueOnce({
+        id: 31,
+        generation_id: 12,
+        generation_request_id: 91,
+        generation_point_key: 'intro:2:choice',
+        revision_number: 1,
+        status: 'moderation_blocked',
+        output_schema: 'choice_set',
+        public_output: {},
+        raw_output_debug_state: 'revealed',
+        raw_output_debug: { raw_text: 'blocked model text' },
+        parser_diagnostics: {},
+        moderation_diagnostics: { reason: 'policy_block' },
+        model_metadata: { provider: 'hosted' },
+        usage_metadata: {},
+        request: {},
+        profile: { profile_key: 'choice_writer', snapshot_id: 44 },
+        created_at: '2026-05-12T01:00:00Z',
+      } satisfies VNPlayGenerationRevisionDebugResponse);
+
+    render(<VNPlayWorkspace />);
+
+    await user.click(await screen.findByRole('button', { name: /debug intro:2:choice revision 1/i }));
+    expect(await screen.findByText(/Raw output: redacted/i)).toBeInTheDocument();
+    expect(screen.queryByText('blocked model text')).not.toBeInTheDocument();
+    expect(mocks.getVNPlayGenerationRevisionDebug).toHaveBeenCalledWith(1, 12, 31);
+
+    await user.click(screen.getByRole('button', { name: /reveal moderation-blocked raw output/i }));
+    expect(await screen.findByRole('dialog', { name: /Reveal moderation-blocked output/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reveal raw output' }));
+
+    await waitFor(() => {
+      expect(mocks.getVNPlayGenerationRevisionDebug).toHaveBeenLastCalledWith(1, 12, 31, {
+        include_blocked_raw: true,
+        confirm: 'REVEAL_MODERATION_BLOCKED',
+      });
+    });
+    expect(await screen.findByText(/blocked model text/)).toBeInTheDocument();
   });
 
   it('creates a checkpoint and refreshes recovery metadata', async () => {

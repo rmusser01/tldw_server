@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookOpen, MessageSquarePlus } from 'lucide-react';
+import Link from 'next/link';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import ChoicePanel from '@web/components/vn-play/ChoicePanel';
 import DialoguePanel from '@web/components/vn-play/DialoguePanel';
+import GenerationInspector from '@web/components/vn-play/GenerationInspector';
 import NewSessionDialog from '@web/components/vn-play/NewSessionDialog';
 import {
   createVNPlayIdempotencyKey,
@@ -17,24 +19,34 @@ import {
   createVNPlayCheckpoint,
   createVNPlaySession,
   getVNPlaySession,
+  activateVNPlayGenerationRevision,
+  cancelVNPlayGenerationRequest,
+  confirmVNPlayGenerationRequest,
   listVNPlayBranches,
   listVNPlayCheckpoints,
   listVNPlayEvents,
+  listVNPlayGenerations,
   listVNPlaySessions,
+  regenerateVNPlayGeneration,
   restoreVNPlaySession,
   retryLastVNPlayTurn,
 } from '@web/lib/api/vnPlay';
+import { isAdmin } from '@web/lib/authz';
 import type {
   VNPlayBranch,
   VNPlayCheckpoint,
   VNPlayChoice,
   VNPlayEvent,
+  VNPlayGenerationHistoryItem,
+  VNPlayOffsetPagination,
   VNPlayMode,
   VNPlaySceneState,
   VNPlaySession,
   VNPlaySessionCreate,
   VNPlayTurnResponse,
 } from '@web/types/vn-play';
+
+const GENERATION_HISTORY_PAGE_SIZE = 25;
 
 function sessionModeLabel(mode: VNPlayMode): string {
   return mode === 'story' ? 'Story/CYOA' : 'Freeform';
@@ -62,22 +74,48 @@ function recoveryCopy(status: string | null): string | null {
   return null;
 }
 
-export default function VNPlayWorkspace() {
+function canViewDebugForCurrentUser(): boolean {
+  if (typeof window === 'undefined') return true;
+  const hasJwtToken = Boolean(window.localStorage.getItem('access_token'));
+  if (!hasJwtToken) return true;
+  const userValue = window.localStorage.getItem('user');
+  if (!userValue) return false;
+  try {
+    return isAdmin(JSON.parse(userValue));
+  } catch {
+    return false;
+  }
+}
+
+type VNPlayWorkspaceProps = {
+  initialSessionId?: number;
+  generationInspectorRoute?: boolean;
+};
+
+export default function VNPlayWorkspace({
+  generationInspectorRoute = false,
+  initialSessionId,
+}: VNPlayWorkspaceProps = {}) {
   const [sessions, setSessions] = useState<VNPlaySession[]>([]);
   const [selectedSession, setSelectedSession] = useState<VNPlaySession | null>(null);
   const [events, setEvents] = useState<VNPlayEvent[]>([]);
   const [checkpoints, setCheckpoints] = useState<VNPlayCheckpoint[]>([]);
   const [branches, setBranches] = useState<VNPlayBranch[]>([]);
+  const [generations, setGenerations] = useState<VNPlayGenerationHistoryItem[]>([]);
+  const [generationPagination, setGenerationPagination] = useState<VNPlayOffsetPagination | null>(null);
   const [modeFilter, setModeFilter] = useState<VNPlayModeFilter>('all');
   const [dialogMode, setDialogMode] = useState<VNPlayMode>('freeform');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isCreatingCheckpoint, setIsCreatingCheckpoint] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingGenerations, setIsLoadingGenerations] = useState(false);
   const [isRetryingTurn, setIsRetryingTurn] = useState(false);
   const [restoringCheckpointId, setRestoringCheckpointId] = useState<number | null>(null);
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const selectedSessionId = selectedSession?.id;
+  const canViewGenerationDebug = useMemo(() => canViewDebugForCurrentUser(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +127,11 @@ export default function VNPlayWorkspace() {
         const nextSessions = await listVNPlaySessions();
         if (cancelled) return;
         setSessions(nextSessions);
-        setSelectedSession(nextSessions[0] ?? null);
+        setSelectedSession(
+          initialSessionId
+            ? nextSessions.find((session) => session.id === initialSessionId) ?? nextSessions[0] ?? null
+            : nextSessions[0] ?? null
+        );
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load VN play sessions');
@@ -105,34 +147,54 @@ export default function VNPlayWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSessionId]);
 
   useEffect(() => {
-    if (!selectedSession) {
+    if (!initialSessionId || sessions.length === 0) return;
+    setSelectedSession((previous) => {
+      if (previous?.id === initialSessionId) return previous;
+      return sessions.find((session) => session.id === initialSessionId) ?? previous;
+    });
+  }, [initialSessionId, sessions]);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
       setEvents([]);
       setCheckpoints([]);
       setBranches([]);
+      setGenerations([]);
+      setGenerationPagination(null);
       return;
     }
 
     let cancelled = false;
     async function loadSessionCollections() {
+      setIsLoadingGenerations(true);
       try {
-        const [nextEvents, nextCheckpoints, nextBranches] = await Promise.all([
-          listVNPlayEvents(selectedSession.id),
-          listVNPlayCheckpoints(selectedSession.id),
-          listVNPlayBranches(selectedSession.id),
+        const [nextEvents, nextCheckpoints, nextBranches, nextGenerations] = await Promise.all([
+          listVNPlayEvents(selectedSessionId),
+          listVNPlayCheckpoints(selectedSessionId),
+          listVNPlayBranches(selectedSessionId),
+          listVNPlayGenerations(selectedSessionId, { limit: GENERATION_HISTORY_PAGE_SIZE, offset: 0 }),
         ]);
         if (!cancelled) {
           setEvents(nextEvents);
           setCheckpoints(nextCheckpoints);
           setBranches(nextBranches);
+          setGenerations(nextGenerations.items ?? []);
+          setGenerationPagination(nextGenerations.pagination ?? null);
         }
       } catch {
         if (!cancelled) {
           setEvents([]);
           setCheckpoints([]);
           setBranches([]);
+          setGenerations([]);
+          setGenerationPagination(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingGenerations(false);
         }
       }
     }
@@ -141,7 +203,7 @@ export default function VNPlayWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSession?.id]);
+  }, [selectedSessionId]);
 
   const filteredSessions = useMemo(() => {
     if (modeFilter === 'all') return sessions;
@@ -163,6 +225,8 @@ export default function VNPlayWorkspace() {
       setEvents([]);
       setCheckpoints([]);
       setBranches([]);
+      setGenerations([]);
+      setGenerationPagination(null);
       setModeFilter('all');
       setIsDialogOpen(false);
     } catch (createError) {
@@ -173,15 +237,34 @@ export default function VNPlayWorkspace() {
   }, []);
 
   const reloadSessionCollections = useCallback(async (sessionId: number) => {
-    const [nextEvents, nextCheckpoints, nextBranches] = await Promise.all([
+    const [nextEvents, nextCheckpoints, nextBranches, nextGenerations] = await Promise.all([
       listVNPlayEvents(sessionId),
       listVNPlayCheckpoints(sessionId),
       listVNPlayBranches(sessionId),
+      listVNPlayGenerations(sessionId, { limit: GENERATION_HISTORY_PAGE_SIZE, offset: 0 }),
     ]);
     setEvents(nextEvents);
     setCheckpoints(nextCheckpoints);
     setBranches(nextBranches);
+    setGenerations(nextGenerations.items ?? []);
+    setGenerationPagination(nextGenerations.pagination ?? null);
   }, []);
+
+  const loadMoreGenerations = useCallback(async () => {
+    if (!selectedSessionId || !generationPagination?.has_more) return;
+    const offset = generationPagination.next_offset ?? generationPagination.offset + generationPagination.limit;
+    setIsLoadingGenerations(true);
+    try {
+      const nextGenerations = await listVNPlayGenerations(selectedSessionId, {
+        limit: GENERATION_HISTORY_PAGE_SIZE,
+        offset,
+      });
+      setGenerations((previous) => [...previous, ...(nextGenerations.items ?? [])]);
+      setGenerationPagination(nextGenerations.pagination ?? null);
+    } finally {
+      setIsLoadingGenerations(false);
+    }
+  }, [generationPagination, selectedSessionId]);
 
   const reloadSelectedSession = useCallback(async (sessionId: number) => {
     const nextSession = await getVNPlaySession(sessionId);
@@ -348,6 +431,27 @@ export default function VNPlayWorkspace() {
     }
   }, [handleTurn, sceneVersion, selectedSession]);
 
+  const handleGenerationAction = useCallback(async (
+    action: () => Promise<VNPlayTurnResponse>
+  ) => {
+    if (!selectedSession) return;
+    setError(null);
+    try {
+      const response = await action();
+      await handleTurn(response);
+    } catch (actionError) {
+      const errorInfo = getVNPlayErrorInfo(actionError);
+      setError(errorInfo.message);
+      if (isRecoverableVNPlayConflict(actionError)) {
+        try {
+          await reloadSelectedSession(selectedSession.id);
+        } catch {
+          // Preserve the original action error if refresh also fails.
+        }
+      }
+    }
+  }, [handleTurn, reloadSelectedSession, selectedSession]);
+
   return (
     <main className="min-h-screen bg-bg text-text">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-6">
@@ -448,16 +552,69 @@ export default function VNPlayWorkspace() {
             </div>
 
             {selectedSession && sceneState ? (
-              <SceneInspector
-                branches={branches}
-                checkpoints={checkpoints}
-                isCreatingCheckpoint={isCreatingCheckpoint}
-                restoringCheckpointId={restoringCheckpointId}
-                sceneState={sceneState}
-                session={selectedSession}
-                onCreateCheckpoint={handleCreateCheckpoint}
-                onRestoreCheckpoint={handleRestoreCheckpoint}
-              />
+              <>
+                <SceneInspector
+                  branches={branches}
+                  checkpoints={checkpoints}
+                  isCreatingCheckpoint={isCreatingCheckpoint}
+                  restoringCheckpointId={restoringCheckpointId}
+                  sceneState={sceneState}
+                  session={selectedSession}
+                  onCreateCheckpoint={handleCreateCheckpoint}
+                  onRestoreCheckpoint={handleRestoreCheckpoint}
+                />
+                <aside className="rounded-md border border-border bg-surface p-4 xl:col-start-2">
+                  {!generationInspectorRoute && (
+                    <Link
+                      className="mb-3 inline-flex text-xs font-medium text-primary hover:text-primaryStrong"
+                      href={`/vn-play/sessions/${selectedSession.id}/generations`}
+                    >
+                      Open generation inspector
+                    </Link>
+                  )}
+                  <GenerationInspector
+                    canViewDebug={canViewGenerationDebug}
+                    generations={generations}
+                    hasMore={Boolean(generationPagination?.has_more)}
+                    isLoading={isLoadingGenerations}
+                    sceneState={sceneState}
+                    sessionId={selectedSession.id}
+                    onLoadMore={loadMoreGenerations}
+                    onActivateRevision={(item) =>
+                      handleGenerationAction(() =>
+                        activateVNPlayGenerationRevision(selectedSession.id, item.generation_id, item.id, {
+                          client_scene_version: sceneVersion,
+                          idempotency_key: createVNPlayIdempotencyKey('generation-activate'),
+                        })
+                      )
+                    }
+                    onCancelRequest={(generationRequestId) =>
+                      handleGenerationAction(() =>
+                        cancelVNPlayGenerationRequest(selectedSession.id, generationRequestId, {
+                          client_scene_version: sceneVersion,
+                          idempotency_key: createVNPlayIdempotencyKey('generation-cancel'),
+                        })
+                      )
+                    }
+                    onConfirmRequest={(generationRequestId) =>
+                      handleGenerationAction(() =>
+                        confirmVNPlayGenerationRequest(selectedSession.id, generationRequestId, {
+                          client_scene_version: sceneVersion,
+                          idempotency_key: createVNPlayIdempotencyKey('generation-confirm'),
+                        })
+                      )
+                    }
+                    onRegenerate={(item) =>
+                      handleGenerationAction(() =>
+                        regenerateVNPlayGeneration(selectedSession.id, item.generation_id, {
+                          client_scene_version: sceneVersion,
+                          idempotency_key: createVNPlayIdempotencyKey('generation-regenerate'),
+                        })
+                      )
+                    }
+                  />
+                </aside>
+              </>
             ) : (
               <aside className="rounded-md border border-border bg-surface p-4">
                 <h2 className="mb-4 text-lg font-semibold">Runtime inspector</h2>

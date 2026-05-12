@@ -14,15 +14,23 @@ vi.mock('@web/lib/api', () => ({
 }));
 
 import {
+  activateVNPlayGenerationRevision,
+  cancelVNPlayGenerationRequest,
+  confirmVNPlayGenerationRequest,
   createVNPlayCheckpoint,
   createVNPlaySession,
   deleteVNPlaySession,
+  getVNPlayGenerationRevision,
+  getVNPlayGenerationRevisionDebug,
   getVNPlaySession,
+  listVNPlayGenerationRevisions,
+  listVNPlayGenerations,
   listVNPlayBranches,
   listVNPlayCheckpoints,
   listVNPlayEvents,
   listVNPlaySessions,
   listVNPlaySetupOptions,
+  regenerateVNPlayGeneration,
   restoreVNPlaySession,
   retryLastVNPlayTurn,
   submitVNPlayTurn,
@@ -148,5 +156,67 @@ describe('vnPlay api client', () => {
         pack_query: 'archive',
       },
     });
+  });
+
+  it('calls scripted generation history and command endpoints', async () => {
+    await listVNPlayGenerations(1, { limit: 10, offset: 20, status: 'succeeded', active: true });
+    await listVNPlayGenerationRevisions(1, 12, { limit: 5, offset: 0 });
+    await getVNPlayGenerationRevision(1, 12, 31);
+    await getVNPlayGenerationRevisionDebug(1, 12, 31);
+    await getVNPlayGenerationRevisionDebug(1, 12, 31, {
+      include_blocked_raw: true,
+      confirm: 'REVEAL_MODERATION_BLOCKED',
+    });
+    await confirmVNPlayGenerationRequest(1, 91, {
+      client_scene_version: 4,
+      idempotency_key: 'confirm-1',
+    });
+    await cancelVNPlayGenerationRequest(1, 91, {
+      client_scene_version: 4,
+      idempotency_key: 'cancel-1',
+    });
+    await regenerateVNPlayGeneration(1, 12, {
+      client_scene_version: 7,
+      idempotency_key: 'regen-1',
+    });
+    await activateVNPlayGenerationRevision(1, 12, 31, {
+      client_scene_version: 9,
+      idempotency_key: 'activate-1',
+    });
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/script/generations', {
+      params: { limit: 10, offset: 20, status: 'succeeded', active: true },
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions',
+      { params: { limit: 5, offset: 0 } }
+    );
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31'
+    );
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31/debug',
+      { params: {} }
+    );
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31/debug',
+      { params: { include_blocked_raw: true, confirm: 'REVEAL_MODERATION_BLOCKED' } }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generation-requests/91/confirm',
+      { client_scene_version: 4, idempotency_key: 'confirm-1' }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generation-requests/91/cancel',
+      { client_scene_version: 4, idempotency_key: 'cancel-1' }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/regenerate',
+      { client_scene_version: 7, idempotency_key: 'regen-1' }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31/activate',
+      { client_scene_version: 9, idempotency_key: 'activate-1' }
+    );
   });
 });
