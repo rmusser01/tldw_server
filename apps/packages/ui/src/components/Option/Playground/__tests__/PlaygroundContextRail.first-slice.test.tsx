@@ -30,6 +30,10 @@ const renderRail = (
       research: 0,
     },
     onOpenSearchContext: vi.fn(),
+    onClearFiles: vi.fn(),
+    onClearKnowledge: vi.fn(),
+    onClearMedia: vi.fn(),
+    onClearResearch: vi.fn(),
     ...overrides,
   };
 
@@ -92,6 +96,28 @@ describe("PlaygroundContextRail first-slice controls", () => {
     expect(screen.getByText("1 knowledge item")).toBeInTheDocument();
     expect(screen.getByText("3 media scopes")).toBeInTheDocument();
     expect(screen.getByText("1 research attachment")).toBeInTheDocument();
+  });
+
+  it("clears active context groups through supplied callbacks", () => {
+    const props = renderRail({
+      hasContext: true,
+      contextCounts: {
+        files: 2,
+        knowledge: 1,
+        media: 3,
+        research: 1,
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear knowledge" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear media scopes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear research context" }));
+
+    expect(props.onClearFiles).toHaveBeenCalledTimes(1);
+    expect(props.onClearKnowledge).toHaveBeenCalledTimes(1);
+    expect(props.onClearMedia).toHaveBeenCalledTimes(1);
+    expect(props.onClearResearch).toHaveBeenCalledTimes(1);
   });
 
   it("keeps Search & Context available in the empty state", () => {

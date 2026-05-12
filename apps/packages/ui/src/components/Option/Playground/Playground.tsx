@@ -105,6 +105,8 @@ const renderArtifactsPanel = () => (
   </React.Suspense>
 );
 
+const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
+
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -125,6 +127,9 @@ export const Playground = () => {
     React.useState<string | null>(null);
   const [dismissedReturnedResearchRunId, setDismissedReturnedResearchRunId] =
     React.useState<string | null>(null);
+  const [serverDegradedChecks, setServerDegradedChecks] = React.useState<
+    string[]
+  >([]);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const { t } = useTranslation(["playground", "common"]);
@@ -142,6 +147,10 @@ export const Playground = () => {
       "playgroundChatLayoutMode",
       defaultChatLayoutMode,
     );
+  const [cockpitContextRailVisible, setCockpitContextRailVisible] =
+    useStorage<boolean>("playgroundChatContextRailVisible", true);
+  const [cockpitRuntimeRailVisible, setCockpitRuntimeRailVisible] =
+    useStorage<boolean>("playgroundChatRuntimeRailVisible", true);
   const {
     messages,
     history,
@@ -166,7 +175,11 @@ export const Playground = () => {
     temporaryChat,
     webSearch,
     selectedKnowledge,
+    setSelectedKnowledge,
     ragMediaIds,
+    setRagMediaIds,
+    stopStreamingRequest,
+    regenerateLastMessage,
   } = useMessageOption();
   const { setSystemPrompt } = useStoreChatModelSettings();
   const composerBottomOffsetPx = stickyChatInput
@@ -226,16 +239,61 @@ export const Playground = () => {
     chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
       ? chatLayoutMode
       : defaultChatLayoutMode;
+  const normalizedCockpitContextRailVisible =
+    cockpitContextRailVisible !== false;
+  const normalizedCockpitRuntimeRailVisible =
+    cockpitRuntimeRailVisible !== false;
   const handleChatLayoutModeChange = React.useCallback(
     (mode: PlaygroundCockpitMode) => {
+      if (
+        mode === "cockpit" &&
+        !normalizedCockpitContextRailVisible &&
+        !normalizedCockpitRuntimeRailVisible
+      ) {
+        void setCockpitContextRailVisible(true);
+        void setCockpitRuntimeRailVisible(true);
+      }
       void setChatLayoutMode(mode);
     },
-    [setChatLayoutMode],
+    [
+      normalizedCockpitContextRailVisible,
+      normalizedCockpitRuntimeRailVisible,
+      setChatLayoutMode,
+      setCockpitContextRailVisible,
+      setCockpitRuntimeRailVisible,
+    ],
   );
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
   }, [setRouteContext]);
+
+  React.useEffect(() => {
+    const handleReadinessState = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        state?: string;
+        degradedChecks?: unknown;
+      }>).detail;
+      if (detail?.state !== "degraded") {
+        setServerDegradedChecks([]);
+        return;
+      }
+      const checks = Array.isArray(detail.degradedChecks)
+        ? detail.degradedChecks
+            .map((check) => (typeof check === "string" ? check.trim() : ""))
+            .filter((check) => check.length > 0)
+        : [];
+      setServerDegradedChecks(checks);
+    };
+
+    window.addEventListener(SERVER_READINESS_STATE_EVENT, handleReadinessState);
+    return () => {
+      window.removeEventListener(
+        SERVER_READINESS_STATE_EVENT,
+        handleReadinessState,
+      );
+    };
+  }, []);
 
   // Debounce search query to avoid running collectThreadSearchMatches on every keystroke
   React.useEffect(() => {
@@ -1376,6 +1434,15 @@ export const Playground = () => {
   const ragMediaIdCount = Array.isArray(ragMediaIds)
     ? ragMediaIds.length
     : 0;
+  const canRegenerateLastResponse = messages.some(
+    (message) => message.role === "assistant",
+  );
+  const runtimeStatusDetail =
+    serverDegradedChecks.length > 0
+      ? `${toText(t("playground:cockpit.degraded", "Degraded"))}: ${serverDegradedChecks.join(
+          ", ",
+        )}`
+      : null;
   const hasChatContext = Boolean(
     attachedResearchContext ||
       webSearch ||
@@ -1448,6 +1515,10 @@ export const Playground = () => {
         research: attachedResearchContext ? 1 : 0,
       }}
       onOpenSearchContext={() => openSearchAndContext({ tab: "search" })}
+      onClearFiles={() => setContextFiles([])}
+      onClearKnowledge={() => setSelectedKnowledge(null)}
+      onClearMedia={() => setRagMediaIds(null)}
+      onClearResearch={handleRemoveAttachedResearchContext}
     />
   );
   const cockpitRightRail = (
@@ -1456,13 +1527,23 @@ export const Playground = () => {
       selectedProvider={selectedModelProvider}
       selectedModel={selectedModelName}
       providerRouteLabel={selectedModel || null}
-      runtimeStatus={streaming ? "streaming" : "ready"}
-      runtimeStatusDetail={null}
+      runtimeStatus={
+        streaming
+          ? "streaming"
+          : serverDegradedChecks.length > 0
+            ? "degraded"
+            : "ready"
+      }
+      runtimeStatusDetail={runtimeStatusDetail}
       messageCount={messages.length}
       threadSearchOpen={threadSearchOpen}
       selectedCharacterName={selectedCharacter?.name || null}
       onOpenModelSettings={openModelSettings}
       onOpenCharacterSettings={openActorSettings}
+      canStopStreaming={streaming}
+      onStopStreaming={() => stopStreamingRequest()}
+      canRegenerate={canRegenerateLastResponse}
+      onRegenerate={() => regenerateLastMessage()}
     />
   );
   const cockpitStatusStrip = (
@@ -1476,7 +1557,7 @@ export const Playground = () => {
       hasContext={hasChatContext}
       contextSummary={statusContextSummary}
       temporaryChat={temporaryChat}
-      degradedChecks={[]}
+      degradedChecks={serverDegradedChecks}
       errorMessage={null}
     />
   );
@@ -1538,6 +1619,10 @@ export const Playground = () => {
         <PlaygroundCockpitShell
           mode={normalizedChatLayoutMode}
           onModeChange={handleChatLayoutModeChange}
+          leftRailVisible={normalizedCockpitContextRailVisible}
+          rightRailVisible={normalizedCockpitRuntimeRailVisible}
+          onLeftRailVisibleChange={setCockpitContextRailVisible}
+          onRightRailVisibleChange={setCockpitRuntimeRailVisible}
           leftRail={cockpitLeftRail}
           rightRail={cockpitRightRail}
           statusStrip={cockpitStatusStrip}

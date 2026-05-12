@@ -27,6 +27,7 @@ type ReadinessResult =
 const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
 const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
 const HEALTHY_CHECK_STATUSES = new Set(["healthy", "ok"])
+const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
 
 function extractDegradedChecks(body: unknown): string[] {
   if (!body || typeof body !== "object") return []
@@ -70,6 +71,18 @@ async function checkHealth(): Promise<ReadinessResult> {
   }
 }
 
+function emitServerReadinessState(
+  state: "ready" | "degraded" | "blocked",
+  degradedChecks: string[] = []
+) {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent(SERVER_READINESS_STATE_EVENT, {
+      detail: { state, degradedChecks }
+    })
+  )
+}
+
 export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
@@ -97,17 +110,20 @@ export const ServerReadinessGate: React.FC<{
       if (cancelled) return
 
       if (result.state === "ready") {
+        emitServerReadinessState("ready")
         setGate("ready")
         return
       }
 
       if (result.state === "degraded" && allowDegraded) {
+        emitServerReadinessState("degraded", result.degradedChecks)
         setDegradedChecks(result.degradedChecks)
         setGate("degraded")
         return
       }
 
       if (Date.now() >= deadline) {
+        emitServerReadinessState("blocked")
         setGate("timeout")
         return
       }

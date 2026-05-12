@@ -26,6 +26,10 @@ const renderInspector = (
     selectedCharacterName: "Mira Vale",
     onOpenModelSettings: vi.fn(),
     onOpenCharacterSettings: vi.fn(),
+    canStopStreaming: false,
+    onStopStreaming: vi.fn(),
+    canRegenerate: true,
+    onRegenerate: vi.fn(),
     ...overrides,
   };
 
@@ -73,6 +77,54 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(props.onOpenCharacterSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("calls the existing stop handler while streaming", () => {
+    const props = renderInspector({
+      streaming: true,
+      runtimeStatus: "streaming",
+      canStopStreaming: true,
+      canRegenerate: false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop generation" }));
+
+    expect(props.onStopStreaming).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "Regenerate last response" }),
+    ).toBeNull();
+  });
+
+  it("calls the existing regenerate handler when ready", () => {
+    const props = renderInspector({
+      streaming: false,
+      runtimeStatus: "ready",
+      canStopStreaming: false,
+      canRegenerate: true,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Regenerate last response" }),
+    );
+
+    expect(props.onRegenerate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
+  });
+
+  it("hides stop and regenerate controls when the shared handlers are unavailable", () => {
+    renderInspector({
+      canStopStreaming: false,
+      canRegenerate: false,
+      onStopStreaming: undefined,
+      onRegenerate: undefined,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Stop generation" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Regenerate last response" }),
+    ).toBeNull();
+  });
+
   it("renders streaming, degraded, and error details through explicit status props", () => {
     const { rerender } = render(
       <PlaygroundRuntimeInspector
@@ -87,6 +139,8 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         selectedCharacterName={null}
         onOpenModelSettings={vi.fn()}
         onOpenCharacterSettings={vi.fn()}
+        canStopStreaming
+        onStopStreaming={vi.fn()}
       />,
     );
 

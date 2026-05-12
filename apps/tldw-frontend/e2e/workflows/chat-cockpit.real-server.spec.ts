@@ -191,6 +191,32 @@ const assertChatCompletionRenderedOrRecoverable = async (
   });
 };
 
+const assertProviderQualifiedPayload = async (page: Page, response: Response) => {
+  const payload = response.request().postDataJSON() as any;
+  expect(payload).toBeTruthy();
+  expect(typeof payload.model).toBe('string');
+  expect(payload.model.trim().length).toBeGreaterThan(0);
+
+  const routeText = await page
+    .getByTestId('playground-runtime-inspector')
+    .getByText(/^Route /)
+    .first()
+    .textContent()
+    .catch(() => null);
+  const routeLabel = routeText?.replace(/^Route\s+/, '').trim() || '';
+  const separatorIndex = routeLabel.indexOf(':');
+  if (separatorIndex > 0 && separatorIndex < routeLabel.length - 1) {
+    const provider = routeLabel.slice(0, separatorIndex);
+    const model = routeLabel.slice(separatorIndex + 1);
+    const routedProvider = payload.api_provider || payload.provider;
+    expect(payload.model).toBe(model);
+    expect(routedProvider).toBeTruthy();
+    if (provider !== 'tldw') {
+      expect(routedProvider).toBe(provider);
+    }
+  }
+};
+
 test.describe('/chat cockpit real-server parity', () => {
   test('does not intercept backend routes in this real-server spec', async ({}, testInfo) => {
     const { readFileSync } = await import('node:fs');
@@ -236,6 +262,16 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await page.getByRole('button', { name: 'Hide context rail' }).click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await page.getByRole('button', { name: 'Show context rail' }).click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await page.getByRole('button', { name: 'Hide runtime rail' }).click();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await page.getByRole('button', { name: 'Show runtime rail' }).click();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     const contextRail = page.getByTestId('playground-context-rail');
     const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search' });
@@ -262,7 +298,9 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.keyboard.press('Escape');
     } else {
       await expect(mcpToggle).toBeDisabled();
-      await expect(mcpToggle).toHaveAccessibleName(/MCP tools unavailable|MCP tools are offline/i);
+      await expect(mcpToggle).toHaveAccessibleName(
+        /MCP tools unavailable|MCP tools are offline|MCP tools: None|Not checked yet/i
+      );
     }
 
     await page.getByRole('button', { name: /Advanced controls/i }).click();
@@ -291,7 +329,7 @@ test.describe('/chat cockpit real-server parity', () => {
       name: 'Current Chat Model Settings',
     });
     await expect(modelSettingsDialog).toBeVisible();
-    await expect(modelSettingsDialog.getByText(/API \/ model/i)).toBeVisible();
+    await expect(modelSettingsDialog.getByText(/API \/ model/i).first()).toBeVisible();
     await modelSettingsDialog.getByRole('button', { name: 'Close' }).click();
     await expect(modelSettingsDialog).toBeHidden();
 
@@ -329,6 +367,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const chatCompletionAttempt = waitForChatCompletionAttempt(page);
     await page.getByRole('button', { name: /send message/i }).click();
     const chatCompletionResponse = await chatCompletionAttempt;
+    await assertProviderQualifiedPayload(page, chatCompletionResponse);
     await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
     await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
 
@@ -373,6 +412,10 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     const mobileRails = page.getByTestId('playground-cockpit-mobile-rails');
     await expect(mobileRails).toBeVisible();
+    await page.getByRole('button', { name: 'Hide context rail' }).click();
+    await expect(mobileRails.locator('summary', { hasText: 'Context' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Show context rail' }).click();
+    await expect(mobileRails.locator('summary', { hasText: 'Context' })).toBeVisible();
     await mobileRails.locator('summary', { hasText: 'Context' }).click();
     await expect(page.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
     const mobileWebSearchControl = mobileRails.getByRole('button', { name: 'Web search' });

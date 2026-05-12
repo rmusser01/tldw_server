@@ -6,7 +6,7 @@ This spec covers only the main WebUI `/chat` page, routed through `apps/tldw-fro
 
 The goal is not just to keep the old `/chat` controls reachable. The long-term target is a true cockpit in the main chat window: side rails and status areas should provide direct, reliable controls for the current conversation, model/runtime state, context/RAG/tool state, and session state, while still allowing the user to collapse into a focused chat layout that resembles the current chat-first page.
 
-This document defines the first implementation slice toward that target. It is not approval to build the entire cockpit maturity backlog in one PR.
+This document originally defined the first implementation slice toward that target. The implementation remains staged for reviewability, but the user has since clarified that all main `/chat` cockpit completion work should stay in the existing draft PR #1582 until it is merge-ready, so the "later slice" language below now means later commits/tasks in the same PR unless explicitly carved out.
 
 ## Source Evidence
 
@@ -23,9 +23,9 @@ This document defines the first implementation slice toward that target. It is n
 Treat the work as two tiers:
 
 1. Merge-blocking parity and verification: prove that every existing main `/chat` workflow still works in cockpit and focus modes.
-2. True cockpit-control completion: turn the main chat rails and status area from summaries/launchers into direct, inspectable, keyboard-accessible controls over multiple slices.
+2. True cockpit-control completion: turn the main chat rails and status area from summaries/launchers into direct, inspectable, keyboard-accessible controls through staged commits in PR #1582.
 
-This avoids merging a shell that looks like a cockpit while leaving the real work surface hidden in the composer.
+This avoids merging a shell that looks like a cockpit while leaving the real work surface hidden in the composer. It also avoids disrupting other developers with multiple partially-complete PRs.
 
 The implementation plan should not attempt every cockpit maturity idea in one oversized patch. Use a narrow first implementation slice:
 
@@ -33,22 +33,23 @@ The implementation plan should not attempt every cockpit maturity idea in one ov
 2. Add independent rail collapse only after the direct controls have one shared source of truth with existing composer state.
 3. Keep deeper workflows in the existing dialogs/panels until the cockpit control path is proven by tests.
 
-## First Slice Boundary
+## PR #1582 Completion Boundary
 
-The next implementation plan should cover only the first slice below. Anything not listed here is a later cockpit-maturity task unless the user explicitly expands scope.
+The first slice is already implemented. Remaining work should continue in PR #1582 and stay limited to the main `/chat` Playground surface. Do not split this into another PR unless the user explicitly changes direction.
 
-In scope for the first slice:
+Still in scope for PR #1582:
 
 - Main WebUI `/chat` only.
 - Direct cockpit controls for web search, Search & Context entry, active context summaries, temporary/saved session state, selected model/provider summary, model settings entry, character/persona entry, streaming/error/degraded status, and status-strip state.
+- Independent context/runtime rail visibility controls for users who want a cockpit layout that can collapse one side at a time.
 - Shared handler/store wiring so rail controls update the same state as existing composer controls.
 - Real-server browser verification that proves at least one state-changing cockpit action works without mocked server data.
 - Component/integration tests that prove the new rail controls call shared state paths rather than rendering static labels.
 
-Out of scope for the first slice:
+Out of scope unless directly required to preserve existing `/chat` functionality:
 
 - Browser-extension sidepanel/sidebar changes.
-- Full replacement of the composer toolbar.
+- Full replacement or removal of the composer toolbar.
 - Full direct-control coverage for compare mode, image generation, voice conversation, advanced parameter presets, MCP execution, or every artifact workflow.
 - Drag-resizable or dockable panel systems.
 - Full provider-health dashboards outside the current chat turn.
@@ -114,11 +115,11 @@ Minimum direct cockpit controls for the first implementation slice:
 - Runtime rail: selected model display, model selector entry point, model settings entry point, provider route/status display, character/persona selector entry point, streaming/stop/regenerate state where available, and last error/status recovery action where available.
 - Status strip: visible ready/streaming/error/degraded state, active model/provider, context-active state, session persistence state, and message count.
 
-Do not move every old composer action at once. Compare mode, full image generation, voice conversation, and advanced parameter presets can remain composer/dialog workflows in the first slice if they remain reachable and the cockpit exposes accurate status or availability.
+Do not move every old composer action at once. Compare mode, full image generation, voice conversation, and advanced parameter presets can remain composer/dialog workflows in PR #1582 if they remain reachable and the cockpit exposes accurate status or availability.
 
 ## Cockpit Maturity Backlog
 
-The items below describe the broader true-cockpit direction. They are not automatically in scope for the first implementation slice unless they are explicitly repeated in the First Slice Boundary above.
+The items below describe the broader true-cockpit direction. For PR #1582, implement only the items needed to make the current main `/chat` cockpit functional and merge-safe; leave speculative cockpit maturity work out.
 
 ### P1: Layout control is binary
 
@@ -127,7 +128,7 @@ Current cockpit mode shows both rails and focus mode hides both. A true cockpit 
 Recommended design:
 
 - Keep `Cockpit` and `Focus` as simple presets.
-- Add independent left/right rail collapse controls in cockpit mode. For the first slice, this is secondary to wiring direct controls to shared state.
+- Add independent left/right rail collapse controls in cockpit mode.
 - Persist the rail visibility state separately from the overall preset in browser storage for the first implementation slice.
 - Keep focus mode as the fast chat-only preset.
 - Avoid draggable/resizable panels in the first completion pass unless needed after usability testing.
@@ -146,7 +147,7 @@ Recommended direct controls:
 - Prompt/system context indicator.
 - Temporary/saved session state and persistence warning.
 
-For the first slice, prioritize web search, Search & Context entry, active context summaries, temporary/saved state, and any clear/remove actions already supported by existing shared handlers.
+For PR #1582, prioritize web search, Search & Context entry, active context summaries, temporary/saved state, and any clear/remove actions already supported by existing shared handlers.
 
 ### P1: Runtime rail is not yet an operational runtime inspector
 
@@ -164,7 +165,7 @@ Recommended direct controls:
 - Usage/cost/token budget indicators where existing data exists.
 - MCP/tools availability and selected tool mode summary.
 
-For the first slice, prioritize selected model/provider display, model settings entry, character/persona entry, streaming/error/degraded status, and provider route warnings relevant to the current turn.
+For PR #1582, prioritize selected model/provider display, model settings entry, character/persona entry, streaming/error/degraded status, provider route warnings relevant to the current turn, and stop/regenerate affordances only where they can call existing shared chat handlers.
 
 ### P2: The composer is overloaded as the only real command surface
 
@@ -231,7 +232,7 @@ The real-server submit test should accept either a successful assistant response
 - Do not remove the existing composer controls until the cockpit equivalent is proven and keyboard-accessible.
 - Do not rely on mocked data for the merge-critical real-server verification path.
 - Do not treat reachability-only assertions as proof of cockpit functionality.
-- Do not implement cockpit-maturity backlog items beyond the first slice unless the implementation plan explicitly calls them out and the user approves the expanded scope.
+- Do not implement speculative cockpit-maturity backlog items unless the implementation plan explicitly calls them out as required for PR #1582 merge readiness.
 
 ## Likely Files
 

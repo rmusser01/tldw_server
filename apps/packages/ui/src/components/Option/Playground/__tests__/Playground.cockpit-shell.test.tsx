@@ -261,4 +261,70 @@ describe("Playground cockpit shell", () => {
       screen.getByRole("button", { name: /show cockpit panels/i }),
     ).toBeInTheDocument();
   });
+
+  it("persists independent context and runtime rail visibility in cockpit mode", async () => {
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-cockpit-shell"),
+    ).toHaveAttribute("data-mode", "cockpit");
+    expect(
+      screen.getByTestId("playground-cockpit-left-rail"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /hide context rail/i }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
+    });
+    expect(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).toBeInTheDocument();
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      false,
+    );
+    expect(
+      screen.getByRole("button", { name: /show context rail/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /hide runtime rail/i }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
+    });
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      false,
+    );
+    expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /show context rail/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /show runtime rail/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-cockpit-left-rail"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("playground-cockpit-right-rail"),
+      ).toBeInTheDocument();
+    });
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      true,
+    );
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      true,
+    );
+  });
 });

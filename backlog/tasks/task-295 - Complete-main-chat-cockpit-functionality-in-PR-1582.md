@@ -1,0 +1,81 @@
+---
+id: TASK-295
+title: Complete main /chat cockpit functionality in PR 1582
+status: Done
+assignee: []
+created_date: '2026-05-12 05:10'
+updated_date: '2026-05-12 05:58'
+labels:
+  - webui
+  - chat
+  - frontend
+  - pr-1582
+dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/1582'
+documentation:
+  - Docs/superpowers/specs/2026-05-12-main-chat-cockpit-controls-gap-design.md
+  - Docs/superpowers/plans/2026-05-12-main-chat-cockpit-single-pr-completion-plan.md
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Finish the remaining main WebUI /chat cockpit work on the existing draft PR #1582 branch only. Scope is the main /chat Playground surface, not the extension sidebar/sidepanel or unrelated pages. The goal is to preserve all existing chat-page functionality while making the new cockpit rails/status controls operate on the same chat state, with real-server verification against the running backend.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 PR #1582 remains the single vehicle for main /chat cockpit completion; no second PR or sidepanel/sidebar route work is introduced.
+- [x] #2 Main /chat cockpit and focus modes preserve existing composer workflows: model selection/settings, character/persona controls, Search & Context, web search, MCP/tools, attachments, prompt/tools menus, advanced controls, send/stop behavior, thread search, and artifacts where currently available.
+- [x] #3 Cockpit rails and status strip expose direct controls/status for the highest-value shared chat state without creating rail-local duplicate state: context/session controls, runtime/model/persona controls, degraded/error/streaming state, and independent rail visibility where supported.
+- [x] #4 Focused unit/component tests cover new shared-state controls and layout behavior; real-server Playwright coverage exercises the running backend without mocked API data or route interception.
+- [x] #5 Known baseline blockers are documented separately from this PR's changed behavior, and the draft PR is pushed with verification evidence.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Stage 1: Reconcile spec/plan with the single-PR scope for PR #1582.
+Stage 2: Add independent cockpit context/runtime rail visibility controls with persisted state and tests.
+Stage 3: Add remaining direct rail/status controls only where they map to existing shared /chat state and handlers.
+Stage 4: Expand real-server Playwright verification against the running backend without mocked API data or route interception.
+Stage 5: Push PR #1582 as draft with focused verification evidence and documented baseline blockers.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Created Docs/superpowers/plans/2026-05-12-main-chat-cockpit-single-pr-completion-plan.md and updated the cockpit gap spec to reflect that remaining main /chat cockpit work stays inside PR #1582 rather than a second PR.
+
+Implemented independent context/runtime rail visibility controls in the main /chat cockpit shell, persisted separately from focus/cockpit mode.
+
+Added direct context clear controls for active file, knowledge, media, and attached research context state using existing /chat setters/handlers.
+
+Added runtime rail stop-generation and regenerate-last-response actions wired to existing shared chat handlers, with regenerate hidden during active streaming.
+
+Wired degraded server readiness from ServerReadinessGate into the main /chat cockpit runtime rail and status strip so degraded health permits chat immediately with visible subsystem warnings.
+
+Expanded the real-server /chat Playwright spec to verify independent rail visibility, provider-qualified chat payload routing, live degraded health entry, and no route interception.
+
+Focused Vitest cockpit suite passed: 7 files, 34 tests. ServerReadinessGate degraded test passed: 1 file, 4 tests. Real-server Playwright cockpit spec passed: 3 tests against http://127.0.0.1:8000. A one-off real-server screenshot capture returned a 200 chat completion and saved /private/tmp/tldw-chat-cockpit-real-server-20260512.png.
+
+Known baseline: the focused Playground cockpit tests still log non-fatal mocked-server 400s from existing chat-settings fetch behavior. The repo-wide UI typecheck remains blocked by unrelated pre-existing errors outside this touched scope. Bandit was not applicable because this slice touched TypeScript, TSX, Markdown, and Playwright files only.
+<!-- SECTION:NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the main /chat cockpit single-PR slice for draft PR #1582: independent rail visibility, direct shared-state rail actions, degraded-health cockpit warnings, and real-server parity coverage are now in the PR branch. Verification includes focused component tests, readiness-gate tests, real-server Playwright without route mocks, and a real-server screenshot capture.
+<!-- SECTION:FINAL_SUMMARY:END -->

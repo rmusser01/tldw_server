@@ -48,6 +48,10 @@ describe("Playground cockpit accessibility", () => {
       <PlaygroundCockpitShell
         mode="cockpit"
         onModeChange={onModeChange}
+        leftRailVisible
+        rightRailVisible
+        onLeftRailVisibleChange={vi.fn()}
+        onRightRailVisibleChange={vi.fn()}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
         statusStrip={
@@ -84,6 +88,41 @@ describe("Playground cockpit accessibility", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false")
     fireEvent.click(toggle)
     expect(onModeChange).toHaveBeenCalledWith("focus")
+  })
+
+  it("labels independent rail visibility controls", () => {
+    const onLeftRailVisibleChange = vi.fn()
+    const onRightRailVisibleChange = vi.fn()
+
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible={false}
+        rightRailVisible
+        onLeftRailVisibleChange={onLeftRailVisibleChange}
+        onRightRailVisibleChange={onRightRailVisibleChange}
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+        statusStrip={<div>Ready</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>
+    )
+
+    const contextToggle = screen.getByRole("button", {
+      name: "Show context rail"
+    })
+    const runtimeToggle = screen.getByRole("button", {
+      name: "Hide runtime rail"
+    })
+
+    expect(contextToggle).toHaveAttribute("aria-pressed", "false")
+    expect(runtimeToggle).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(contextToggle)
+    fireEvent.click(runtimeToggle)
+    expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true)
+    expect(onRightRailVisibleChange).toHaveBeenCalledWith(false)
   })
 
   it("announces compact runtime state through one status region", () => {

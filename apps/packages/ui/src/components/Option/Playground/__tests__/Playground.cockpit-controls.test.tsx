@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
@@ -38,6 +38,10 @@ const messageOptionState = vi.hoisted(() => ({
     webSearch: true,
     selectedKnowledge: [{ id: "knowledge-1", title: "Research notes" }],
     ragMediaIds: [101, 202],
+    setSelectedKnowledge: vi.fn(),
+    setRagMediaIds: vi.fn(),
+    stopStreamingRequest: vi.fn(),
+    regenerateLastMessage: vi.fn(),
   },
 }));
 
@@ -221,10 +225,15 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.temporaryChat = true;
     messageOptionState.value.webSearch = true;
     messageOptionState.value.contextFiles = [{ id: "file-1", name: "brief.pdf" }];
+    messageOptionState.value.setContextFiles = vi.fn();
     messageOptionState.value.selectedKnowledge = [
       { id: "knowledge-1", title: "Research notes" },
     ];
+    messageOptionState.value.setSelectedKnowledge = vi.fn();
     messageOptionState.value.ragMediaIds = [101, 202];
+    messageOptionState.value.setRagMediaIds = vi.fn();
+    messageOptionState.value.stopStreamingRequest = vi.fn();
+    messageOptionState.value.regenerateLastMessage = vi.fn();
   });
 
   it("surfaces existing context and runtime state in cockpit rails", async () => {
@@ -253,6 +262,22 @@ describe("Playground cockpit controls", () => {
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(within(contextRail).queryByText("1 file(s)")).toBeNull();
+      fireEvent.click(
+        within(contextRail).getByRole("button", { name: "Clear files" }),
+      );
+      fireEvent.click(
+        within(contextRail).getByRole("button", { name: "Clear knowledge" }),
+      );
+      fireEvent.click(
+        within(contextRail).getByRole("button", {
+          name: "Clear media scopes",
+        }),
+      );
+      expect(messageOptionState.value.setContextFiles).toHaveBeenCalledWith([]);
+      expect(messageOptionState.value.setSelectedKnowledge).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setRagMediaIds).toHaveBeenCalledWith(null);
       const webSearchControl = within(contextRail).getByRole("button", {
         name: "Web search",
       });
@@ -289,6 +314,19 @@ describe("Playground cockpit controls", () => {
       expect(
         within(runtimeInspector).getByText("Route openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: "Stop generation",
+        }),
+      );
+      expect(messageOptionState.value.stopStreamingRequest).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(
+        within(runtimeInspector).queryByRole("button", {
+          name: "Regenerate last response",
+        }),
+      ).toBeNull();
       expect(within(runtimeInspector).getByText("2 messages")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Mira Vale")).toBeInTheDocument();
 
@@ -326,5 +364,56 @@ describe("Playground cockpit controls", () => {
     expect(screen.queryByTestId("playground-runtime-inspector")).toBeNull();
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+  });
+
+  it("wires ready-state runtime regenerate to the shared chat handler", async () => {
+    messageOptionState.value.streaming = false;
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(
+      within(runtimeInspector).queryByRole("button", {
+        name: "Stop generation",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(
+      within(runtimeInspector).getByRole("button", {
+        name: "Regenerate last response",
+      }),
+    );
+
+    expect(messageOptionState.value.regenerateLastMessage).toHaveBeenCalledTimes(
+      1,
+    );
+  });
+
+  it("reflects degraded server readiness in the cockpit runtime and status strip", async () => {
+    messageOptionState.value.streaming = false;
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "degraded", degradedChecks: ["chacha_notes"] },
+        }),
+      );
+    });
+
+    const runtimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Degraded")).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).getByText("Degraded: chacha_notes"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
+      "chacha_notes",
+    );
   });
 });

@@ -19,6 +19,10 @@ export type PlaygroundRuntimeInspectorProps = {
   selectedCharacterName: string | null | undefined;
   onOpenModelSettings: () => void;
   onOpenCharacterSettings: () => void;
+  canStopStreaming?: boolean;
+  onStopStreaming?: () => void;
+  canRegenerate?: boolean;
+  onRegenerate?: () => void;
 };
 
 const interpolateCountFallback = (value: string, count: number) =>
@@ -36,6 +40,10 @@ export const PlaygroundRuntimeInspector = ({
   selectedCharacterName,
   onOpenModelSettings,
   onOpenCharacterSettings,
+  canStopStreaming = false,
+  onStopStreaming,
+  canRegenerate = false,
+  onRegenerate,
 }: PlaygroundRuntimeInspectorProps) => {
   const { t } = useTranslation("playground");
   const selectedModelParts =
@@ -103,6 +111,29 @@ export const PlaygroundRuntimeInspector = ({
           <p className={railMutedClass}>
             {t("cockpit.route", `Route ${routeLabel}`)}
           </p>
+        ) : null}
+        {canStopStreaming && onStopStreaming ? (
+          <button
+            type="button"
+            onClick={onStopStreaming}
+            className={`${railActionClass} mt-3`}
+            aria-label={t("cockpit.stopGeneration", "Stop generation")}
+          >
+            {t("cockpit.stopGeneration", "Stop generation")}
+          </button>
+        ) : null}
+        {!streaming && canRegenerate && onRegenerate ? (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className={`${railActionClass} mt-3`}
+            aria-label={t(
+              "cockpit.regenerateLastResponse",
+              "Regenerate last response",
+            )}
+          >
+            {t("cockpit.regenerateLastResponse", "Regenerate last response")}
+          </button>
         ) : null}
       </section>
 
