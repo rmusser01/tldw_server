@@ -23,6 +23,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/Common/Button"
+import { getDesignSystemState } from "@/design-system"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
 import { buildACPClientConfig } from "@/services/acp/connection"
@@ -146,7 +147,7 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
           { title: t("acp.create.steps.creating", "Creating") },
           { title: t("acp.create.steps.startingAgent", "Starting Agent") },
           { title: t("acp.create.steps.connecting", "Connecting") },
-          { title: t("acp.create.steps.ready", "Ready") },
+          { title: t("acp.create.steps.ready", getDesignSystemState("ready").label) },
         ]}
       />
       {error && (
