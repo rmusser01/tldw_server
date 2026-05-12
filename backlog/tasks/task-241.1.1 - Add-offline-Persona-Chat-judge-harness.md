@@ -4,7 +4,7 @@ title: Add offline Persona Chat judge harness
 status: Done
 assignee: []
 created_date: '2026-05-11 05:48'
-updated_date: '2026-05-12 00:12'
+updated_date: '2026-05-12 00:33'
 labels:
   - persona
   - chat
@@ -65,12 +65,16 @@ Opened PR #1576 for review and linked it from #1566, #1543, and #1510.
 Review-fix pass for PR #1576 started. Actionable threads: add per-verdict counts, make mismatched/invalid counts mutually exclusive, harden malformed fixture score extraction, skip empty case IDs, and update tests.
 
 PR #1576 review fixes completed. Addressed Qodo and Gemini threads by adding immutable per-verdict report counts, computing mismatched_cases directly from mismatched statuses, skipping empty fixture case IDs, and hardening malformed fixture score extraction. Verification on 2026-05-12: harness+contract pytest passed 16 tests; Bandit reported zero findings on touched Python; placeholder scan found no matches; git diff --check passed.
+
+Review-fix follow-up started. Verified offline_only is still derived from fixture_payload, so malformed/false fixture metadata can make the offline-only harness report offline_only=false. Adding a regression test and hardcoding the report field to True.
+
+Review-fix follow-up completed. Finding was still valid: offline_only was derived from fixture_payload. Added a regression test for malformed fixture offline_only=false and changed the report constructor to hardcode offline_only=True. No findings were skipped. Verification on 2026-05-12: harness+contract pytest passed 17 tests; Bandit reported zero findings on touched Python; placeholder scan found no matches; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the offline Persona Chat judge harness and completed the PR #1576 review-fix pass. The report now includes per-verdict counts, keeps matched/mismatched/missing/invalid status counts mutually exclusive, ignores empty fixture case IDs, and safely normalizes malformed fixture score data. Local verification passed for focused judge tests, Bandit, placeholder scan, and diff hygiene.
+Added the offline Persona Chat judge harness and completed follow-up PR review fixes. The report now always marks the harness output offline_only=True regardless of fixture metadata, includes per-verdict counts, keeps matched/mismatched/missing/invalid status counts mutually exclusive, ignores empty fixture case IDs, and safely normalizes malformed fixture score data. Local verification passed for focused judge tests, Bandit, placeholder scan, and diff hygiene.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

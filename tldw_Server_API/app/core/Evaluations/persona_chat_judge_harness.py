@@ -145,7 +145,7 @@ def build_persona_chat_judge_report(
 
     return PersonaChatJudgeHarnessReport(
         schema_version=_string_or_empty(fixture_payload.get("schema_version")),
-        offline_only=bool(fixture_payload.get("offline_only")),
+        offline_only=True,
         total_cases=total_cases,
         matched_cases=matched_cases,
         mismatched_cases=mismatched_cases,

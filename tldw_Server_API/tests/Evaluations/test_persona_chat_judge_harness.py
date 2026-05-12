@@ -69,6 +69,16 @@ def test_report_matches_expected_contract_outputs() -> None:
     _require(report["extra_candidate_ids"] == [], "no extra candidates are present")
 
 
+def test_report_remains_offline_only_when_fixture_metadata_is_malformed() -> None:
+    """The offline harness should not trust fixture metadata for its runtime boundary."""
+    fixture = _copy_fixture()
+    fixture["offline_only"] = False
+
+    report = build_persona_chat_judge_report(fixture, _candidate_outputs()).to_dict()
+
+    _require(report["offline_only"] is True, "offline harness reports should always be offline-only")
+
+
 def test_verdict_mismatch_is_reported_without_unbounded_response_text() -> None:
     """Verdict mismatches should be bounded to ids, keys, and labels."""
     candidates = _candidate_outputs()
