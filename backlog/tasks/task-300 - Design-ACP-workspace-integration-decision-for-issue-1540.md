@@ -4,7 +4,7 @@ title: Design ACP workspace integration decision for issue 1540
 status: Done
 assignee: []
 created_date: '2026-05-12 14:26'
-updated_date: '2026-05-12 14:42'
+updated_date: '2026-05-12 14:54'
 labels:
   - ACP
   - workspace
@@ -46,12 +46,16 @@ Linked the decision from the canonical workspace decision doc, ACP PRD, and ACP 
 Verification so far: rg trailing-whitespace check returned no matches; targeted rg confirmed canonical workspace, WorkspacePlayground, Agent Tasks, ACP Playground, agent-orchestration/workspaces, and canonical_workspace_id coverage; git diff --check returned exit 0 for tracked docs. Bandit is not applicable to this docs-only slice.
 
 Opened PR #1614 for the ACP workspace integration design gate and commented on issue #1540 with the remaining implementation order.
+
+PR #1614 review pass: Qodo flagged missing trusted-roots flow and missing explicit verification/testing slice; Gemini flagged possible tldw_Server_API casing ambiguity. Reopening TASK-300 for review-fix documentation updates.
+
+Review fixes applied: clarified repository casing for tldw_Server_API, added trusted-root selection/inheritance/enforcement flow, and made verification/testing an explicit implementation slice.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added Docs/Design/ACP_Workspace_Integration_Decision_2026_05.md, linked it from the canonical workspace decision, ACP PRD, and ACP development docs, opened PR #1614, and updated issue #1540 with the backend/UI/history closeout order. Verification: git diff --cached --check passed; trailing-whitespace rg returned no matches; targeted rg confirmed required bridge/workspace touchpoints. Bandit skipped because this is a docs-only change.
+Added Docs/Design/ACP_Workspace_Integration_Decision_2026_05.md, linked it from the canonical workspace decision, ACP PRD, and ACP development docs, opened PR #1614, updated issue #1540 with the backend/UI/history closeout order, and addressed PR review comments by clarifying tldw_Server_API casing, trusted-root flow, and verification/testing slice boundaries. Verification: git diff --check passed; trailing-whitespace rg returned no matches; targeted rg confirmed required bridge/workspace/trusted-root touchpoints. Bandit skipped because this is a docs-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

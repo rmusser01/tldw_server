@@ -34,9 +34,10 @@ becoming a parallel workspace product.
 Zustand store in `apps/packages/ui/src/store/workspace.ts` remains the
 responsive cache and offline-friendly UI state.
 
-The backend canonical workspace route family is `tldw_Server_API/app/api/v1/endpoints/workspaces.py`.
-Those endpoints use string workspace IDs and own workspace sources, selected
-source order, notes, and artifacts.
+The backend canonical workspace route family is the repository's mixed-case
+`tldw_Server_API/app/api/v1/endpoints/workspaces.py` package path. Those
+endpoints use string workspace IDs and own workspace sources, selected source
+order, notes, and artifacts.
 
 ### ACP Execution Workspace
 
@@ -189,12 +190,24 @@ Generated work products promoted into canonical workspace artifacts must follow
 the future artifact contract in #1525. Until that lands, ACP run artifacts stay
 linked as execution outputs, not polished workspace work products.
 
-## MCP And Environment Flow
+## MCP, Trusted Roots, And Environment Flow
 
 Workspace MCP server configuration for ACP runs remains owned by the ACP
 execution workspace in the first slice. Canonical workspace sources and selected
 source state can guide task prompts and templates, but they should not silently
 become MCP tools or environment variables.
+
+Trusted roots are selected from the ACP execution workspace, not from canonical
+workspace membership. The linked ACP execution workspace `root_path` is the
+trusted root only after it is absolute and passes the existing
+`ACP-WORKSPACE.allowed_base_paths` / `ACP_WORKSPACE_ALLOWED_BASE_PATHS`
+allowlist validation. A canonical workspace ID by itself never widens the
+filesystem trust boundary.
+
+Projects, tasks, and runs inherit trusted-root behavior through their bound ACP
+execution workspace. If a canonical workspace does not have a linked ACP
+execution workspace, no workspace root, MCP server config, or env values flow
+into the ACP run.
 
 Dispatch behavior remains:
 
@@ -202,6 +215,12 @@ Dispatch behavior remains:
 - convert enabled workspace MCP servers into `mcpServers`;
 - forward ACP execution workspace `env_vars` as per-session env;
 - merge sandbox env through the existing sandbox path when sandbox mode is used.
+- reject absolute or escaping `cwd` values outside the validated trusted root.
+
+MCP Hub path-scope enforcement should consume the same resolved trusted root
+when ACP context is present. Existing `McpHubWorkspaceRootResolver` and path
+scope behavior are the baseline: unresolved or ambiguous workspace roots must
+fail closed or require approval according to the active path-scope policy.
 
 Future work may map canonical workspace source sets to MCP workspace sets, but
 that should be a separate MCP Hub integration slice.
@@ -232,6 +251,12 @@ that should be a separate MCP Hub integration slice.
 
 ## Implementation Slices
 
+The implementation is split into three explicit delivery tracks:
+
+- Backend model/API: Slice 1.
+- Frontend navigation/UI: Slices 2, 3, and 4.
+- Verification/testing: Slice 5.
+
 ### Slice 1: Backend Bridge Contract
 
 Goal: make the canonical workspace to ACP execution workspace link explicit.
@@ -242,8 +267,8 @@ Scope:
   canonical workspace.
 - Store `canonical_workspace_id` in ACP workspace metadata initially.
 - Include canonical workspace metadata in project/task detail responses.
-- Add tests for ownership, missing workspace, missing allowlist, and duplicate
-  bridge prevention.
+- Add backend tests for ownership, missing workspace, missing allowlist,
+  trusted-root inheritance, cwd containment, and duplicate bridge prevention.
 
 ### Slice 2: WorkspacePlayground Handoff
 
@@ -277,12 +302,20 @@ Scope:
 - Link to ACP detail/events/artifacts/diagnostics/audit routes.
 - Use redacted previews where support-safe views are required.
 
-### Slice 5: Closeout And Issue Updates
+### Slice 5: Verification, Testing, And Closeout
 
-Goal: close #1540 with evidence and split remaining implementation work.
+Goal: prove the integration behavior before closing #1540 and split any
+remaining implementation work.
 
 Scope:
 
+- Run backend tests for bridge creation, ownership, allowlist failures,
+  trusted-root inheritance, and cwd escape rejection.
+- Run frontend tests for WorkspacePlayground handoff, Agent Tasks filtering,
+  setup-gap states, and ACP detail links.
+- Add or update docs checks that preserve the canonical workspace versus ACP
+  execution workspace distinction.
+- Run Bandit on touched backend paths when implementation code changes.
 - Update #1540 with the bridge decision and implementation issue list.
 - Keep #1538 blocked on #1525 for polished artifact promotion.
 - Keep #1537 downstream of stable workspace, artifact, retention, redaction,
@@ -312,5 +345,5 @@ Scope:
   bridge contract sections.
 - UI/API touchpoints: covered by backend/frontend touchpoints and user flows.
 - Permission and retention implications: covered by permissions, safety,
-  retention, redaction, MCP, and env sections.
+  retention, redaction, trusted-root, MCP, and env sections.
 - Implementation split: covered by the five implementation slices.
