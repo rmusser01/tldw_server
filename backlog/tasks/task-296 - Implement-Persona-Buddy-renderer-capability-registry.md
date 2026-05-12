@@ -1,0 +1,65 @@
+---
+id: TASK-296
+title: Implement Persona Buddy renderer capability registry
+status: In Progress
+assignee: []
+created_date: '2026-05-12 05:15'
+updated_date: '2026-05-12 05:15'
+labels:
+  - persona
+  - buddy
+  - visual-packs
+  - implementation
+dependencies:
+  - TASK-293
+  - TASK-294
+documentation:
+  - Docs/superpowers/specs/2026-05-12-persona-buddy-renderer-capability-registry-design.md
+  - Docs/superpowers/plans/2026-05-12-persona-buddy-renderer-capability-registry-implementation-plan.md
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the approved Persona/Buddy renderer capability registry thin slice. This should add backend renderer capability registry and Persona API reporting, wire backend manifest validation to the registry, add frontend capability service types/helper, route Buddy display and diagnostics through a frontend renderer registry, and add focused backend/frontend tests. Keep sprite_frames as the only enabled V1 renderer, keep draft manifest saves permissive, fail closed at activation/import-preview validation boundaries for unsupported renderers, avoid renderer-level asset-role enforcement, and do not implement Live2D, Persona Chat, VN, CYOA, or external MCP provider behavior.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Backend registry exposes only enabled sprite_frames in V1 and validator uses it for renderer/version checks.
+- [ ] #2 Persona API exposes authenticated visual-renderer capabilities without requiring a persona-specific lookup.
+- [ ] #3 Draft manifest save remains permissive while activation and import-preview reject unsupported renderers.
+- [ ] #4 Frontend service types/helper can fetch renderer capabilities and Buddy runtime uses a local renderer registry for renderability.
+- [ ] #5 Buddy diagnostics and dock rendering use the same frontend registry and preserve text fallback for unsupported renderers.
+- [ ] #6 Focused backend and frontend tests pass, diff check passes, and Bandit on touched backend production scope reports no new findings.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Execute the reviewed implementation plan in Docs/superpowers/plans/2026-05-12-persona-buddy-renderer-capability-registry-implementation-plan.md using subagent-driven development.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-buddy-renderer-capability-spec
+
+Branch: codex/persona-buddy-renderer-capability-spec
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
