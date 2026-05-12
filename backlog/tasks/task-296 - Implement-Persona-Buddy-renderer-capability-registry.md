@@ -4,7 +4,7 @@ title: Implement Persona Buddy renderer capability registry
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:15'
-updated_date: '2026-05-12 05:29'
+updated_date: '2026-05-12 05:36'
 labels:
   - persona
   - buddy
@@ -31,7 +31,7 @@ Implement the approved Persona/Buddy renderer capability registry thin slice. Th
 <!-- AC:BEGIN -->
 - [ ] #1 Backend registry exposes only enabled sprite_frames in V1 and validator uses it for renderer/version checks.
 - [x] #2 Persona API exposes authenticated visual-renderer capabilities without requiring a persona-specific lookup.
-- [ ] #3 Draft manifest save remains permissive while activation and import-preview reject unsupported renderers.
+- [x] #3 Draft manifest save remains permissive while activation and import-preview reject unsupported renderers.
 - [ ] #4 Frontend service types/helper can fetch renderer capabilities and Buddy runtime uses a local renderer registry for renderability.
 - [ ] #5 Buddy diagnostics and dock rendering use the same frontend registry and preserve text fallback for unsupported renderers.
 - [ ] #6 Focused backend and frontend tests pass, diff check passes, and Bandit on touched backend production scope reports no new findings.
@@ -55,6 +55,10 @@ Task 1 backend registry/core validation completed in commit 5a4b44775. Focused c
 Task 2 backend API slice plan: add requested visual-renderer capability API tests, run targeted tests to confirm the missing route/schema failure, add Persona visual renderer capability response schemas, add authenticated GET /api/v1/persona/visual-renderers using the existing Persona feature flag, request-user auth, rate limit, and registry helper, rerun the targeted tests, run git diff --check, and commit the assigned files.
 
 Task 2 backend API verification: red run produced expected 404 on test_list_persona_visual_renderer_capabilities before route/schema implementation; green run passed 2 targeted tests. git diff --check passed. Bandit on tldw_Server_API/app/api/v1/schemas/persona.py and tldw_Server_API/app/api/v1/endpoints/persona.py wrote /tmp/bandit_task296_task2.json with zero findings.
+
+Task 3 validation-boundary regression plan: add API test proving draft manifest PATCH permits unsupported future renderer while activate rejects invalid_manifest; add portability preview test by mutating exported metadata/pack.json to renderer_type live2d and updating metadata/pack.json checksum so validation reaches malformed_visual_manifest; run the requested focused pytest command, git diff --check against 473ca0ceb..HEAD, and commit test-only changes.
+
+Task 3 verification: focused pytest command passed with 9 passed and 5 warnings. Red phase was not possible without reverting existing production behavior because the newly added regression tests passed immediately against current code. git diff --check 473ca0ceb..HEAD passed. No Bandit run needed for Task 3 because only tests and Backlog notes were changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

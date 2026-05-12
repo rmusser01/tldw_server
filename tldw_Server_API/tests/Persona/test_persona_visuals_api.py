@@ -574,6 +574,37 @@ def test_activation_rejects_manifest_without_required_states(persona_db: Charact
         assert response.json()["detail"]["code"] == "invalid_manifest"
 
 
+def test_draft_manifest_update_accepts_future_renderer_but_activation_rejects_it(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Renderer Boundary Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        draft_response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": {
+                    "manifest_version": 1,
+                    "renderer_type": "live2d",
+                    "states": {},
+                    "animations": {},
+                },
+                "expected_version": pack["version"],
+            },
+        )
+        assert draft_response.status_code == 200, draft_response.text
+        assert draft_response.json()["manifest"]["renderer_type"] == "live2d"
+
+        activate_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+        )
+
+        assert activate_response.status_code == 400
+        assert activate_response.json()["detail"]["code"] == "invalid_manifest"
+        assert "unsupported renderer_type" in activate_response.json()["detail"]["message"]
+
+
 def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Owner Persona")
