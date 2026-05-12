@@ -187,4 +187,19 @@ describe('vnScripts api client', () => {
       request
     );
   });
+
+  it('encodes VN script template ids before building the create endpoint', async () => {
+    const request = {
+      title: 'Template Route',
+      primary_asset_pack_id: 7,
+      content_rating: 'general' as const,
+    };
+
+    await createVNScriptFromTemplate('linear scene/α', request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/templates/linear%20scene%2F%CE%B1/scripts',
+      request
+    );
+  });
 });

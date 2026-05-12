@@ -63,6 +63,8 @@ class VNScriptService:
         generation_profiles: Mapping[str, str] | None = None,
         description: str | None = None,
         content_rating: str = "general",
+        initial_draft: Mapping[str, Any] | None = None,
+        initial_diagnostics: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a script shell and its empty draft."""
         return self.repo.create_script(
@@ -74,6 +76,8 @@ class VNScriptService:
             generation_profile_id=generation_profile_id,
             generation_profiles=generation_profiles,
             content_rating=content_rating,
+            initial_draft=initial_draft,
+            initial_diagnostics=initial_diagnostics,
         )
 
     def list_scripts(self, *, limit: int = 50, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
@@ -96,11 +100,37 @@ class VNScriptService:
         description: str | None = None,
         content_rating: str = "general",
         audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
+        draft: Mapping[str, Any] | None = None,
         policy_profile: ProfileRow | None = None,
         generation_profile: ProfileRow | None = None,
         resolved_generation_profiles: Mapping[str, ProfileRow] | None = None,
     ) -> dict[str, Any]:
         """Create a normal script and store a validated template draft."""
+        template_draft = (
+            dict(draft)
+            if draft is not None
+            else instantiate_template(
+                template_id,
+                title=title,
+                primary_asset_pack_id=primary_asset_pack_id,
+                generation_profile_id=generation_profile_id,
+            )
+        )
+        script_metadata = _script_metadata_payload(
+            primary_asset_pack_id=primary_asset_pack_id,
+            policy_profile_id=policy_profile_id,
+            generation_profile_id=generation_profile_id,
+            generation_profiles=generation_profiles,
+            content_rating=content_rating,
+        )
+        validation = self.validate_draft_payload(
+            script_metadata,
+            template_draft,
+            audio_refs=audio_refs,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            generation_profiles=resolved_generation_profiles,
+        )
         script = self.create_script(
             title=title,
             description=description,
@@ -109,22 +139,10 @@ class VNScriptService:
             generation_profile_id=generation_profile_id,
             generation_profiles=generation_profiles,
             content_rating=content_rating,
+            initial_draft=template_draft,
+            initial_diagnostics=validation,
         )
-        draft = instantiate_template(
-            template_id,
-            title=title,
-            primary_asset_pack_id=primary_asset_pack_id,
-            generation_profile_id=generation_profile_id,
-        )
-        draft_response = self.replace_draft(
-            int(script["id"]),
-            if_revision=0,
-            draft=draft,
-            audio_refs=audio_refs,
-            policy_profile=policy_profile,
-            generation_profile=generation_profile,
-            generation_profiles=resolved_generation_profiles,
-        )
+        draft_response = self.get_draft(int(script["id"]))
         return {"script": script, "draft": draft_response}
 
     def get_script(self, script_id: int) -> dict[str, Any]:
@@ -509,6 +527,23 @@ def _approved_slot_keys(manifest: Mapping[str, Any]) -> set[str]:
 
 def _empty_audio_refs(program: Mapping[str, Any]) -> Mapping[str, Mapping[str, Any]]:
     return {}
+
+
+def _script_metadata_payload(
+    *,
+    primary_asset_pack_id: int,
+    policy_profile_id: str,
+    generation_profile_id: str,
+    generation_profiles: Mapping[str, str] | None,
+    content_rating: str,
+) -> dict[str, Any]:
+    return {
+        "primary_asset_pack_id": primary_asset_pack_id,
+        "policy_profile_id": policy_profile_id,
+        "generation_profile_id": generation_profile_id,
+        "generation_profiles": dict(generation_profiles or {}),
+        "content_rating": content_rating,
+    }
 
 
 def _normalize_audio_refs(raw_refs: Mapping[str, Mapping[str, Any]] | None) -> dict[str, dict[str, Any]]:

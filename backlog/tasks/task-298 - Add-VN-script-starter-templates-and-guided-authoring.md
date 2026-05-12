@@ -55,15 +55,16 @@ Implementation will proceed in an isolated worktree on branch codex/vn-script-te
 - Added backend-owned starter template catalog endpoints under `/api/v1/vn/vn-scripts/templates`.
 - Added WebUI template selection while preserving the blank/custom JSON creation path.
 - Documented the custom frontend contract in `Docs/API-related/VN_PLATFORM_API.md` and the VN platform API spec.
+- Addressed PR review follow-ups for atomic template draft creation, frontend template ID encoding, and portable verification commands.
 <!-- SECTION:NOTES:END -->
 
 ## Verification
 
 <!-- SECTION:VERIFICATION:BEGIN -->
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/VN_Scripts -q` -> 47 passed, 5 warnings.
-- `bunx vitest run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend` -> 23 passed.
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/VN_Scripts -q` -> 48 passed, 5 warnings.
+- `bunx vitest run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend` -> 24 passed.
 - `bunx eslint components/vn-scripts/VNScriptsWorkbench.tsx lib/api/vnScripts.ts types/vn-scripts.ts __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend` -> passed.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/vn_scripts.py tldw_Server_API/app/api/v1/schemas/vn_script_schemas.py tldw_Server_API/app/core/VN_Scripts -f json -o /tmp/bandit_vn_script_templates.json` -> passed, 0 findings.
+- `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/vn_scripts.py tldw_Server_API/app/api/v1/schemas/vn_script_schemas.py tldw_Server_API/app/core/VN_Scripts tldw_Server_API/app/core/DB_Management/VNScripts_DB.py -f json -o /tmp/bandit_vn_script_templates_review.json` -> passed, 0 findings.
 - `git diff --check` -> passed.
 - Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1606
 <!-- SECTION:VERIFICATION:END -->

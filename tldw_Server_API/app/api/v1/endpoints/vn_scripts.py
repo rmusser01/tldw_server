@@ -32,7 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptVersionPolicyEvaluateResponse,
     VNScriptVersionResponse,
 )
-from tldw_Server_API.app.core.VN_Scripts.templates import get_template
+from tldw_Server_API.app.core.VN_Scripts.templates import get_template, instantiate_template
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
@@ -131,6 +131,17 @@ async def create_script_from_template(
             generation_profiles=request.generation_profiles,
             profile_store=profile_store,
         )
+        draft = instantiate_template(
+            template_id,
+            title=title,
+            primary_asset_pack_id=request.primary_asset_pack_id,
+            generation_profile_id=request.generation_profile_id,
+        )
+        audio_refs = await _resolve_accessible_audio_refs(
+            draft,
+            files_repo=files_repo,
+            owner_user_id=service.owner_user_id,
+        )
         draft_preview = service.create_script_from_template(
             template_id,
             title=title,
@@ -143,22 +154,9 @@ async def create_script_from_template(
             policy_profile=policy_profile,
             generation_profile=generation_profile,
             resolved_generation_profiles=generation_profiles,
+            audio_refs=audio_refs,
+            draft=draft,
         )
-        audio_refs = await _resolve_accessible_audio_refs(
-            draft_preview["draft"]["draft"],
-            files_repo=files_repo,
-            owner_user_id=service.owner_user_id,
-        )
-        if audio_refs:
-            draft_preview["draft"] = service.replace_draft(
-                int(draft_preview["script"]["id"]),
-                if_revision=int(draft_preview["draft"]["revision"]),
-                draft=draft_preview["draft"]["draft"],
-                audio_refs=audio_refs,
-                policy_profile=policy_profile,
-                generation_profile=generation_profile,
-                generation_profiles=generation_profiles,
-            )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
     return VNScriptCreateFromTemplateResponse.model_validate(draft_preview)

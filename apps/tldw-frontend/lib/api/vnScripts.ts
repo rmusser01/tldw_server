@@ -45,7 +45,7 @@ export function createVNScriptFromTemplate(
   templateId: string,
   request: VNScriptCreateFromTemplateRequest
 ): Promise<VNScriptCreateFromTemplateResponse> {
-  return apiClient.post(`${VN_SCRIPTS_BASE}/templates/${templateId}/scripts`, request);
+  return apiClient.post(`${VN_SCRIPTS_BASE}/templates/${encodeURIComponent(templateId)}/scripts`, request);
 }
 
 export function listVNScripts(query: VNScriptListQuery = {}): Promise<VNScriptListResponse> {

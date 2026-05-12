@@ -258,6 +258,24 @@ def test_create_script_from_template_rejects_unknown_profiles(
     assert response.json()["detail"]["details"]["reason"] == "policy_profile_not_found"
 
 
+def test_create_script_from_template_does_not_persist_script_when_validation_fails(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/vn/vn-scripts/templates/linear_scene/scripts",
+        json={
+            "title": "Invalid Template Route",
+            "primary_asset_pack_id": 999_999,
+            "content_rating": "general",
+        },
+    )
+    scripts_response = client.get("/api/v1/vn/vn-scripts/scripts")
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["details"]["reason"] == "pack_not_found"
+    assert scripts_response.status_code == 200
+    assert scripts_response.json()["total"] == 0
+    assert scripts_response.json()["items"] == []
+
+
 def test_generated_choice_template_validates_and_publishes(
     client: TestClient,
     chacha_dbs: dict[int, CharactersRAGDB],
