@@ -5093,17 +5093,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Media/hooks/useReadingProgress.tsx:Loading",
-    "path": "src/components/Media/hooks/useReadingProgress.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Loading",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Loading\" state label in src/components/Media/hooks/useReadingProgress.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx:Ready",
     "path": "src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx",
     "rule": "canonical-state-label",
