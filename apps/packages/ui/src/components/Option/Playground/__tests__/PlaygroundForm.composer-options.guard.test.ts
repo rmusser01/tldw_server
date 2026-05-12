@@ -38,4 +38,15 @@ describe("PlaygroundForm composer options guard", () => {
     expect(source).toContain("handleAttachmentMenuChange")
     expect(source).toContain("handleSendMenuChange")
   })
+
+  it("keeps legacy composer controls before transient notices", () => {
+    const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
+    const source = fs.readFileSync(sourcePath, "utf8")
+    const legacyReturnStart = source.indexOf("return (", source.indexOf("if (nextgenComposerEnabled)"))
+    const toolbarIndex = source.indexOf("{composerToolbarNode}", legacyReturnStart)
+    const noticesIndex = source.indexOf("{composerNoticesNode}", legacyReturnStart)
+
+    expect(toolbarIndex).toBeGreaterThan(legacyReturnStart)
+    expect(noticesIndex).toBeGreaterThan(toolbarIndex)
+  })
 })

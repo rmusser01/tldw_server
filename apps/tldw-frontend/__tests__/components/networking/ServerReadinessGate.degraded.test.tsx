@@ -44,6 +44,9 @@ describe("ServerReadinessGate degraded health", () => {
     renderGate(true)
 
     expect(await screen.findByTestId("page-content")).toBeInTheDocument()
+    expect(screen.getByTestId("server-readiness-degraded-shell")).toHaveClass(
+      "server-readiness-degraded-shell"
+    )
     expect(screen.getByRole("status")).toHaveTextContent(
       "Server partially degraded"
     )

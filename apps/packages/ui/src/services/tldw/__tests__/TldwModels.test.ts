@@ -114,6 +114,21 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledWith({ refreshOpenRouter: true })
   })
 
+  it("resolves in-flight model metadata failures through the fallback path", async () => {
+    mocks.getModels.mockRejectedValueOnce(
+      new Error("Failed to fetch (GET /api/v1/llm/models/metadata)")
+    )
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const first = service.getModels(true)
+    const second = service.getModels(true)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([[], []])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+  })
+
   it("reuses cached models during the forced refresh cooldown", async () => {
     mocks.getModels.mockResolvedValue([
       { id: "openrouter/model-a", name: "Model A", provider: "openrouter", type: "chat" }

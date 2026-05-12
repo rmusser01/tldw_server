@@ -132,10 +132,15 @@ export const ServerReadinessGate: React.FC<{
 
   if (gate === "degraded") {
     return (
-      <>
+      <div
+        data-testid="server-readiness-degraded-shell"
+        className="server-readiness-degraded-shell"
+      >
         <ServerHealthWarningBanner degradedChecks={degradedChecks} />
-        {children}
-      </>
+        <div className="server-readiness-degraded-content">
+          {children}
+        </div>
+      </div>
     )
   }
 

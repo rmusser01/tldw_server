@@ -5441,9 +5441,9 @@ export const PlaygroundForm = ({
                         return (
                           <>
                             {composerTextareaNode}
+                            {composerToolbarNode}
                             {composerInlineMessagesNode}
                             {composerNoticesNode}
-                            {composerToolbarNode}
                           </>
                         );
                       })()}

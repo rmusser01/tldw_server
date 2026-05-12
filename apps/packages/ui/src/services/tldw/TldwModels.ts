@@ -190,23 +190,23 @@ export class TldwModelsService {
       await this.persistCache()
       
       return this.cachedModels
-    })()
-
-    this.inFlightFetch = fetchPromise
-    try {
-      return await fetchPromise
-    } catch (error) {
+    })().catch((error) => {
       if (!import.meta.env?.DEV) {
         console.error('Failed to fetch models from tldw:', error)
       }
-      
+
       // Return cached models if available, even if expired
       if (this.cachedModels) {
         return this.cachedModels
       }
-      
+
       // Return empty array as fallback
       return []
+    })
+
+    this.inFlightFetch = fetchPromise
+    try {
+      return await fetchPromise
     } finally {
       if (this.inFlightFetch === fetchPromise) {
         this.inFlightFetch = null
