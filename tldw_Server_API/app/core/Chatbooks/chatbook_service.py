@@ -132,6 +132,7 @@ _OPENWEBUI_FOLDER_MIRROR_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 _CHATBOOK_TEMPLATE_MODES = {"pass_through", "render_on_export", "render_on_import"}
+MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS = 1000
 
 try:  # Prompts database is optional in some deployments
     from ..DB_Management.Prompts_DB import PromptsDatabase  # type: ignore
@@ -2482,6 +2483,9 @@ class ChatbookService:
         summary = self._openwebui_hydration_summary(items)
         summary["referenced_files"] = len(items)
         summary["warning_count"] = len(warnings) + sum(1 for item in items if item.get("warning_code"))
+        returned_items, omitted_items = self._cap_openwebui_hydration_items(items)
+        summary["returned_items"] = len(returned_items)
+        summary["omitted_items"] = omitted_items
         return {
             "scope": {
                 "conversation_ids": list(conversation_ids),
@@ -2489,7 +2493,7 @@ class ChatbookService:
             },
             "process_supported_files": bool(process_supported_files),
             "summary": summary,
-            "items": items,
+            "items": returned_items,
             "warnings": warnings,
         }
 
@@ -2624,6 +2628,9 @@ class ChatbookService:
         ]
         warnings.extend(item_warnings[:MAX_PREVIEW_WARNING_ITEMS])
         summary["warning_count"] = len(warnings)
+        returned_items, omitted_items = self._cap_openwebui_hydration_items(items)
+        summary["returned_items"] = len(returned_items)
+        summary["omitted_items"] = omitted_items
         return {
             "scope": {
                 "conversation_ids": list(conversation_ids),
@@ -2631,7 +2638,7 @@ class ChatbookService:
             },
             "process_supported_files": bool(process_supported_files),
             "summary": summary,
-            "items": items,
+            "items": returned_items,
             "warnings": warnings,
         }
 
@@ -2679,6 +2686,8 @@ class ChatbookService:
         resolved = [item for item in items if item.get("status") == "resolved"]
         return {
             "referenced_files": len(items),
+            "returned_items": len(items),
+            "omitted_items": 0,
             "resolved_files": len(resolved),
             "image_files": sum(1 for item in resolved if item.get("file_kind") == "image"),
             "media_files": sum(1 for item in resolved if item.get("file_kind") != "image"),
@@ -2718,6 +2727,8 @@ class ChatbookService:
         }
         return {
             "referenced_files": len(items),
+            "returned_items": len(items),
+            "omitted_items": 0,
             "resolved_files": resolved_files,
             "image_files": image_files,
             "media_files": media_files,
@@ -2736,6 +2747,16 @@ class ChatbookService:
             "processed_files": sum(1 for item in items if item.get("processing_status") == "completed"),
             "warning_count": 0,
         }
+
+    @staticmethod
+    def _cap_openwebui_hydration_items(
+        items: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return a bounded hydration item list and omitted-item count."""
+        limit = max(0, int(MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS))
+        if len(items) <= limit:
+            return list(items), 0
+        return list(items[:limit]), len(items) - limit
 
     @staticmethod
     def _openwebui_timestamp_to_iso(value: Any) -> tuple[str, str | None]:

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Chatbooks import openwebui_hydration as hydration
+from tldw_Server_API.app.core.Chatbooks import chatbook_service as chatbook_service_mod
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -350,6 +351,65 @@ def test_db_chat_file_fallback_uses_preserved_openwebui_source_chat_row_id():
     assert preview.references[0].source == "chat_file"
 
 
+def test_db_chat_file_fallback_batches_source_chat_rows(monkeypatch):
+    conn = _chat_file_connection()
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_load_chat_file_rows(_conn, chat_ids, user_id=None):
+        calls.append((tuple(chat_ids), user_id))
+        return [
+            {
+                "id": "link-a",
+                "chat_id": "source-chat-a",
+                "file_id": "file-a",
+                "message_id": "source-msg-a",
+                "user_id": "owui-user",
+                "created_at": 1,
+                "updated_at": 1,
+            },
+            {
+                "id": "link-b",
+                "chat_id": "source-chat-b",
+                "file_id": "file-b",
+                "message_id": "source-msg-b",
+                "user_id": "owui-user",
+                "created_at": 2,
+                "updated_at": 2,
+            },
+        ]
+
+    monkeypatch.setattr(hydration, "load_openwebui_chat_file_rows_for_chats", fake_load_chat_file_rows)
+    db = FakeChaChaDB(
+        messages_by_conversation={
+            "conv-a": [{"id": "msg-a", "conversation_id": "conv-a"}],
+            "conv-b": [{"id": "msg-b", "conversation_id": "conv-b"}],
+        },
+        metadata_by_message_id={
+            "msg-a": _metadata(refs=[], source_message_id="source-msg-a"),
+            "msg-b": _metadata(refs=[], source_message_id="source-msg-b"),
+        },
+        settings_by_conversation={
+            "conv-a": {"settings": {"openwebui_import": {"metadata": {"row_id": "source-chat-a"}}}},
+            "conv-b": {"settings": {"openwebui_import": {"metadata": {"row_id": "source-chat-b"}}}},
+        },
+    )
+
+    preview = hydration.extract_openwebui_hydration_references(
+        db,
+        hydration.OpenWebUIHydrationScope(
+            conversation_ids=("conv-a", "conv-b"),
+            openwebui_user_id="owui-user",
+        ),
+        openwebui_conn=conn,
+    )
+
+    assert calls == [(("source-chat-a", "source-chat-b"), "owui-user")]
+    assert [(ref.conversation_id, ref.message_id, ref.file_id) for ref in preview.references] == [
+        ("conv-a", "msg-a", "file-a"),
+        ("conv-b", "msg-b", "file-b"),
+    ]
+
+
 def test_db_chat_file_fallback_skips_conversations_without_source_row_id():
     conn = _chat_file_connection()
     conn.execute(
@@ -680,6 +740,103 @@ def test_register_non_image_processing_hook_is_optional_and_failure_keeps_media_
     assert processed.status == "registered_media"
     assert processed.warning_code == "processing_failed"
     assert media_db.get_media_file(processed.media_id, "original") is not None
+
+
+def test_register_non_image_reports_copy_failure_without_terminating(
+    real_hydration_db,
+    media_db,
+    tmp_path,
+    monkeypatch,
+):
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "tldw-owned-storage"
+
+    def fail_copy(**_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(hydration, "_copy_openwebui_attachment_to_storage", fail_copy)
+
+    item = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-copy-fails"),
+        _resolved_file(pdf_path, file_id="file-copy-fails"),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+
+    assert item.status == "media_registration_failed"
+    assert item.warning_code == "media_registration_failed"
+    assert item.media_id is not None
+
+
+def test_register_non_image_reports_media_file_insert_failure_without_terminating(
+    real_hydration_db,
+    media_db,
+    tmp_path,
+    monkeypatch,
+):
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "tldw-owned-storage"
+
+    def fail_insert_media_file(**_kwargs):
+        raise RuntimeError("insert failed")
+
+    monkeypatch.setattr(media_db, "insert_media_file", fail_insert_media_file)
+
+    item = hydration.register_non_image_reference(
+        real_hydration_db,
+        media_db,
+        _reference(file_id="file-insert-fails"),
+        _resolved_file(pdf_path, file_id="file-insert-fails"),
+        owner_user_id=101,
+        storage_root=storage_root,
+        job_id="job-media",
+    )
+
+    assert item.status == "media_registration_failed"
+    assert item.warning_code == "media_registration_failed"
+    assert item.media_id is not None
+    assert item.storage_path is not None
+
+
+def test_preview_and_run_hydration_cap_response_items(tmp_path, monkeypatch):
+    allowed_root = tmp_path / "allowed"
+    data_root = allowed_root / "openwebui"
+    uploads_dir = data_root / "uploads"
+    uploads_dir.mkdir(parents=True)
+    _write_openwebui_hydration_db(data_root)
+    _patch_allowed_roots(monkeypatch, allowed_root)
+    monkeypatch.setattr(chatbook_service_mod, "MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS", 3)
+    refs = [{"id": f"missing-{index}"} for index in range(5)]
+    db = FakeChaChaDB(
+        messages_by_conversation={"conv-a": [{"id": "msg-a", "conversation_id": "conv-a"}]},
+        metadata_by_message_id={"msg-a": _metadata(refs=refs)},
+    )
+    service = ChatbookService("101", db, user_id_int=101)
+    monkeypatch.setattr(service, "_get_media_db", lambda: None)
+
+    preview = service.preview_openwebui_attachment_hydration(
+        openwebui_data_root=str(data_root),
+        scope={"conversation_ids": ["conv-a"], "source_user_id": "ow-user"},
+    )
+    result = service.run_openwebui_attachment_hydration(
+        openwebui_data_root=str(data_root),
+        scope={"conversation_ids": ["conv-a"], "source_user_id": "ow-user"},
+        job_id="job-run",
+    )
+
+    assert preview["summary"]["referenced_files"] == 5
+    assert preview["summary"]["returned_items"] == 3
+    assert preview["summary"]["omitted_items"] == 2
+    assert len(preview["items"]) == 3
+    assert result["summary"]["referenced_files"] == 5
+    assert result["summary"]["returned_items"] == 3
+    assert result["summary"]["omitted_items"] == 2
+    assert len(result["items"]) == 3
 
 
 def test_run_openwebui_attachment_hydration_hydrates_resolved_image(

@@ -359,6 +359,8 @@ Fields:
   "process_supported_files": false,
   "summary": {
     "referenced_files": 3,
+    "returned_items": 3,
+    "omitted_items": 0,
     "resolved_files": 2,
     "image_files": 1,
     "media_files": 1,
@@ -385,7 +387,7 @@ Fields:
 }
 ```
 
-Common warnings include `missing_file`, `unsupported_file_type`, `file_too_large`, `path_rejected`, and paths outside allowed roots.
+`items` is capped to protect API clients from very large responses. Use `summary.referenced_files`, `summary.returned_items`, and `summary.omitted_items` to detect whether the response was truncated. Common warnings include `missing_file`, `unsupported_file_type`, `file_too_large`, `path_rejected`, and paths outside allowed roots.
 
 ### 5. Create OpenWebUI Attachment Hydration Job
 
@@ -431,6 +433,8 @@ Hydration output storage uses `OPENWEBUI_HYDRATION_MEDIA_STORAGE_PATH` when set,
   "result": {
     "summary": {
       "referenced_files": 3,
+      "returned_items": 3,
+      "omitted_items": 0,
       "resolved_files": 2,
       "hydrated_images": 1,
       "registered_media_files": 1,

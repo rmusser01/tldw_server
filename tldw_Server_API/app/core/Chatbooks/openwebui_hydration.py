@@ -223,6 +223,7 @@ def extract_openwebui_hydration_references(
     references: list[OpenWebUIHydrationReference] = []
     items: list[OpenWebUIHydrationPreviewItem] = []
     seen_keys: set[tuple[str, str | None, str, str]] = set()
+    chat_file_contexts: dict[str, list[tuple[str, dict[str, str]]]] = {}
 
     for conversation_id in scope.conversation_ids:
         messages = _load_conversation_messages(chacha_db, conversation_id)
@@ -274,15 +275,20 @@ def extract_openwebui_hydration_references(
                 )
 
         if openwebui_conn is not None:
-            _extend_references_from_chat_file_fallback(
-                references=references,
-                seen_keys=seen_keys,
-                openwebui_conn=openwebui_conn,
-                chacha_db=chacha_db,
-                conversation_id=conversation_id,
-                source_message_to_tldw_id=source_message_to_tldw_id,
-                openwebui_user_id=scope.openwebui_user_id,
-            )
+            source_chat_id = _source_chat_id_from_conversation_settings(chacha_db, conversation_id)
+            if source_chat_id:
+                chat_file_contexts.setdefault(source_chat_id, []).append(
+                    (conversation_id, source_message_to_tldw_id)
+                )
+
+    if openwebui_conn is not None and chat_file_contexts:
+        _extend_references_from_chat_file_fallback(
+            references=references,
+            seen_keys=seen_keys,
+            openwebui_conn=openwebui_conn,
+            chat_file_contexts=chat_file_contexts,
+            openwebui_user_id=scope.openwebui_user_id,
+        )
 
     return OpenWebUIHydrationPreview(
         references=tuple(references),
@@ -470,7 +476,17 @@ def register_non_image_reference(
     if not resolved_file.path.is_file():
         return _media_result_item(reference, "missing_file", job_id=job_id)
 
-    checksum = _sha256_file(resolved_file.path)
+    try:
+        checksum = _sha256_file(resolved_file.path)
+    except Exception:
+        return _media_result_item(
+            reference,
+            "media_registration_failed",
+            job_id=job_id,
+            source_key=f"openwebui:file:{reference.file_id}" if reference.file_id else None,
+            warning_code="media_registration_failed",
+            mime_type=resolved_file.mime_type,
+        )
     source_key = _source_key_for_digest(reference, checksum)
     existing_item = _existing_hydration_item(chacha_db, message_id, source_key)
     if existing_item is not None and existing_item.get("media_id") is not None:
@@ -517,17 +533,28 @@ def register_non_image_reference(
         checksum=checksum,
         run_dedupe_cache=run_dedupe_cache,
     )
-    if media_id is None:
-        media_id, _, _ = media_db.add_media_with_keywords(
-            url=media_url,
-            title=filename,
-            media_type=_media_type_for_file(resolved_file, mime_type, filename),
-            content=placeholder_content,
-            keywords=["openwebui", "attachment"],
-            safe_metadata=json.dumps(safe_metadata, sort_keys=True),
-            source_hash=checksum,
-            visibility="personal",
-            owner_user_id=owner_user_id,
+    try:
+        if media_id is None:
+            media_id, _, _ = media_db.add_media_with_keywords(
+                url=media_url,
+                title=filename,
+                media_type=_media_type_for_file(resolved_file, mime_type, filename),
+                content=placeholder_content,
+                keywords=["openwebui", "attachment"],
+                safe_metadata=json.dumps(safe_metadata, sort_keys=True),
+                source_hash=checksum,
+                visibility="personal",
+                owner_user_id=owner_user_id,
+            )
+    except Exception:
+        return _media_result_item(
+            reference,
+            "media_registration_failed",
+            job_id=job_id,
+            source_key=source_key,
+            checksum=checksum,
+            mime_type=mime_type,
+            warning_code="media_registration_failed",
         )
     if media_id is None:
         return _media_result_item(
@@ -539,32 +566,45 @@ def register_non_image_reference(
             mime_type=mime_type,
         )
     media_id = int(media_id)
-    if run_dedupe_cache is not None and not source_file_id:
-        run_dedupe_cache[(str(owner_user_id), checksum)] = media_id
 
-    media_file = media_db.get_media_file(media_id, "original")
-    status = "already_registered_media" if media_file else "registered_media"
-    if media_file:
-        media_file_id = str(media_file["uuid"])
-        storage_path = str(media_file["storage_path"])
-    else:
-        storage_path = _copy_openwebui_attachment_to_storage(
-            source_path=resolved_file.path,
-            storage_root=storage_root,
-            owner_user_id=owner_user_id,
-            media_id=media_id,
-            filename=filename,
-        )
-        media_file_id = str(
-            media_db.insert_media_file(
+    storage_path = None
+    media_file_id = None
+    try:
+        media_file = media_db.get_media_file(media_id, "original")
+        status = "already_registered_media" if media_file else "registered_media"
+        if media_file:
+            media_file_id = str(media_file["uuid"])
+            storage_path = str(media_file["storage_path"])
+        else:
+            storage_path = _copy_openwebui_attachment_to_storage(
+                source_path=resolved_file.path,
+                storage_root=storage_root,
+                owner_user_id=owner_user_id,
                 media_id=media_id,
-                file_type="original",
-                storage_path=storage_path,
-                original_filename=filename,
-                file_size=resolved_file.path.stat().st_size,
-                mime_type=mime_type,
-                checksum=checksum,
+                filename=filename,
             )
+            media_file_id = str(
+                media_db.insert_media_file(
+                    media_id=media_id,
+                    file_type="original",
+                    storage_path=storage_path,
+                    original_filename=filename,
+                    file_size=resolved_file.path.stat().st_size,
+                    mime_type=mime_type,
+                    checksum=checksum,
+                )
+            )
+    except Exception:
+        return _media_result_item(
+            reference,
+            "media_registration_failed",
+            job_id=job_id,
+            source_key=source_key,
+            media_id=media_id,
+            checksum=checksum,
+            storage_path=storage_path,
+            mime_type=mime_type,
+            warning_code="media_registration_failed",
         )
 
     processing_status = "skipped"
@@ -601,12 +641,16 @@ def register_non_image_reference(
     }
     if warning_code is not None:
         item_update["warning_code"] = warning_code
-    if not merge_openwebui_message_hydration_metadata(
-        chacha_db,
-        message_id,
-        item_update,
-        job_id=job_id,
-    ):
+    try:
+        metadata_saved = merge_openwebui_message_hydration_metadata(
+            chacha_db,
+            message_id,
+            item_update,
+            job_id=job_id,
+        )
+    except Exception:
+        metadata_saved = False
+    if not metadata_saved:
         return _media_result_item(
             reference,
             "metadata_update_failed",
@@ -619,6 +663,8 @@ def register_non_image_reference(
             mime_type=mime_type,
             processing_status=processing_status,
         )
+    if run_dedupe_cache is not None and not source_file_id:
+        run_dedupe_cache[(str(owner_user_id), checksum)] = media_id
 
     return _media_result_item(
         reference,
@@ -971,43 +1017,43 @@ def _extend_references_from_chat_file_fallback(
     references: list[OpenWebUIHydrationReference],
     seen_keys: set[tuple[str, str | None, str, str]],
     openwebui_conn: sqlite3.Connection,
-    chacha_db: Any,
-    conversation_id: str,
-    source_message_to_tldw_id: dict[str, str],
+    chat_file_contexts: Mapping[str, list[tuple[str, dict[str, str]]]],
     openwebui_user_id: str | None,
 ) -> None:
-    source_chat_id = _source_chat_id_from_conversation_settings(chacha_db, conversation_id)
-    if not source_chat_id:
-        return
     rows = load_openwebui_chat_file_rows_for_chats(
         openwebui_conn,
-        [source_chat_id],
+        tuple(chat_file_contexts.keys()),
         user_id=openwebui_user_id,
     )
     for row in rows:
         file_id = _row_text(row, "file_id")
         if not file_id:
             continue
+        source_chat_id = _row_text(row, "chat_id")
+        if not source_chat_id:
+            continue
+        contexts = chat_file_contexts.get(source_chat_id, [])
         source_message_id = _row_text(row, "message_id")
-        message_id = source_message_to_tldw_id.get(source_message_id) if source_message_id else None
-        if source_message_id and message_id is None:
-            continue
-        key = (conversation_id, message_id, file_id, "chat_file")
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        references.append(
-            OpenWebUIHydrationReference(
-                conversation_id=conversation_id,
-                message_id=message_id,
-                file_id=file_id,
-                raw_ref_index=None,
-                raw_ref=dict(row),
-                source="chat_file",
-                source_chat_id=source_chat_id,
-                source_message_id=source_message_id,
+        for conversation_id, source_message_to_tldw_id in contexts:
+            message_id = source_message_to_tldw_id.get(source_message_id) if source_message_id else None
+            if source_message_id and message_id is None:
+                continue
+            key = (conversation_id, message_id, file_id, "chat_file")
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            references.append(
+                OpenWebUIHydrationReference(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    file_id=file_id,
+                    raw_ref_index=None,
+                    raw_ref=dict(row),
+                    source="chat_file",
+                    source_chat_id=source_chat_id,
+                    source_message_id=source_message_id,
+                )
             )
-        )
 
 
 def _source_chat_id_from_conversation_settings(chacha_db: Any, conversation_id: str) -> str | None:

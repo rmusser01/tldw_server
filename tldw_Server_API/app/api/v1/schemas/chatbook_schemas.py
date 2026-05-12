@@ -424,6 +424,8 @@ class OpenWebUIHydrationItemResponse(BaseModel):
 class OpenWebUIHydrationSummaryResponse(BaseModel):
     """Counts for an OpenWebUI attachment hydration preview or job result."""
     referenced_files: int = Field(default=0, ge=0)
+    returned_items: int = Field(default=0, ge=0)
+    omitted_items: int = Field(default=0, ge=0)
     resolved_files: int = Field(default=0, ge=0)
     image_files: int = Field(default=0, ge=0)
     media_files: int = Field(default=0, ge=0)

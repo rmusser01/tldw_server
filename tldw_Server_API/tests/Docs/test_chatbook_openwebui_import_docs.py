@@ -143,6 +143,9 @@ def test_chatbook_openapi_documents_openwebui_multipart_fields() -> None:
         hydration_request = spec["components"]["schemas"]["OpenWebUIHydrationRequest"]
         assert "openwebui_data_root" in hydration_request["required"]  # nosec B101
         assert hydration_request["properties"]["process_supported_files"]["default"] is False  # nosec B101
+        hydration_summary = spec["components"]["schemas"]["OpenWebUIHydrationSummary"]
+        assert "returned_items" in hydration_summary["properties"]  # nosec B101
+        assert "omitted_items" in hydration_summary["properties"]  # nosec B101
         assert "OpenWebUIHydrationPreviewResponse" in spec["components"]["schemas"]  # nosec B101
         assert "OpenWebUIHydrationJobResponse" in spec["components"]["schemas"]  # nosec B101
 

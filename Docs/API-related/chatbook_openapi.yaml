@@ -1129,6 +1129,14 @@ components:
         referenced_files:
           type: integer
           minimum: 0
+        returned_items:
+          type: integer
+          minimum: 0
+          description: Number of item records included in this response.
+        omitted_items:
+          type: integer
+          minimum: 0
+          description: Number of item records omitted because the response item cap was reached.
         resolved_files:
           type: integer
           minimum: 0
