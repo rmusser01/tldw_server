@@ -114,7 +114,7 @@ Run:
 - `rg -n "TO[D]O|TB[D]|FIX[M]E|PLACE[H]OLDER|\\?\\?" Docs/Reviews/PERSONA_CHAT_JUDGE_EVAL_CONTRACT_2026_05_11.md Docs/superpowers/plans/2026-05-11-persona-chat-judge-harness.md`
 - `git diff --check`
 
-- [ ] **Step 2: Commit and open PR**
+- [x] **Step 2: Commit and open PR**
 
 Run:
 ```bash
