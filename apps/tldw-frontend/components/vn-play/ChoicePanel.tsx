@@ -1,4 +1,5 @@
 import React, { FormEvent, useState } from 'react';
+import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
 import {
@@ -15,6 +16,24 @@ export interface ChoicePanelProps {
   sessionId: number;
   onError?: (error: unknown) => void;
   onTurn: (response: VNPlayTurnResponse) => void;
+}
+
+function choiceMetadata(choice: VNPlayChoice): Record<string, unknown> {
+  return choice.metadata && typeof choice.metadata === 'object' ? choice.metadata : {};
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function isGeneratedChoice(choice: VNPlayChoice): boolean {
+  const metadata = choiceMetadata(choice);
+  return (
+    choice.source === 'generated' ||
+    metadataString(metadata, 'source') === 'generated' ||
+    Boolean(metadataString(metadata, 'generation_point_key'))
+  );
 }
 
 export default function ChoicePanel({
@@ -77,21 +96,36 @@ export default function ChoicePanel({
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-normal text-text-muted">Choices</h3>
       {choices.length > 0 ? (
         <div className="grid gap-2">
-          {choices.map((choice) => (
-            <Button
-              key={choice.id}
-              className="justify-start text-left"
-              loading={submittingChoiceId === choice.id}
-              onClick={() => void submitChoice(choice.id)}
-              type="button"
-              variant="secondary"
-            >
-              {choice.text}
-            </Button>
-          ))}
+          {choices.map((choice) => {
+            const metadata = choiceMetadata(choice);
+            const generated = isGeneratedChoice(choice);
+            const generationPointKey = metadataString(metadata, 'generation_point_key');
+            const status = metadataString(metadata, 'status');
+            return (
+              <Button
+                key={choice.id}
+                className="h-auto justify-start text-left"
+                loading={submittingChoiceId === choice.id}
+                onClick={() => void submitChoice(choice.id)}
+                type="button"
+                variant="secondary"
+              >
+                <span className="grid gap-1">
+                  <span>{choice.text}</span>
+                  {(generated || generationPointKey || status) && (
+                    <span className="flex flex-wrap gap-1">
+                      {generated && <Badge variant="info">Generated</Badge>}
+                      {generationPointKey && <Badge variant="neutral">{generationPointKey}</Badge>}
+                      {status && <Badge variant="neutral">{status}</Badge>}
+                    </span>
+                  )}
+                </span>
+              </Button>
+            );
+          })}
         </div>
       ) : (
-        <p className="text-sm text-text-muted">No choices.</p>
+        <p className="text-sm text-text-muted">No choices are available yet.</p>
       )}
 
       <form className="mt-4 grid gap-2" onSubmit={submitCustomAction}>
