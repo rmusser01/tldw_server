@@ -683,17 +683,31 @@ export const PAGE_MAPPINGS: PageMapping[] = [
     ]
   },
   {
-    name: "Moderation Playground",
+    name: "Moderation Review",
     category: "workspace",
-    webuiPath: "/moderation-playground",
-    extensionOptionsPath: "/moderation-playground",
+    webuiPath: "/moderation",
+    extensionOptionsPath: "/moderation",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionModerationPlayground",
+    sharedComponent: "ModerationReviewShell",
     session: 6,
     checklistItems: [
-      "Input field accepts text",
-      "Moderation button works",
-      "Results display correctly"
+      "Review shell renders",
+      "Queue unavailable status is clear",
+      "Content Rules link works"
+    ]
+  },
+  {
+    name: "Content Rules",
+    category: "workspace",
+    webuiPath: "/moderation/rules",
+    extensionOptionsPath: "/moderation/rules",
+    extensionSidepanelPath: null,
+    sharedComponent: "ModerationPlaygroundShell",
+    session: 6,
+    checklistItems: [
+      "Policy tabs render",
+      "Blocklist and override controls are reachable",
+      "Rule test sandbox works"
     ]
   },
   {

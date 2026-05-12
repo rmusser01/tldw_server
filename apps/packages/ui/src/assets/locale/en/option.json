@@ -1439,14 +1439,24 @@
     "system": "System prompts",
     "quick": "Quick prompts"
   },
+  "moderationReview": {
+    "nav": "Moderation Review",
+    "title": "Moderation Review",
+    "desc": "Review flagged items, escalations, and decisions"
+  },
+  "moderationRules": {
+    "nav": "Content Rules",
+    "title": "Content Rules",
+    "desc": "Configure moderation policies, blocklists, and testing"
+  },
   "moderationPlayground": {
-    "nav": "Moderation Playground",
-    "title": "Moderation Playground",
-    "subtitle": "Family safety controls and server guardrails in one place.",
-    "desc": "Content safety rules, blocklists, and testing",
+    "nav": "Content Rules",
+    "title": "Content Rules",
+    "subtitle": "Configure moderation policies, blocklists, user overrides, and rule tests.",
+    "desc": "Configure moderation policies, blocklists, and testing",
     "onboarding": {
-      "title": "Welcome to Content Controls",
-      "description": "Set up content safety rules to protect your family or enforce server guardrails.",
+      "title": "Welcome to Content Rules",
+      "description": "Set up content safety rules, blocklists, overrides, and test cases.",
       "guardrailsCta": "Set up Family Guardrails",
       "dismiss": "Skip \u2014 I\u2019ll explore on my own",
       "tabHint": "Start here: Policy & Settings tab sets your base rules. Then test them in the Test Sandbox.",

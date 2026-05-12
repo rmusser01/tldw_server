@@ -95,7 +95,14 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   { path: "/flashcards", name: "Flashcards", category: "workspace" },
   { path: "/quiz", name: "Quiz", category: "workspace" },
-  { path: "/moderation-playground", name: "Moderation Playground", category: "workspace" },
+  { path: "/moderation", name: "Moderation Review", category: "workspace" },
+  { path: "/moderation/rules", name: "Content Rules", category: "workspace" },
+  {
+    path: "/moderation-playground",
+    name: "Moderation Playground Legacy Redirect",
+    category: "workspace",
+    skip: "Legacy alias covered by the route alias contract."
+  },
   { path: "/kanban", name: "Kanban", category: "workspace" },
   { path: "/data-tables", name: "Data Tables", category: "workspace" },
   { path: "/content-review", name: "Content Review", category: "workspace" },

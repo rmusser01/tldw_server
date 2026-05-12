@@ -105,6 +105,18 @@ describe("ModerationPlaygroundShell", () => {
     expect(screen.getByRole("tab", { name: /advanced/i })).toBeInTheDocument()
   })
 
+  it("uses Content Rules naming for the rules configuration surface", () => {
+    render(<ModerationPlaygroundShell />)
+
+    expect(
+      screen.getByRole("heading", { name: "Content Rules" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Moderation Playground")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/policies, blocklists, user overrides, and rule tests/i)
+    ).toBeInTheDocument()
+  })
+
   it("shows Policy tab content by default", async () => {
     render(<ModerationPlaygroundShell />)
     expect(await screen.findByText(/personal data protection/i)).toBeInTheDocument()

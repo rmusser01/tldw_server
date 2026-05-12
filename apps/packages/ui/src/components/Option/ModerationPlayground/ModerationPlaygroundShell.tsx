@@ -281,13 +281,13 @@ export const ModerationPlaygroundShell: React.FC = () => {
       {/* Onboarding */}
       {showOnboarding && (
         <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 p-5 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-          <p className="text-base font-semibold">
-            {t("option:moderationPlayground.onboarding.title", "Welcome to Content Controls")}
+            <p className="text-base font-semibold">
+            {t("option:moderationPlayground.onboarding.title", "Welcome to Content Rules")}
           </p>
           <p className="text-sm text-text-muted mt-1">
             {t(
               "option:moderationPlayground.onboarding.description",
-              "Set up content safety rules to protect your family or enforce server guardrails."
+              "Set up content safety rules, blocklists, overrides, and test cases."
             )}
           </p>
 
@@ -328,12 +328,12 @@ export const ModerationPlaygroundShell: React.FC = () => {
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="text-xl sm:text-2xl font-display font-bold">
-              {t("option:moderationPlayground.title", "Moderation Playground")}
+              {t("option:moderationPlayground.title", "Content Rules")}
             </h2>
             <p className="text-text-muted text-sm mt-1">
               {t(
                 "option:moderationPlayground.subtitle",
-                "Family safety controls and server guardrails in one place."
+                "Configure moderation policies, blocklists, user overrides, and rule tests."
               )}
             </p>
             <div className="mt-2">
