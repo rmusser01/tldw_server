@@ -10,6 +10,7 @@ from typing import Any, Literal, Mapping, Sequence
 JudgeResult = Literal["Pass", "Fail"]
 
 _MIN_CASES_PER_CLASS_FOR_PRODUCTION = 20
+_VALID_JUDGE_RESULTS = frozenset(("Pass", "Fail"))
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,37 @@ class PersonaChatJudgeInput:
     labels: tuple[str, ...] = ()
     expected_evidence: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        """Reject incomplete fixture identity fields before calibration."""
+        object.__setattr__(
+            self,
+            "case_id",
+            _require_non_empty_text(self.case_id, field_name="case_id"),
+        )
+        object.__setattr__(
+            self,
+            "assistant_kind",
+            _require_non_empty_text(self.assistant_kind, field_name="assistant_kind"),
+        )
+        object.__setattr__(
+            self,
+            "assistant_id",
+            _require_non_empty_text(self.assistant_id, field_name="assistant_id"),
+        )
+        object.__setattr__(
+            self,
+            "persona_memory_mode",
+            _require_non_empty_text(
+                self.persona_memory_mode,
+                field_name="persona_memory_mode",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "user_input",
+            _require_non_empty_text(self.user_input, field_name="user_input"),
+        )
+
 
 @dataclass(frozen=True)
 class PersonaChatJudgePrediction:
@@ -49,6 +81,20 @@ class PersonaChatJudgePrediction:
     result: JudgeResult
     critique: str
     evidence: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous prediction keys and non-binary judge results."""
+        object.__setattr__(
+            self,
+            "case_id",
+            _require_non_empty_text(self.case_id, field_name="case_id"),
+        )
+        object.__setattr__(
+            self,
+            "dimension_key",
+            _require_non_empty_text(self.dimension_key, field_name="dimension_key"),
+        )
+        _validate_judge_result(self.result)
 
 
 @dataclass(frozen=True)
@@ -162,11 +208,20 @@ PERSONA_CHAT_JUDGE_DIMENSIONS: dict[str, PersonaChatJudgeDimension] = {
 def build_persona_chat_judge_input(case: Mapping[str, Any]) -> PersonaChatJudgeInput:
     """Normalize one Persona Chat quality fixture into a judge input."""
     return PersonaChatJudgeInput(
-        case_id=str(case.get("case_id") or ""),
-        assistant_kind=str(case.get("assistant_kind") or ""),
-        assistant_id=str(case.get("assistant_id") or ""),
-        persona_memory_mode=str(case.get("persona_memory_mode") or ""),
-        user_input=str(case.get("input") or ""),
+        case_id=_require_non_empty_text(case.get("case_id"), field_name="case_id"),
+        assistant_kind=_require_non_empty_text(
+            case.get("assistant_kind"),
+            field_name="assistant_kind",
+        ),
+        assistant_id=_require_non_empty_text(
+            case.get("assistant_id"),
+            field_name="assistant_id",
+        ),
+        persona_memory_mode=_require_non_empty_text(
+            case.get("persona_memory_mode"),
+            field_name="persona_memory_mode",
+        ),
+        user_input=_require_non_empty_text(case.get("input"), field_name="input"),
         expected_context=deepcopy(_mapping_or_empty(case.get("expected_context"))),
         response_observation=deepcopy(_mapping_or_empty(case.get("response_observation"))),
         labels=tuple(str(label) for label in _sequence_or_empty(case.get("labels"))),
@@ -244,16 +299,35 @@ def calibrate_persona_chat_judge_predictions(
     min_cases_per_class: int = _MIN_CASES_PER_CLASS_FOR_PRODUCTION,
 ) -> PersonaChatJudgeCalibrationReport:
     """Compare judge predictions against fixture labels before surfacing quality signals."""
-    input_by_case_id = {judge_input.case_id: judge_input for judge_input in inputs}
+    input_by_case_id: dict[str, PersonaChatJudgeInput] = {}
+    for judge_input in inputs:
+        case_id = _require_non_empty_text(judge_input.case_id, field_name="case_id")
+        if case_id in input_by_case_id:
+            raise ValueError(f"Duplicate Persona Chat judge input case_id: {case_id}")
+        input_by_case_id[case_id] = judge_input
+
     predictions_by_key: dict[tuple[str, str], PersonaChatJudgePrediction] = {}
+    seen_prediction_keys: set[tuple[str, str]] = set()
     unknown_predictions: list[tuple[str, str]] = []
 
     for prediction in predictions:
-        prediction_key = (prediction.case_id, prediction.dimension_key)
-        if prediction.case_id not in input_by_case_id:
+        case_id = _require_non_empty_text(prediction.case_id, field_name="case_id")
+        dimension_key = _require_non_empty_text(
+            prediction.dimension_key,
+            field_name="dimension_key",
+        )
+        _validate_judge_result(prediction.result)
+        prediction_key = (case_id, dimension_key)
+        if prediction_key in seen_prediction_keys:
+            raise ValueError(
+                "Duplicate Persona Chat judge prediction for "
+                f"case_id={case_id}, dimension_key={dimension_key}"
+            )
+        seen_prediction_keys.add(prediction_key)
+        if case_id not in input_by_case_id:
             unknown_predictions.append(prediction_key)
             continue
-        if prediction.dimension_key not in PERSONA_CHAT_JUDGE_DIMENSIONS:
+        if dimension_key not in PERSONA_CHAT_JUDGE_DIMENSIONS:
             unknown_predictions.append(prediction_key)
             continue
         predictions_by_key[prediction_key] = prediction
@@ -370,12 +444,28 @@ def _mapping_or_empty(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _require_non_empty_text(value: Any, *, field_name: str) -> str:
+    text = "" if value is None else str(value).strip()
+    if not text:
+        raise ValueError(
+            f"Persona Chat judge {field_name} is required and must be non-empty."
+        )
+    return text
+
+
 def _sequence_or_empty(value: Any) -> tuple[Any, ...]:
     if isinstance(value, (str, bytes)) or value is None:
         return ()
     if isinstance(value, Sequence):
         return tuple(value)
     return ()
+
+
+def _validate_judge_result(result: Any) -> None:
+    if not isinstance(result, str) or result not in _VALID_JUDGE_RESULTS:
+        raise ValueError(
+            'Persona Chat judge prediction result must be "Pass" or "Fail".'
+        )
 
 
 def _safe_rate(numerator: int, denominator: int) -> float | None:

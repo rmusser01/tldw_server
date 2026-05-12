@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.Evaluations.persona_chat_judge import (
+    PersonaChatJudgeInput,
     PersonaChatJudgePrediction,
     build_persona_chat_judge_input,
     build_persona_chat_judge_prompt,
@@ -31,6 +34,18 @@ def test_build_persona_chat_judge_input_preserves_fixture_contract() -> None:
         "available_tools",
         "assistant_text",
     )
+
+
+@pytest.mark.parametrize(
+    "required_field",
+    ["case_id", "assistant_kind", "assistant_id", "persona_memory_mode", "input"],
+)
+def test_build_persona_chat_judge_input_requires_contract_fields(required_field: str) -> None:
+    case = case_by_id("PC-CASE-017")
+    case[required_field] = " "
+
+    with pytest.raises(ValueError, match=required_field):
+        build_persona_chat_judge_input(case)
 
 
 def test_build_persona_chat_judge_prompt_is_binary_and_structured() -> None:
@@ -106,3 +121,46 @@ def test_calibration_reports_missing_and_unknown_predictions() -> None:
 
     assert report.unknown_predictions == (("PC-CASE-015", "not_registered"),)
     assert report.missing_predictions == (("PC-CASE-015", "memory_expectation_alignment"),)
+
+
+def test_calibration_rejects_duplicate_input_case_ids() -> None:
+    judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-010"))
+
+    with pytest.raises(ValueError, match="Duplicate Persona Chat judge input case_id"):
+        calibrate_persona_chat_judge_predictions([judge_input, judge_input], [])
+
+
+def test_calibration_rejects_duplicate_prediction_keys() -> None:
+    judge_input = build_persona_chat_judge_input(case_by_id("PC-CASE-010"))
+    prediction = PersonaChatJudgePrediction(
+        case_id="PC-CASE-010",
+        dimension_key="exemplar_synthesis",
+        result="Fail",
+        critique="The response repeats the rare style phrase directly.",
+        evidence=("assistant_text",),
+    )
+
+    with pytest.raises(ValueError, match="Duplicate Persona Chat judge prediction"):
+        calibrate_persona_chat_judge_predictions([judge_input], [prediction, prediction])
+
+
+def test_judge_prediction_rejects_invalid_result_values() -> None:
+    with pytest.raises(ValueError, match="result"):
+        PersonaChatJudgePrediction(
+            case_id="PC-CASE-010",
+            dimension_key="exemplar_synthesis",
+            result="PASS",
+            critique="Invalid casing should not be accepted.",
+            evidence=("assistant_text",),
+        )
+
+
+def test_judge_input_rejects_blank_manual_case_id() -> None:
+    with pytest.raises(ValueError, match="case_id"):
+        PersonaChatJudgeInput(
+            case_id=" ",
+            assistant_kind="persona",
+            assistant_id="garden-style",
+            persona_memory_mode="read_only",
+            user_input="Answer with the selected style guidance.",
+        )

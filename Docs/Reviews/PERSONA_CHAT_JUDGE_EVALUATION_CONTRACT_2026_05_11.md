@@ -72,6 +72,18 @@ The report includes:
 
 The default production threshold is 20 pass and 20 fail cases per dimension. The current synthetic fixture set is useful for contract and smoke calibration, but it is not enough to claim production-calibrated judge accuracy.
 
+## Known Failure Modes And Residual Risk
+
+- Insufficient labeled data: the current fixture set is a smoke and contract surface, not a statistically meaningful production calibration set. Raw pass rates must not be used as production quality claims.
+- Label leakage: fixture `labels` are calibration ground truth only. The prompt builder must continue excluding labels, and future callers must not pass calibration labels into judge-visible evidence.
+- Corrupted calibration keys: missing or duplicate `case_id` values and duplicate `(case_id, dimension_key)` predictions can silently overwrite data. The helper rejects these before computing metrics.
+- Invalid judge result parsing: only exact `Pass` and `Fail` values are accepted. Parser or model drift that emits variants such as `PASS`, `fail`, or explanatory prose must be treated as invalid output.
+- Unknown prediction scope: unregistered dimensions and unknown case IDs are reported as unknown predictions rather than counted as calibration evidence.
+- Model and prompt drift: any model, prompt, dimension, or fixture-schema change requires a fresh calibration run before comparing results across revisions.
+- Subjective boundary cases: the V1 dimensions cover selected Persona Chat failure families only. They do not replace human review for nuanced style, safety, or intent disagreements outside the registered dimensions.
+- Grounding and factuality limits: this judge evaluates observed Persona Chat behavior against fixture evidence. It does not prove factual correctness, retrieval grounding, or broader RAG quality.
+- Runtime limits: this layer is optional and offline. It does not gate live chat responses, enforce moderation, or protect runtime Persona Chat behavior.
+
 ## Non-Goals
 
 - No live LLM execution.
@@ -89,3 +101,4 @@ Focused tests live in `tldw_Server_API/tests/Evaluations/test_persona_chat_judge
 - Binary prompt shape and structured output requirements.
 - One positive and one negative fixture-label calibration case for `exemplar_synthesis`.
 - Missing and unknown prediction reporting.
+- Required identity-field validation, duplicate calibration-key rejection, and invalid judge-result rejection.

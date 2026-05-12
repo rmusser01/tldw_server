@@ -17,7 +17,7 @@ references:
 documentation:
   - Docs/Reviews/PERSONA_CHAT_TRACE_ERROR_TAXONOMY_2026_05_10.md
   - Docs/Reviews/PERSONA_CHAT_JUDGE_EVALUATION_CONTRACT_2026_05_11.md
-  - docs/superpowers/plans/2026-05-11-persona-chat-judge-evaluation.md
+  - Docs/superpowers/plans/2026-05-11-persona-chat-judge-evaluation.md
 priority: medium
 ---
 
@@ -50,12 +50,18 @@ Red/green: test_persona_chat_judge.py first failed with ModuleNotFoundError for 
 Self-review fix: prompt generation now excludes fixture labels so calibration ground truth is not leaked to a judge. The regression test first failed on fixture_labels appearing in the prompt, then passed after removing that field; focused pytest, Bandit, and git diff --check were rerun successfully.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1570
+
+PR review fixes: documented known judge failure modes and residual V1 risks, added required identity-field validation for judge inputs, rejected blank/duplicate calibration keys, and rejected invalid judge result values before metric calculation.
+
+PR review verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Persona/test_persona_chat_quality_fixtures.py -v passed with 20 tests; python -m bandit -r tldw_Server_API/app/core/Evaluations/persona_chat_judge.py reported no issues; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added an optional/offline Persona Chat judge contract and calibration helper tied to existing deterministic quality fixtures. The implementation defines binary judge dimensions, fixture-derived judge inputs, structured prompt generation, and label-based calibration metrics without changing runtime Persona Chat behavior or adding a live eval service.
+
+PR review follow-up hardened the calibration contract by rejecting missing identity fields, duplicate input/prediction keys, and invalid judge result values before metric calculation. The contract documentation now records known judge failure modes, residual V1 risks, and the offline/runtime boundary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
