@@ -95,7 +95,8 @@ Record implementation notes and check acceptance criteria as they are satisfied.
 
 Run:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_contract.py -q`
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -f json -o /tmp/bandit_persona_chat_judge_review_command.json`
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py -f json -o /tmp/bandit_persona_chat_judge_review_command_runtime.json`
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -s B101 -f json -o /tmp/bandit_persona_chat_judge_review_command.json`
 - `rg -n "TO[D]O|TB[D]|FIX[M]E|PLACE[H]OLDER|\\?\\?" Docs/Reviews/PERSONA_CHAT_JUDGE_EVAL_CONTRACT_2026_05_11.md Docs/superpowers/plans/2026-05-12-persona-chat-judge-review-command.md tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py`
 - `git diff --check`
 

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-12 01:12'
-updated_date: '2026-05-12 01:35'
+updated_date: '2026-05-12 01:47'
 labels:
   - persona-chat
   - evaluations
@@ -55,7 +55,7 @@ PR review sweep started for PR #1583. Actionable findings verified: packaged def
 
 Review fixes addressed Qodo and Gemini feedback: the default fixture now loads from packaged evaluation data instead of the excluded tests tree; JSON loading uses file handles; output writing avoids an extra newline-copy allocation; CLI tests now use standard pytest assertions and fixture-size invariants; the packaged fixture is checked against the contract test fixture.
 
-PR review fixes verified: python -m pytest tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_contract.py -q (24 passed, 5 warnings); python -m pytest tldw_Server_API/tests/Evaluations/unit/test_evals_cli_recipe_commands.py::test_unified_cli_help_includes_recipes_group tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -q (7 passed, 5 warnings); python -m bandit -r tldw_Server_API/app/core/Evaluations/cli/persona_chat_judge_cli.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -f json -o /tmp/bandit_persona_chat_judge_review_command.json (0 issues); importlib.resources packaged fixture probe returned True; placeholder scan returned no matches; git diff --check passed.
+PR review fixes verified: python -m pytest tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_contract.py -q (24 passed, 5 warnings); python -m pytest tldw_Server_API/tests/Evaluations/unit/test_evals_cli_recipe_commands.py::test_unified_cli_help_includes_recipes_group tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -q (7 passed, 5 warnings); runtime Bandit on persona_chat_judge_cli.py reported no results/errors; touched Python Bandit with B101 skipped for pytest assertions reported no results/errors; importlib.resources packaged fixture probe returned True and persona-chat-judge-contract/v1; placeholder scan returned no matches; git diff --check passed. Wheel build inspection was attempted with python -m build --wheel --no-isolation --outdir /tmp/tldw_persona_judge_wheel but the local venv lacks the wheel build dependency.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -63,7 +63,7 @@ PR review fixes verified: python -m pytest tldw_Server_API/tests/Evaluations/uni
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added an offline `tldw-evals persona-chat-judge review` command that loads candidate outputs keyed by PC-JUDGE case id, validates JSON object roots, reuses the existing harness for bounded comparison reports, prints sorted JSON to stdout, and can write the same report to an explicit file. The default fixture now loads from packaged evaluation data so the console script works outside the source tree. The contract doc shows the workflow and reiterates the offline-only boundary: no model provider calls, database persistence, Jobs, API endpoint, WebUI state, runtime chat gating, or response mutation.
 
-Known skips/blockers: none. Residual risks and failure modes are recorded above.
+Known skips/blockers: none. Residual risks and failure modes are recorded in this task.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1583
 <!-- SECTION:FINAL_SUMMARY:END -->
