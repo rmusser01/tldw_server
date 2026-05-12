@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-12 14:37'
+updated_date: '2026-05-12 15:27'
 labels:
   - webui
   - chat
@@ -73,6 +73,10 @@ Review-follow-up verification: model.scoped-settings test first failed before th
 Reopened for CI failure follow-up: Playground Device/A11y/Composer Gates failed before tests during bun install. Root cause investigation found the workflow times out in workspace install while running extension WXT prepare; the same install completes locally when SKIP_WXT_PREPARE=1, and this Playground gate does not need extension preparation.
 
 CI failure follow-up fix: added SKIP_WXT_PREPARE=1 at the UI Playground Quality Gates job level so the Playground-only workflow install does not run extension WXT preparation. Verification: SKIP_WXT_PREPARE=1 bun install --frozen-lockfile from apps completed with no changes; exact gate scripts passed locally: composer 31 tests, device matrix 14 tests, accessibility 19 tests; git diff --check passed. actionlint is not installed in this environment, so workflow validation is via YAML shape review and rerun CI after push.
+
+Extended CI install fix after Onboarding E2E Gate failed with the same root cause: install-time cancellation before tests, with sibling UX Smoke stuck in Install frontend dependencies. Applying SKIP_WXT_PREPARE=1 to non-extension frontend/e2e CI jobs that run bun install from apps.
+
+Extended non-extension frontend CI workflows now set SKIP_WXT_PREPARE=1: ci frontend lint, frontend-required, frontend UX gates, frontend e2e tiers, plus the already-pushed Playground quality gate. Verification: SKIP_WXT_PREPARE=1 bun install --frozen-lockfile from apps completed with no changes; exact Playground gate scripts had already passed locally; git diff --check passed. actionlint is validated by GitHub CI because it is not installed locally.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -83,6 +87,8 @@ Completed the main /chat cockpit single-PR slice for draft PR #1582: independent
 Review follow-up fixed the remaining active scoped-settings defect and revalidated the PR review-comment surface with focused UI, backend, and real-server /chat coverage.
 
 CI follow-up scoped the Playground gate install away from extension WXT preparation and verified the exact gate scripts locally before pushing.
+
+Extended the install-time WXT prepare skip across non-extension frontend/e2e workflows after the same install-time timeout affected onboarding/UX checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
