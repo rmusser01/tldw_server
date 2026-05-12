@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
 from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import (
     AgentRegistry,
     AgentRegistryEntry,
+    classify_agent_entrypoint,
 )
 
 pytestmark = pytest.mark.unit
@@ -182,3 +183,178 @@ def test_update_agent_collection_defaults_are_fresh_instances() -> None:
     assert second is not None
     assert second.acp_args == []
     assert second.acp_args is not first.acp_args
+
+
+def test_classifier_ready_to_probe_native_entrypoint(monkeypatch) -> None:
+    entry = AgentRegistryEntry(
+        type="opencode",
+        name="OpenCode",
+        entrypoint_strategy="native_acp",
+        acp_command="opencode",
+        acp_args=["acp"],
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+        env_getter=lambda _name: "present",
+    )
+
+    assert result.probe_state == "ready_to_probe"
+    assert result.acp_command == "opencode"
+    assert result.acp_args == ["acp"]
+    assert result.primary_blocker is None
+    assert result.blockers == []
+
+
+def test_classifier_blocks_native_entrypoint_missing_command() -> None:
+    entry = AgentRegistryEntry(
+        type="goose",
+        name="Goose",
+        entrypoint_strategy="native_acp",
+        acp_command="goose",
+        acp_args=["acp"],
+    )
+
+    result = classify_agent_entrypoint(entry, command_resolver=lambda _command: None)
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "binary_missing"
+    assert "binary_missing" in result.blockers
+
+
+def test_classifier_blocks_missing_required_credentials() -> None:
+    entry = AgentRegistryEntry(
+        type="commercial_agent",
+        name="Commercial Agent",
+        entrypoint_strategy="native_acp",
+        acp_command="commercial-agent",
+        requires_api_key="COMMERCIAL_AGENT_API_KEY",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+        env_getter=lambda _name: None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "credentials_missing"
+    assert "credentials_missing" in result.blockers
+
+
+def test_classifier_does_not_infer_native_acp_command_from_command() -> None:
+    entry = AgentRegistryEntry(
+        type="opencode",
+        name="OpenCode",
+        command="opencode",
+        entrypoint_strategy="native_acp",
+        acp_command="",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "entrypoint_strategy_missing"
+    assert result.acp_command == ""
+
+
+def test_classifier_does_not_infer_adapter_acp_command_from_command() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="adapter_acp",
+        acp_command="",
+        adapter_source="example/codex-acp",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "entrypoint_strategy_missing"
+    assert result.acp_command == ""
+
+
+def test_classifier_documented_candidate_keeps_command_separate_from_acp_command() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        command="codex",
+        entrypoint_strategy="documented_candidate",
+        acp_command="",
+        certification_blocker="adapter_required",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: f"/usr/bin/{command}",
+    )
+
+    assert result.probe_state == "documented_only"
+    assert result.primary_blocker == "adapter_required"
+    assert result.acp_command == ""
+
+
+def test_classifier_documented_candidate_is_documented_only() -> None:
+    entry = AgentRegistryEntry(
+        type="codex",
+        name="Codex",
+        entrypoint_strategy="documented_candidate",
+        certification_blocker="adapter_required",
+    )
+
+    result = classify_agent_entrypoint(entry)
+
+    assert result.probe_state == "documented_only"
+    assert result.primary_blocker == "adapter_required"
+    assert result.acp_command == ""
+
+
+def test_classifier_adapter_requires_adapter_command() -> None:
+    entry = AgentRegistryEntry(
+        type="adapter",
+        name="Adapter",
+        entrypoint_strategy="adapter_acp",
+        acp_command="adapter-acp",
+        acp_args=[],
+        adapter_source="example/adapter",
+    )
+
+    result = classify_agent_entrypoint(entry, command_resolver=lambda _command: None)
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "adapter_missing"
+
+
+def test_classifier_custom_template_is_never_probe_ready() -> None:
+    entry = AgentRegistryEntry(
+        type="custom",
+        name="Custom Agent",
+        entrypoint_strategy="custom_template",
+    )
+
+    result = classify_agent_entrypoint(entry)
+
+    assert result.probe_state == "custom_template"
+    assert result.acp_command == ""
+
+
+def test_classifier_rejects_shell_builtin_entrypoint() -> None:
+    entry = AgentRegistryEntry(
+        type="bad",
+        name="Bad",
+        entrypoint_strategy="native_acp",
+        acp_command="cd",
+    )
+
+    result = classify_agent_entrypoint(entry, command_resolver=lambda _command: "/bin/cd")
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "shell_builtin_collision"

@@ -30,12 +30,40 @@ AgentEntrypointStrategy = Literal[
     "documented_candidate",
     "custom_template",
 ]
+AgentProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+_SHELL_BUILTIN_COMMANDS = frozenset({"alias", "cd", "export", "set", "source", "unset"})
 
 
 def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
     if value in {"native_acp", "adapter_acp", "documented_candidate", "custom_template"}:
         return value
     return "documented_candidate"
+
+
+@dataclass(frozen=True)
+class AgentEntrypointClassification:
+    profile_key: str
+    entrypoint_strategy: AgentEntrypointStrategy
+    probe_state: AgentProbeState
+    acp_command: str
+    acp_args: list[str]
+    primary_blocker: str | None
+    blockers: list[str]
+    status_message: str
+    docs_url: str | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "profile_key": self.profile_key,
+            "entrypoint_strategy": self.entrypoint_strategy,
+            "probe_state": self.probe_state,
+            "acp_command": self.acp_command,
+            "acp_args": list(self.acp_args),
+            "primary_blocker": self.primary_blocker,
+            "blockers": list(self.blockers),
+            "status_message": self.status_message,
+            "docs_url": self.docs_url,
+        }
 
 
 @dataclass
@@ -132,6 +160,91 @@ class AgentRegistryEntry:
 
         result["is_configured"] = result["status"] == "available"
         return result
+
+
+def classify_agent_entrypoint(
+    entry: AgentRegistryEntry,
+    *,
+    command_resolver: Callable[[str], str | None] = shutil.which,
+    env_getter: Callable[[str], str | None] = os.getenv,
+) -> AgentEntrypointClassification:
+    """Classify ACP entrypoint readiness without starting the agent."""
+    strategy = entry.entrypoint_strategy
+    acp_command = entry.acp_command
+    acp_args = list(entry.acp_args)
+    docs_url = entry.compatibility_docs_url or entry.docs_url
+
+    def classification(
+        probe_state: AgentProbeState,
+        *,
+        blocker: str | None = None,
+        status_message: str,
+        command: str = acp_command,
+        args: list[str] | None = None,
+    ) -> AgentEntrypointClassification:
+        blockers = [blocker] if blocker else []
+        return AgentEntrypointClassification(
+            profile_key=entry.type,
+            entrypoint_strategy=strategy,
+            probe_state=probe_state,
+            acp_command=command,
+            acp_args=list(args if args is not None else acp_args),
+            primary_blocker=blocker,
+            blockers=blockers,
+            status_message=status_message,
+            docs_url=docs_url,
+        )
+
+    if strategy == "custom_template":
+        return classification(
+            "custom_template",
+            status_message="Custom agent templates require operator-supplied ACP entrypoint metadata.",
+            command="",
+            args=[],
+        )
+
+    if strategy == "documented_candidate":
+        return classification(
+            "documented_only",
+            blocker=entry.certification_blocker,
+            status_message="Agent is documented as a candidate and is not eligible for live ACP probing yet.",
+            command="",
+            args=[],
+        )
+
+    if not acp_command:
+        return classification(
+            "blocked",
+            blocker="entrypoint_strategy_missing",
+            status_message="Registry entry has no explicit ACP stdio command.",
+        )
+
+    if acp_command in _SHELL_BUILTIN_COMMANDS:
+        return classification(
+            "blocked",
+            blocker="shell_builtin_collision",
+            status_message="Configured ACP command matches a shell builtin or alias-like value.",
+        )
+
+    if entry.requires_api_key and not env_getter(entry.requires_api_key):
+        return classification(
+            "blocked",
+            blocker="credentials_missing",
+            status_message="Required API key or credential environment variable is missing.",
+        )
+
+    if not command_resolver(acp_command):
+        blocker = "adapter_missing" if strategy == "adapter_acp" else "binary_missing"
+        return classification(
+            "blocked",
+            blocker=blocker,
+            status_message="Configured ACP entrypoint command is not available on PATH.",
+        )
+
+    return classification(
+        "ready_to_probe",
+        status_message="Configured ACP entrypoint is ready for a bounded initialize probe.",
+    )
 
 
 class AgentRegistry:
