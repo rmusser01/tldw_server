@@ -20,6 +20,7 @@ import {
   createVNPlayCheckpoint,
   createVNPlaySession,
   deleteVNPlaySession,
+  getVNPlayBranchNavigation,
   getVNPlayGenerationRevision,
   getVNPlayGenerationRevisionDebug,
   getVNPlaySession,
@@ -31,6 +32,7 @@ import {
   listVNPlaySessions,
   listVNPlaySetupOptions,
   regenerateVNPlayGeneration,
+  restoreVNPlayBranch,
   restoreVNPlaySession,
   retryLastVNPlayTurn,
   submitVNPlayTurn,
@@ -124,6 +126,22 @@ describe('vnPlay api client', () => {
       idempotency_key: 'restore-1',
     });
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branches');
+  });
+
+  it('calls branch navigation and guarded branch restore endpoints', async () => {
+    await getVNPlayBranchNavigation(1);
+    await restoreVNPlayBranch(1, 12, {
+      client_scene_version: 6,
+      idempotency_key: 'restore-branch-12',
+      target: 'choice_point',
+    });
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branch-navigation');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branches/12/restore', {
+      client_scene_version: 6,
+      idempotency_key: 'restore-branch-12',
+      target: 'choice_point',
+    });
   });
 
   it('loads VN play setup options with server-side selector parameters', async () => {
