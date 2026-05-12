@@ -32,7 +32,7 @@ Implement the approved Persona/Buddy renderer capability registry thin slice. Th
 - [ ] #1 Backend registry exposes only enabled sprite_frames in V1 and validator uses it for renderer/version checks.
 - [x] #2 Persona API exposes authenticated visual-renderer capabilities without requiring a persona-specific lookup.
 - [x] #3 Draft manifest save remains permissive while activation and import-preview reject unsupported renderers.
-- [ ] #4 Frontend service types/helper can fetch renderer capabilities and Buddy runtime uses a local renderer registry for renderability.
+- [x] #4 Frontend service types/helper can fetch renderer capabilities and Buddy runtime uses a local renderer registry for renderability.
 - [ ] #5 Buddy diagnostics and dock rendering use the same frontend registry and preserve text fallback for unsupported renderers.
 - [ ] #6 Focused backend and frontend tests pass, diff check passes, and Bandit on touched backend production scope reports no new findings.
 <!-- AC:END -->
@@ -59,6 +59,10 @@ Task 2 backend API verification: red run produced expected 404 on test_list_pers
 Task 3 validation-boundary regression plan: add API test proving draft manifest PATCH permits unsupported future renderer while activate rejects invalid_manifest; add portability preview test by mutating exported metadata/pack.json to renderer_type live2d and updating metadata/pack.json checksum so validation reaches malformed_visual_manifest; run the requested focused pytest command, git diff --check against 473ca0ceb..HEAD, and commit test-only changes.
 
 Task 3 verification: focused pytest command passed with 9 passed and 5 warnings. Red phase was not possible without reverting existing production behavior because the newly added regression tests passed immediately against current code. git diff --check 473ca0ceb..HEAD passed. No Bandit run needed for Task 3 because only tests and Backlog notes were changed.
+
+Task 4 frontend registry/service plan: add typed capability response models, add getPersonaVisualRendererCapabilities() against /api/v1/persona/visual-renderers with malformed renderers normalized to [], add a local Buddy renderer registry with only sprite_frames mapped to SpriteFrameRenderer, and add focused Vitest coverage for service fetching and renderer resolution/fallback.
+
+Task 4 verification: red Vitest run failed before implementation because personaVisualRenderers.tsx and getPersonaVisualRendererCapabilities() were missing. Green run passed 2 files and 6 tests for personaVisualRenderers and persona-visuals service.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

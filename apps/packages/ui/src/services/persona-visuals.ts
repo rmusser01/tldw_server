@@ -28,7 +28,8 @@ import type {
   PersonaVisualPackExportRequest,
   PersonaVisualPackExportResponse,
   PersonaVisualPackListResponse,
-  PersonaVisualPortabilityJobResponse
+  PersonaVisualPortabilityJobResponse,
+  PersonaVisualRendererCapabilitiesResponse
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -137,6 +138,17 @@ export async function listPersonaVisualPacks(
     PersonaVisualPack[] | PersonaVisualPackListResponse
   >(personaVisualPath(personaId, "/visual-packs"))
   return normalizePersonaVisualPackList(payload)
+}
+
+export async function getPersonaVisualRendererCapabilities(): Promise<
+  PersonaVisualRendererCapabilitiesResponse
+> {
+  const payload = await fetchPersonaVisualJson<PersonaVisualRendererCapabilitiesResponse>(
+    "/api/v1/persona/visual-renderers"
+  )
+  return {
+    renderers: Array.isArray(payload?.renderers) ? payload.renderers : []
+  }
 }
 
 export async function getPersonaVisualPack(

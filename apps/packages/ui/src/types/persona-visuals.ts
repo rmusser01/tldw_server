@@ -15,6 +15,22 @@ export type PersonaVisualRendererType =
   | "static_image"
   | "live2d"
 
+export interface PersonaVisualRendererCapability {
+  renderer_type: PersonaVisualRendererType
+  display_name: string
+  manifest_versions: number[]
+  can_validate: boolean
+  can_activate: boolean
+  buddy_runtime_supported: boolean
+  import_supported: boolean
+  export_supported: boolean
+  disabled_reason?: string | null
+}
+
+export interface PersonaVisualRendererCapabilitiesResponse {
+  renderers: PersonaVisualRendererCapability[]
+}
+
 export type PersonaVisualPackStatus =
   | "draft"
   | "review"
