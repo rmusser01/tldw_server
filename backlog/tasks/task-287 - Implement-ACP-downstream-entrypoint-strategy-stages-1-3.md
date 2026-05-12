@@ -4,7 +4,7 @@ title: Implement ACP downstream entrypoint strategy stages 1-3
 status: In Progress
 assignee: []
 created_date: '2026-05-12 03:51'
-updated_date: '2026-05-12 05:12'
+updated_date: '2026-05-12 05:20'
 labels:
   - ACP
   - implementation
@@ -51,6 +51,10 @@ Task 2 complete. Added deterministic classify_agent_entrypoint output, immutable
 Task 3 execution plan recorded before edits: add requested failing helper tests; run focused pytest with shared venv for red evidence; implement only certification smoke profile manifest and stdio runner changes; re-run focused pytest plus scoped Bandit and diff review; commit only Task 3 helper and test files.
 
 Task 3 red evidence: focused helper pytest initially failed with 4 missing-helper failures for build_agent_profile_manifest, run_manifest_dict, and _run_stdio_jsonrpc_sequence while 8 existing tests passed. Task 3 green evidence: focused helper pytest now reports 12 passed, 5 warnings. Scoped Bandit on acp_certification_smoke.py reports 0 results. git diff --check on Task 3 files is clean.
+
+Task 3 follow-up review fix plan: add regression coverage for interleaved JSON-RPC notifications before matching responses; verify red against current stdio runner; update runner to wait for the response id matching the just-sent frame while ignoring notifications and other ids within the existing timeout; re-run focused helper tests and commit a scoped follow-up.
+
+Task 3 follow-up red evidence: helper pytest failed with len(written)==2 after an interleaved notification before initialize error, proving session/new was written too early. Follow-up green evidence: helper pytest now reports 14 passed, 5 warnings. The stdio reader now waits for a matching JSON-RPC response id and ignores notifications and other ids inside the existing timeout. Scoped Bandit on acp_certification_smoke.py reports 0 results and git diff --check is clean.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

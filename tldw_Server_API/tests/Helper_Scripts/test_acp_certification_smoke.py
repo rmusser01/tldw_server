@@ -312,3 +312,120 @@ def test_stdio_sequence_runner_stops_after_failed_initialize(monkeypatch) -> Non
     assert rc != 0
     assert len(written) == 1
     assert '"method": "initialize"' in written[0]
+
+
+def test_stdio_sequence_runner_ignores_notification_before_initialize_error(monkeypatch) -> None:
+    module = _load_module()
+    written = []
+    responses = iter(
+        [
+            '{"jsonrpc":"2.0","method":"log/message","params":{"message":"starting"}}\n',
+            '{"jsonrpc":"2.0","id":99,"result":{"ignored":true}}\n',
+            '{"jsonrpc":"2.0","id":1,"error":{"message":"init failed"}}\n',
+        ]
+    )
+
+    class _Stdin:
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            return None
+
+    class _Stdout:
+        def readline(self):
+            return next(responses, "")
+
+    class _Process:
+        stdin = _Stdin()
+        stdout = _Stdout()
+
+        def wait(self, timeout=None):
+            return 1
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: _Process())
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+            {"jsonrpc": "2.0", "id": 3, "method": "session/prompt", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert len(written) == 1
+    assert '"method": "initialize"' in written[0]
+    assert '"method": "session/new"' not in "".join(written)
+
+
+def test_stdio_sequence_runner_ignores_notification_before_initialize_success(monkeypatch) -> None:
+    module = _load_module()
+    written = []
+    responses = iter(
+        [
+            '{"jsonrpc":"2.0","method":"log/message","params":{"message":"starting"}}\n',
+            '{"jsonrpc":"2.0","id":99,"result":{"ignored":true}}\n',
+            '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1"}}\n',
+            '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}\n',
+            '{"jsonrpc":"2.0","id":3,"result":{"content":[]}}\n',
+        ]
+    )
+
+    class _Stdin:
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Stdout:
+        def readline(self):
+            return next(responses, "")
+
+    class _Process:
+        stdin = _Stdin()
+        stdout = _Stdout()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: _Process())
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+            {"jsonrpc": "2.0", "id": 3, "method": "session/prompt", "params": {}},
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc == 0
+    assert [json.loads(frame)["method"] for frame in written] == [
+        "initialize",
+        "session/new",
+        "session/prompt",
+    ]

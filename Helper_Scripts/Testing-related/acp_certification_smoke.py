@@ -401,30 +401,41 @@ def _handle_missing_prerequisite(command: dict[str, Any], reason: str) -> int | 
     return 127
 
 
-def _read_jsonrpc_response(process: subprocess.Popen[str], timeout_seconds: float) -> dict[str, Any] | None:
-    """Read one JSON-RPC line from a process stdout within a timeout."""
+def _read_jsonrpc_response(
+    process: subprocess.Popen[str],
+    request_id: Any,
+    deadline: float,
+) -> dict[str, Any] | None:
+    """Read the matching JSON-RPC response for a request id before the deadline."""
     stdout = process.stdout
     if stdout is None:
         return None
 
-    if hasattr(stdout, "fileno"):
-        try:
-            readable, _, _ = select.select([stdout], [], [], timeout_seconds)
-        except (OSError, ValueError):
-            readable = [stdout]
-        if not readable:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             return None
 
-    line = stdout.readline()
-    if not line:
-        return None
-    try:
-        payload = json.loads(line)
-    except json.JSONDecodeError:
-        return {"error": {"message": f"invalid JSON-RPC response: {line.strip()}"}}
-    if not isinstance(payload, dict):
-        return {"error": {"message": "JSON-RPC response is not an object"}}
-    return payload
+        if hasattr(stdout, "fileno"):
+            try:
+                readable, _, _ = select.select([stdout], [], [], remaining)
+            except (OSError, ValueError):
+                readable = [stdout]
+            if not readable:
+                return None
+
+        line = stdout.readline()
+        if not line:
+            return None
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return {"id": request_id, "error": {"message": f"invalid JSON-RPC response: {line.strip()}"}}
+        if not isinstance(payload, dict):
+            return {"id": request_id, "error": {"message": "JSON-RPC response is not an object"}}
+        if payload.get("id") != request_id:
+            continue
+        return payload
 
 
 def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
@@ -463,7 +474,7 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             print(f"FAIL {command_id}: subprocess closed stdin before {frame.get('method')}", file=sys.stderr)
             return 1
 
-        response = _read_jsonrpc_response(process, remaining)
+        response = _read_jsonrpc_response(process, frame.get("id"), deadline)
         if response is None:
             process.kill()
             print(f"FAIL {command_id}: timed out waiting for {frame.get('method')} response", file=sys.stderr)
