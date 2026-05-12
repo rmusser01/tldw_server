@@ -15,11 +15,15 @@ export type VNPlayTurnStatus =
   | 'completed'
   | 'abandoned'
   | 'cancelled';
+export type VNPlayGenerationRawDebugState = 'absent' | 'available' | 'redacted' | 'revealed';
 
 export interface VNPlayChoice {
   id: string;
   text: string;
   metadata?: Record<string, unknown>;
+  source?: string;
+  generation_id?: number;
+  revision_id?: number;
 }
 
 export interface VNPlaySceneAsset {
@@ -47,6 +51,9 @@ export interface VNPlaySceneState {
   weather?: string | null;
   active_branch_node_id?: number | null;
   visible_choices?: VNPlayChoice[] | Array<Record<string, unknown>>;
+  waiting_generation_request_id?: number | null;
+  waiting_generation_confirmation?: Record<string, unknown> | null;
+  waiting_reason?: string | null;
   transcript_cursor?: number | null;
   scene_version: number;
   warnings?: unknown[];
@@ -254,6 +261,94 @@ export interface VNPlayRestoreRequest {
   checkpoint_id: number;
   client_scene_version: number;
   idempotency_key: string;
+}
+
+export interface VNPlayGenerationActionRequest {
+  client_scene_version: number;
+  idempotency_key: string;
+}
+
+export interface VNPlayGenerationProfileSummary {
+  profile_key: string;
+  snapshot_id: number;
+  provider_class?: string | null;
+  moderation_required?: boolean | null;
+  estimated_cost_class?: string | null;
+}
+
+export interface VNPlayGenerationHistoryItem {
+  id: number;
+  generation_id: number;
+  generation_point_key: string;
+  revision_number: number;
+  status: string;
+  active: boolean;
+  output_schema: string;
+  public_output: Record<string, unknown>;
+  applied_visuals?: Array<Record<string, unknown>>;
+  rejected_visuals?: Array<Record<string, unknown>>;
+  public_error_code?: string | null;
+  source?: string;
+  profile: VNPlayGenerationProfileSummary;
+  created_at?: string | null;
+}
+
+export interface VNPlayOffsetPagination {
+  mode: 'offset';
+  total?: number | null;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  next_offset?: number | null;
+}
+
+export interface VNPlayGenerationHistoryResponse {
+  items: VNPlayGenerationHistoryItem[];
+  pagination: VNPlayOffsetPagination;
+  total?: number | null;
+  limit?: number | null;
+  offset?: number | null;
+  has_more?: boolean | null;
+  next_offset?: number | null;
+}
+
+export type VNPlayGenerationRevisionListResponse = VNPlayGenerationHistoryResponse;
+
+export interface VNPlayGenerationListQuery {
+  generation_id?: number;
+  generation_point_key?: string;
+  status?: string;
+  active?: boolean;
+  source?: string;
+  created_after?: string;
+  created_before?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface VNPlayGenerationDebugQuery {
+  include_blocked_raw?: boolean;
+  confirm?: string;
+}
+
+export interface VNPlayGenerationRevisionDebugResponse {
+  id: number;
+  generation_id: number;
+  generation_request_id: number;
+  generation_point_key: string;
+  revision_number: number;
+  status: string;
+  output_schema: string;
+  public_output: Record<string, unknown>;
+  raw_output_debug_state: VNPlayGenerationRawDebugState;
+  raw_output_debug?: Record<string, unknown> | null;
+  parser_diagnostics?: Record<string, unknown>;
+  moderation_diagnostics?: Record<string, unknown>;
+  model_metadata?: Record<string, unknown>;
+  usage_metadata?: Record<string, unknown>;
+  request?: Record<string, unknown>;
+  profile: VNPlayGenerationProfileSummary;
+  created_at?: string | null;
 }
 
 export interface VNPlayBranch {
