@@ -224,6 +224,11 @@ Import preview statuses:
    failed validation.
 8. `fallback_missing`: no valid static fallback asset is available.
 
+The first implemented V2 preview seam is fixture-only:
+`preview_renderer_import()` consumes normalized manifest and asset metadata and
+returns renderer diagnostics without reading archives, persisting assets, or
+activating packs. Archive parsing and commit remain separate future slices.
+
 ## Validation Stages
 
 V2 needs different validation strictness at each lifecycle stage:
@@ -397,8 +402,8 @@ Recommended follow-up sequence:
 
 1. Manifest V2 schema and renderer capability docs.
 2. Backend renderer capability expansion for V2 statuses and asset-role limits.
-3. Import-preview validator interface for renderer-specific archives, with
-   fixture-only tests and no new runtime renderer.
+3. Import-preview validator interface for renderer-specific metadata, with
+   fixture-only tests and no new archive parser or runtime renderer.
 4. Persona Garden preview UI copy for unsupported, feature-gated,
    dependency-missing, license-review, and fallback-missing V2 packs.
 5. MCP capability update to expose renderer support and draft/import boundaries.
