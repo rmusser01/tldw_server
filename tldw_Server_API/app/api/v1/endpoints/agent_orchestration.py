@@ -13,20 +13,26 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     CompletionSignalValidationError,
     ReviewDecisionValidationError,
-    validate_task_completion_signal,
     validate_review_decision_signal,
+    validate_task_completion_signal,
 )
+from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
     get_orchestration_db,
 )
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
+    CANONICAL_WORKSPACE_ID_METADATA_KEY,
+    CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY,
+    CANONICAL_WORKSPACE_LINKED_STATUS,
+    CANONICAL_WORKSPACE_SOURCE_METADATA_KEY,
     InvalidTransitionError,
     OrchestrationNotFoundError,
 )
@@ -604,6 +610,7 @@ def _resolve_dispatch_cwd(raw_cwd: str, *, workspace_root: str | None = None) ->
 
 
 _VALID_WORKSPACE_TYPES = {"manual", "discovered", "monorepo_child"}
+_VALID_CANONICAL_WORKSPACE_SOURCES = {"workspace_playground"}
 
 
 class ACPWorkspaceCreateRequest(BaseModel):
@@ -631,6 +638,46 @@ class ACPWorkspaceUpdateRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class CanonicalWorkspaceBridgeRequest(BaseModel):
+    canonical_workspace_id: str = Field(..., min_length=1)
+    root_path: str = Field(..., description="Absolute filesystem path for ACP execution")
+    name: str | None = Field(
+        default=None,
+        description="Optional ACP execution workspace name",
+    )
+    description: str = Field(
+        default="",
+        description="Optional ACP execution workspace description",
+    )
+    canonical_workspace_source: str = Field(default="workspace_playground")
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("canonical_workspace_id")
+    @classmethod
+    def clean_canonical_workspace_id(cls, value: str) -> str:
+        canonical_id = value.strip()
+        if not canonical_id:
+            raise ValueError("canonical_workspace_id must not be empty")
+        return canonical_id
+
+    @field_validator("canonical_workspace_source")
+    @classmethod
+    def check_canonical_workspace_source(cls, value: str) -> str:
+        if value not in _VALID_CANONICAL_WORKSPACE_SOURCES:
+            raise ValueError(
+                f"canonical_workspace_source must be one of {_VALID_CANONICAL_WORKSPACE_SOURCES}"
+            )
+        return value
+
+
+class CanonicalWorkspaceLinkResponse(BaseModel):
+    acp_workspace_id: int
+    canonical_workspace_id: str
+    canonical_workspace_source: str = "workspace_playground"
+    link_status: str = CANONICAL_WORKSPACE_LINKED_STATUS
+
+
 class ACPWorkspaceResponse(BaseModel):
     id: int
     name: str
@@ -649,6 +696,7 @@ class ACPWorkspaceResponse(BaseModel):
     created_at: str = ""
     updated_at: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    canonical_workspace: CanonicalWorkspaceLinkResponse | None = None
     children: list[ACPWorkspaceResponse] | None = None
     mcp_servers: list[dict[str, Any]] | None = None
 
@@ -692,6 +740,7 @@ class ProjectResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     task_summary: dict[str, Any] | None = None
     workspace: ACPWorkspaceResponse | None = None
+    canonical_workspace: CanonicalWorkspaceLinkResponse | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +775,7 @@ class TaskResponse(BaseModel):
     created_at: str = ""
     updated_at: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    canonical_workspace: CanonicalWorkspaceLinkResponse | None = None
     runs: list[dict[str, Any]] | None = None
     reviews: list[dict[str, Any]] | None = None
 
@@ -738,6 +788,135 @@ class RunDispatchRequest(BaseModel):
 class ReviewRequest(BaseModel):
     approved: bool = Field(..., description="Whether the review is approved")
     feedback: str = Field(default="", description="Review feedback")
+
+
+def _canonical_workspace_link_from_workspace(workspace: Any | None) -> dict[str, Any] | None:
+    if workspace is None:
+        return None
+
+    if isinstance(workspace, dict):
+        metadata = workspace.get("metadata") or {}
+        workspace_id = workspace.get("id")
+    else:
+        metadata = getattr(workspace, "metadata", {}) or {}
+        workspace_id = getattr(workspace, "id", None)
+
+    if not isinstance(metadata, dict) or workspace_id is None:
+        return None
+
+    canonical_workspace_id = metadata.get(CANONICAL_WORKSPACE_ID_METADATA_KEY)
+    if not canonical_workspace_id:
+        return None
+
+    return {
+        "acp_workspace_id": int(workspace_id),
+        "canonical_workspace_id": str(canonical_workspace_id),
+        "canonical_workspace_source": str(
+            metadata.get(CANONICAL_WORKSPACE_SOURCE_METADATA_KEY)
+            or "workspace_playground"
+        ),
+        "link_status": str(
+            metadata.get(CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY)
+            or CANONICAL_WORKSPACE_LINKED_STATUS
+        ),
+    }
+
+
+def _workspace_response_payload(workspace: Any) -> dict[str, Any]:
+    payload = workspace.to_dict() if hasattr(workspace, "to_dict") else dict(workspace)
+    payload["canonical_workspace"] = _canonical_workspace_link_from_workspace(workspace)
+    return payload
+
+
+def _bridge_metadata(
+    *,
+    canonical_workspace_id: str,
+    canonical_workspace_source: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    merged = dict(metadata or {})
+    merged[CANONICAL_WORKSPACE_ID_METADATA_KEY] = canonical_workspace_id
+    merged[CANONICAL_WORKSPACE_SOURCE_METADATA_KEY] = canonical_workspace_source
+    merged[CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY] = (
+        CANONICAL_WORKSPACE_LINKED_STATUS
+    )
+    return merged
+
+
+def _canonical_workspace_name(canonical_workspace: Any, fallback_id: str) -> str:
+    if isinstance(canonical_workspace, dict):
+        name = canonical_workspace.get("name")
+    else:
+        name = getattr(canonical_workspace, "name", None)
+    return str(name or fallback_id).strip() or fallback_id
+
+
+def _canonical_workspace_bridge_conflict(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "canonical_workspace_bridge_conflict",
+            "message": message,
+        },
+    )
+
+
+def _ensure_canonical_workspace_bridge_sync(
+    *,
+    db: Any,
+    payload: CanonicalWorkspaceBridgeRequest,
+    canonical_workspace: Any,
+    validated_path: str,
+):
+    existing_link = db.get_workspace_by_canonical_workspace_id(
+        payload.canonical_workspace_id
+    )
+    if existing_link:
+        if existing_link.root_path != validated_path:
+            raise _canonical_workspace_bridge_conflict(
+                "Canonical workspace is already linked to a different ACP workspace root."
+            )
+        return existing_link
+
+    existing_root = db.get_workspace_by_root_path(validated_path)
+    if existing_root:
+        existing_canonical_id = (existing_root.metadata or {}).get(
+            CANONICAL_WORKSPACE_ID_METADATA_KEY
+        )
+        if (
+            existing_canonical_id
+            and str(existing_canonical_id) != payload.canonical_workspace_id
+        ):
+            raise _canonical_workspace_bridge_conflict(
+                "ACP workspace root is already linked to a different canonical workspace."
+            )
+        return db.link_workspace_to_canonical(
+            existing_root.id,
+            canonical_workspace_id=payload.canonical_workspace_id,
+            canonical_workspace_source=payload.canonical_workspace_source,
+            metadata=payload.metadata,
+        )
+
+    canonical_name = _canonical_workspace_name(
+        canonical_workspace,
+        payload.canonical_workspace_id,
+    )
+    workspace_name = (
+        payload.name
+        or f"ACP: {canonical_name} ({payload.canonical_workspace_id})"
+    )
+    return db.create_workspace(
+        name=workspace_name,
+        root_path=validated_path,
+        description=payload.description,
+        workspace_type="manual",
+        env_vars=payload.env_vars,
+        metadata=_bridge_metadata(
+            canonical_workspace_id=payload.canonical_workspace_id,
+            canonical_workspace_source=payload.canonical_workspace_source,
+            metadata=payload.metadata,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -772,7 +951,7 @@ async def create_workspace(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return ACPWorkspaceResponse(**ws.to_dict())
+    return ACPWorkspaceResponse(**_workspace_response_payload(ws))
 
 
 @router.get(
@@ -791,7 +970,41 @@ async def list_workspaces(
         workspace_type=workspace_type,
         health_status=health_status,
     ))
-    return [ACPWorkspaceResponse(**ws.to_dict()) for ws in workspaces]
+    return [ACPWorkspaceResponse(**_workspace_response_payload(ws)) for ws in workspaces]
+
+
+@router.post(
+    "/workspaces/canonical-bridge",
+    response_model=ACPWorkspaceResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+)
+async def ensure_canonical_workspace_bridge(
+    payload: CanonicalWorkspaceBridgeRequest,
+    user: User = Depends(get_request_user),
+    canonical_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> ACPWorkspaceResponse:
+    """Find or create an ACP execution workspace linked to a canonical workspace."""
+    canonical_workspace = canonical_db.get_workspace(payload.canonical_workspace_id)
+    if not canonical_workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    validated_path = _validate_workspace_root(payload.root_path)
+    db = get_orchestration_db(_user_id_int(user))
+    try:
+        workspace = await _run_sync(
+            lambda: _ensure_canonical_workspace_bridge_sync(
+                db=db,
+                payload=payload,
+                canonical_workspace=canonical_workspace,
+                validated_path=validated_path,
+            )
+        )
+    except OrchestrationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ACPWorkspaceResponse(**_workspace_response_payload(workspace))
 
 
 @router.get(
@@ -813,7 +1026,11 @@ async def get_workspace(
     mcp_servers = await _run_sync(lambda: db.list_workspace_mcp_servers(workspace_id))
 
     d = ws.to_dict()
-    d["children"] = [ACPWorkspaceResponse(**c.to_dict()).model_dump() for c in children]
+    d["canonical_workspace"] = _canonical_workspace_link_from_workspace(ws)
+    d["children"] = [
+        ACPWorkspaceResponse(**_workspace_response_payload(c)).model_dump()
+        for c in children
+    ]
     d["mcp_servers"] = mcp_servers
     return ACPWorkspaceResponse(**d)
 
@@ -842,7 +1059,7 @@ async def update_workspace(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return ACPWorkspaceResponse(**ws.to_dict())
+    return ACPWorkspaceResponse(**_workspace_response_payload(ws))
 
 
 @router.delete(
@@ -1057,7 +1274,14 @@ async def create_project(
         ))
     except OrchestrationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ProjectResponse(**project.to_dict())
+    d = project.to_dict()
+    if project.workspace_id:
+        ws = await _run_sync(lambda: db.get_workspace(project.workspace_id))
+        if ws:
+            workspace_payload = _workspace_response_payload(ws)
+            d["workspace"] = workspace_payload
+            d["canonical_workspace"] = workspace_payload.get("canonical_workspace")
+    return ProjectResponse(**d)
 
 
 @router.get(
@@ -1089,7 +1313,9 @@ async def list_projects(
             if p.workspace_id:
                 ws = db.get_workspace(p.workspace_id)
                 if ws:
-                    d["workspace"] = ws.to_dict()
+                    workspace_payload = _workspace_response_payload(ws)
+                    d["workspace"] = workspace_payload
+                    d["canonical_workspace"] = workspace_payload.get("canonical_workspace")
             results.append(d)
         return results
 
@@ -1117,7 +1343,9 @@ async def get_project(
     if project.workspace_id:
         ws = await _run_sync(lambda: db.get_workspace(project.workspace_id))
         if ws:
-            d["workspace"] = ws.to_dict()
+            workspace_payload = _workspace_response_payload(ws)
+            d["workspace"] = workspace_payload
+            d["canonical_workspace"] = workspace_payload.get("canonical_workspace")
     return ProjectResponse(**d)
 
 
@@ -1225,6 +1453,10 @@ async def get_task(
     runs = await _run_sync(lambda: db.list_runs(task_id))
     reviews = await _run_sync(lambda: db.list_reviews(task_id))
     d = task.to_dict()
+    project = await _run_sync(lambda: db.get_project(task.project_id))
+    if project and project.workspace_id:
+        workspace = await _run_sync(lambda: db.get_workspace(project.workspace_id))
+        d["canonical_workspace"] = _canonical_workspace_link_from_workspace(workspace)
     d["reviews"] = reviews
     d["runs"] = await _enrich_task_runs(
         runs,

@@ -483,6 +483,12 @@ For product-level workspace membership, ACP execution workspaces attach to the
 canonical workspace model rather than defining a separate product workspace.
 See `../Design/ACP_Workspace_Integration_Decision_2026_05.md` for the bridge
 contract between `/api/v1/workspaces` and `/api/v1/agent-orchestration`.
+Use `POST /api/v1/agent-orchestration/workspaces/canonical-bridge` to find or
+create the ACP execution workspace for a canonical workspace. The request must
+include the canonical workspace ID and an absolute `root_path` under the
+configured ACP workspace allowlist; the response includes a `canonical_workspace`
+bridge object with the canonical ID, source, link status, and ACP execution
+workspace ID.
 
 For the standard runner, per-session env is sent with `session/new`. For sandbox
 mode, per-session env is merged over `[ACP-SANDBOX].agent_env` and passed to the

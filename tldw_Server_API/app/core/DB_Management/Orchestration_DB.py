@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
 from tldw_Server_API.app.core.Agent_Orchestration.models import (
     ACPWorkspace,
@@ -31,6 +29,8 @@ from tldw_Server_API.app.core.Agent_Orchestration.models import (
     TaskStatus,
     is_valid_transition,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
 # ---------------------------------------------------------------------------
 # Custom exceptions
@@ -46,6 +46,10 @@ class InvalidTransitionError(ValueError):
 
 
 _SCHEMA_VERSION = 2
+CANONICAL_WORKSPACE_ID_METADATA_KEY = "canonical_workspace_id"
+CANONICAL_WORKSPACE_SOURCE_METADATA_KEY = "canonical_workspace_source"
+CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY = "link_status"
+CANONICAL_WORKSPACE_LINKED_STATUS = "linked"
 
 # Base schema (v1) — applied to fresh databases
 _SCHEMA_V1_SQL = """\
@@ -456,6 +460,46 @@ class OrchestrationDB:
         if row is None:
             return None
         return self._row_to_workspace(row)
+
+    def get_workspace_by_canonical_workspace_id(
+        self,
+        canonical_workspace_id: str,
+    ) -> ACPWorkspace | None:
+        """Look up a workspace linked to a canonical product workspace."""
+        canonical_id = str(canonical_workspace_id or "").strip()
+        if not canonical_id:
+            return None
+        for workspace in self.list_workspaces():
+            metadata = workspace.metadata if isinstance(workspace.metadata, dict) else {}
+            linked_canonical_id = str(
+                metadata.get(CANONICAL_WORKSPACE_ID_METADATA_KEY) or ""
+            )
+            if linked_canonical_id == canonical_id:
+                return workspace
+        return None
+
+    def link_workspace_to_canonical(
+        self,
+        workspace_id: int,
+        *,
+        canonical_workspace_id: str,
+        canonical_workspace_source: str = "workspace_playground",
+        link_status: str = CANONICAL_WORKSPACE_LINKED_STATUS,
+        metadata: dict[str, Any] | None = None,
+    ) -> ACPWorkspace:
+        """Attach canonical workspace metadata to an existing ACP workspace."""
+        workspace = self.get_workspace(workspace_id)
+        if workspace is None:
+            raise OrchestrationNotFoundError(f"Workspace {workspace_id} not found")
+
+        merged_metadata = dict(workspace.metadata or {})
+        merged_metadata.update(metadata or {})
+        merged_metadata[CANONICAL_WORKSPACE_ID_METADATA_KEY] = str(canonical_workspace_id)
+        merged_metadata[CANONICAL_WORKSPACE_SOURCE_METADATA_KEY] = str(
+            canonical_workspace_source
+        )
+        merged_metadata[CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY] = str(link_status)
+        return self.update_workspace(workspace_id, metadata=merged_metadata)
 
     def list_workspaces(
         self,

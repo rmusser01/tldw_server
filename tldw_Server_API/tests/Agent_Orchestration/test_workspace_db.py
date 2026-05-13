@@ -3,7 +3,6 @@ import tempfile
 
 import pytest
 
-from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, TaskStatus
 from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
     OrchestrationDB,
     OrchestrationNotFoundError,
@@ -229,6 +228,47 @@ class TestWorkspaceCRUD:
             metadata={"framework": "fastapi", "version": "0.100"},
         )
         assert ws.metadata["framework"] == "fastapi"
+
+    def test_get_workspace_by_canonical_workspace_id(self, db):
+        db.create_workspace(name="Other", root_path="/tmp/other")
+        linked = db.create_workspace(
+            name="Linked",
+            root_path="/tmp/linked",
+            metadata={
+                "canonical_workspace_id": "workspace-alpha",
+                "canonical_workspace_source": "workspace_playground",
+                "link_status": "linked",
+            },
+        )
+
+        found = db.get_workspace_by_canonical_workspace_id("workspace-alpha")
+
+        assert found is not None
+        assert found.id == linked.id
+        assert db.get_workspace_by_canonical_workspace_id("workspace-missing") is None
+
+    def test_link_workspace_to_canonical_merges_metadata_without_duplication(self, db):
+        ws = db.create_workspace(
+            name="Existing Root",
+            root_path="/tmp/existing-root",
+            metadata={"existing": "kept"},
+        )
+
+        linked = db.link_workspace_to_canonical(
+            ws.id,
+            canonical_workspace_id="workspace-alpha",
+            canonical_workspace_source="workspace_playground",
+        )
+
+        assert linked.id == ws.id
+        assert linked.metadata == {
+            "existing": "kept",
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        }
+        assert len(db.list_workspaces()) == 1
+        assert db.get_workspace_by_canonical_workspace_id("workspace-alpha").id == ws.id
 
     def test_workspace_with_git_info(self, db):
         ws = db.create_workspace(
