@@ -74,6 +74,15 @@ capability list with `can_validate: false`, `can_activate: false`,
 `runtime_adapter_not_implemented`; that is an explicit future/disabled state,
 not a runtime support claim.
 
+Renderer import-preview diagnostics are also split from archive parsing. The
+fixture-level validator in
+`tldw_Server_API/app/core/Persona/visual_import_preview_validators.py` accepts
+already-normalized manifest and asset metadata, resolves the renderer capability
+registry, and returns structured blockers, warnings, normalized role categories,
+commit eligibility, and activation eligibility. It does not parse archives,
+create asset rows, activate packs, or load renderer runtimes; the current V1
+archive preview and commit flow remains unchanged.
+
 ### Sprite Atlas Frames
 
 Sprite atlases are represented as `sprite_frames` packs. In this slice,
