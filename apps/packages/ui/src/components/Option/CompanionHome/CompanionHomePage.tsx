@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useIsConnected } from "@/hooks/useConnectionState"
+import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { useMilestoneStore } from "@/store/milestones"
 import {
   type CompanionHomeSnapshot,
@@ -29,6 +30,9 @@ type CompanionHomePageProps = {
   surface: CompanionHomeSurface
   onPersonalizationEnabled?: () => void
 }
+
+const SETUP_REQUIRED_LABEL =
+  (getDesignSystemState("setup_required") ?? DESIGN_SYSTEM_STATES.setup_required).label
 
 const formatDegradedSources = (sources: CompanionHomeSnapshot["degradedSources"]): string =>
   sources
@@ -116,7 +120,7 @@ export function CompanionHomePage({
     if (itemsLength > 0) return undefined
     if (!hasPersonalization) {
       return {
-        label: "Setup required",
+        label: SETUP_REQUIRED_LABEL,
         description: "Connect your tldw server and enable personalization to unlock this feature. " + setupDescription
       }
     }
@@ -146,7 +150,7 @@ export function CompanionHomePage({
       ? undefined
       : !hasPersonalization
         ? {
-            label: "Setup required",
+            label: SETUP_REQUIRED_LABEL,
             description:
               "Connect your tldw server and enable personalization to unlock needs-attention signals from goals and reading."
           }
@@ -169,7 +173,7 @@ export function CompanionHomePage({
       ? undefined
       : !hasPersonalization
         ? {
-            label: "Setup required",
+            label: SETUP_REQUIRED_LABEL,
             description:
               "Connect your tldw server and enable personalization to unlock resume suggestions across goals, reading, and notes."
           }
