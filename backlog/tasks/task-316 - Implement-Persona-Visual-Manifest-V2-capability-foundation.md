@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-13 06:25'
-updated_date: '2026-05-13 06:28'
+updated_date: '2026-05-13 06:32'
 labels:
   - persona
   - buddy
@@ -16,6 +16,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
   - 'https://github.com/rmusser01/tldw_server/issues/1628'
+  - 'https://github.com/rmusser01/tldw_server/pull/1630'
 documentation:
   - Docs/Design/2026-05-13-persona-visual-manifest-v2-contract.md
   - Docs/Code_Documentation/Persona_Visual_Packs.md
@@ -69,6 +70,8 @@ Known skips/blockers: none. Final frontend verification used the package-local b
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the Manifest V2 renderer capability foundation for Persona/Buddy visual packs. The backend registry and /api/v1/persona/visual-renderers response now expose additive renderer metadata for contract versions, asset roles, role-category mapping, limits, setup status/blockers, and fallback/license requirements while preserving existing response fields. sprite_frames remains the only activatable Buddy-runtime renderer, and live2d is represented only as an explicit disabled future-state capability. Shared UI types, service coverage, docs, and the PRD now reflect that boundary.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/1630
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
