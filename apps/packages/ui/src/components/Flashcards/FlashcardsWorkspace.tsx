@@ -13,6 +13,7 @@ import {
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import ConnectionProblemBanner from "@/components/Common/ConnectionProblemBanner"
 import { StatusBadge } from "@/components/Common/StatusBadge"
+import { getDesignSystemState } from "@/design-system"
 import { getDemoFlashcardDecks } from "@/utils/demo-content"
 const FlipCardDemo = React.lazy(() =>
   import("./components/FlipCardDemo").then((m) => ({ default: m.FlipCardDemo }))
@@ -109,8 +110,9 @@ export const FlashcardsWorkspace: React.FC = () => {
       }
     }
     if (uxState === "unconfigured" || uxState === "configuring_url") {
+      const setupRequiredState = getDesignSystemState("setup_required")
       return {
-        badgeLabel: "Setup required",
+        badgeLabel: setupRequiredState.label,
         title: t("option:flashcards.setupTitle", {
           defaultValue: "Finish setup to use Flashcards"
         }),

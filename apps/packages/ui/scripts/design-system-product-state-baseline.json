@@ -5115,17 +5115,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Flashcards/FlashcardsWorkspace.tsx:Setup required",
-    "path": "src/components/Flashcards/FlashcardsWorkspace.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Setup required",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Setup required\" state label in src/components/Flashcards/FlashcardsWorkspace.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Ready",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "canonical-state-label",
