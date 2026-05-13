@@ -21,6 +21,27 @@ const acpMocks = vi.hoisted(() => ({
   getAvailableAgents: vi.fn()
 }))
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+  const labelOverrides: Partial<
+    Record<Parameters<typeof actual.getDesignSystemState>[0], string>
+  > = {
+    ready: "Registry ready",
+    setup_required: "Registry setup required"
+  }
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+        const label = labelOverrides[key]
+        return label ? { ...state, label } : state
+      }
+    )
+  }
+})
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
@@ -203,6 +224,32 @@ describe("AgentRegistryPage connection config", () => {
         })
       )
     })
+  })
+
+  it("uses design-system state labels for runtime setup states", async () => {
+    acpMocks.getAvailableAgents.mockResolvedValue({
+      agents: [
+        {
+          type: "planner",
+          name: "Planner Agent",
+          description: "Plans work",
+          is_configured: true
+        },
+        {
+          type: "local-runner",
+          name: "Local Runner",
+          description: "Requires local setup",
+          is_configured: false
+        }
+      ]
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    expect(screen.getByText("Local Runner")).toBeInTheDocument()
+    expect(screen.getByText("Registry ready")).toBeInTheDocument()
+    expect(screen.getByText("Registry setup required")).toBeInTheDocument()
   })
 
   it("normalizes structured ACP health payloads without trying to render raw objects", async () => {

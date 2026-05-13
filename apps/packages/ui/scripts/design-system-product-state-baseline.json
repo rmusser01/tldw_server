@@ -5137,28 +5137,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Option/AgentRegistry/index.tsx:Ready",
-    "path": "src/components/Option/AgentRegistry/index.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/AgentRegistry/index.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/AgentRegistry/index.tsx:Unavailable",
-    "path": "src/components/Option/AgentRegistry/index.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Unavailable",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Unavailable\" state label in src/components/Option/AgentRegistry/index.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Option/CompanionHome/CompanionHomePage.tsx:Setup required#label-setup-required-companionhomepage-line-119-ne2x8o",
     "path": "src/components/Option/CompanionHome/CompanionHomePage.tsx",
     "rule": "canonical-state-label",

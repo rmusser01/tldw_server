@@ -17,7 +17,7 @@ import { buildACPAuthHeaders, buildACPClientConfig } from "@/services/acp/connec
 import { normalizeACPHealthStatus, type ACPHealthStatus } from "@/services/acp/readiness"
 import type { ACPSupportState, ACPVerificationLevel } from "@/services/acp/types"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
-
+import { DESIGN_SYSTEM_STATES, getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
 type AgentEntry = {
   type: string
   name: string
@@ -244,6 +244,19 @@ export const AgentRegistryPage: React.FC = () => {
   )
 }
 
+const AGENT_STATUS_STATE: Record<AgentEntry["status"], DesignSystemStateKey> = {
+  available: "ready",
+  requires_setup: "setup_required",
+  unavailable: "unavailable"
+}
+
+const AGENT_STATUS_LABELS = Object.fromEntries(
+  Object.entries(AGENT_STATUS_STATE).map(([status, stateKey]) => [
+    status,
+    (getDesignSystemState(stateKey) ?? DESIGN_SYSTEM_STATES[stateKey]).label
+  ])
+) as Record<AgentEntry["status"], string>
+
 const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
   const statusColor =
     agent.status === "available"
@@ -252,12 +265,7 @@ const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
         ? "warning"
         : "error"
 
-  const statusLabel =
-    agent.status === "available"
-      ? "Ready"
-      : agent.status === "requires_setup"
-        ? "Setup Required"
-        : "Unavailable"
+  const statusLabel = AGENT_STATUS_LABELS[agent.status]
   const showUnverifiedWarning =
     agent.status === "available" && agent.support_state === "documented_unverified"
 
