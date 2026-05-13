@@ -108,8 +108,9 @@ Recommendation:
 
 Extend the existing renderer family before adding new renderer engines:
 
-1. Add optional `sprite_sheet`/atlas capability metadata only after backend
-   validation and Buddy rendering agree on the support boundary.
+1. Keep sprite atlas support under `renderer_type: "sprite_frames"` and use
+   `asset_role: "sprite_sheet"` plus frame-level `region` rectangles for atlas
+   assets. `sprite_sheet` is not an activatable renderer in this V1.1 slice.
 2. Keep it within the same raster-safe validation model: bounded dimensions,
    byte size, region bounds, checksums, no executable content.
 3. Treat this as the lowest-risk bridge between current sprite packs and richer

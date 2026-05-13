@@ -584,7 +584,10 @@ baseline. The first reference-backed V1 slices are now covered:
    tracked by #1497 and the 2026-05-10 design evaluation.
 9. Renderer capability registry/API and Buddy renderer registry are complete in
    PR #1608, with `sprite_frames` still the only enabled V1 runtime renderer.
-10. Live2D or other renderer adapter implementation remains future work after
+10. Sprite atlas V1.1 remains inside `sprite_frames`: atlas assets use
+    `asset_role: "sprite_sheet"` and frame-level `region` rectangles, not a
+    separate `sprite_sheet` renderer or manifest version bump.
+11. Live2D or other renderer adapter implementation remains future work after
     non-sprite manifest V2, import-preview validation hooks, dependency gates,
     licensing review, and fallback requirements are separately scoped.
 
