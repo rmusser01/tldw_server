@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-13 00:21'
-updated_date: '2026-05-13 00:44'
+updated_date: '2026-05-13 01:28'
 labels:
   - ACP
   - workspace
@@ -59,12 +59,18 @@ Verification:
 - git diff --check => clean.
 - source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py tldw_Server_API/app/core/DB_Management/Orchestration_DB.py -f json -o /tmp/bandit_task307.json => 0 findings.
 - Ruff focused check after import cleanup still reports pre-existing baseline issues in touched files: B904/F841/UP037/SIM118/F841 unrelated to this bridge slice.
+
+PR review sweep started for PR #1615. Actionable review findings to address: async canonical workspace lookup, atomic bridge binding, canonical link uniqueness, missing return/test type hints, and helper docstrings. Frontend Lint check log shows the job was canceled during bun install while the workflow was still running, not a code lint error from this branch.
+
+PR 1615 review sweep addressed unresolved comments for async canonical DB lookup atomic bridge binding canonical uniqueness direct canonical lookup batched project workspace lookup type hints and helper docstrings. Added relink conflict prevention for existing ACP roots.
+
+Final verification after review fixes: focused Agent Orchestration pytest 86 passed; Ruff touched-file check passed; git diff --check clean; Bandit touched backend scan 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the ACP workspace backend bridge contract for #1540 and opened PR #1615. The slice adds the canonical bridge endpoint, metadata helpers, response exposure for project/task details, documentation, and focused tests for ownership/missing workspace, allowlist failures, duplicate bridge behavior, trusted-root inheritance, cwd containment, and canonical response metadata. Verification: focused Agent Orchestration pytest 80 passed; git diff --check clean; Bandit on touched backend files 0 findings. Known non-blocker: focused Ruff still reports unrelated pre-existing baseline issues in touched files after import cleanup.
+Implemented the ACP workspace backend bridge contract for issue 1540 and addressed PR 1615 review feedback. Verification: focused Agent Orchestration pytest 86 passed; Ruff on touched files passed; git diff --check clean; Bandit on touched backend files 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

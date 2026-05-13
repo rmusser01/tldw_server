@@ -22,7 +22,7 @@ from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     validate_review_decision_signal,
     validate_task_completion_signal,
 )
-from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
+from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
     get_orchestration_db,
@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
     CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY,
     CANONICAL_WORKSPACE_LINKED_STATUS,
     CANONICAL_WORKSPACE_SOURCE_METADATA_KEY,
+    CanonicalWorkspaceBridgeConflictError,
     InvalidTransitionError,
     OrchestrationNotFoundError,
 )
@@ -791,6 +792,7 @@ class ReviewRequest(BaseModel):
 
 
 def _canonical_workspace_link_from_workspace(workspace: Any | None) -> dict[str, Any] | None:
+    """Build the public canonical workspace link payload from an ACP workspace."""
     if workspace is None:
         return None
 
@@ -823,27 +825,14 @@ def _canonical_workspace_link_from_workspace(workspace: Any | None) -> dict[str,
 
 
 def _workspace_response_payload(workspace: Any) -> dict[str, Any]:
+    """Convert an ACP workspace to an API payload with bridge metadata included."""
     payload = workspace.to_dict() if hasattr(workspace, "to_dict") else dict(workspace)
     payload["canonical_workspace"] = _canonical_workspace_link_from_workspace(workspace)
     return payload
 
 
-def _bridge_metadata(
-    *,
-    canonical_workspace_id: str,
-    canonical_workspace_source: str,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    merged = dict(metadata or {})
-    merged[CANONICAL_WORKSPACE_ID_METADATA_KEY] = canonical_workspace_id
-    merged[CANONICAL_WORKSPACE_SOURCE_METADATA_KEY] = canonical_workspace_source
-    merged[CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY] = (
-        CANONICAL_WORKSPACE_LINKED_STATUS
-    )
-    return merged
-
-
 def _canonical_workspace_name(canonical_workspace: Any, fallback_id: str) -> str:
+    """Return a display name from a canonical workspace row or fallback ID."""
     if isinstance(canonical_workspace, dict):
         name = canonical_workspace.get("name")
     else:
@@ -852,6 +841,7 @@ def _canonical_workspace_name(canonical_workspace: Any, fallback_id: str) -> str
 
 
 def _canonical_workspace_bridge_conflict(message: str) -> HTTPException:
+    """Return the stable 409 error shape for canonical bridge conflicts."""
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
@@ -867,36 +857,8 @@ def _ensure_canonical_workspace_bridge_sync(
     payload: CanonicalWorkspaceBridgeRequest,
     canonical_workspace: Any,
     validated_path: str,
-):
-    existing_link = db.get_workspace_by_canonical_workspace_id(
-        payload.canonical_workspace_id
-    )
-    if existing_link:
-        if existing_link.root_path != validated_path:
-            raise _canonical_workspace_bridge_conflict(
-                "Canonical workspace is already linked to a different ACP workspace root."
-            )
-        return existing_link
-
-    existing_root = db.get_workspace_by_root_path(validated_path)
-    if existing_root:
-        existing_canonical_id = (existing_root.metadata or {}).get(
-            CANONICAL_WORKSPACE_ID_METADATA_KEY
-        )
-        if (
-            existing_canonical_id
-            and str(existing_canonical_id) != payload.canonical_workspace_id
-        ):
-            raise _canonical_workspace_bridge_conflict(
-                "ACP workspace root is already linked to a different canonical workspace."
-            )
-        return db.link_workspace_to_canonical(
-            existing_root.id,
-            canonical_workspace_id=payload.canonical_workspace_id,
-            canonical_workspace_source=payload.canonical_workspace_source,
-            metadata=payload.metadata,
-        )
-
+) -> ACPWorkspace:
+    """Delegate canonical bridge creation to the DB atomic bridge helper."""
     canonical_name = _canonical_workspace_name(
         canonical_workspace,
         payload.canonical_workspace_id,
@@ -905,17 +867,14 @@ def _ensure_canonical_workspace_bridge_sync(
         payload.name
         or f"ACP: {canonical_name} ({payload.canonical_workspace_id})"
     )
-    return db.create_workspace(
+    return db.find_or_create_canonical_workspace_bridge(
+        canonical_workspace_id=payload.canonical_workspace_id,
+        canonical_workspace_source=payload.canonical_workspace_source,
         name=workspace_name,
         root_path=validated_path,
         description=payload.description,
-        workspace_type="manual",
         env_vars=payload.env_vars,
-        metadata=_bridge_metadata(
-            canonical_workspace_id=payload.canonical_workspace_id,
-            canonical_workspace_source=payload.canonical_workspace_source,
-            metadata=payload.metadata,
-        ),
+        metadata=payload.metadata,
     )
 
 
@@ -985,7 +944,9 @@ async def ensure_canonical_workspace_bridge(
     canonical_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ACPWorkspaceResponse:
     """Find or create an ACP execution workspace linked to a canonical workspace."""
-    canonical_workspace = canonical_db.get_workspace(payload.canonical_workspace_id)
+    canonical_workspace = await _run_sync(
+        lambda: canonical_db.get_workspace(payload.canonical_workspace_id)
+    )
     if not canonical_workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
@@ -1000,6 +961,8 @@ async def ensure_canonical_workspace_bridge(
                 validated_path=validated_path,
             )
         )
+    except CanonicalWorkspaceBridgeConflictError as exc:
+        raise _canonical_workspace_bridge_conflict(str(exc)) from exc
     except OrchestrationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1304,6 +1267,9 @@ async def list_projects(
             projects = db.list_projects(workspace_id=None)
         else:
             projects = db.list_projects()
+        workspaces_by_id = db.get_workspaces_by_ids([
+            p.workspace_id for p in projects if p.workspace_id
+        ])
         results = []
         for p in projects:
             summary = db.get_project_summary(p.id)
@@ -1311,7 +1277,7 @@ async def list_projects(
             d["task_summary"] = summary
             # Include workspace info if bound
             if p.workspace_id:
-                ws = db.get_workspace(p.workspace_id)
+                ws = workspaces_by_id.get(p.workspace_id)
                 if ws:
                     workspace_payload = _workspace_response_payload(ws)
                     d["workspace"] = workspace_payload
@@ -1430,8 +1396,11 @@ async def list_tasks(
     if status_filter:
         try:
             task_status = TaskStatus(status_filter)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status_filter}")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status: {status_filter}",
+            ) from exc
     tasks = await _run_sync(lambda: db.list_tasks(project_id, status=task_status))
     return [TaskResponse(**t.to_dict()) for t in tasks]
 
@@ -1573,7 +1542,7 @@ async def dispatch_run(
                 name=f"orchestration-task-{task_id}",
                 cwd=effective_cwd,
             )
-        except Exception as reg_exc:
+        except Exception:
             logger.warning("Failed to register orchestration ACP session")
 
     except HTTPException:
@@ -1741,7 +1710,7 @@ async def dispatch_run(
                     "feedback_present": True,
                 },
             )
-        except Exception as exc:
+        except Exception:
             review_error = REVIEWER_FAILED
             logger.exception("ACP reviewer failed")
             if review_run is None:

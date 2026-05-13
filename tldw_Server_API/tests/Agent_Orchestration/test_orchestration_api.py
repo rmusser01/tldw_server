@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -98,9 +99,9 @@ async def test_multiple_runs_per_task(svc):
     project = await svc.create_project(name="P1", user_id=1)
     task = await svc.create_task(project.id, title="T1", user_id=1)
 
-    r1 = await svc.create_run(task.id, session_id="s1")
-    r2 = await svc.create_run(task.id, session_id="s2")
-    r3 = await svc.create_run(task.id, session_id="s3")
+    await svc.create_run(task.id, session_id="s1")
+    await svc.create_run(task.id, session_id="s2")
+    await svc.create_run(task.id, session_id="s3")
 
     runs = await svc.list_runs(task.id)
     assert len(runs) == 3
@@ -273,10 +274,10 @@ class _TestUser:
 
 
 class _CanonicalWorkspaceDB:
-    def __init__(self, workspaces=None):
+    def __init__(self, workspaces: dict[str, dict[str, Any]] | None = None) -> None:
         self.workspaces = dict(workspaces or {})
 
-    def get_workspace(self, workspace_id):
+    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         return self.workspaces.get(workspace_id)
 
 
@@ -394,10 +395,10 @@ class _ReviewerDecisionClient:
 
 
 class _WorkspaceSessionCaptureClient:
-    def __init__(self):
+    def __init__(self) -> None:
         self.create_session_calls = []
 
-    async def create_session(self, *_args, **kwargs):
+    async def create_session(self, *_args: Any, **kwargs: Any) -> str:
         self.create_session_calls.append({"args": _args, "kwargs": kwargs})
         return "session-workspace-env"
 
