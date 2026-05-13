@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-13 15:55'
-updated_date: '2026-05-13 15:58'
+updated_date: '2026-05-13 16:44'
 labels:
   - docs
   - webui
@@ -38,6 +38,8 @@ Create the strategic design spec for a repeatable demo-video campaign covering t
 3. Document the chapter-level walkthrough model, persona-series structure, real local recording approach, seeded demo environment requirements, and repeatable production workflow.
 4. Explicitly mark detailed feature inventory, scripts, recording runbooks, and asset checklists as follow-up work, not part of this spec.
 5. Verify the spec is present and scoped correctly, update TASK-320 acceptance criteria and final notes, then commit the spec/task changes.
+
+Revision pass: patch the design spec with the critique findings above, verify markdown whitespace, update TASK-320 completion evidence, and commit the spec revision separately.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -46,14 +48,18 @@ Create the strategic design spec for a repeatable demo-video campaign covering t
 Created the strategic design spec at `Docs/superpowers/specs/2026-05-13-webui-extension-demo-video-series-design.md`. The spec is intentionally scoped to campaign architecture, walkthrough chapter structure, persona cuts, production workflow, risks, and follow-up artifacts. Detailed feature inventory and scripts remain deferred to the next planning phase.
 
 Verification: `git diff --check -- Docs/superpowers/specs/2026-05-13-webui-extension-demo-video-series-design.md backlog/tasks/task-320\ -\ Design-WebUI-and-extension-demo-video-series.md` passed with no whitespace errors. Independent bounded spec review returned APPROVED. Bandit is not applicable because this task changes only markdown documentation/backlog records.
+
+User reviewed the committed design and asked for a critique pass before continuing. Review found concrete improvement areas to patch into the spec: add claim/evidence guardrails, WebUI-vs-extension surface mapping, recording readiness gates, stale-asset/version metadata, and clearer script-planning inputs before moving into implementation/script planning.
+
+Design critique patch added guardrails that were missing from the first spec revision: claim/evidence ledger, WebUI-vs-extension surface map, script-planning feature matrix, recording readiness gate, asset versioning/staleness control, and additional follow-up artifacts under `Docs/Product/DemoVideos/`. Verification: `git diff --check -- Docs/superpowers/specs/2026-05-13-webui-extension-demo-video-series-design.md backlog/tasks/task-320\ -\ Design-WebUI-and-extension-demo-video-series.md` passed. Bandit remains not applicable because this revision only changes markdown documentation/backlog records.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the WebUI and extension demo video series design spec for the approved master-walkthrough-first campaign. The spec documents a real-app 20-30 minute full walkthrough, derived persona cuts, the chapter-level walkthrough structure, persona-to-value mappings, seeded local demo environment requirements, repeatable production workflow, risks, and follow-up runbook/script artifacts. It deliberately defers full feature coverage, narration scripts, shot lists, seed data, and recording runbooks to the next planning phase so this design remains strategic and reviewable.
+Revised the WebUI and extension demo video series design after a critique pass. The updated spec keeps the approved master-walkthrough-first strategy, but strengthens the next phase with a claim/evidence ledger, WebUI-vs-extension surface map, script-planning feature matrix, recording readiness gate, asset versioning/staleness controls, and expanded follow-up artifacts for script/runbook planning. These changes reduce the risk of overclaiming, confusing sidepanel vs WebUI roles, leaking private demo data, or publishing clips that become stale.
 
-Verification: whitespace check passed for the touched spec and task file; independent spec review returned APPROVED. Bandit skipped as not applicable to markdown-only documentation changes.
+Verification: markdown whitespace check passed for the touched spec and task file. Bandit remains skipped as not applicable to docs-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
