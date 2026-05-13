@@ -693,6 +693,9 @@ export const PAGE_MAPPINGS: PageMapping[] = [
     checklistItems: [
       "Review shell renders",
       "Queue unavailable status is clear",
+      "Review item detail shows decision history and redaction state",
+      "Bulk selection reports partial failures",
+      "Saved filter presets and scoped shortcuts work",
       "Content Rules link works"
     ]
   },

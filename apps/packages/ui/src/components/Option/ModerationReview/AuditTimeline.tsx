@@ -26,7 +26,11 @@ const undoCopy = (entry: ModerationReviewDecisionHistoryEntry): string => {
 
 export const AuditTimeline: React.FC<AuditTimelineProps> = ({ decisions }) => {
   return (
-    <section className="rounded-md border border-border bg-surface p-3" aria-labelledby="review-audit-title">
+    <section
+      id="moderation-review-audit"
+      className="rounded-md border border-border bg-surface p-3"
+      aria-labelledby="review-audit-title"
+    >
       <div className="flex items-center gap-2">
         <History className="h-4 w-4 text-text-muted" aria-hidden="true" />
         <h3 id="review-audit-title" className="text-sm font-semibold text-text">

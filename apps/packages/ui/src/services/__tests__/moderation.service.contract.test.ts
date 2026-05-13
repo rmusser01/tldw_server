@@ -127,7 +127,14 @@ describe("moderation service contract", () => {
       action: "dismiss",
       reason: "Batch cleanup"
     })
-    await listModerationReviewAudit({ item_id: "item/1", actor: "reviewer", action: "decision.block" })
+    await listModerationReviewAudit({
+      item_id: "item/1",
+      decision_id: "decision/1",
+      actor: "reviewer",
+      action: "decision.block",
+      date_from: "2026-05-12T00:00:00Z",
+      date_to: "2026-05-13T00:00:00Z"
+    })
 
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(1, {
       path: "/api/v1/moderation/review/items/item%2F1",
@@ -157,7 +164,8 @@ describe("moderation service contract", () => {
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(5, {
-      path: "/api/v1/moderation/review/audit?item_id=item%2F1&actor=reviewer&action=decision.block",
+      path:
+        "/api/v1/moderation/review/audit?item_id=item%2F1&decision_id=decision%2F1&actor=reviewer&action=decision.block&date_from=2026-05-12T00%3A00%3A00Z&date_to=2026-05-13T00%3A00%3A00Z",
       method: "GET"
     })
   })

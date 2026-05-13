@@ -2,7 +2,7 @@ import React from "react"
 import { RefreshCw, Search } from "lucide-react"
 
 import { getDesignSystemState } from "@/design-system"
-import type { ModerationReviewFilters } from "./hooks/useModerationReviewQueue"
+import type { ModerationReviewFilterPreset, ModerationReviewFilters } from "./hooks/useModerationReviewQueue"
 
 type ReviewQueueToolbarProps = {
   filters: ModerationReviewFilters
@@ -10,6 +10,11 @@ type ReviewQueueToolbarProps = {
   onRefresh: () => void
   loading?: boolean
   compact?: boolean
+  searchInputRef?: React.RefObject<HTMLInputElement | null>
+  filterPresets?: ModerationReviewFilterPreset[]
+  onSavePreset?: (name: string) => void
+  onApplyPreset?: (name: string) => void
+  onDeletePreset?: (name: string) => void
 }
 
 const inputClass =
@@ -21,8 +26,16 @@ export const ReviewQueueToolbar: React.FC<ReviewQueueToolbarProps> = ({
   onFilterChange,
   onRefresh,
   loading = false,
-  compact = false
+  compact = false,
+  searchInputRef,
+  filterPresets = [],
+  onSavePreset,
+  onApplyPreset,
+  onDeletePreset
 }) => {
+  const [presetName, setPresetName] = React.useState("")
+  const [selectedPreset, setSelectedPreset] = React.useState("")
+
   return (
     <div className="rounded-lg border border-border bg-surface p-3">
       <div className={`grid gap-3 ${compact ? "grid-cols-1" : "md:grid-cols-4 xl:grid-cols-8"}`}>
@@ -108,6 +121,7 @@ export const ReviewQueueToolbar: React.FC<ReviewQueueToolbarProps> = ({
           <span className="relative">
             <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-text-muted" aria-hidden="true" />
             <input
+              ref={searchInputRef}
               className={`${inputClass} w-full pl-8`}
               value={filters.q}
               onChange={(event) => onFilterChange("q", event.target.value)}
@@ -116,7 +130,69 @@ export const ReviewQueueToolbar: React.FC<ReviewQueueToolbarProps> = ({
           </span>
         </label>
       </div>
-      <div className="mt-3 flex justify-end">
+      <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="grid gap-3 sm:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto_auto] lg:max-w-3xl">
+          <label className="grid gap-1 text-xs font-medium text-text-muted">
+            Preset name
+            <input
+              className={inputClass}
+              value={presetName}
+              onChange={(event) => setPresetName(event.target.value)}
+              placeholder="High PII"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-medium text-text-muted">
+            Saved preset
+            <select
+              className={inputClass}
+              value={selectedPreset}
+              onChange={(event) => setSelectedPreset(event.target.value)}
+            >
+              <option value="">Choose preset</option>
+              {filterPresets.map((preset) => (
+                <option key={preset.name} value={preset.name}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              onSavePreset?.(presetName)
+              if (presetName.trim()) {
+                setSelectedPreset(presetName.trim())
+                setPresetName("")
+              }
+            }}
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text hover:bg-surface3"
+          >
+            Save preset
+          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => selectedPreset && onApplyPreset?.(selectedPreset)}
+              disabled={!selectedPreset}
+              className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text hover:bg-surface3 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Apply preset
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedPreset) {
+                  onDeletePreset?.(selectedPreset)
+                  setSelectedPreset("")
+                }
+              }}
+              disabled={!selectedPreset}
+              className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text-muted hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
         <button
           type="button"
           onClick={onRefresh}

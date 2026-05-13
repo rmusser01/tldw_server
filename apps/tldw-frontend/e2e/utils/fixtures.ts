@@ -2,6 +2,7 @@
  * Extended Playwright test fixtures for workflow tests
  */
 import { test as base, expect, type Page } from "@playwright/test"
+import { readFileSync } from "node:fs"
 import {
   seedAuth,
   TEST_CONFIG,
@@ -136,6 +137,22 @@ export const test = base.extend<WorkflowFixtures>({
 })
 
 export { expect }
+
+export interface ModerationReviewItemsFixture {
+  populated: any[]
+  empty: any[]
+  permissionDenied: { status: number; body: Record<string, unknown> }
+  backendError: { status: number; body: Record<string, unknown> }
+  partialData: any[]
+  expiredUndo: any[]
+  redactedContent: any[]
+}
+
+export function loadModerationReviewItemsFixture(): ModerationReviewItemsFixture {
+  return JSON.parse(
+    readFileSync("e2e/fixtures/moderation-review-items.json", "utf8")
+  ) as ModerationReviewItemsFixture
+}
 
 /**
  * Extract model IDs from provider response

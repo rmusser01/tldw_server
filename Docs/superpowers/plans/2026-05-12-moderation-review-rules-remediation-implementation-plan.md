@@ -554,23 +554,23 @@ Expected: decisions are auditable and undo/redaction behavior is explicit in UI 
 
 **Implementation Tasks:**
 
-- [ ] Add multi-select to queue rows with a visible selected count and clear selection control.
+- [x] Add multi-select to queue rows with a visible selected count and clear selection control.
 
-- [ ] Add `BulkDecisionBar` for approve, dismiss, block, redact, and escalate. Require confirmation and reason for destructive/high-risk bulk actions.
+- [x] Add `BulkDecisionBar` for approve, dismiss, block, redact, and escalate. Require confirmation and reason for destructive/high-risk bulk actions.
 
-- [ ] Wire `POST /moderation/review/bulk-decision` and render partial failure results inline.
+- [x] Wire `POST /moderation/review/bulk-decision` and render partial failure results inline.
 
-- [ ] Add saved filter presets in local storage for status/category/severity/source/date/sort. Keep the persistence local and reversible.
+- [x] Add saved filter presets in local storage for status/category/severity/source/date/sort. Keep the persistence local and reversible.
 
-- [ ] Add keyboard shortcuts only when focus is inside the review surface: next/previous item, approve, dismiss, focus search, refresh. Show shortcuts in tooltips or a small help popover, not as permanent instructional copy.
+- [x] Add keyboard shortcuts only when focus is inside the review surface: next/previous item, approve, dismiss, focus search, refresh. Show shortcuts in tooltips or a small help popover, not as permanent instructional copy.
 
-- [ ] Add "review complete" completion state when `needs_review` count reaches zero, with secondary links to audit and content rules.
+- [x] Add "review complete" completion state when `needs_review` count reaches zero, with secondary links to audit and content rules.
 
 **Tests:**
 
-- [ ] Unit/component tests for bulk confirmation, required reason validation, partial failure display, saved filter persistence, and keyboard shortcuts.
+- [x] Unit/component tests for bulk confirmation, required reason validation, partial failure display, saved filter persistence, and keyboard shortcuts.
 
-- [ ] E2E test for selecting several rows, bulk dismissing, handling one failed item, and clearing selection.
+- [x] E2E test for selecting several rows, bulk dismissing, handling one failed item, and clearing selection.
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationReview/__tests__/BulkDecisionBar.test.tsx apps/packages/ui/src/components/Option/ModerationReview/__tests__/ModerationReviewShell.test.tsx`
 
@@ -578,7 +578,7 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: repeat-review workflow can be completed without opening every item, while destructive actions remain confirmed and audited.
 
-**Status:** In Progress
+**Status:** Complete
 
 ---
 
@@ -600,69 +600,81 @@ Expected: repeat-review workflow can be completed without opening every item, wh
 
 **Implementation Tasks:**
 
-- [ ] Add E2E fixtures for populated review queue, empty queue, permission denied, backend error, partial data, expired undo, and redacted content states.
+- [x] Add E2E fixtures for populated review queue, empty queue, permission denied, backend error, partial data, expired undo, and redacted content states.
 
-- [ ] Update smoke/page inventory so canonical routes are `/moderation` and `/moderation/rules`; keep `/moderation-playground` only as a legacy redirect case.
+- [x] Update smoke/page inventory so canonical routes are `/moderation` and `/moderation/rules`; keep `/moderation-playground` only as a legacy redirect case.
 
-- [ ] Update `Docs/Code_Documentation/Moderation-Guardrails.md` to distinguish "Moderation Review" from "Content Rules", list review permissions, explain sanitized review data, and document retention/minimization behavior.
+- [x] Update `Docs/Code_Documentation/Moderation-Guardrails.md` to distinguish "Moderation Review" from "Content Rules", list review permissions, explain sanitized review data, and document retention/minimization behavior.
 
-- [ ] Document `MODERATION_REVIEW_CAPTURE_ENABLED` and `MODERATION_REVIEW_DB_PATH`.
+- [x] Document `MODERATION_REVIEW_CAPTURE_ENABLED` and `MODERATION_REVIEW_DB_PATH`.
 
-- [ ] Add a short "known unsupported states" note if any review producers remain unwired after the MVP.
+- [x] Add a short "known unsupported states" note if any review producers remain unwired after the MVP.
 
-- [ ] Run full focused frontend/backend verification and record results in the relevant Backlog tasks.
+- [x] Run full focused frontend/backend verification and record results in the relevant Backlog tasks.
 
 **Verification Commands:**
 
-- [ ] Backend focused:
+- [x] Backend focused:
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py tldw_Server_API/tests/unit/test_moderation_review_audit.py tldw_Server_API/tests/AuthNZ_Unit/test_moderation_permissions_claims.py tldw_Server_API/tests/unit/test_moderation_event_capture.py -q`
 
 Expected: all focused moderation backend tests pass.
 
-- [ ] Frontend focused:
+Result: 57 passed, 5 warnings.
+
+- [x] Frontend focused:
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationPlayground/__tests__ apps/packages/ui/src/components/Option/ModerationReview/__tests__ apps/packages/ui/src/components/Layouts/__tests__/settings-nav.moderation.test.ts apps/packages/ui/src/services/__tests__/moderation.service.contract.test.ts`
 
 Expected: all focused moderation frontend tests pass.
 
-- [ ] Route and responsive E2E:
+Result: 25 focused frontend files passed, 239 tests passed.
+
+- [x] Route and responsive E2E:
 
 Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-routes.spec.ts apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-responsive.spec.ts apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-review.spec.ts apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-review-power-user.spec.ts --project=chromium`
 
 Expected: canonical routes, legacy redirect, responsive behavior, review queue, decision, undo, and bulk flows pass through Playwright/CDP.
 
-- [ ] Design-system/state guard:
+Result: 10 Playwright/CDP tests passed under the tier-5 project.
+
+- [x] Design-system/state guard:
 
 Run: `bun run verify:design-system-state`
 
 Expected: no new design-system state violations.
 
-- [ ] Security scan on touched backend production files:
+Result: command ran and failed on existing repo-wide baseline entries in AgentRegistry/AgentTasks product-state usage and stale baseline entries; no moderation files were implicated.
+
+- [x] Security scan on touched backend production files:
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/moderation.py tldw_Server_API/app/api/v1/schemas/moderation_schemas.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/review_store.py tldw_Server_API/app/core/Moderation/review_service.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py -f json -o /tmp/bandit_moderation_review.json`
 
 Expected: no new findings in touched code.
 
-- [ ] Whitespace/diff hygiene:
+Result: Bandit JSON output contained `"results": []`.
+
+- [x] Whitespace/diff hygiene:
 
 Run: `git diff --check`
 
 Expected: no whitespace errors.
 
-**Status:** Not Started
+Result: no whitespace errors.
+
+**Status:** Complete
 
 ---
 
 ## Implementation Risk Checks
 
-- [ ] Review endpoints must not inherit the existing global `SYSTEM_CONFIGURE` dependency, or reviewer role support will be fake.
-- [ ] The review UI must treat backend `safe_fields` as authoritative and avoid rendering absent raw fields.
-- [ ] Event capture must be idempotent and gated until the UI/retention path is verified.
-- [ ] Extension route parity must be explicit; `/moderation` must not silently point to rules.
-- [ ] Raw blocklist replace/upload must not bypass lint and preview.
-- [ ] Power-user shortcuts must not fire while typing in inputs/textareas.
-- [ ] E2E fixtures must cover populated and missing-data states; an empty-only queue is not enough.
+- [x] Review endpoints must not inherit the existing global `SYSTEM_CONFIGURE` dependency, or reviewer role support will be fake.
+- [x] The review UI must treat backend `safe_fields` as authoritative and avoid rendering absent raw fields.
+- [x] Event capture must be idempotent and gated until the UI/retention path is verified.
+- [x] Extension route parity must be explicit; `/moderation` must not silently point to rules.
+- [x] Raw blocklist replace/upload must not bypass lint and preview.
+- [x] Power-user shortcuts must not fire while typing in inputs/textareas.
+- [x] E2E fixtures must cover populated and missing-data states; an empty-only queue is not enough.
 
 ## Plan Review Notes
 

@@ -1,11 +1,13 @@
 import * as React from "react"
 
 import {
+  bulkDecideModerationReviewItems,
   decideModerationReviewItem,
   getModerationReviewItem,
   listModerationReviewItems,
   undoModerationReviewDecision,
   type ModerationDecisionAction,
+  type ModerationReviewBulkDecisionResponse,
   type ModerationReviewItem,
   type ModerationReviewListParams,
   type ModerationReviewSort,
@@ -26,6 +28,11 @@ export interface ModerationReviewFilters {
   cursor: string | null
 }
 
+export interface ModerationReviewFilterPreset {
+  name: string
+  filters: ModerationReviewFilters
+}
+
 export interface ModerationReviewUndoState {
   itemId: string
   token: string
@@ -44,6 +51,8 @@ const DEFAULT_FILTERS: ModerationReviewFilters = {
   sort: "newest",
   cursor: null
 }
+
+const FILTER_PRESETS_STORAGE_KEY = "tldw.moderationReview.filterPresets.v1"
 
 function toListParams(filters: ModerationReviewFilters): ModerationReviewListParams {
   return {
@@ -66,6 +75,41 @@ function messageFromError(error: unknown): string {
   return String((error as { message?: unknown })?.message || "Review queue request failed")
 }
 
+function loadStoredPresets(): ModerationReviewFilterPreset[] {
+  if (typeof window === "undefined") {
+    return []
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]")
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    return parsed
+      .filter((entry) => entry && typeof entry.name === "string" && entry.filters)
+      .map((entry) => ({
+        name: entry.name,
+        filters: {
+          ...DEFAULT_FILTERS,
+          ...entry.filters,
+          cursor: null
+        }
+      }))
+  } catch {
+    return []
+  }
+}
+
+function persistPresets(presets: ModerationReviewFilterPreset[]) {
+  if (typeof window === "undefined") {
+    return
+  }
+  window.localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(presets))
+}
+
+function filterMatchesActiveStatus(item: ModerationReviewItem, filters: ModerationReviewFilters): boolean {
+  return !filters.status || item.status === filters.status
+}
+
 export function useModerationReviewQueue() {
   const [filters, setFilters] = React.useState<ModerationReviewFilters>(DEFAULT_FILTERS)
   const [items, setItems] = React.useState<ModerationReviewItem[]>([])
@@ -80,6 +124,11 @@ export function useModerationReviewQueue() {
   const [warnings, setWarnings] = React.useState<string[]>([])
   const [partial, setPartial] = React.useState(false)
   const [undo, setUndo] = React.useState<ModerationReviewUndoState | null>(null)
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set())
+  const [bulkDeciding, setBulkDeciding] = React.useState<ModerationDecisionAction | null>(null)
+  const [bulkResult, setBulkResult] = React.useState<ModerationReviewBulkDecisionResponse | null>(null)
+  const [filterPresets, setFilterPresets] = React.useState<ModerationReviewFilterPreset[]>(loadStoredPresets)
+  const selectedItemIds = React.useMemo(() => Array.from(selectedIds), [selectedIds])
 
   const updateFilter = React.useCallback(
     <K extends keyof ModerationReviewFilters>(key: K, value: ModerationReviewFilters[K]) => {
@@ -88,6 +137,7 @@ export function useModerationReviewQueue() {
         [key]: value,
         cursor: key === "cursor" ? (value as string | null) : null
       }))
+      setBulkResult(null)
     },
     []
   )
@@ -101,6 +151,7 @@ export function useModerationReviewQueue() {
       const response = await listModerationReviewItems(toListParams(activeFilters))
       const sorted = sortReviewItems(response.items || [], activeFilters.sort)
       setItems(sorted)
+      setSelectedIds((current) => new Set([...current].filter((itemId) => sorted.some((item) => item.id === itemId))))
       setTotal(typeof response.total === "number" ? response.total : sorted.length)
       setNextCursor(response.next_cursor || null)
       const preferredId =
@@ -174,6 +225,41 @@ export function useModerationReviewQueue() {
     [items]
   )
 
+  const selectRelative = React.useCallback(
+    async (direction: 1 | -1) => {
+      if (items.length === 0) {
+        return
+      }
+      const currentIndex = selectedItemId
+        ? Math.max(0, items.findIndex((item) => item.id === selectedItemId))
+        : 0
+      const nextIndex = Math.min(items.length - 1, Math.max(0, currentIndex + direction))
+      const nextItem = items[nextIndex]
+      if (nextItem) {
+        await selectItem(nextItem.id)
+      }
+    },
+    [items, selectItem, selectedItemId]
+  )
+
+  const toggleSelected = React.useCallback((itemId: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+      return next
+    })
+    setBulkResult(null)
+  }, [])
+
+  const clearSelection = React.useCallback(() => {
+    setSelectedIds(new Set())
+    setBulkResult(null)
+  }, [])
+
   const decideSelected = React.useCallback(
     async (action: ModerationDecisionAction, reason?: string) => {
       if (!selectedItemId) {
@@ -230,6 +316,87 @@ export function useModerationReviewQueue() {
     }
   }, [refresh, undo])
 
+  const bulkDecideSelected = React.useCallback(
+    async (action: ModerationDecisionAction, reason?: string) => {
+      if (selectedItemIds.length === 0) {
+        return
+      }
+      setBulkDeciding(action)
+      setError(null)
+      try {
+        const response = await bulkDecideModerationReviewItems({
+          item_ids: selectedItemIds,
+          action,
+          reason: reason?.trim() || undefined
+        })
+        setBulkResult(response)
+        const itemUpdates = new Map(
+          response.results
+            .filter((entry) => entry.ok && entry.item)
+            .map((entry) => [entry.item_id, entry.item as ModerationReviewItem])
+        )
+        setItems((current) =>
+          current
+            .map((item) => itemUpdates.get(item.id) || item)
+            .filter((item) => filterMatchesActiveStatus(item, filters))
+        )
+        if (selectedItemId && itemUpdates.has(selectedItemId)) {
+          const updated = itemUpdates.get(selectedItemId) || null
+          setSelectedItem(updated && filterMatchesActiveStatus(updated, filters) ? updated : null)
+        }
+        const failedIds = new Set(response.results.filter((entry) => !entry.ok).map((entry) => entry.item_id))
+        setSelectedIds(failedIds)
+      } catch (requestError) {
+        setError(requestError)
+      } finally {
+        setBulkDeciding(null)
+      }
+    },
+    [filters, selectedItemId, selectedItemIds]
+  )
+
+  const saveFilterPreset = React.useCallback(
+    (name: string) => {
+      const normalized = name.trim()
+      if (!normalized) {
+        return
+      }
+      const { cursor: _cursor, ...presetFilters } = filters
+      const next = [
+        ...filterPresets.filter((preset) => preset.name !== normalized),
+        { name: normalized, filters: { ...presetFilters, cursor: null } }
+      ].sort((a, b) => a.name.localeCompare(b.name))
+      setFilterPresets(next)
+      persistPresets(next)
+    },
+    [filterPresets, filters]
+  )
+
+  const applyFilterPreset = React.useCallback(
+    (name: string) => {
+      const preset = filterPresets.find((entry) => entry.name === name)
+      if (!preset) {
+        return
+      }
+      setFilters({
+        ...DEFAULT_FILTERS,
+        ...preset.filters,
+        cursor: null
+      })
+      setBulkResult(null)
+    },
+    [filterPresets]
+  )
+
+  const deleteFilterPreset = React.useCallback(
+    (name: string) => {
+      const next = filterPresets.filter((entry) => entry.name !== name)
+      setFilterPresets(next)
+      persistPresets(next)
+    },
+    [filterPresets]
+  )
+
   return {
     filters,
     updateFilter,
@@ -245,10 +412,21 @@ export function useModerationReviewQueue() {
     warnings,
     partial,
     undo,
+    selectedItemIds,
+    bulkDeciding,
+    bulkResult,
+    filterPresets,
     refresh,
     loadNextPage,
     selectItem,
+    selectRelative,
+    toggleSelected,
+    clearSelection,
     decideSelected,
-    undoDecision
+    undoDecision,
+    bulkDecideSelected,
+    saveFilterPreset,
+    applyFilterPreset,
+    deleteFilterPreset
   }
 }

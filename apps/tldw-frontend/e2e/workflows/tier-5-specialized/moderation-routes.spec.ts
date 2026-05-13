@@ -81,8 +81,8 @@ test.describe("Moderation routes", () => {
       authedPage.getByRole("heading", { name: /moderation review/i })
     ).toBeVisible({ timeout: 15_000 })
     await expect(authedPage.getByLabel(/status/i)).toBeVisible()
-    await expect(authedPage.getByText(/no review items match these filters/i)).toBeVisible()
-    await expect(authedPage.getByRole("link", { name: /content rules/i })).toBeVisible()
+    await expect(authedPage.getByText(/review complete/i)).toBeVisible()
+    await expect(authedPage.getByRole("link", { name: /^content rules$/i })).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)
   })

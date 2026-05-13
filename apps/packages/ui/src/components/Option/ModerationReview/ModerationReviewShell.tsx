@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, ClipboardList, ShieldCheck, SlidersHorizon
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { MODERATION_RULES_PATH } from "@/routes/route-paths"
+import { BulkDecisionBar } from "./BulkDecisionBar"
 import { DecisionBar } from "./DecisionBar"
 import { useModerationReviewQueue } from "./hooks/useModerationReviewQueue"
 import { ReviewItemDetail } from "./ReviewItemDetail"
@@ -45,6 +46,20 @@ const backendStatusCopy = (online: boolean, uxState: string) => {
   }
 }
 
+const shouldIgnoreShortcut = (target: EventTarget | null) => {
+  const element = target as HTMLElement | null
+  if (!element) {
+    return false
+  }
+  const tagName = element.tagName.toLowerCase()
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select" ||
+    element.isContentEditable
+  )
+}
+
 export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
   compact = false
 }) => {
@@ -53,14 +68,52 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
   const backendStatus = backendStatusCopy(online, uxState)
   const StatusIcon = backendStatus.tone === "ok" ? CheckCircle2 : AlertTriangle
   const queue = useModerationReviewQueue()
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const visibleTotal = queue.total ?? queue.items.length
   const selectedStatus = queue.selectedItem?.status || "None"
+  const reviewComplete =
+    !queue.loading &&
+    !queue.error &&
+    queue.filters.status === "needs_review" &&
+    visibleTotal === 0 &&
+    queue.items.length === 0
+
+  const handleShortcut = React.useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      if (shouldIgnoreShortcut(event.target)) {
+        return
+      }
+      if (event.key === "n" || event.key === "ArrowDown") {
+        event.preventDefault()
+        void queue.selectRelative(1)
+      } else if (event.key === "p" || event.key === "ArrowUp") {
+        event.preventDefault()
+        void queue.selectRelative(-1)
+      } else if (event.key === "a") {
+        event.preventDefault()
+        void queue.decideSelected("approve")
+      } else if (event.key === "d") {
+        event.preventDefault()
+        void queue.decideSelected("dismiss")
+      } else if (event.key === "/") {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+      } else if (event.key === "r") {
+        event.preventDefault()
+        void queue.refresh()
+      }
+    },
+    [queue]
+  )
 
   return (
     <section
       className="space-y-5"
       data-testid="moderation-review-shell"
       aria-labelledby="moderation-review-title"
+      tabIndex={0}
+      onKeyDown={handleShortcut}
+      title="Shortcuts: n next, p previous, a approve, d dismiss, / search, r refresh"
     >
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
@@ -133,6 +186,11 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
         onRefresh={queue.refresh}
         loading={queue.loading}
         compact={compact}
+        searchInputRef={searchInputRef}
+        filterPresets={queue.filterPresets}
+        onSavePreset={queue.saveFilterPreset}
+        onApplyPreset={queue.applyFilterPreset}
+        onDeletePreset={queue.deleteFilterPreset}
       />
 
       <ReviewStatePanels
@@ -140,9 +198,30 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
         error={queue.error}
         partial={queue.partial}
         warnings={queue.warnings}
-        empty={!queue.loading && !queue.error && queue.items.length === 0 && !queue.selectedItem}
+        empty={!reviewComplete && !queue.loading && !queue.error && queue.items.length === 0 && !queue.selectedItem}
         onRetry={queue.refresh}
       />
+
+      {reviewComplete && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-100">
+          <div className="font-semibold">Review complete</div>
+          <p className="mt-1">No items currently need review under the active filters.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href="#moderation-review-audit"
+              className="rounded-md border border-green-300 bg-white px-3 py-2 font-medium text-green-900 hover:bg-green-100 dark:border-green-900/50 dark:bg-green-950/40 dark:text-green-100"
+            >
+              Review audit
+            </a>
+            <Link
+              to={MODERATION_RULES_PATH}
+              className="rounded-md border border-green-300 bg-white px-3 py-2 font-medium text-green-900 hover:bg-green-100 dark:border-green-900/50 dark:bg-green-950/40 dark:text-green-100"
+            >
+              Content rules
+            </Link>
+          </div>
+        </div>
+      )}
 
       {!queue.loading && !queue.error && (queue.items.length > 0 || queue.selectedItem) && (
         <div className={`grid gap-4 ${compact ? "grid-cols-1" : "xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]"}`}>
@@ -155,12 +234,23 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
               <ReviewQueueList
                 items={queue.items}
                 selectedItemId={queue.selectedItemId}
+                selectedForBulkIds={queue.selectedItemIds}
                 onSelect={(itemId) => void queue.selectItem(itemId)}
+                onToggleSelected={queue.toggleSelected}
               />
             ) : (
               <div className="rounded-lg border border-border bg-surface2 p-4 text-sm text-text-muted">
                 The active filters no longer include this selected item.
               </div>
+            )}
+            {queue.selectedItemIds.length > 0 && (
+              <BulkDecisionBar
+                selectedCount={queue.selectedItemIds.length}
+                deciding={queue.bulkDeciding}
+                result={queue.bulkResult}
+                onBulkDecision={queue.bulkDecideSelected}
+                onClearSelection={queue.clearSelection}
+              />
             )}
             {queue.nextCursor && (
               <button

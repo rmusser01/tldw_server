@@ -95,7 +95,7 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   { path: "/flashcards", name: "Flashcards", category: "workspace" },
   { path: "/quiz", name: "Quiz", category: "workspace" },
-  { path: "/moderation", name: "Moderation Review", category: "workspace" },
+  { path: "/moderation", name: "Moderation Review", category: "workspace", expectedTestId: "moderation-review-shell" },
   { path: "/moderation/rules", name: "Content Rules", category: "workspace" },
   {
     path: "/moderation-playground",
