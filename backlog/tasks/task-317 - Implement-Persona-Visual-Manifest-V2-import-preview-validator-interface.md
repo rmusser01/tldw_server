@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-13 14:28'
-updated_date: '2026-05-13 14:36'
+updated_date: '2026-05-13 14:49'
 labels:
   - persona
   - buddy
@@ -43,12 +43,18 @@ Implement the next Manifest V2 foundation slice for Persona/Buddy visual packs: 
 Implementation plan created: Docs/superpowers/plans/2026-05-13-persona-visual-v2-import-preview-validator.md. Plan reviewer subagent was not dispatched because this session only allows subagents when explicitly requested; proceeding with an inline self-review and TDD implementation.
 
 Implemented fixture-only renderer import-preview validator and documented the boundary. Verification: initial red pytest failed on missing visual_import_preview_validators module; focused validator tests passed; persona visual boundary suite passed; git diff --check passed; Bandit JSON reported zero findings.
+
+PR #1634 review sweep started. Actionable findings verified: sanitize unknown-renderer blocker text, avoid float version truncation, treat missing required manifest/contract versions as blockers, and make asset attribute reads robust.
+
+PR #1634 review fixes implemented and verified: unknown renderer blocker text is escaped/capped, version coercion no longer truncates floats, missing manifest/contract versions now block supported renderers, and asset text extraction tolerates unexpected objects. Verification: 38 persona visual tests passed, git diff --check passed, Bandit reported zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added a backend Persona Visual renderer import-preview validator interface for normalized manifest/assets metadata. The slice reports known disabled live2d blockers, unknown renderer diagnostics, required role-category gaps, and supported sprite_frames eligibility without parsing archives, writing assets, activating packs, or changing the existing V1 portability path.
+
+Review sweep: addressed Qodo and Gemini findings with sanitizer, strict integer version parsing, required version blockers, robust asset attribute access, and focused regression tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

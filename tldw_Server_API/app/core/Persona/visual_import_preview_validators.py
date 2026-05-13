@@ -9,6 +9,7 @@ capability registry.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +18,9 @@ from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererCapability,
     get_persona_visual_renderer_capability,
 )
+
+MAX_BLOCKER_TEXT_LENGTH = 100
+_INTEGER_TEXT_RE = re.compile(r"^[+-]?\d+$")
 
 
 @dataclass(frozen=True)
@@ -88,7 +92,7 @@ def preview_renderer_import(
             renderer_contract_version=renderer_contract_version,
             can_commit=False,
             activation_eligible=False,
-            blockers=[f"unknown_renderer:{renderer_type or 'missing'}"],
+            blockers=[f"unknown_renderer:{_format_text_for_blocker(renderer_type)}"],
             normalized_role_categories=_normalize_role_categories(None, assets),
         )
 
@@ -134,11 +138,10 @@ def _capability_blockers(
         _append_unique(blockers, blocker)
     if capability.disabled_reason:
         _append_unique(blockers, capability.disabled_reason)
-    if manifest_version is not None and manifest_version not in capability.manifest_versions:
+    if capability.manifest_versions and manifest_version not in capability.manifest_versions:
         _append_unique(blockers, f"unsupported_manifest_version:{manifest_version}")
     if (
-        renderer_contract_version is not None
-        and capability.renderer_contract_versions
+        capability.renderer_contract_versions
         and renderer_contract_version not in capability.renderer_contract_versions
     ):
         _append_unique(
@@ -206,16 +209,33 @@ def _asset_text(
 ) -> str:
     if isinstance(asset, Mapping):
         return str(asset.get(field_name) or "")
-    return str(getattr(asset, field_name) or "")
+    return str(getattr(asset, field_name, "") or "")
 
 
 def _coerce_int(value: Any) -> int | None:
     if isinstance(value, bool) or value is None:
         return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return int(stripped) if _INTEGER_TEXT_RE.fullmatch(stripped) else None
+    return None
+
+
+def _format_text_for_blocker(value: Any) -> str:
+    text = str(value or "")
+    text = (
+        text.replace("\\", "\\\\")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
+    if len(text) > MAX_BLOCKER_TEXT_LENGTH:
+        return text[:MAX_BLOCKER_TEXT_LENGTH] + "..."
+    return text or "missing"
 
 
 def _append_unique(values: list[str], value: str) -> None:

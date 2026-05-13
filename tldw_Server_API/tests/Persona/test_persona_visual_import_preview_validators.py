@@ -99,9 +99,30 @@ def test_preview_renderer_import_reports_unknown_renderer_without_asset_writes()
     assert result.warnings == []
 
 
+def test_preview_renderer_import_sanitizes_unknown_renderer_blocker() -> None:
+    unsafe_renderer_type = "not_real\n\tsecret\\path" + ("x" * 120)
+    manifest = _live2d_manifest()
+    manifest["renderer_type"] = unsafe_renderer_type
+
+    result = preview_renderer_import(manifest=manifest, assets=[])
+
+    assert result.renderer_type == unsafe_renderer_type
+    assert len(result.blockers) == 1
+    blocker = result.blockers[0]
+    assert "\n" not in blocker
+    assert "\t" not in blocker
+    assert "\r" not in blocker
+    assert "not_real\\n\\tsecret\\\\path" in blocker
+    assert blocker.endswith("...")
+
+
 def test_preview_renderer_import_keeps_sprite_frames_supported() -> None:
     result = preview_renderer_import(
-        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "renderer_contract_version": 1,
+        },
         assets=[
             PersonaVisualImportPreviewAsset(
                 source_asset_id="asset-idle",
@@ -118,3 +139,60 @@ def test_preview_renderer_import_keeps_sprite_frames_supported() -> None:
     assert result.activation_eligible is True
     assert result.blockers == []
     assert result.normalized_role_categories["frame"] == ["asset-idle"]
+
+
+def test_preview_renderer_import_blocks_missing_required_versions() -> None:
+    result = preview_renderer_import(
+        manifest={"renderer_type": "sprite_frames"},
+        assets=[
+            PersonaVisualImportPreviewAsset(
+                source_asset_id="asset-idle",
+                asset_role="frame",
+                mime_type="image/png",
+            )
+        ],
+    )
+
+    assert result.status == "invalid_renderer_assets"
+    assert result.can_commit is False
+    assert result.activation_eligible is False
+    assert "unsupported_manifest_version:None" in result.blockers
+    assert "unsupported_renderer_contract_version:None" in result.blockers
+
+
+def test_preview_renderer_import_rejects_non_integer_version_values() -> None:
+    result = preview_renderer_import(
+        manifest={
+            "manifest_version": 1.9,
+            "renderer_type": "sprite_frames",
+            "renderer_contract_version": 1.9,
+        },
+        assets=[
+            PersonaVisualImportPreviewAsset(
+                source_asset_id="asset-idle",
+                asset_role="frame",
+                mime_type="image/png",
+            )
+        ],
+    )
+
+    assert result.manifest_version is None
+    assert result.renderer_contract_version is None
+    assert result.status == "invalid_renderer_assets"
+    assert result.can_commit is False
+    assert "unsupported_manifest_version:None" in result.blockers
+    assert "unsupported_renderer_contract_version:None" in result.blockers
+
+
+def test_preview_renderer_import_ignores_unexpected_asset_objects() -> None:
+    result = preview_renderer_import(
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "renderer_contract_version": 1,
+        },
+        assets=[object()],  # type: ignore[list-item]
+    )
+
+    assert result.status == "supported"
+    assert result.normalized_role_categories == {}
