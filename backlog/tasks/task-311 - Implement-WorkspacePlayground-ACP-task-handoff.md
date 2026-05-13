@@ -1,11 +1,11 @@
 ---
 id: TASK-311
 title: Implement WorkspacePlayground ACP task handoff
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-05-13 02:10'
-updated_date: '2026-05-13 04:47'
+updated_date: '2026-05-13 04:52'
 labels:
   - ACP
   - workspace
@@ -47,12 +47,14 @@ Verification: bunx vitest run src/components/Option/WorkspacePlayground/__tests_
 PR #1625 review-fix pass reopened this task in the branch worktree. Scope: resolve still-actionable Gemini, CodeRabbit, and Qodo review threads; preserve Ant Design v6 title/destroyOnHidden props where local tests and guardrails prove those are the current API; add regression tests for config loading, rollback, and in-flight cancellation guards.
 
 Review fixes now also document that WorkspacePlayground ACP history/retention must coordinate with #1512 and #1513 rather than creating a separate retention/redaction path.
+
+Review-fix verification: focused Vitest passed for WorkspaceHeader, AgentTasks connection, and AntD modal prop guards (40 tests). bun run lint from apps/tldw-frontend exited 0 with existing warnings only. Targeted ESLint on changed package files exited 0 with warnings only. git diff --check passed. Bandit on the touched frontend path wrote /tmp/bandit_task311_pr1625_review_frontend_path.json with zero findings and loc=0 because no Python files were touched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a WorkspacePlayground create-agent-task handoff that uses the canonical ACP workspace bridge, creates an AgentProject bound to the returned ACP execution workspace, then creates the AgentTask with canonical workspace metadata and a direct path to Agent Tasks. Verification passed for the focused WorkspaceHeader/AgentTasks Vitest set, git diff --check, and Bandit on the touched frontend path with zero Python findings because the touched source is TS/TSX.
+Implemented PR #1625 review fixes for WorkspacePlayground ACP task handoff. The modal now awaits async pre-submit persistence, respects connection-config loading before enabling task creation, rolls back an ACP AgentProject if downstream AgentTask creation fails, and blocks cancel/close/keyboard dismissal while submission is in flight. The touched WorkspaceHeader modal now uses Ant Design v6 destroyOnHidden, and the ACP workspace decision doc explicitly ties retention/redaction behavior to #1512 and #1513. Verification passed for the focused Vitest set, frontend lint, targeted ESLint, git diff --check, and Bandit frontend-path scan.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
