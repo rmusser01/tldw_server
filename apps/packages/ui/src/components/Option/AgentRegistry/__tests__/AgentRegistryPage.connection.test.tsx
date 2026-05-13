@@ -2,7 +2,6 @@ import React from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { getDesignSystemState } from "@/design-system"
 import { AgentRegistryPage } from "../index"
 
 const storageMocks = vi.hoisted(() => ({
@@ -24,12 +23,21 @@ const acpMocks = vi.hoisted(() => ({
 
 vi.mock("@/design-system", async (importActual) => {
   const actual = await importActual<typeof import("@/design-system")>()
+  const labelOverrides: Partial<
+    Record<Parameters<typeof actual.getDesignSystemState>[0], string>
+  > = {
+    ready: "Registry ready",
+    setup_required: "Registry setup required"
+  }
 
   return {
     ...actual,
     getDesignSystemState: vi.fn(
-      (key: Parameters<typeof actual.getDesignSystemState>[0]) =>
-        actual.getDesignSystemState(key)
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+        const label = labelOverrides[key]
+        return label ? { ...state, label } : state
+      }
     )
   }
 })
@@ -240,13 +248,8 @@ describe("AgentRegistryPage connection config", () => {
 
     expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
     expect(screen.getByText("Local Runner")).toBeInTheDocument()
-    expect(screen.getByText("Ready")).toBeInTheDocument()
-    expect(screen.getByText("Setup required")).toBeInTheDocument()
-
-    await waitFor(() => {
-      expect(getDesignSystemState).toHaveBeenCalledWith("ready")
-      expect(getDesignSystemState).toHaveBeenCalledWith("setup_required")
-    })
+    expect(screen.getByText("Registry ready")).toBeInTheDocument()
+    expect(screen.getByText("Registry setup required")).toBeInTheDocument()
   })
 
   it("normalizes structured ACP health payloads without trying to render raw objects", async () => {

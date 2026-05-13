@@ -250,6 +250,13 @@ const AGENT_STATUS_STATE: Record<AgentEntry["status"], DesignSystemStateKey> = {
   unavailable: "unavailable"
 }
 
+const AGENT_STATUS_LABELS = Object.fromEntries(
+  Object.entries(AGENT_STATUS_STATE).map(([status, stateKey]) => [
+    status,
+    (getDesignSystemState(stateKey) ?? DESIGN_SYSTEM_STATES[stateKey]).label
+  ])
+) as Record<AgentEntry["status"], string>
+
 const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
   const statusColor =
     agent.status === "available"
@@ -258,10 +265,7 @@ const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
         ? "warning"
         : "error"
 
-  const statusStateKey = AGENT_STATUS_STATE[agent.status]
-  const statusState =
-    getDesignSystemState(statusStateKey) ?? DESIGN_SYSTEM_STATES[statusStateKey]
-  const statusLabel = statusState.label
+  const statusLabel = AGENT_STATUS_LABELS[agent.status]
   const showUnverifiedWarning =
     agent.status === "available" && agent.support_state === "documented_unverified"
 

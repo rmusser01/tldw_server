@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-13 14:23'
-updated_date: '2026-05-13 14:29'
+updated_date: '2026-05-13 14:44'
 labels:
   - design-system
   - webui
@@ -58,14 +58,20 @@ Implementation: AgentRegistry now maps available/requires_setup/unavailable to r
 Verification: focused AgentRegistry test passed with 5 tests; combined AgentRegistry plus product-state guard tests passed with 57 tests; bun run verify:design-system-state passed with baseline exceptions reduced from 504 to 502 and canonical-state-label reduced from 24 to 22; git diff --check passed.
 
 TypeScript caveat: bunx tsc --noEmit --pretty false --project tsconfig.json still fails on existing repo-wide baseline errors in unrelated tests/components; no reported errors referenced AgentRegistry or the touched baseline file. Bandit skipped because this is a frontend-only TypeScript/JSON slice.
+
+PR #1633 review-fix pass: Qodo flagged the test's getDesignSystemState call-argument assertions as implementation-detail brittle; CodeRabbit flagged per-card render-time design-system label lookups. Both findings are valid for this slice and can be handled with behavior-based visible-label assertions plus module-scope status-label precomputation.
+
+Review fix implementation: AgentRegistry now precomputes AGENT_STATUS_LABELS at module scope from AGENT_STATUS_STATE and the design-system registry/fallback definitions. The focused test now verifies visible registry-derived labels by having the design-system mock return distinct ready/setup_required labels, without asserting getDesignSystemState call arguments.
+
+Review fix verification: bunx vitest run src/components/Option/AgentRegistry/__tests__/AgentRegistryPage.connection.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed with 57 tests; bun run verify:design-system-state passed with 502 baseline exceptions and canonical-state-label 22; git diff --check passed. Package-wide TypeScript remains blocked by unrelated existing baseline diagnostics and still reports no AgentRegistry touched-file diagnostics.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated AgentRegistry runtime status labels to resolve through the canonical design-system state registry. Available, setup-required, and unavailable statuses now map to ready, setup_required, and unavailable registry states with DESIGN_SYSTEM_STATES fallbacks, preserving the existing status color behavior while centralizing user-facing state copy.
+Migrated AgentRegistry runtime status labels to resolve through the canonical design-system state registry. Available, setup-required, and unavailable statuses map to ready, setup_required, and unavailable registry states with DESIGN_SYSTEM_STATES fallbacks, preserving existing status color behavior while centralizing user-facing state copy.
 
-Added focused AgentRegistry coverage that preserves the real design-system module and spies only on getDesignSystemState. Removed the two obsolete AgentRegistry canonical-state-label baseline exceptions for Ready and Unavailable.
+Review feedback on PR #1633 was addressed by moving status-label resolution to a module-scope AGENT_STATUS_LABELS map and changing the focused test to assert visible registry-derived labels instead of getDesignSystemState call arguments. The two obsolete AgentRegistry canonical-state-label baseline exceptions remain removed.
 
 Verification passed for focused AgentRegistry tests, AgentRegistry plus product-state guard tests, bun run verify:design-system-state, and git diff --check. Package-wide TypeScript remains blocked by unrelated existing baseline errors; no errors referenced AgentRegistry or the touched baseline file. Bandit was skipped because this is a frontend-only TypeScript/JSON change.
 <!-- SECTION:FINAL_SUMMARY:END -->
