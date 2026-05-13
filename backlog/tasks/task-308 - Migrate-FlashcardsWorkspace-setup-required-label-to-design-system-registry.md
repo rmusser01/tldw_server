@@ -4,7 +4,7 @@ title: Migrate FlashcardsWorkspace setup-required label to design-system registr
 status: Done
 assignee: []
 created_date: '2026-05-13 00:56'
-updated_date: '2026-05-13 01:03'
+updated_date: '2026-05-13 01:29'
 labels:
   - design-system
   - frontend
@@ -52,6 +52,11 @@ Verification:
 - git diff --check passed.
 - Baseline JSON parse check passed.
 - Bandit skipped: touched code is frontend TypeScript, JSON baseline, and task documentation only.
+
+PR #1618 review fix:
+- Made the getDesignSystemState test mock defensively pass through a missing registry state instead of dereferencing state.label.
+- Fresh review-fix verification: FlashcardsWorkspace connection-state Vitest passed 3 tests; product-state guard Vitest passed 52 tests; verify:design-system-state exited 0 with baseline exceptions 506 and canonical-state-label 26; git diff --check passed.
+- Full UI tsc still exits nonzero due existing unrelated package diagnostics outside this PR touched files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

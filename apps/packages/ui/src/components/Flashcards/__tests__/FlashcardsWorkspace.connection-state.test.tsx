@@ -81,11 +81,13 @@ vi.mock("@/design-system", async (importActual) => {
     getDesignSystemState: vi.fn(
       (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
         const state = actual.getDesignSystemState(key)
-        return {
-          ...state,
-          label:
-            key === "setup_required" ? mocks.setupRequiredLabel : state.label
-        }
+        return state
+          ? {
+              ...state,
+              label:
+                key === "setup_required" ? mocks.setupRequiredLabel : state.label
+            }
+          : state
       }
     )
   }
