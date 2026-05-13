@@ -1,5 +1,5 @@
 /**
- * Workspace Playground Real-Backend Workflow E2E Tests
+ * Research Studio Real-Backend Workflow E2E Tests
  *
  * These scenarios intentionally avoid route stubbing to catch regressions
  * that only appear when the page boots against a live API server.
@@ -503,7 +503,7 @@ const clickActionable = async (locator: Locator) => {
   }
 }
 
-test.describe("Workspace Playground Workflow (Real Backend)", () => {
+test.describe("Research Studio Workflow (Real Backend)", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
     await page.setViewportSize(DESKTOP_VIEWPORT)
@@ -670,7 +670,7 @@ test.describe("Workspace Playground Workflow (Real Backend)", () => {
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
 
-    const fixtureId = generateTestId("workspace-studio-scope")
+    const fixtureId = generateTestId("research-studio-scope")
     const leftSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Left`,
       `Left comparison source. Token ${fixtureId}-left. Claim: alpha baseline improved by 11 percent.`

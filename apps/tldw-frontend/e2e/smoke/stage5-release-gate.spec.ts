@@ -107,7 +107,7 @@ const CRITICAL_ROUTES: CriticalRoute[] = [
     expectedPath: "/moderation/rules",
     allowRedirectPanel: true
   },
-  { path: "/workspace-playground", name: "Workspace Playground" },
+  { path: "/research-studio", name: "Research Studio" },
   { path: "/writing-playground", name: "Writing Playground" },
   { path: "/stt", name: "STT" },
   { path: "/speech", name: "Speech" }

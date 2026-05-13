@@ -134,6 +134,30 @@ describe("ServerReadinessGate", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it("keeps malformed health responses behind the readiness screen", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error("invalid json")
+      }
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expectReadinessStatus()
+    })
+    expect(screen.queryByText("App ready")).toBeNull()
+  })
+
   it("restarts readiness checks when leaving a bypass route after timing out", async () => {
     vi.useFakeTimers()
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")

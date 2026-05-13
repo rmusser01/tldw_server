@@ -849,10 +849,10 @@ export const EXTENSION_ONLY_PAGES: PageMapping[] = [
     ]
   },
   {
-    name: "Workspace Playground",
+    name: "Research Studio",
     category: "workspace",
     webuiPath: null,
-    extensionOptionsPath: "/workspace-playground",
+    extensionOptionsPath: "/research-studio",
     extensionSidepanelPath: null,
     sharedComponent: "OptionWorkspacePlayground",
     session: 7,

@@ -60,6 +60,11 @@ import {
 } from "../undo-manager"
 import { getWorkspaceChatNoSourcesHint } from "../source-location-copy"
 import { getWorkspaceChatSearchMessageId } from "../workspace-global-search"
+import {
+  getCapability,
+  getCapabilityCopy,
+  type ResearchStudioCapabilitiesResponse
+} from "../research-studio-capabilities"
 
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
@@ -960,6 +965,8 @@ const SimpleChatInput: React.FC<{
   isLoading: boolean
   isPreparingContext?: boolean
   isChatUnavailable?: boolean
+  isChatUnavailableReason?: "connection" | "capability"
+  chatUnavailableMessage?: string | null
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
@@ -970,6 +977,8 @@ const SimpleChatInput: React.FC<{
   isLoading,
   isPreparingContext = false,
   isChatUnavailable = false,
+  isChatUnavailableReason = "connection",
+  chatUnavailableMessage,
   placeholder,
   seededValue,
   onSeedConsumed,
@@ -1057,10 +1066,11 @@ const SimpleChatInput: React.FC<{
         <div className="px-3 py-2 text-xs text-warning bg-warning/10 border-b border-warning/20 flex items-center gap-2 rounded-t-md">
           <WifiOff className="h-3.5 w-3.5 shrink-0" />
           <span>
-            {t(
-              "playground:chat.disconnectedWarning",
-              "Can't reach the server. Check your connection or server status."
-            )}
+            {chatUnavailableMessage ||
+              t(
+                "playground:chat.disconnectedWarning",
+                "Can't reach the server. Check your connection or server status."
+              )}
           </span>
         </div>
       )}
@@ -1101,7 +1111,12 @@ const SimpleChatInput: React.FC<{
             onKeyDown={handleKeyDown}
             placeholder={
               isChatUnavailable
-                ? t("playground:chat.inputPlaceholderDisconnected", "Server disconnected...")
+                ? isChatUnavailableReason === "capability"
+                  ? t(
+                      "playground:chat.inputPlaceholderUnavailable",
+                      "Chat unavailable..."
+                    )
+                  : t("playground:chat.inputPlaceholderDisconnected", "Server disconnected...")
                 : placeholder || t("playground:chat.inputPlaceholder", "Type / for commands or a message...")
             }
             autoSize={{ minRows: 1, maxRows: 6 }}
@@ -1126,7 +1141,9 @@ const SimpleChatInput: React.FC<{
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={
               isChatUnavailable
-                ? t("playground:chat.serverDisconnected", "Server disconnected")
+                ? isChatUnavailableReason === "capability"
+                  ? t("playground:chat.chatUnavailable", "Chat unavailable")
+                  : t("playground:chat.serverDisconnected", "Server disconnected")
                 : isPreparingContext
                 ? t(
                     "playground:chat.preparingSourceContext",
@@ -1193,12 +1210,18 @@ interface ChatPaneProps {
   provenanceEnabled?: boolean
   statusGuardrailsEnabled?: boolean
   contentWidthMode?: ChatPaneContentWidthMode
+  researchStudioCapabilities?: ResearchStudioCapabilitiesResponse
+  researchStudioCapabilitiesStale?: boolean
+  onRefreshResearchStudioCapabilities?: () => Promise<ResearchStudioCapabilitiesResponse>
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
   provenanceEnabled = true,
   statusGuardrailsEnabled = true,
-  contentWidthMode = "comfortable"
+  contentWidthMode = "comfortable",
+  researchStudioCapabilities,
+  researchStudioCapabilitiesStale = false,
+  onRefreshResearchStudioCapabilities
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
@@ -1869,6 +1892,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSubmit = async (message: string) => {
     if (preparingSourceContext) return
+    let actionChatCapability = chatCapability
+    if (
+      statusGuardrailsEnabled &&
+      onRefreshResearchStudioCapabilities &&
+      (researchStudioCapabilitiesStale || !actionChatCapability)
+    ) {
+      try {
+        actionChatCapability = getCapability(
+          await onRefreshResearchStudioCapabilities(),
+          "chat"
+        )
+      } catch {
+        // Keep the existing snapshot; connection errors are handled by submit.
+      }
+    }
+
+    if (statusGuardrailsEnabled && actionChatCapability?.mode === "block") {
+      const capabilityMessage = getCapabilityCopy(actionChatCapability, "Chat")
+      if (capabilityMessage) {
+        messageApi.warning(capabilityMessage)
+      }
+      return
+    }
+
     const normalizedMessage = message.trim().replace(/\s+/g, " ").toLowerCase()
     const sourceScopeSignature = [...effectiveSelectedSourceIdsRef.current]
       .sort((a, b) => a.localeCompare(b))
@@ -2478,10 +2525,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const hasConnectionFailure =
     connectionState.phase === ConnectionPhase.ERROR &&
     !connectionState.isChecking
-  const isChatUnavailable =
+  const chatCapability = researchStudioCapabilities
+    ? getCapability(researchStudioCapabilities, "chat")
+    : null
+  const chatCapabilityMessage = statusGuardrailsEnabled
+    ? chatCapability
+      ? getCapabilityCopy(chatCapability, "Chat")
+      : null
+    : null
+  const isChatCapabilityRefreshable =
+    statusGuardrailsEnabled &&
+    researchStudioCapabilitiesStale &&
+    Boolean(onRefreshResearchStudioCapabilities)
+  const isChatCapabilityBlocked =
+    statusGuardrailsEnabled &&
+    chatCapability?.mode === "block" &&
+    !isChatCapabilityRefreshable
+  const isChatCapabilityWarn =
+    statusGuardrailsEnabled && chatCapability?.mode === "warn"
+  const isConnectionUnavailable =
     statusGuardrailsEnabled &&
     (submitError !== null || hasConnectionFailure)
-  const showConnectionBanner = isChatUnavailable
+  const isChatUnavailable =
+    isConnectionUnavailable || isChatCapabilityBlocked
+  const showConnectionBanner = isConnectionUnavailable
   const connectionDescription =
     submitError ||
     connectionState.lastError ||
@@ -3047,12 +3114,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               </div>
             </div>
           )}
+          {isChatCapabilityWarn && chatCapabilityMessage && (
+            <div
+              data-testid="workspace-chat-capability-status"
+              className="mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+            >
+              {chatCapabilityMessage}
+            </div>
+          )}
           <SimpleChatInput
             onSubmit={handleSubmit}
             onStop={handleStopStreaming}
             isLoading={streaming}
             isPreparingContext={preparingSourceContext}
             isChatUnavailable={isChatUnavailable}
+            isChatUnavailableReason={
+              isChatCapabilityBlocked && !isConnectionUnavailable
+                ? "capability"
+                : "connection"
+            }
+            chatUnavailableMessage={
+              isChatCapabilityBlocked && !isConnectionUnavailable
+                ? chatCapabilityMessage
+                : null
+            }
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
             slashCommands={slashCommands}

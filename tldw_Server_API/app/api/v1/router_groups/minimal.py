@@ -58,6 +58,13 @@ def iter_minimal_test_router_specs() -> Iterable[RouterSpec]:
             skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.research_studio",
+            log_name="research_studio",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("research-studio",),
+            skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.paper_search",
             log_name="paper_search",
             prefix=f"{API_V1_PREFIX}/paper-search",

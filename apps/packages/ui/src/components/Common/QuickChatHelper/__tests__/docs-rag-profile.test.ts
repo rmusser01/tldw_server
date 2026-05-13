@@ -22,7 +22,8 @@ describe("buildQuickChatDocsRagProfile", () => {
     })
 
     expect(profile.query).toContain("Current page context:")
-    expect(profile.query).toContain("/workspace-playground")
+    expect(profile.query).toContain("Research Studio")
+    expect(profile.query).toContain("/research-studio")
     expect(profile.options.include_parent_document).toBe(false)
   })
 

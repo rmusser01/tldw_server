@@ -1,6 +1,6 @@
 # Research Studio Trust and Status Telemetry Runbook
 
-Operational guidance for validating and troubleshooting Workspace Playground trust/status UX instrumentation.
+Operational guidance for validating and troubleshooting Research Studio trust/status UX instrumentation.
 
 ## Scope
 
@@ -10,6 +10,10 @@ This runbook covers:
 - Incident triage for provenance, status visibility, cancelability, and recovery flows.
 
 Primary implementation references:
+- `tldw_Server_API/app/api/v1/endpoints/research_studio.py`
+- `tldw_Server_API/app/core/Research_Studio/capabilities.py`
+- `tldw_Server_API/app/api/v1/schemas/research_studio_capabilities.py`
+- `apps/packages/ui/src/components/Option/WorkspacePlayground/research-studio-capabilities.ts`
 - `apps/packages/ui/src/utils/workspace-playground-telemetry.ts`
 - `apps/packages/ui/src/components/Option/WorkspacePlayground/index.tsx`
 - `apps/packages/ui/src/components/Option/WorkspacePlayground/ChatPane/index.tsx`
@@ -18,8 +22,167 @@ Primary implementation references:
 - `apps/packages/ui/src/components/Option/WorkspacePlayground/undo-manager.ts`
 - `apps/packages/ui/src/store/workspace.ts`
 
+The implementation references retain `workspace-playground` names as internal
+compatibility identifiers; user-facing routes and labels should use
+`/research-studio` and Research Studio.
+
 Plan reference:
 - `IMPLEMENTATION_PLAN_research_studio_trust_status.md`
+
+## Capability-Aware Health Contract
+
+Research Studio now has a backend-owned capability contract for action-level
+status. Keep route entry permissive for reachable degraded backend health, then
+gate or warn only at the relevant Research Studio action boundary.
+
+Primary endpoint:
+
+```text
+GET /api/v1/research-studio/capabilities
+```
+
+Operational properties:
+- Authenticated and permission-gated with `media.read`.
+- Rate-limited under `research_studio.capabilities`.
+- Derived server-side from local health collectors; the WebUI must not infer
+  action capability from raw subsystem health payloads.
+- Short-lived client cache via `ttl_seconds`; clients refresh before expensive
+  generation actions when the payload is stale.
+- Sanitized response fields only: stable status/mode/dependency/reason-code
+  values, no raw exceptions, local paths, provider keys, or secret values.
+
+Capability payload shape:
+
+```json
+{
+  "status": "degraded",
+  "ttl_seconds": 30,
+  "capabilities": {
+    "source_browse": {
+      "status": "ready",
+      "mode": "allow",
+      "dependencies": ["database", "chacha_notes"]
+    },
+    "chat": {
+      "status": "degraded",
+      "mode": "warn",
+      "dependencies": ["source_browse", "rag", "llm"],
+      "reason_code": "rag_degraded"
+    },
+    "artifact_text_generation": {
+      "status": "ready",
+      "mode": "allow",
+      "dependencies": ["source_browse", "llm"]
+    },
+    "slides_generation": {
+      "status": "unavailable",
+      "mode": "block",
+      "dependencies": ["source_browse", "llm", "slides"],
+      "reason_code": "slides_unavailable"
+    },
+    "audio_summary": {
+      "status": "unknown",
+      "mode": "warn",
+      "dependencies": ["source_browse", "llm", "tts"],
+      "reason_code": "tts_unknown"
+    },
+    "export_download": {
+      "status": "ready",
+      "mode": "allow",
+      "dependencies": ["local_artifact_state"]
+    },
+    "sync_share": {
+      "status": "unknown",
+      "mode": "warn",
+      "dependencies": ["sync"]
+    }
+  },
+  "timestamp": "2026-05-13T00:00:00Z"
+}
+```
+
+Stable values:
+- `status`: `ready`, `degraded`, `unavailable`, or `unknown`.
+- `mode`: `allow`, `warn`, or `block`.
+- `reason_code`: optional machine-readable user-safe reason.
+- `dependencies`: stable dependency identifiers, not raw implementation
+  details.
+
+Mode semantics:
+- `allow`: action proceeds normally.
+- `warn`: action remains available with degraded or unknown status copy.
+- `block`: only the matching action is blocked; adjacent independent actions
+  remain available.
+
+### Current Health Sources
+
+| Source | Current Payload Evidence | Research Studio Use | Limitations |
+|---|---|---|---|
+| `GET /api/v1/health` | Aggregate `status` plus `checks.database`, `checks.metrics`, and `checks.chacha_notes`; HTTP `206` is used for aggregate degraded state. | Broad app entry/status and source-health input to capability derivation. | Still not enough by itself for action-level gating. |
+| `GET /api/v1/health/live` | Lightweight `status: alive`. | Safe for liveness/recovery probing only. | Liveness does not imply any Research Studio workflow capability. |
+| `GET /api/v1/rag/health` | RAG `status` plus component statuses for cache, metrics, batch processor, and circuit breakers. | Input to chat and source-grounded generation capability derivation. | Does not prove LLM provider availability by itself. |
+| `GET /api/v1/llm/health` | LLM subsystem `status` plus provider manager, queue, and rate-limiter details. | Input to chat, text artifact, slides, and audio summary capability derivation. | Does not prove source access, slides DB, or TTS provider availability by itself. |
+| TTS config readiness collector | Configured provider count and enabled-provider count without provider initialization. | Input to Audio Summary capability derivation. | This intentionally avoids downloading or initializing TTS models; exact synthesis failures still surface at request time. |
+| Slides DB collector | Per-user slides database availability. | Input to Slides output capability derivation. | Does not prove LLM generation or source retrieval readiness for slide content. |
+
+### Capability Matrix
+
+| Research Studio Capability | Frontend Behavior | Backend Contract Source |
+|---|---|---|
+| Open Research Studio route | Allow when aggregate health is `ok`, `healthy`, or `degraded`; continue to block only unreachable, malformed, or explicit unhealthy readiness states. | Implemented by `ServerReadinessGate`. |
+| Browse local workspace shell, notes, and locally persisted selection state | Allow with broad degraded/disconnected status visible. | Local/browser state. |
+| Browse backend-backed source details | Allow or warn from `source_browse`; request-level errors still own exact source-detail failures. | `source_browse`. |
+| Chat over selected sources | `warn` keeps Send available with degraded copy; `block` disables Send without showing the generic disconnected banner. | `chat`. |
+| Generate work products or raw text artifacts | Source selection remains first; then `warn` shows inline degraded copy and `block` disables text output buttons/regeneration. | `artifact_text_generation`. |
+| Generate Slides | Slides blocks apply only to Slides and do not block text artifacts. | `slides_generation`. |
+| Generate Audio Summary | Audio blocks apply only to Audio Summary and do not block text artifacts or slides. | `audio_summary`. |
+| Export/download generated artifacts | Local downloads remain available when they do not need backend services; backend-dependent exports respect the capability. | `export_download`. |
+| Sync/share collaborative state | Warn or block only from explicit sync/share capability state. | `sync_share`. |
+
+### Frontend Implementation Decision
+
+The frontend consumes the backend contract but does not duplicate derivation
+rules. If the capability endpoint is unreachable, malformed, unauthorized, or
+times out, Research Studio stays open when aggregate readiness already allowed
+entry. Capabilities become `unknown/warn`, read-only UI remains available, and
+request-level errors still own exact action failures.
+
+The source-selection gate remains higher priority than capability gating. If no
+source is selected, show no-source guidance first. Capability warnings and
+blocks appear only after the user is otherwise eligible to attempt an action.
+
+### Local Verification Checklist
+
+Use this checklist for PR evidence when capability gating or generation
+behavior changes. Do not paste secrets, full keys, raw provider error bodies, or
+full generated artifact text into the PR.
+
+1. Confirm authenticated backend access:
+   - Load the existing local single-user or JWT credentials from saved config.
+   - Verify `GET /api/v1/health` returns reachable `ok`, `healthy`, or
+     `degraded` state.
+   - Verify `GET /api/v1/research-studio/capabilities` returns `200` and all
+     expected capability IDs.
+2. Confirm route behavior with CDP or Playwright:
+   - `/research-studio` renders the Research Studio shell.
+   - `/workspace-playground` redirects or aliases to `/research-studio`.
+   - `/workspace-studio?tab=studio` normalizes to
+     `/research-studio?tab=studio`.
+   - Mobile `/research-studio?tab=studio` opens the Studio tab.
+3. Confirm real local text generation:
+   - Use existing saved provider credentials; do not replace this with a mock
+     provider or fake key.
+   - Seed or select a small deterministic source.
+   - Select the source in Research Studio.
+   - Generate a `Summary` artifact.
+   - Record provider family and model only when visible and non-sensitive.
+   - Record source type/title, artifact type, completion status, output
+     character count, and screenshot path if captured.
+4. Document caveats:
+   - If live generation fails because credentials are absent or invalid, record
+     that as a PR verification blocker.
+   - If Slides or Audio Summary are not fully configured, keep their live
+     certification deferred and rely on capability-mode tests for this PR.
 
 ## Ownership and Escalation
 

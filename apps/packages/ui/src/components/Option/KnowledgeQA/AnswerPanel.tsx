@@ -414,7 +414,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         type: "workspace_handoff",
         source_count: results.length,
       })
-      navigate("/workspace-playground")
+      navigate("/research-studio")
     } catch (error) {
       if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
         return

@@ -66,6 +66,7 @@ import {
 import {
   estimateGenerationSeconds,
   encodeSlidesVisualStyleValue,
+  type ArtifactGenerationOptions,
 } from "./hooks/useArtifactGeneration"
 import {
   STUDIO_DEFAULT_RAG_TOP_K,
@@ -85,6 +86,12 @@ import {
   getResponsiveArtifactModalProps,
   SLIDES_EXPORT_FORMATS,
 } from "./hooks/useArtifactExport"
+import {
+  getArtifactCapabilityId,
+  getCapability,
+  getCapabilityCopy,
+  type ResearchStudioCapabilitiesResponse
+} from "../research-studio-capabilities"
 
 // Re-export for external consumers
 export { estimateGenerationSeconds, estimateGenerationTokens, estimateGenerationCostUsd } from "./hooks/useArtifactGeneration"
@@ -428,12 +435,23 @@ const renderQuickNotesSection = (onCollapse: () => void) => (
 interface StudioPaneProps {
   /** Callback to hide/collapse the pane */
   onHide?: () => void
+  /** Callback to focus or open the workspace Sources pane/tab */
+  onRequestSources?: () => void
+  /** Backend-owned Research Studio capability health contract */
+  researchStudioCapabilities?: ResearchStudioCapabilitiesResponse
+  /** Refresh capability health before expensive generation actions */
+  onRefreshResearchStudioCapabilities?: () => Promise<ResearchStudioCapabilitiesResponse>
 }
 
 /**
  * StudioPane - Right pane for generating outputs
  */
-export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
+export const StudioPane: React.FC<StudioPaneProps> = ({
+  onHide,
+  onRequestSources,
+  researchStudioCapabilities,
+  onRefreshResearchStudioCapabilities
+}) => {
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
   const [messageApi, contextHolder] = message.useMessage()
@@ -693,6 +711,74 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
   } = audioTts
 
   const showAudioSettingsPanel = showTtsSettings || contextualAudioSettingsVisible
+
+  const getOutputCapability = React.useCallback(
+    (
+      type: ArtifactType,
+      payload: ResearchStudioCapabilitiesResponse | undefined =
+        researchStudioCapabilities
+    ) => {
+      if (!payload) return null
+      return getCapability(payload, getArtifactCapabilityId(type))
+    },
+    [researchStudioCapabilities]
+  )
+
+  const getOutputCapabilityCopy = React.useCallback(
+    (
+      type: ArtifactType,
+      label: string,
+      payload: ResearchStudioCapabilitiesResponse | undefined =
+        researchStudioCapabilities
+    ) => {
+      const capability = getOutputCapability(type, payload)
+      return capability ? getCapabilityCopy(capability, label) : null
+    },
+    [getOutputCapability, researchStudioCapabilities]
+  )
+
+  const handleCapabilityAwareGenerateOutput = React.useCallback(
+    async (type: ArtifactType, options?: ArtifactGenerationOptions) => {
+      const button = OUTPUT_BUTTONS.find((entry) => entry.type === type)
+      const label = button?.label ?? type.replace(/_/g, " ")
+      let capabilityPayload = researchStudioCapabilities
+
+      if (onRefreshResearchStudioCapabilities) {
+        try {
+          capabilityPayload = await onRefreshResearchStudioCapabilities()
+        } catch {
+          capabilityPayload = researchStudioCapabilities
+        }
+      }
+
+      const refreshedCapability = getOutputCapability(type, capabilityPayload)
+      if (refreshedCapability?.mode === "block") {
+        messageApi.warning(
+          getCapabilityCopy(refreshedCapability, label) ||
+            t(
+              "playground:studio.outputUnavailable",
+              "{{label}} is unavailable while required services are offline.",
+              { label }
+            )
+        )
+        return
+      }
+
+      if (type === "audio_overview") {
+        setShowTtsSettings(true)
+      }
+      await handleGenerateOutput(type, options)
+    },
+    [
+      getOutputCapability,
+      handleGenerateOutput,
+      messageApi,
+      onRefreshResearchStudioCapabilities,
+      researchStudioCapabilities,
+      setShowTtsSettings,
+      t
+    ]
+  )
 
   const quizParsing = useQuizParsing()
 
@@ -1335,8 +1421,16 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
               isGeneratingOutput && generatingOutputType === type
             const requiresMultipleSources =
               type === "compare_sources" && selectedMediaCount < 2
+            const capability = getOutputCapability(type)
+            const capabilityBlocked = capability?.mode === "block"
+            const capabilityMessage = capability
+              ? getCapabilityCopy(capability, label)
+              : null
             const isDisabled =
-              !hasSelectedSources || isGeneratingOutput || requiresMultipleSources
+              !hasSelectedSources ||
+              isGeneratingOutput ||
+              requiresMultipleSources ||
+              capabilityBlocked
             const artifactStatus = artifactStatusForType(type)
 
             return (
@@ -1353,6 +1447,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                         "playground:studio.selectSourcesFirst",
                         "Select sources first"
                       )
+                    : capabilityBlocked && capabilityMessage
+                    ? capabilityMessage
                     : description
                 }
               >
@@ -1364,10 +1460,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                   onMouseEnter={() => setActiveOutputType(type)}
                   onClick={() => {
                     setActiveOutputType(type)
-                    if (type === "audio_overview") {
-                      setShowTtsSettings(true)
-                    }
-                    void handleGenerateOutput(type)
+                    if (capabilityBlocked) return
+                    void handleCapabilityAwareGenerateOutput(type)
                   }}
                   className={`relative flex flex-col items-center justify-center rounded-lg border p-3 transition-colors ${
                     isDisabled
@@ -1397,8 +1491,112 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
             )
           }
 
+          const renderOutputGroup = (
+            group: (typeof OUTPUT_GROUPS)[number],
+            visibleTypes: Set<ArtifactType>
+          ) => {
+            const groupTypes = group.types.filter((type) => visibleTypes.has(type))
+            if (groupTypes.length === 0) return null
+
+            return (
+              <section key={group.id} className="space-y-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  {group.label}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {groupTypes.map((type) => renderOutputButton(type))}
+                </div>
+              </section>
+            )
+          }
+
+          if (!hasSelectedSources) {
+            return (
+              <div
+                data-testid="studio-source-readiness"
+                className="rounded-md border border-border bg-surface2/40 p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <FileText className="mt-0.5 h-4 w-4 flex-none text-text-muted" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-text">
+                      {t(
+                        "playground:studio.sourceReadinessTitle",
+                        "Select sources to generate work products"
+                      )}
+                    </p>
+                    <p className="mt-1 text-xs leading-snug text-text-muted">
+                      {t(
+                        "playground:studio.selectSourcesHint",
+                        getWorkspaceStudioNoSourcesHint(isMobile)
+                      )}
+                    </p>
+                    {onRequestSources && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        className="mt-3"
+                        onClick={onRequestSources}
+                      >
+                        {t(
+                          "playground:studio.openSourcesCta",
+                          isMobile ? "Open Sources tab" : "Open Sources pane"
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          const primaryVisibleTypes = new Set(
+            primaryButtons.map((button) => button.type)
+          )
+          const secondaryVisibleTypes = new Set(
+            secondaryButtons.map((button) => button.type)
+          )
+          const noticeTypes = [
+            ...primaryButtons,
+            ...(moreOutputsExpanded ? secondaryButtons : [])
+          ]
+          const capabilityNotices = noticeTypes
+            .map((button) => ({
+              key: getArtifactCapabilityId(button.type),
+              message: getOutputCapabilityCopy(button.type, button.label),
+              mode: getOutputCapability(button.type)?.mode
+            }))
+            .filter(
+              (
+                item
+              ): item is {
+                key: string
+                message: string
+                mode: "warn" | "block"
+              } =>
+                Boolean(item.message) &&
+                (item.mode === "warn" || item.mode === "block")
+            )
+            .filter(
+              (item, index, items) =>
+                items.findIndex((candidate) => candidate.key === item.key) === index
+            )
+            .sort((a, b) =>
+              a.mode === b.mode ? 0 : a.mode === "block" ? -1 : 1
+            )
+
           return (
             <div className="space-y-2">
+              {capabilityNotices.length > 0 && (
+                <div
+                  data-testid="studio-capability-warning"
+                  className="space-y-1 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+                >
+                  {capabilityNotices.slice(0, 3).map((notice) => (
+                    <p key={notice.key}>{notice.message}</p>
+                  ))}
+                </div>
+              )}
               <WorkProductTemplateChooser
                 selectedTemplateId={selectedWorkProductTemplateId}
                 selectedSourceCount={selectedMediaCount}
@@ -1414,14 +1612,22 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                     return
                   }
                   setActiveOutputType(template.outputArtifactType)
-                  void handleGenerateOutput(template.outputArtifactType, {
+                  void handleCapabilityAwareGenerateOutput(template.outputArtifactType, {
                     templateId
                   })
                 }}
               />
 
-              <div className="grid grid-cols-2 gap-2">
-                {primaryButtons.map((btn) => renderOutputButton(btn.type))}
+              <div className="pt-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  {t("playground:studio.otherOutputs", "Other outputs")}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {OUTPUT_GROUPS.map((group) =>
+                  renderOutputGroup(group, primaryVisibleTypes)
+                )}
               </div>
 
               {secondaryButtons.length > 0 && (
@@ -1441,8 +1647,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                   </button>
 
                   {moreOutputsExpanded && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {secondaryButtons.map((btn) => renderOutputButton(btn.type))}
+                    <div className="mt-2 space-y-3">
+                      {OUTPUT_GROUPS.map((group) =>
+                        renderOutputGroup(group, secondaryVisibleTypes)
+                      )}
                     </div>
                   )}
                 </>
@@ -1450,16 +1658,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
             </div>
           )
         })()}
-        {!hasSelectedSources && (
-          <p className="mt-2 text-center text-xs text-text-muted">
-            {t(
-              "playground:studio.selectSourcesHint",
-              getWorkspaceStudioNoSourcesHint(isMobile)
-            )}
-          </p>
-        )}
 
-        <div className="mt-4 rounded border border-border bg-surface2/30 p-3">
+        {hasSelectedSources && (
+          <div className="contents">
+            <div className="mt-4 rounded border border-border bg-surface2/30 p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -1527,10 +1729,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                 )}
             </p>
           </div>
-        </div>
+            </div>
 
-        {/* TTS Settings Panel */}
-        <div className="mt-4">
+            {/* TTS Settings Panel */}
+            <div className="mt-4">
           {!contextualAudioSettingsVisible && !showTtsSettings && (
             <p className="mb-2 rounded border border-border bg-surface2/30 px-3 py-2 text-xs text-text-muted">
               {t(
@@ -1701,7 +1903,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
               </div>
             )}
           </div>
-        </div>
+            </div>
+          </div>
+        )}
         </div>
       </div>
 
@@ -1815,7 +2019,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                                   onClick={(event) => {
                                     event.stopPropagation()
                                     if (!hasSelectedSources || isGeneratingOutput) return
-                                    void handleGenerateOutput(artifact.type, {
+                                    void handleCapabilityAwareGenerateOutput(artifact.type, {
                                       mode: "replace",
                                       targetArtifactId: artifact.id,
                                       templateId: artifact.templateId
@@ -1966,7 +2170,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
                               onClick: ({ key }) => {
                                 const mode =
                                   key === "replace" ? "replace" : "new_version"
-                                handleGenerateOutput(artifact.type, {
+                                void handleCapabilityAwareGenerateOutput(artifact.type, {
                                   mode,
                                   targetArtifactId: artifact.id,
                                   templateId: artifact.templateId

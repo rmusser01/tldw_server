@@ -34,6 +34,7 @@ export type ClientPath =
   | "/api/v1/web-clipper/save"
   | "/api/v1/web-clipper/{clip_id}"
   | "/api/v1/web-clipper/{clip_id}/enrichments"
+  | "/api/v1/research-studio/capabilities"
   | "/api/v1/rag/health"
   | "/api/v1/rag/search"
   | "/api/v1/rag/search/stream"

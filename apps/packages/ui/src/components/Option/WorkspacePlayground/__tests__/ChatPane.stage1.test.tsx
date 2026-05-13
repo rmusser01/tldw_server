@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
+import { buildUnknownResearchStudioCapabilities } from "../research-studio-capabilities"
 
 const mockCheckConnectionOnce = vi.fn()
 const mockSaveWorkspaceChatSession = vi.fn()
@@ -225,10 +226,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-function renderChatPane() {
+function renderChatPane(props: Record<string, unknown> = {}) {
   return render(
     <MemoryRouter>
-      <ChatPane />
+      <ChatPane {...props} />
     </MemoryRouter>
   )
 }
@@ -537,6 +538,95 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     expect(screen.getByRole("textbox")).toBeDisabled()
     expect(screen.getByRole("button", { name: /Server disconnected/i })).toBeDisabled()
+  })
+
+  it("blocks chat from capability health without showing a connection failure", () => {
+    const capabilities = buildUnknownResearchStudioCapabilities()
+    capabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+
+    renderChatPane({ researchStudioCapabilities: capabilities })
+
+    expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Chat is unavailable while required services are offline.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("textbox")).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: /Chat unavailable/i })
+    ).toBeDisabled()
+  })
+
+  it("refreshes stale capability health before blocking a chat submit", async () => {
+    const staleCapabilities = buildUnknownResearchStudioCapabilities()
+    staleCapabilities.capabilities.chat = {
+      status: "ready",
+      mode: "allow",
+      dependencies: ["llm"]
+    }
+    const refreshedCapabilities = buildUnknownResearchStudioCapabilities()
+    refreshedCapabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+    const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
+
+    renderChatPane({
+      researchStudioCapabilities: staleCapabilities,
+      researchStudioCapabilitiesStale: true,
+      onRefreshResearchStudioCapabilities: refreshCapabilities
+    })
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Check this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(refreshCapabilities).toHaveBeenCalledTimes(1)
+    })
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it("lets a stale blocked snapshot refresh before allowing chat submit", async () => {
+    const staleCapabilities = buildUnknownResearchStudioCapabilities()
+    staleCapabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+    const refreshedCapabilities = buildUnknownResearchStudioCapabilities()
+    refreshedCapabilities.capabilities.chat = {
+      status: "ready",
+      mode: "allow",
+      dependencies: ["llm"]
+    }
+    const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
+
+    renderChatPane({
+      researchStudioCapabilities: staleCapabilities,
+      researchStudioCapabilitiesStale: true,
+      onRefreshResearchStudioCapabilities: refreshCapabilities
+    })
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    expect(textarea).not.toBeDisabled()
+    fireEvent.change(textarea, { target: { value: "Check this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(refreshCapabilities).toHaveBeenCalledTimes(1)
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        message: "Check this",
+        image: ""
+      })
+    })
   })
 
   it("saves previous workspace chat and restores next workspace chat on switch", () => {
