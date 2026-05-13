@@ -96,6 +96,7 @@ export type SearchRuntimeDetails = {
   rerankingEnabled: boolean
   rerankingStrategy: string
   averageRelevance: number | null
+  sourceStatus: Record<string, KnowledgeSourceStatus>
   webFallbackEnabled: boolean
   webFallbackTriggered: boolean
   webFallbackEngine: string | null
@@ -129,6 +130,12 @@ export type SearchRuntimeDetails = {
     score: number | null
     reason: string | null
   }>
+}
+
+export type KnowledgeSourceStatus = {
+  status: "searched" | "empty" | "unavailable" | "skipped" | "error" | string
+  count: number
+  reason?: string
 }
 
 // Search history item

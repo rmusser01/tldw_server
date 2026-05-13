@@ -311,9 +311,17 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
       <div className={panelClassName}>
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-          <h3 className="text-sm font-semibold text-text">
-            {t("sidepanel:knowledge.title", "Knowledge Search")}
-          </h3>
+          <div className="min-w-0 pr-3">
+            <h3 className="text-sm font-semibold text-text">
+              {t("sidepanel:knowledge.title", "Knowledge Search")}
+            </h3>
+            <p className="mt-0.5 text-[11px] leading-4 text-text-muted">
+              {t(
+                "sidepanel:knowledge.scopeNote",
+                "Search and insert context for this chat. Open /knowledge for the full QA workspace."
+              )}
+            </p>
+          </div>
           <button
             onClick={() => setOpenState(false)}
             className="p-1 text-text-muted hover:text-text transition-colors rounded"

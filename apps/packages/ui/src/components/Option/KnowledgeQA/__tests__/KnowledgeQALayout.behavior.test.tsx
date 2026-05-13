@@ -189,6 +189,14 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     layoutModeState.isResearch = false
   })
 
+  it("uses a visible label for the persistent simple/detailed mode control", () => {
+    renderLayout()
+
+    expect(
+      screen.getByRole("button", { name: "Switch to detailed view" })
+    ).toHaveTextContent("Detailed")
+  })
+
   it("keeps the evidence rail closed while the settings panel is open", async () => {
     state.results = [{ id: "r1" }]
     state.answer = "Answer"

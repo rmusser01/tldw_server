@@ -16,6 +16,7 @@ import {
   getRagSourceLabel,
   isRagSource,
 } from "@/services/rag/sourceMetadata"
+import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 
 const LazyHistoryPane = React.lazy(() =>
   import("../history/HistoryPane").then((module) => ({ default: module.HistoryPane })),
@@ -389,6 +390,16 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
     setSettingsPanelOpen(true)
   }
 
+  const handleAddSources = () => {
+    const request = requestQuickIngestOpen(
+      { source: "knowledge_qa" },
+      { focusTrigger: true }
+    )
+    if (!request) {
+      handleOpenSourceSelector()
+    }
+  }
+
   return (
     <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1">
       <a
@@ -439,6 +450,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                     updateSetting("enable_web_fallback", !settings.enable_web_fallback)
                   }
                   onOpenSourceSelector={handleOpenSourceSelector}
+                  onAddSources={handleAddSources}
                   onOpenSettings={() => setSettingsPanelOpen(true)}
                   generationProvider={settings.generation_provider ?? null}
                   generationModel={settings.generation_model ?? null}
@@ -450,6 +462,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
                   scopeChangeDetails={scopeChangeDetails}
+                  showAddSources={isMobile}
                   className={isDesktopReadyState ? "justify-center" : undefined}
                 />
               ) : (
@@ -493,6 +506,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                       }
                     }}
                     onSelectSources={handleOpenSourceSelector}
+                    onAddSources={handleAddSources}
                     hasSources={settings.sources.length > 0}
                     hasRecentSession={Boolean(recentHistoryItem)}
                     webFallbackEnabled={settings.enable_web_fallback}
@@ -548,6 +562,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}
                       webEnabled={settings.enable_web_fallback}
+                      sourceStatus={knowledgeQa.searchDetails?.sourceStatus}
                     />
                   </React.Suspense>
                 ) : null}
@@ -609,7 +624,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
           <button
             type="button"
             onClick={() => setLayoutMode(isSimple ? "research" : "simple")}
-            className="rounded-lg border border-border bg-surface p-2 shadow-sm hover:bg-hover transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-xs font-medium text-text-muted shadow-sm hover:bg-hover hover:text-text transition-colors"
             title={isSimple ? "Switch to detailed view" : "Switch to simple view"}
             aria-label={isSimple ? "Switch to detailed view" : "Switch to simple view"}
           >
@@ -618,6 +633,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
             ) : (
               <PanelLeftClose className="h-4 w-4 text-text-muted" />
             )}
+            <span>{isSimple ? "Detailed" : "Simple"}</span>
           </button>
         )}
 

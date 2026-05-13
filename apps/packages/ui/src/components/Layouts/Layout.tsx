@@ -140,6 +140,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const isChatScreen = location.pathname === "/chat"
   const isViewportConstrainedRoute = (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname)
+  const mobileSidebarTitle = location.pathname.startsWith("/knowledge")
+    ? t("common:knowledgeSidebar.title", "Knowledge history")
+    : t("common:chatSidebar.title", "Chats")
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {
@@ -403,7 +406,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           <Drawer
             title={
               <div className="flex items-center justify-between">
-                <span>{t("common:chatSidebar.title", "Chats")}</span>
+                <span>{mobileSidebarTitle}</span>
                 <IconButton
                   onClick={() => setSidebarOpen(false)}
                   ariaLabel={t("common:close", { defaultValue: "Close" }) as string}

@@ -81,6 +81,10 @@ describe("KnowledgeQAProvider streaming search", () => {
           diversity: 0.42,
           freshness: null,
         },
+        source_status: {
+          media_db: { status: "searched", count: 1 },
+          prompts: { status: "empty", count: 0, reason: "no_matching_entries" },
+        },
       }
       yield { type: "delta", text: "Hello" }
       await new Promise<void>((resolve) => {
@@ -133,6 +137,10 @@ describe("KnowledgeQAProvider streaming search", () => {
           topicality: 0.88,
           diversity: 0.42,
         }),
+        sourceStatus: {
+          media_db: { status: "searched", count: 1 },
+          prompts: { status: "empty", count: 0, reason: "no_matching_entries" },
+        },
       })
     )
     expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
@@ -214,6 +222,14 @@ describe("KnowledgeQAProvider streaming search", () => {
         coverage: "75",
       },
       metadata: {
+        source_status: {
+          media_db: { status: "searched", count: 1 },
+          world_books: {
+            status: "unavailable",
+            count: 0,
+            reason: "no_retriever_configured",
+          },
+        },
         web_fallback: {
           triggered: true,
           engine_used: "duckduckgo",
@@ -262,6 +278,14 @@ describe("KnowledgeQAProvider streaming search", () => {
         verificationRate: 0.8,
         verificationCoverage: 0.75,
         verificationReportAvailable: true,
+        sourceStatus: {
+          media_db: { status: "searched", count: 1 },
+          world_books: {
+            status: "unavailable",
+            count: 0,
+            reason: "no_retriever_configured",
+          },
+        },
         candidatesConsidered: 25,
         candidatesReturned: 1,
         candidatesRejected: 24,

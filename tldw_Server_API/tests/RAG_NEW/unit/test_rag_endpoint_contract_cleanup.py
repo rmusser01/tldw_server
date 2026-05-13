@@ -35,6 +35,17 @@ def test_streaming_endpoint_delegates_event_generation_to_core():
     assert "agentic_rag_pipeline(" not in stream_source  # nosec B101
 
 
+def test_all_unified_search_variants_accept_prompts_db_dependency() -> None:
+    for endpoint_name in (
+        "unified_search_endpoint",
+        "unified_search_stream_endpoint",
+        "unified_batch_endpoint",
+        "resume_batch_endpoint",
+    ):
+        signature = inspect.signature(getattr(rag_ep, endpoint_name))
+        assert "prompts_db" in signature.parameters, endpoint_name  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_streaming_endpoint_frames_core_events_as_ndjson(monkeypatch: pytest.MonkeyPatch) -> None:
     resolved_request = ResolvedRAGRequest(

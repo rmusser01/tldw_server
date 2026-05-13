@@ -120,7 +120,7 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Knowledge
   // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/knowledge", name: "Knowledge", category: "knowledge" },
+  { path: "/knowledge", name: "Knowledge QA", category: "knowledge" },
   { path: "/world-books", name: "World Books", category: "knowledge" },
   { path: "/dictionaries", name: "Dictionaries", category: "knowledge" },
   { path: "/characters", name: "Characters", category: "knowledge" },

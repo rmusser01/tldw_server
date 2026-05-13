@@ -253,7 +253,7 @@ export function ChatSidebar({
       <div
         data-testid="chat-sidebar"
         className={cn(
-          "flex flex-col h-screen items-center py-4 gap-2 w-12 border-r border-border bg-surface2",
+          "flex flex-col h-screen items-center py-4 gap-2 w-12 overflow-hidden border-r border-border bg-surface2",
           className
         )}
       >
@@ -295,51 +295,53 @@ export function ChatSidebar({
 
         <div className="h-px w-6 bg-border my-2" />
 
-        {sidebarShortcuts.map((item) => (
-          <React.Fragment key={item.id}>
-            {renderShortcutIcon(item)}
-          </React.Fragment>
-        ))}
+        <div className="flex min-h-0 flex-1 w-full flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-1">
+          {sidebarShortcuts.map((item) => (
+            <React.Fragment key={item.id}>
+              {renderShortcutIcon(item)}
+            </React.Fragment>
+          ))}
+        </div>
 
-        <div className="flex-1" />
+        <div className="flex shrink-0 flex-col items-center gap-2">
+          <NotesDockButton
+            appearance="ghost"
+            tooltipPlacement="right"
+            ariaLabel={t("option:notesDock.tooltipSidebar", "Open Notes Dock")}
+          />
 
-        <NotesDockButton
-          appearance="ghost"
-          tooltipPlacement="right"
-          ariaLabel={t("option:notesDock.tooltipSidebar", "Open Notes Dock")}
-        />
-
-        <QuickChatHelperButton
-          variant="inline"
-          showToggle={false}
-          appearance="ghost"
-          tooltipPlacement="right"
-          ariaLabel={t(
-            "option:quickChatHelper.tooltipSidebar",
-            "Open Quick Chat Helper (sidebar)"
-          )}
-        />
-
-        <Tooltip
-          title={t("common:chatSidebar.settings", "Settings")}
-          placement="right"
-        >
-          <button
-            aria-label={t("common:chatSidebar.settings", "Settings")}
-            aria-current={settingsShortcutActive ? "page" : undefined}
-            data-testid="chat-sidebar-settings"
-            onClick={() => navigate("/settings")}
-            className={cn(
-              "p-2 rounded-lg",
-              focusRingClasses,
-              settingsShortcutActive
-                ? "border border-border bg-surface text-text"
-                : "text-text-muted hover:bg-surface hover:text-text"
+          <QuickChatHelperButton
+            variant="inline"
+            showToggle={false}
+            appearance="ghost"
+            tooltipPlacement="right"
+            ariaLabel={t(
+              "option:quickChatHelper.tooltipSidebar",
+              "Open Quick Chat Helper (sidebar)"
             )}
+          />
+
+          <Tooltip
+            title={t("common:chatSidebar.settings", "Settings")}
+            placement="right"
           >
-            <Settings className="size-4" />
-          </button>
-        </Tooltip>
+            <button
+              aria-label={t("common:chatSidebar.settings", "Settings")}
+              aria-current={settingsShortcutActive ? "page" : undefined}
+              data-testid="chat-sidebar-settings"
+              onClick={() => navigate("/settings")}
+              className={cn(
+                "p-2 rounded-lg",
+                focusRingClasses,
+                settingsShortcutActive
+                  ? "border border-border bg-surface text-text"
+                  : "text-text-muted hover:bg-surface hover:text-text"
+              )}
+            >
+              <Settings className="size-4" />
+            </button>
+          </Tooltip>
+        </div>
       </div>
     )
   }

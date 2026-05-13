@@ -700,6 +700,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
             refineLabel="Refine search"
             enableWebLabel="Include web sources"
             selectSourcesLabel="Adjust sources"
+            sourceStatus={searchDetails?.sourceStatus}
             onRefine={() => {
               const input = document.getElementById("knowledge-search-input")
               input?.focus()

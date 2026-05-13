@@ -1108,10 +1108,12 @@ _CANONICAL_SOURCE_TO_DATASOURCE: dict[str, DataSource] = {
     "media_db": DataSource.MEDIA_DB,
     "notes": DataSource.NOTES,
     "characters": DataSource.CHARACTER_CARDS,
-    "chats": DataSource.CHARACTER_CARDS,
+    "chats": DataSource.CHAT_HISTORY,
     "kanban": DataSource.KANBAN,
     "sql": DataSource.SQL,
     "prompts": DataSource.PROMPTS,
+    "world_books": DataSource.WORLD_BOOKS,
+    "dictionaries": DataSource.DICTIONARIES,
     "claims": DataSource.CLAIMS,
 }
 
@@ -1123,6 +1125,8 @@ _DATASOURCE_TO_CANONICAL_SOURCE: dict[DataSource, str] = {
     DataSource.KANBAN: "kanban",
     DataSource.SQL: "sql",
     DataSource.PROMPTS: "prompts",
+    DataSource.WORLD_BOOKS: "world_books",
+    DataSource.DICTIONARIES: "dictionaries",
     DataSource.CLAIMS: "claims",
 }
 
@@ -1162,6 +1166,152 @@ def _sources_to_data_sources(sources: list[str]) -> list[DataSource]:
             raise ValueError(f"Invalid source '{source}'")
         data_sources.append(mapped)
     return data_sources
+
+
+def _metadata_truthy(value: Any) -> bool:
+    """Interpret common metadata flag encodings as booleans."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    return bool(value)
+
+
+def _document_metadata(doc: Any) -> dict[str, Any]:
+    """Return a defensive copy of a retrieved document's metadata mapping."""
+    if isinstance(doc, dict):
+        metadata = doc.get("metadata")
+        return dict(metadata) if isinstance(metadata, dict) else {}
+    metadata = getattr(doc, "metadata", None)
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _document_canonical_source(doc: Any) -> str:
+    """Resolve a document's public source id from its source field or metadata."""
+    source_value: Any = None
+    if isinstance(doc, dict):
+        source_value = doc.get("source")
+        metadata = doc.get("metadata")
+        if source_value is None and isinstance(metadata, dict):
+            source_value = metadata.get("source")
+    else:
+        source_value = getattr(doc, "source", None)
+        if source_value is None:
+            metadata = getattr(doc, "metadata", None)
+            if isinstance(metadata, dict):
+                source_value = metadata.get("source")
+
+    if isinstance(source_value, DataSource):
+        return _DATASOURCE_TO_CANONICAL_SOURCE.get(source_value, source_value.value)
+    source_text = str(source_value or "").strip().lower()
+    if not source_text:
+        return "media_db"
+    mapped = _CANONICAL_SOURCE_TO_DATASOURCE.get(source_text)
+    if mapped is not None:
+        return _DATASOURCE_TO_CANONICAL_SOURCE.get(mapped, source_text)
+    aliases = {
+        "media": "media_db",
+        "notes_db": "notes",
+        "chat_history": "chats",
+        "character_cards": "characters",
+        "character_cards_db": "characters",
+        "kanban_db": "kanban",
+        "task_boards": "kanban",
+        "prompts_db": "prompts",
+        "worldbooks": "world_books",
+        "world_book": "world_books",
+        "world_books_db": "world_books",
+        "dictionary": "dictionaries",
+        "chat_dictionary": "dictionaries",
+        "chat_dictionaries": "dictionaries",
+        "chat_dictionaries_db": "dictionaries",
+    }
+    return aliases.get(source_text, source_text)
+
+
+def _filter_workspace_artifacts(
+    documents: list[Any],
+    *,
+    workspace_id: Optional[str],
+) -> tuple[list[Any], dict[str, int]]:
+    """Exclude workspace/test/generated artifacts outside the requested workspace scope."""
+    filtered_documents: list[Any] = []
+    filtered_counts: dict[str, int] = {}
+    requested_workspace = str(workspace_id).strip() if workspace_id is not None else ""
+
+    for doc in documents:
+        metadata = _document_metadata(doc)
+        doc_workspace = str(metadata.get("workspace_id") or "").strip()
+        origin = str(metadata.get("origin") or "").strip().lower()
+        visibility = str(metadata.get("visibility") or "").strip().lower()
+        is_workspace_artifact = (
+            bool(doc_workspace)
+            or _metadata_truthy(metadata.get("is_generated"))
+            or _metadata_truthy(metadata.get("is_test_artifact"))
+            or origin in {"workspace", "generated", "test", "test_artifact", "workspace_artifact"}
+            or visibility == "workspace"
+        )
+
+        should_filter = False
+        if is_workspace_artifact and not requested_workspace:
+            should_filter = True
+        elif requested_workspace and doc_workspace and doc_workspace != requested_workspace:
+            should_filter = True
+
+        if should_filter:
+            source = _document_canonical_source(doc)
+            filtered_counts[source] = filtered_counts.get(source, 0) + 1
+            continue
+        filtered_documents.append(doc)
+
+    return filtered_documents, filtered_counts
+
+
+def _build_source_status(
+    requested_sources: list[str],
+    *,
+    retriever: Any,
+    documents: list[Any],
+    filtered_counts: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    """Build per-source availability and result-count diagnostics for UI recovery."""
+    retriever_map = getattr(retriever, "retrievers", {}) or {}
+    available_sources = set(retriever_map.keys()) if isinstance(retriever_map, dict) else set()
+    counts: dict[str, int] = {}
+    for doc in documents:
+        source = _document_canonical_source(doc)
+        counts[source] = counts.get(source, 0) + 1
+
+    status: dict[str, dict[str, Any]] = {}
+    for source in requested_sources:
+        data_source = _CANONICAL_SOURCE_TO_DATASOURCE.get(source)
+        count = counts.get(source, 0)
+        if data_source not in available_sources:
+            entry: dict[str, Any] = {
+                "status": "unavailable",
+                "count": 0,
+                "reason": "no_retriever_configured",
+            }
+        elif count == 0:
+            entry = {
+                "status": "empty",
+                "count": 0,
+                "reason": "no_matching_entries",
+            }
+        else:
+            entry = {
+                "status": "searched",
+                "count": count,
+            }
+        filtered_count = filtered_counts.get(source, 0)
+        if filtered_count:
+            entry["filtered_artifact_count"] = filtered_count
+        status[source] = entry
+    return status
 
 
 def normalize_documents_for_generation(docs: list[Any]) -> list[Document]:
@@ -1600,6 +1750,16 @@ async def unified_rag_pipeline(
     if generation_prompt is not None:
         request_metadata["generation_prompt"] = generation_prompt
     request_metadata["max_generation_tokens"] = max_generation_tokens
+    workspace_id = kwargs.get("workspace_id")
+    if workspace_id is None:
+        workspace_id = request_metadata.get("workspace_id")
+    if workspace_id is not None:
+        workspace_id = str(workspace_id).strip() or None
+        if workspace_id is not None:
+            request_metadata["workspace_id"] = workspace_id
+    prompts_db_path = kwargs.get("prompts_db_path")
+    world_books_db_path = kwargs.get("world_books_db_path")
+    chat_dictionaries_db_path = kwargs.get("chat_dictionaries_db_path")
 
     if resolved_request is None:
         resolved_request = resolve_legacy_standard_pipeline_request(
@@ -1929,12 +2089,17 @@ async def unified_rag_pipeline(
     cache_namespace = retrieval_index_namespace or (user_id or None)
     if cache_namespace is None:
         try:
-            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path]
+            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path, prompts_db_path]
             if any(parts):
                 joined = "|".join([str(p or "") for p in parts])
                 cache_namespace = f"db:{hashlib.sha256(joined.encode('utf-8')).hexdigest()[:12]}"
         except (TypeError, ValueError):
             cache_namespace = None
+    workspace_cache_component = workspace_id or "global"
+    if cache_namespace is not None:
+        cache_namespace = f"{cache_namespace}|workspace:{workspace_cache_component}"
+    elif workspace_id is not None:
+        cache_namespace = f"workspace:{workspace_cache_component}"
 
     def _get_cache_instance():
         nonlocal cache_instance
@@ -2071,15 +2236,22 @@ async def unified_rag_pipeline(
             base_kwargs: dict[str, Any] = {"user_id": user_id or "0", "media_db": media_db}
             if chacha_db is not None:
                 base_kwargs["chacha_db"] = chacha_db
+            prompts_db = kwargs.get("prompts_db")
+            if prompts_db is not None:
+                base_kwargs["prompts_db"] = prompts_db
             if sql_retriever is not None:
                 base_kwargs["sql_retriever"] = sql_retriever
 
-            variants = [
-                dict(base_kwargs),
-                {k: v for k, v in base_kwargs.items() if k != "chacha_db"},
-                {k: v for k, v in base_kwargs.items() if k != "sql_retriever"},
-                {k: v for k, v in base_kwargs.items() if k not in {"chacha_db", "sql_retriever"}},
-            ]
+            optional_keys = ("chacha_db", "prompts_db", "sql_retriever")
+            variants = [dict(base_kwargs)]
+            for key in optional_keys:
+                if key in base_kwargs:
+                    variants.append({k: v for k, v in base_kwargs.items() if k != key})
+            variants.append({
+                k: v
+                for k, v in base_kwargs.items()
+                if k not in set(optional_keys)
+            })
             seen: set[tuple[str, ...]] = set()
             for variant in variants:
                 key = tuple(sorted(variant.keys()))
@@ -2094,6 +2266,54 @@ async def unified_rag_pipeline(
                 return MultiDatabaseRetriever(db_paths, user_id=user_id or "0")
             except TypeError:
                 return MultiDatabaseRetriever(db_paths)
+
+        def _build_pipeline_db_paths() -> dict[str, str]:
+            """Return the full source-to-database map for every retrieval pass."""
+            db_paths: dict[str, str] = {}
+            if media_db_path:
+                db_paths["media_db"] = str(media_db_path)
+            if notes_db_path:
+                db_paths["notes_db"] = str(notes_db_path)
+            if prompts_db_path:
+                db_paths["prompts_db"] = str(prompts_db_path)
+            if character_db_path:
+                db_paths["character_cards_db"] = str(character_db_path)
+                db_paths["world_books_db"] = str(world_books_db_path or character_db_path)
+                db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path or character_db_path)
+            else:
+                if world_books_db_path:
+                    db_paths["world_books_db"] = str(world_books_db_path)
+                if chat_dictionaries_db_path:
+                    db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path)
+            if kanban_db_path:
+                db_paths["kanban_db"] = str(kanban_db_path)
+            return db_paths
+
+        source_status_retriever: Any = None
+        cumulative_filtered_artifact_counts: dict[str, int] = {}
+
+        def _apply_workspace_filtering_to_result() -> None:
+            """Filter the current result documents and refresh source diagnostics."""
+            nonlocal result
+            filtered_documents, filtered_artifact_counts = _filter_workspace_artifacts(
+                list(result.documents or []),
+                workspace_id=workspace_id,
+            )
+            for source, count in filtered_artifact_counts.items():
+                cumulative_filtered_artifact_counts[source] = (
+                    cumulative_filtered_artifact_counts.get(source, 0) + count
+                )
+            result.documents = filtered_documents
+            if source_status_retriever is not None:
+                result.metadata["source_status"] = _build_source_status(
+                    _normalize_pipeline_sources(list(retrieval_sources)),
+                    retriever=source_status_retriever,
+                    documents=filtered_documents,
+                    filtered_counts=dict(cumulative_filtered_artifact_counts),
+                )
+            if workspace_id is not None:
+                result.metadata["workspace_id"] = workspace_id
+            result.metadata["documents_retrieved"] = len(filtered_documents)
 
         # ========== LEARNED FUSION / CALIBRATION HELPERS ==========
         def _decorate_calibration_metadata() -> None:
@@ -3040,18 +3260,11 @@ async def unified_rag_pipeline(
                 if MultiDatabaseRetriever and RetrievalConfig:
 
                     # Set up database paths
-                    db_paths = {}
-                    if media_db_path:
-                        db_paths["media_db"] = media_db_path
-                    if notes_db_path:
-                        db_paths["notes_db"] = notes_db_path
-                    if character_db_path:
-                        db_paths["character_cards_db"] = character_db_path
-                    if kanban_db_path:
-                        db_paths["kanban_db"] = kanban_db_path
+                    db_paths = _build_pipeline_db_paths()
 
                     # Initialize retriever (tests may patch this constructor).
                     retriever = _build_multi_retriever(db_paths)
+                    source_status_retriever = retriever
 
                     # Configure retrieval
                     config = RetrievalConfig(
@@ -3099,7 +3312,7 @@ async def unified_rag_pipeline(
                             "media_db": f"user_{user_key}_media_embeddings",
                             "notes": f"user_{user_key}_notes_embeddings",
                         }
-                        if {"character_cards", "characters", "chats"} & source_names:
+                        if {"character_cards", "characters"} & source_names:
                             collection_names["character_cards"] = f"user_{user_key}_character_embeddings"
                         if {"kanban", "kanban_db"} & source_names:
                             collection_names["kanban"] = f"user_{user_key}_kanban_embeddings"
@@ -3302,6 +3515,7 @@ async def unified_rag_pipeline(
                             result.errors.append(f"Query expansion retrieval failed: {str(_exp_err)}")
 
                     result.documents = documents
+                    _apply_workspace_filtering_to_result()
                     # Optional PRF second-pass retrieval to fill remaining slots
                     if (
                         enable_prf
@@ -3546,6 +3760,8 @@ async def unified_rag_pipeline(
                             asyncio.TimeoutError,
                         ) as _dec_err:
                             result.errors.append(f"Query decomposition failed: {str(_dec_err)}")
+
+                    _apply_workspace_filtering_to_result()
 
                     # Attach retrieval guidance prompt in metadata for downstream awareness/debugging
                     try:
@@ -4309,15 +4525,7 @@ async def unified_rag_pipeline(
                         return []
                     try:
                         # Reuse the same retriever setup
-                        db_paths = {}
-                        if media_db_path:
-                            db_paths["media_db"] = media_db_path
-                        if notes_db_path:
-                            db_paths["notes_db"] = notes_db_path
-                        if character_db_path:
-                            db_paths["character_cards_db"] = character_db_path
-                        if kanban_db_path:
-                            db_paths["kanban_db"] = kanban_db_path
+                        db_paths = _build_pipeline_db_paths()
 
                         retriever = _build_multi_retriever(db_paths)
                         config = RetrievalConfig(
@@ -4526,13 +4734,7 @@ async def unified_rag_pipeline(
                     # Re-run retrieval with rewritten query
                     if MultiDatabaseRetriever and RetrievalConfig:
                         try:
-                            db_paths = {}
-                            if media_db_path:
-                                db_paths["media_db"] = media_db_path
-                            if notes_db_path:
-                                db_paths["notes_db"] = notes_db_path
-                            if character_db_path:
-                                db_paths["character_cards_db"] = character_db_path
+                            db_paths = _build_pipeline_db_paths()
 
                             retriever = _build_multi_retriever(db_paths)
                             retrieval_config = RetrievalConfig(
@@ -5858,15 +6060,7 @@ async def unified_rag_pipeline(
                     async def _retrieve_for_claim(c_text: str, top_k: int = 5):
                         try:
                             if MultiDatabaseRetriever and RetrievalConfig:
-                                db_paths = {}
-                                if media_db_path:
-                                    db_paths["media_db"] = media_db_path
-                                if notes_db_path:
-                                    db_paths["notes_db"] = notes_db_path
-                                if character_db_path:
-                                    db_paths["character_cards_db"] = character_db_path
-                                if kanban_db_path:
-                                    db_paths["kanban_db"] = kanban_db_path
+                                db_paths = _build_pipeline_db_paths()
                                 # Initialize multi retriever scoped to user's databases
                                 mdr = _build_multi_retriever(db_paths)
                                 ds = list(resolved_data_sources)
@@ -6640,6 +6834,8 @@ async def unified_rag_pipeline(
 
             except ImportError:
                 result.errors.append("Cost tracking module not available")
+
+        _apply_workspace_filtering_to_result()
 
         # ========== CACHE STORAGE ==========
         if enable_cache and not result.cache_hit and result.documents:

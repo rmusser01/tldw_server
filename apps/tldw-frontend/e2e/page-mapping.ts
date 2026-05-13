@@ -262,12 +262,12 @@ export const PAGE_MAPPINGS: PageMapping[] = [
   // Session 3: Knowledge & Content
   // ═══════════════════════════════════════════════════════════════════════════
   {
-    name: "Knowledge Workspace",
+    name: "Knowledge QA Workspace",
     category: "knowledge",
     webuiPath: "/knowledge",
     extensionOptionsPath: "/knowledge",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionKnowledge",
+    sharedComponent: "KnowledgeQA",
     session: 3,
     checklistItems: CHECKLIST_TEMPLATES.knowledge
   },

@@ -142,6 +142,7 @@
   },
   "knowledge": {
     "title": "Knowledge Search",
+    "scopeNote": "Search and insert context for this chat. Open /knowledge for the full QA workspace.",
     "tabs": {
       "search": "Search",
       "qaSearch": "QA Search",
@@ -233,8 +234,8 @@
       "all": "All",
       "media": "Documents & Media",
       "notes": "Notes",
-      "characters": "Story Characters",
-      "chats": "Conversations",
+      "characters": "Characters",
+      "chats": "Chats",
       "kanban": "Task Boards"
     },
     "preset": "Preset",

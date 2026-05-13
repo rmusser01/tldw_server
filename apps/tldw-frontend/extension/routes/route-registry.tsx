@@ -693,10 +693,9 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       order: 3
     }
   },
-  // Extension intentionally supports thread routes only for now.
-  // Shared-token deep links (/knowledge/shared/:shareToken) are deferred pending product direction.
   { kind: "options", path: "/knowledge", element: <OptionKnowledgeWorkspace /> },
   { kind: "options", path: "/knowledge/thread/:threadId", element: <OptionKnowledgeWorkspace /> },
+  { kind: "options", path: "/knowledge/shared/:shareToken", element: <OptionKnowledgeWorkspace /> },
   { kind: "options", path: "/world-books", element: <OptionWorldBooksWorkspace /> },
   { kind: "options", path: "/dictionaries", element: <OptionDictionariesWorkspace /> },
   { kind: "options", path: "/characters", element: <OptionCharactersWorkspace /> },
