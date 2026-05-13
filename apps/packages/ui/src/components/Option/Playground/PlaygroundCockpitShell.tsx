@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 export type PlaygroundCockpitMode = "cockpit" | "focus";
+export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
 
 export type PlaygroundCockpitShellProps = {
   mode: PlaygroundCockpitMode;
@@ -17,6 +18,8 @@ export type PlaygroundCockpitShellProps = {
   rightRailVisible?: boolean;
   onLeftRailVisibleChange?: (visible: boolean) => void;
   onRightRailVisibleChange?: (visible: boolean) => void;
+  mobilePanel?: PlaygroundCockpitMobilePanel;
+  onMobilePanelChange?: (panel: PlaygroundCockpitMobilePanel) => void;
   leftRail: React.ReactNode;
   rightRail: React.ReactNode;
   statusStrip: React.ReactNode;
@@ -30,12 +33,16 @@ export const PlaygroundCockpitShell = ({
   rightRailVisible = true,
   onLeftRailVisibleChange,
   onRightRailVisibleChange,
+  mobilePanel,
+  onMobilePanelChange,
   leftRail,
   rightRail,
   statusStrip,
   children,
 }: PlaygroundCockpitShellProps) => {
   const { t } = useTranslation("playground");
+  const [uncontrolledMobilePanel, setUncontrolledMobilePanel] =
+    React.useState<PlaygroundCockpitMobilePanel>("context");
   const focusMode = mode === "focus";
   const nextMode: PlaygroundCockpitMode = focusMode ? "cockpit" : "focus";
   const toggleLabel = focusMode
@@ -43,6 +50,28 @@ export const PlaygroundCockpitShell = ({
     : t("cockpit.enterFocus", "Enter focus chat");
   const showLeftRail = !focusMode && leftRailVisible;
   const showRightRail = !focusMode && rightRailVisible;
+  const resolvedMobilePanel =
+    mobilePanel !== undefined ? mobilePanel : uncontrolledMobilePanel;
+  const setMobilePanel = React.useCallback(
+    (panel: PlaygroundCockpitMobilePanel) => {
+      if (onMobilePanelChange) {
+        onMobilePanelChange(panel);
+        return;
+      }
+      setUncontrolledMobilePanel(panel);
+    },
+    [onMobilePanelChange],
+  );
+  const visibleMobilePanel =
+    resolvedMobilePanel === "runtime" && rightRailVisible
+      ? "runtime"
+      : resolvedMobilePanel === "context" && leftRailVisible
+        ? "context"
+        : leftRailVisible
+          ? "context"
+          : rightRailVisible
+            ? "runtime"
+            : null;
   const leftRailLabel = leftRailVisible
     ? t("cockpit.hideContextRail", "Hide context rail")
     : t("cockpit.showContextRail", "Show context rail");
@@ -151,22 +180,64 @@ export const PlaygroundCockpitShell = ({
           data-testid="playground-cockpit-mobile-rails"
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
-          {leftRailVisible && (
-            <details className="rounded-md border border-border bg-surface">
-              <summary className="cursor-pointer px-3 py-2 font-medium text-text">
+          <div
+            role="tablist"
+            aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}
+            className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"
+          >
+            {leftRailVisible ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={visibleMobilePanel === "context"}
+                aria-controls="playground-mobile-context-panel"
+                onClick={() => setMobilePanel("context")}
+                className={`rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  visibleMobilePanel === "context"
+                    ? "bg-bg text-text shadow-sm"
+                    : "text-text-muted hover:bg-bg"
+                }`}
+              >
                 {t("cockpit.context", "Context")}
-              </summary>
-              <div className="border-t border-border p-2">{leftRail}</div>
-            </details>
-          )}
-          {rightRailVisible && (
-            <details className="rounded-md border border-border bg-surface">
-              <summary className="cursor-pointer px-3 py-2 font-medium text-text">
+              </button>
+            ) : null}
+            {rightRailVisible ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={visibleMobilePanel === "runtime"}
+                aria-controls="playground-mobile-runtime-panel"
+                onClick={() => setMobilePanel("runtime")}
+                className={`rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  visibleMobilePanel === "runtime"
+                    ? "bg-bg text-text shadow-sm"
+                    : "text-text-muted hover:bg-bg"
+                }`}
+              >
                 {t("cockpit.runtime", "Runtime")}
-              </summary>
-              <div className="border-t border-border p-2">{rightRail}</div>
-            </details>
-          )}
+              </button>
+            ) : null}
+          </div>
+          {visibleMobilePanel === "context" ? (
+            <section
+              id="playground-mobile-context-panel"
+              role="tabpanel"
+              aria-label={t("cockpit.context", "Context")}
+              className="max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2"
+            >
+              {leftRail}
+            </section>
+          ) : null}
+          {visibleMobilePanel === "runtime" ? (
+            <section
+              id="playground-mobile-runtime-panel"
+              role="tabpanel"
+              aria-label={t("cockpit.runtime", "Runtime")}
+              className="max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2"
+            >
+              {rightRail}
+            </section>
+          ) : null}
         </div>
       )}
 

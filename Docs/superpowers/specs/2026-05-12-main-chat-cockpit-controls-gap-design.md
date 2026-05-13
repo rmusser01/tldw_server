@@ -6,13 +6,13 @@ This spec covers only the main WebUI `/chat` page, routed through `apps/tldw-fro
 
 The goal is not just to keep the old `/chat` controls reachable. The long-term target is a true cockpit in the main chat window: side rails and status areas should provide direct, reliable controls for the current conversation, model/runtime state, context/RAG/tool state, and session state, while still allowing the user to collapse into a focused chat layout that resembles the current chat-first page.
 
-This document originally defined the first implementation slice toward that target. The implementation remains staged for reviewability, but the user has since clarified that all main `/chat` cockpit completion work should stay in the existing draft PR #1582 until it is merge-ready, so the "later slice" language below now means later commits/tasks in the same PR unless explicitly carved out.
+This document originally defined the first implementation slice toward that target. The implementation remains staged for reviewability, but the user has since clarified that PR #1582 should not merge at the first-slice bar. The current merge bar is a fully mature main `/chat` cockpit in the same draft PR. Any "later slice" language below means later commits/tasks in PR #1582 unless explicitly carved out.
 
 ## Source Evidence
 
-- `PlaygroundCockpitShell.tsx` currently provides a binary `cockpit` / `focus` layout toggle, fixed left/right desktop rails, mobile `details` rails, and a status strip slot.
-- `PlaygroundContextRail.tsx` currently summarizes context and opens Search & Context via a custom event. It does not directly manage context, RAG, web search, files, or tool state.
-- `PlaygroundRuntimeInspector.tsx` currently shows streaming/ready state, selected model, message count, thread-search state, and buttons that open model and character settings dialogs.
+- `PlaygroundCockpitShell.tsx` now provides `cockpit` / `focus` layout presets, independent desktop rail visibility, a controlled mobile tab panel for context/runtime rails, and a status strip slot.
+- `PlaygroundContextRail.tsx` now exposes direct web/session/context controls, context counts, and a source inventory for active context sources. It still needs real-state visual QA and any remaining source/action hardening found by browser verification.
+- `PlaygroundRuntimeInspector.tsx` now shows streaming/degraded/ready state, selected provider/model, provider route, scoped setting summaries, model/character entry points, tools entry, message count, and recovery controls where existing handlers support them.
 - `Playground.tsx` derives cockpit rail state from `attachedResearchContext`, `webSearch`, `contextFiles`, `selectedKnowledge`, `ragMediaIds`, `temporaryChat`, `serverChatId`, `historyId`, `selectedModel`, `streaming`, and `selectedCharacter`.
 - `ComposerToolbar.tsx` remains the primary location for many old `/chat` controls: temporary/saved chat, Search & Context, web search, model/prompt/character controls, MCP, dictation, voice chat, attachments, tools, compare mode, and advanced controls.
 - `chat-cockpit.real-server.spec.ts` verifies the running server, degraded-health pass-through, cockpit/focus rail visibility, and reachability of key controls. It does not fully exercise all old `/chat` workflows or true cockpit-side control behavior.
@@ -20,22 +20,24 @@ This document originally defined the first implementation slice toward that targ
 
 ## Design Decision
 
-Treat the work as two tiers:
+Treat the work as two tiers within the same PR:
 
 1. Merge-blocking parity and verification: prove that every existing main `/chat` workflow still works in cockpit and focus modes.
 2. True cockpit-control completion: turn the main chat rails and status area from summaries/launchers into direct, inspectable, keyboard-accessible controls through staged commits in PR #1582.
 
 This avoids merging a shell that looks like a cockpit while leaving the real work surface hidden in the composer. It also avoids disrupting other developers with multiple partially-complete PRs.
 
-The implementation plan should not attempt every cockpit maturity idea in one oversized patch. Use a narrow first implementation slice:
+The previous first implementation slice is useful history, not the merge bar. The remaining PR work should finish the cockpit surface by making these areas demonstrably usable:
 
-1. Make cockpit rails control the highest-risk existing state directly: web search, context entry, temporary/saved session state, model/provider summary, model settings, character/persona entry, streaming/error status, and the existing degraded warning.
-2. Add independent rail collapse only after the direct controls have one shared source of truth with existing composer state.
-3. Keep deeper workflows in the existing dialogs/panels until the cockpit control path is proven by tests.
+1. Context rail: source-oriented inventory, web/files/knowledge/media/research status, per-source actions where shared setters already exist, empty/degraded states, and Search & Context entry.
+2. Runtime rail: provider/model route clarity, scoped provider:model settings summary, character/persona state, tools/MCP availability entry, and turn stop/regenerate recovery where shared handlers already exist.
+3. Status strip: prioritized diagnostic/action surface for streaming, degraded, error, no-model, unsaved, and context-active states.
+4. Responsive cockpit: deliberate mobile tab/drawer interaction that keeps the composer usable and keyboard/touch accessible.
+5. Browser-observed UI/design QA against the real running server, with screenshots for desktop and mobile states.
 
 ## PR #1582 Completion Boundary
 
-The first slice is already implemented. Remaining work should continue in PR #1582 and stay limited to the main `/chat` Playground surface. Do not split this into another PR unless the user explicitly changes direction.
+The first slice is already implemented, but it is not merge-ready under the clarified standard. Remaining work should continue in PR #1582 and stay limited to the main `/chat` Playground surface. Do not split this into another PR unless the user explicitly changes direction.
 
 Still in scope for PR #1582:
 
@@ -45,6 +47,11 @@ Still in scope for PR #1582:
 - Shared handler/store wiring so rail controls update the same state as existing composer controls.
 - Real-server browser verification that proves at least one state-changing cockpit action works without mocked server data.
 - Component/integration tests that prove the new rail controls call shared state paths rather than rendering static labels.
+- Mature context source inventory with per-source actions and empty/degraded states.
+- Mature runtime inspector with route, settings, tools, character/persona, and turn recovery surfaces.
+- Mature status strip hierarchy with direct actions for the highest-priority active state.
+- Mobile cockpit tabs/drawer behavior with composer usability preserved.
+- Desktop and mobile screenshot-based QA from the real `/chat` page.
 
 Out of scope unless directly required to preserve existing `/chat` functionality:
 
@@ -117,9 +124,9 @@ Minimum direct cockpit controls for the first implementation slice:
 
 Do not move every old composer action at once. Compare mode, full image generation, voice conversation, and advanced parameter presets can remain composer/dialog workflows in PR #1582 if they remain reachable and the cockpit exposes accurate status or availability.
 
-## Cockpit Maturity Backlog
+## Cockpit Maturity Work Remaining In PR #1582
 
-The items below describe the broader true-cockpit direction. For PR #1582, implement only the items needed to make the current main `/chat` cockpit functional and merge-safe; leave speculative cockpit maturity work out.
+The items below describe the true-cockpit merge bar for the main `/chat` page. Keep speculative work out, but do not treat the previous first-slice shell as sufficient.
 
 ### P1: Layout control is binary
 
@@ -178,14 +185,14 @@ Recommended design:
 - Prefer shared handlers and stores over parallel rail-only state.
 - Keep one source of truth for every control.
 
-### P2: Mobile cockpit is only a compact disclosure surface
+### P1: Mobile cockpit must remain an intentional cockpit surface
 
-Mobile currently uses `details` sections for rails. That is acceptable as a first pass, but true cockpit controls should remain usable on mobile.
+Mobile should not be an afterthought or a static summary. It should provide a deliberate context/runtime tab or drawer surface that remains usable while the composer stays reachable.
 
 Recommended design:
 
 - Keep focus as the default mobile preset.
-- Use a cockpit drawer or stacked disclosure controls for context/runtime.
+- Use cockpit tabs or a drawer/sheet pattern for context/runtime.
 - Verify every required direct control is reachable by keyboard/touch and does not occlude the composer.
 
 ## Test Coverage Design

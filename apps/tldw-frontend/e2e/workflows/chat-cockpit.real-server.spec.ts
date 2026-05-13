@@ -127,11 +127,19 @@ const closeSearchContextIfOpen = async (page: Page) => {
   }
 };
 
-const assertCoreComposerControls = async (page: Page, options: { mobile?: boolean } = {}) => {
+const assertCoreComposerControls = async (
+  page: Page,
+  options: { mobile?: boolean; composerOnly?: boolean } = {}
+) => {
   await ensureComposerOptionsVisible(page);
   await expect(page.getByTestId('composer-options-toggle')).toBeVisible();
   await expect(page.getByTestId('chat-input')).toBeVisible();
   await expect(page.getByRole('button', { name: /send message/i })).toBeVisible();
+
+  if (options.mobile && options.composerOnly) {
+    return;
+  }
+
   await expect(page.getByTestId('model-selector').first()).toBeVisible();
   await expect(page.getByRole('button', { name: /Select a Prompt/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /Select character or persona/i })).toBeVisible();
@@ -199,13 +207,21 @@ const assertProviderQualifiedPayload = async (page: Page, response: Response) =>
   expect(typeof payload.model).toBe('string');
   expect(payload.model.trim().length).toBeGreaterThan(0);
 
-  const routeText = await page
-    .getByTestId('playground-runtime-inspector')
+  const runtimeInspector = page.getByTestId('playground-runtime-inspector');
+  const visibleRouteLabel = await runtimeInspector
+    .getByText('Provider route')
+    .locator('xpath=following-sibling::p[1]')
+    .textContent()
+    .catch(() => null);
+  const routeText = await runtimeInspector
     .getByText(/^Route /)
     .first()
     .textContent()
     .catch(() => null);
-  const routeLabel = routeText?.replace(/^Route\s+/, '').trim() || '';
+  const routeLabel =
+    visibleRouteLabel?.trim() ||
+    routeText?.replace(/^Route\s+/, '').trim() ||
+    '';
   const separatorIndex = routeLabel.indexOf(':');
   if (separatorIndex > 0 && separatorIndex < routeLabel.length - 1) {
     const provider = routeLabel.slice(0, separatorIndex);
@@ -275,8 +291,13 @@ test.describe('/chat cockpit real-server parity', () => {
     await page.getByRole('button', { name: 'Show runtime rail' }).click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     const contextRail = page.getByTestId('playground-context-rail');
+    const runtimeInspector = page.getByTestId('playground-runtime-inspector');
+    await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+    await expect(runtimeInspector.getByText('Scoped settings')).toBeVisible();
+    await expect(runtimeInspector.getByRole('heading', { name: 'Tools' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'Open MCP tools' })).toBeVisible();
     const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
-    const webSearchControl = contextRail.getByRole('button', { name: 'Web search' });
+    const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
     const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
     expect(['true', 'false']).toContain(initialWebSearchState);
 
@@ -288,9 +309,19 @@ test.describe('/chat cockpit real-server parity', () => {
     } else {
       await expect(cockpitStatus).not.toContainText('Web search on');
     }
+    if (toggledWebSearchState !== 'true') {
+      await webSearchControl.click();
+      await expect(webSearchControl).toHaveAttribute('aria-pressed', 'true');
+    }
+    await expect(cockpitStatus).toContainText('Web search on');
+    const sourceInventory = contextRail.getByRole('list', { name: 'Context sources' });
+    await expect(sourceInventory).toBeVisible();
+    await expect(sourceInventory.getByRole('listitem').filter({ hasText: 'Web search' })).toContainText(
+      'Active'
+    );
 
     await closeSearchContextIfOpen(page);
-    await page.getByRole('button', { name: 'Open Search & Context' }).click();
+    await contextRail.getByRole('button', { name: 'Open Search & Context' }).click();
     await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible();
 
     const mcpToggle = page.getByTestId('mcp-tools-toggle');
@@ -361,8 +392,10 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await expect(
-      page.getByTestId('playground-context-rail').getByRole('button', { name: 'Web search' })
-    ).toHaveAttribute('aria-pressed', toggledWebSearchState);
+      page
+        .getByTestId('playground-context-rail')
+        .getByRole('button', { name: 'Web search', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true');
 
     const smokePrompt = `cockpit smoke ${Date.now()}`;
     await page.getByTestId('chat-input').fill(smokePrompt);
@@ -372,6 +405,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await assertProviderQualifiedPayload(page, chatCompletionResponse);
     await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
     await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
+    await expect(cockpitStatus).not.toContainText('0 messages');
 
     const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
     expect(failingApiHits).toEqual([]);
@@ -382,7 +416,7 @@ test.describe('/chat cockpit real-server parity', () => {
     apiTracker.dispose();
   });
 
-  test('keeps mobile cockpit details and focus composer usable against the live server', async ({
+  test('keeps mobile cockpit tabs and focus composer usable against the live server', async ({
     page,
     request,
   }) => {
@@ -414,13 +448,28 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     const mobileRails = page.getByTestId('playground-cockpit-mobile-rails');
     await expect(mobileRails).toBeVisible();
+    await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toHaveAttribute(
+      'aria-selected',
+      'false'
+    );
     await page.getByRole('button', { name: 'Hide context rail' }).click();
-    await expect(mobileRails.locator('summary', { hasText: 'Context' })).toHaveCount(0);
+    await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveCount(0);
+    await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
     await page.getByRole('button', { name: 'Show context rail' }).click();
-    await expect(mobileRails.locator('summary', { hasText: 'Context' })).toBeVisible();
-    await mobileRails.locator('summary', { hasText: 'Context' }).click();
-    await expect(page.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
-    const mobileWebSearchControl = mobileRails.getByRole('button', { name: 'Web search' });
+    const contextTab = mobileRails.getByRole('tab', { name: 'Context' });
+    await expect(contextTab).toBeVisible();
+    await contextTab.click();
+    await expect(contextTab).toHaveAttribute('aria-selected', 'true');
+    const contextPanel = mobileRails.getByRole('tabpanel', { name: 'Context' });
+    await expect(contextPanel.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
+    const mobileWebSearchControl = contextPanel.getByRole('button', {
+      name: 'Web search',
+      exact: true,
+    });
     const initialMobileWebSearchState =
       await mobileWebSearchControl.getAttribute('aria-pressed');
     await mobileWebSearchControl.click();
@@ -429,9 +478,15 @@ test.describe('/chat cockpit real-server parity', () => {
       initialMobileWebSearchState === 'true' ? 'false' : 'true'
     );
     await expect(page.getByTestId('chat-input')).toBeVisible();
-    await mobileRails.locator('summary', { hasText: 'Runtime' }).click();
-    await expect(page.getByRole('button', { name: 'Open model settings' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open character settings' })).toBeVisible();
+    const runtimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
+    await runtimeTab.click();
+    await expect(runtimeTab).toHaveAttribute('aria-selected', 'true');
+    const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
+    await expect(runtimePanel.getByText('Provider route')).toBeVisible();
+    await expect(runtimePanel.getByText('Scoped settings')).toBeVisible();
+    await expect(runtimePanel.getByRole('heading', { name: 'Tools' })).toBeVisible();
+    await expect(runtimePanel.getByRole('button', { name: 'Open model settings' })).toBeVisible();
+    await expect(runtimePanel.getByRole('button', { name: 'Open character settings' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Enter focus chat' }).click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
@@ -439,6 +494,6 @@ test.describe('/chat cockpit real-server parity', () => {
       'focus'
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
-    await assertCoreComposerControls(page, { mobile: true });
+    await assertCoreComposerControls(page, { mobile: true, composerOnly: true });
   });
 });

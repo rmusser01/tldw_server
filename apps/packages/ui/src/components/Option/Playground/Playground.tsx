@@ -5,16 +5,24 @@ import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
 } from "./PlaygroundCockpitShell";
-import { PlaygroundContextRail } from "./PlaygroundContextRail";
-import { PlaygroundRuntimeInspector } from "./PlaygroundRuntimeInspector";
+import {
+  PlaygroundContextRail,
+  type PlaygroundContextSource,
+} from "./PlaygroundContextRail";
+import {
+  PlaygroundRuntimeInspector,
+  type RuntimeSettingSummary,
+} from "./PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
 import {
   openActorSettings,
+  openMcpTools,
   openModelSettings,
   openSearchAndContext,
   setTemporaryChatFromCockpit,
   toggleWebSearchFromCockpit,
 } from "./playground-cockpit-actions";
+import { getCockpitMessageCount } from "./playground-cockpit-state";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
@@ -110,6 +118,29 @@ const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
 type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
 const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const getRecordString = (
+  value: unknown,
+  keys: string[],
+): string | null => {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const fieldValue = value[key];
+    if (typeof fieldValue === "string" && fieldValue.trim().length > 0) {
+      return fieldValue.trim();
+    }
+    if (
+      (typeof fieldValue === "number" || typeof fieldValue === "bigint") &&
+      String(fieldValue).trim().length > 0
+    ) {
+      return String(fieldValue);
+    }
+  }
+  return null;
+};
+
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -156,6 +187,9 @@ export const Playground = () => {
     useStorage<boolean>("playgroundChatContextRailVisible", true);
   const [cockpitRuntimeRailVisible, setCockpitRuntimeRailVisible] =
     useStorage<boolean>("playgroundChatRuntimeRailVisible", true);
+  const [mobileCockpitPanel, setMobileCockpitPanel] = useStorage<
+    "context" | "runtime" | null
+  >("playgroundChatMobileCockpitPanel", "context");
   const {
     messages,
     history,
@@ -186,7 +220,16 @@ export const Playground = () => {
     stopStreamingRequest,
     regenerateLastMessage,
   } = useMessageOption();
-  const { setSystemPrompt } = useStoreChatModelSettings();
+  const {
+    setSystemPrompt,
+    temperature,
+    topP,
+    topK,
+    numCtx,
+    numPredict,
+    reasoningEffort,
+    apiProvider,
+  } = useStoreChatModelSettings();
   const composerBottomOffsetPx = stickyChatInput
     ? resolveComposerBottomOffsetPx(composerDockMetrics)
     : 0;
@@ -211,6 +254,7 @@ export const Playground = () => {
     useSmartScroll(messages, streaming, 120, {
       bottomOffsetPx: composerBottomOffsetPx,
     });
+
   const [dropState, setDropState] = React.useState<
     "idle" | "dragging" | "error"
   >("idle");
@@ -1482,6 +1526,166 @@ export const Playground = () => {
     selectedModelProvider && selectedModel
       ? selectedModel.slice(selectedModelProvider.length + 1)
       : selectedModel;
+  const effectiveSelectedProvider = selectedModelProvider || apiProvider || null;
+  const contextFileItems = Array.isArray(contextFiles) ? contextFiles : [];
+  const selectedKnowledgeItems = Array.isArray(selectedKnowledge)
+    ? selectedKnowledge
+    : selectedKnowledge
+      ? [selectedKnowledge]
+      : [];
+  const ragMediaItems = Array.isArray(ragMediaIds) ? ragMediaIds : [];
+  const removeContextFileAt = React.useCallback(
+    (index: number) => {
+      setContextFiles(contextFileItems.filter((_, itemIndex) => itemIndex !== index));
+    },
+    [contextFileItems, setContextFiles],
+  );
+  const removeRagMediaAt = React.useCallback(
+    (index: number) => {
+      const nextIds = ragMediaItems.filter((_, itemIndex) => itemIndex !== index);
+      setRagMediaIds(nextIds.length > 0 ? nextIds : null);
+    },
+    [ragMediaItems, setRagMediaIds],
+  );
+  const contextSources = ([
+    webSearch
+      ? {
+          id: "web-search",
+          kind: "web" as const,
+          label: toText(t("playground:cockpit.web", "Web")),
+          title: toText(t("playground:cockpit.webSearch", "Web search")),
+          detail: toText(
+            t(
+              "playground:cockpit.webSearchDetail",
+              "Enabled for the next reply.",
+            ),
+          ),
+          state: "active" as const,
+          onRemove: toggleWebSearchFromCockpit,
+          removeLabel: toText(
+            t("playground:cockpit.disableWebSearch", "Disable web search"),
+          ),
+        }
+      : null,
+    attachedResearchContext
+      ? {
+          id: `research-${attachedResearchContext.run_id || "active"}`,
+          kind: "research" as const,
+          label: toText(t("playground:cockpit.research", "Research")),
+          title:
+            attachedResearchContext.query ||
+            attachedResearchContext.question ||
+            toText(t("playground:cockpit.researchContext", "Research context")),
+          detail: attachedResearchContext.run_id
+            ? toText(
+                t("playground:cockpit.researchRun", "Run {{runId}}", {
+                  runId: attachedResearchContext.run_id,
+                }),
+              )
+            : null,
+          state: "active" as const,
+          onOpen: () => openSearchAndContext({ tab: "context" }),
+          onRemove: handleRemoveAttachedResearchContext,
+          removeLabel: toText(
+            t(
+              "playground:cockpit.clearResearchContext",
+              "Clear research context",
+            ),
+          ),
+        }
+      : null,
+    ...contextFileItems.map((file, index) => {
+      const title =
+        getRecordString(file, ["name", "filename", "title", "id"]) ||
+        toText(
+          t("playground:cockpit.fileFallback", "File {{index}}", {
+            index: index + 1,
+          }),
+        );
+      return {
+        id: `file-${getRecordString(file, ["id"]) || index}`,
+        kind: "file" as const,
+        label: toText(t("playground:cockpit.file", "File")),
+        title,
+        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+        state: "active" as const,
+        onRemove: () => removeContextFileAt(index),
+      };
+    }),
+    ...selectedKnowledgeItems.map((knowledge, index) => {
+      const title =
+        getRecordString(knowledge, ["title", "name", "id"]) ||
+        toText(
+          t("playground:cockpit.knowledgeFallback", "Knowledge {{index}}", {
+            index: index + 1,
+          }),
+        );
+      return {
+        id: `knowledge-${getRecordString(knowledge, ["id"]) || index}`,
+        kind: "knowledge" as const,
+        label: toText(t("playground:cockpit.knowledge", "Knowledge")),
+        title,
+        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+        state: "active" as const,
+        onOpen: () => openSearchAndContext({ tab: "context" }),
+        onRemove: () => setSelectedKnowledge(null),
+      };
+    }),
+    ...ragMediaItems.map((mediaId, index) => ({
+      id: `media-${mediaId}`,
+      kind: "media" as const,
+      label: toText(t("playground:cockpit.media", "Media")),
+      title: toText(
+        t("playground:cockpit.mediaScopeLabel", "Media scope {{id}}", {
+          id: mediaId,
+        }),
+      ),
+      detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+      state: "active" as const,
+      onOpen: () => openSearchAndContext({ tab: "context" }),
+      onRemove: () => removeRagMediaAt(index),
+    })),
+  ] satisfies Array<PlaygroundContextSource | null>).filter(
+    Boolean,
+  ) as PlaygroundContextSource[];
+  const runtimeSettingSummaries: RuntimeSettingSummary[] = [
+    typeof temperature === "number"
+      ? {
+          label: toText(t("playground:cockpit.temperature", "Temperature")),
+          value: String(temperature),
+        }
+      : null,
+    typeof topP === "number"
+      ? {
+          label: toText(t("playground:cockpit.topP", "Top P")),
+          value: String(topP),
+        }
+      : null,
+    typeof topK === "number"
+      ? {
+          label: toText(t("playground:cockpit.topK", "Top K")),
+          value: String(topK),
+        }
+      : null,
+    typeof numCtx === "number"
+      ? {
+          label: toText(t("playground:cockpit.contextWindow", "Context")),
+          value: String(numCtx),
+        }
+      : null,
+    typeof numPredict === "number"
+      ? {
+          label: toText(t("playground:cockpit.maxTokens", "Max tokens")),
+          value: String(numPredict),
+        }
+      : null,
+    typeof reasoningEffort === "string" && reasoningEffort.length > 0
+      ? {
+          label: toText(t("playground:cockpit.reasoning", "Reasoning")),
+          value: reasoningEffort,
+        }
+      : null,
+  ].filter((item): item is RuntimeSettingSummary => Boolean(item));
   const statusContextSummary = [
     webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
     contextFileCount > 0
@@ -1520,10 +1724,12 @@ export const Playground = () => {
           )
       : null,
   ].filter((item): item is string => Boolean(item));
+  const cockpitMessageCount = getCockpitMessageCount(messages, history);
   const cockpitLeftRail = (
     <PlaygroundContextRail
       hasContext={hasChatContext}
       contextSummary={contextSummary}
+      contextSources={contextSources}
       sessionLabel={sessionLabel}
       historyLinked={Boolean(historyId)}
       webSearch={webSearch}
@@ -1546,7 +1752,7 @@ export const Playground = () => {
   const cockpitRightRail = (
     <PlaygroundRuntimeInspector
       streaming={streaming}
-      selectedProvider={selectedModelProvider}
+      selectedProvider={effectiveSelectedProvider}
       selectedModel={selectedModelName}
       providerRouteLabel={selectedModel || null}
       runtimeStatus={
@@ -1557,7 +1763,7 @@ export const Playground = () => {
             : "ready"
       }
       runtimeStatusDetail={runtimeStatusDetail}
-      messageCount={messages.length}
+      messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
       selectedCharacterName={selectedCharacter?.name || null}
       onOpenModelSettings={openModelSettings}
@@ -1566,15 +1772,27 @@ export const Playground = () => {
       onStopStreaming={() => stopStreamingRequest()}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
+      settingSummaries={runtimeSettingSummaries}
+      toolSummary={{
+        state: "available",
+        label: toText(t("playground:cockpit.mcpTools", "MCP tools")),
+        detail: toText(
+          t(
+            "playground:cockpit.toolsComposerManaged",
+            "Open composer tool controls to inspect availability.",
+          ),
+        ),
+        onOpen: openMcpTools,
+      }}
     />
   );
   const cockpitStatusStrip = (
     <PlaygroundStatusStrip
       mode={normalizedChatLayoutMode}
       streaming={streaming}
-      selectedProvider={selectedModelProvider}
+      selectedProvider={effectiveSelectedProvider}
       selectedModel={selectedModelName}
-      messageCount={messages.length}
+      messageCount={cockpitMessageCount}
       sessionLabel={sessionLabel}
       hasContext={hasChatContext}
       contextSummary={statusContextSummary}
@@ -1582,6 +1800,9 @@ export const Playground = () => {
       degraded={serverReadinessState === "degraded"}
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
+      onStopStreaming={() => stopStreamingRequest()}
+      onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
+      onOpenModelSettings={openModelSettings}
     />
   );
 
@@ -1646,6 +1867,8 @@ export const Playground = () => {
           rightRailVisible={normalizedCockpitRuntimeRailVisible}
           onLeftRailVisibleChange={setCockpitContextRailVisible}
           onRightRailVisibleChange={setCockpitRuntimeRailVisible}
+          mobilePanel={mobileCockpitPanel}
+          onMobilePanelChange={setMobileCockpitPanel}
           leftRail={cockpitLeftRail}
           rightRail={cockpitRightRail}
           statusStrip={cockpitStatusStrip}

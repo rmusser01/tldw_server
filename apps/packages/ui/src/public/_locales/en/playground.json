@@ -2638,5 +2638,140 @@
   },
   "tts_progressSegments": {
     "message": "{{completed}}/{{total}} segments"
+  },
+  "cockpit_noContextDetail": {
+    "message": "Nothing extra will be added to the next reply."
+  },
+  "cockpit_contextSummary": {
+    "message": "Context summary"
+  },
+  "cockpit_contextSources": {
+    "message": "Context sources"
+  },
+  "cockpit_activeSourceCountOne": {
+    "message": "1 active source"
+  },
+  "cockpit_activeSourceCountMany": {
+    "message": "{{count}} active sources"
+  },
+  "cockpit_armed": {
+    "message": "Armed"
+  },
+  "cockpit_idle": {
+    "message": "Idle"
+  },
+  "cockpit_active": {
+    "message": "Active"
+  },
+  "cockpit_available": {
+    "message": "Available"
+  },
+  "cockpit_disabled": {
+    "message": "Disabled"
+  },
+  "cockpit_removeSource": {
+    "message": "Remove {{title}}"
+  },
+  "cockpit_openSource": {
+    "message": "Open {{title}}"
+  },
+  "cockpit_web": {
+    "message": "Web"
+  },
+  "cockpit_webSearchDetail": {
+    "message": "Enabled for the next reply."
+  },
+  "cockpit_disableWebSearch": {
+    "message": "Disable web search"
+  },
+  "cockpit_research": {
+    "message": "Research"
+  },
+  "cockpit_researchContext": {
+    "message": "Research context"
+  },
+  "cockpit_researchRun": {
+    "message": "Run {{runId}}"
+  },
+  "cockpit_file": {
+    "message": "File"
+  },
+  "cockpit_fileFallback": {
+    "message": "File {{index}}"
+  },
+  "cockpit_knowledge": {
+    "message": "Knowledge"
+  },
+  "cockpit_knowledgeFallback": {
+    "message": "Knowledge {{index}}"
+  },
+  "cockpit_media": {
+    "message": "Media"
+  },
+  "cockpit_mediaScopeLabel": {
+    "message": "Media scope {{id}}"
+  },
+  "cockpit_nextReply": {
+    "message": "Used on next reply"
+  },
+  "cockpit_contextEmptyWorkbench": {
+    "message": "Add web search, files, knowledge, media, or research context before sending."
+  },
+  "cockpit_turnRunning": {
+    "message": "Turn running"
+  },
+  "cockpit_turnIdle": {
+    "message": "Turn idle"
+  },
+  "cockpit_providerRoute": {
+    "message": "Provider route"
+  },
+  "cockpit_stop": {
+    "message": "Stop"
+  },
+  "cockpit_scopedSettings": {
+    "message": "Scoped settings"
+  },
+  "cockpit_settingsDefault": {
+    "message": "Using default settings for this provider:model."
+  },
+  "cockpit_temperature": {
+    "message": "Temperature"
+  },
+  "cockpit_topP": {
+    "message": "Top P"
+  },
+  "cockpit_topK": {
+    "message": "Top K"
+  },
+  "cockpit_contextWindow": {
+    "message": "Context"
+  },
+  "cockpit_maxTokens": {
+    "message": "Max tokens"
+  },
+  "cockpit_reasoning": {
+    "message": "Reasoning"
+  },
+  "cockpit_toolAvailability": {
+    "message": "Tool availability"
+  },
+  "cockpit_tools": {
+    "message": "Tools"
+  },
+  "cockpit_mcpTools": {
+    "message": "MCP tools"
+  },
+  "cockpit_openMcpTools": {
+    "message": "Open MCP tools"
+  },
+  "cockpit_openTools": {
+    "message": "Open tools"
+  },
+  "cockpit_toolsComposerManaged": {
+    "message": "Open composer tool controls to inspect availability."
+  },
+  "cockpit_mobilePanelTabs": {
+    "message": "Mobile cockpit panels"
   }
 }

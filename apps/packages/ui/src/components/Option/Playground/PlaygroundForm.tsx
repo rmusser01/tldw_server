@@ -176,7 +176,9 @@ import { buildConversationSummaryCheckpointPrompt } from "./conversation-summary
 import {
   OPEN_ACTOR_SETTINGS_EVENT,
   OPEN_KNOWLEDGE_PANEL_EVENT,
+  OPEN_MCP_TOOLS_EVENT,
   OPEN_MODEL_SETTINGS_EVENT,
+  OPEN_TURN_TOOLS_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
 } from "./playground-cockpit-actions";
@@ -1224,6 +1226,30 @@ export const PlaygroundForm = ({
       setToolsPopoverOpen,
     ],
   );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      closeComposerPopoversExcept("mcp");
+      setMcpPopoverOpen(true);
+    };
+    window.addEventListener(OPEN_MCP_TOOLS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_MCP_TOOLS_EVENT, handler);
+    };
+  }, [closeComposerPopoversExcept, setMcpPopoverOpen]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      closeComposerPopoversExcept("tools");
+      setToolsPopoverOpen(true);
+    };
+    window.addEventListener(OPEN_TURN_TOOLS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_TURN_TOOLS_EVENT, handler);
+    };
+  }, [closeComposerPopoversExcept, setToolsPopoverOpen]);
 
   React.useEffect(() => {
     setOptionalPanelVisible("model-catalog", modelDropdownOpen);

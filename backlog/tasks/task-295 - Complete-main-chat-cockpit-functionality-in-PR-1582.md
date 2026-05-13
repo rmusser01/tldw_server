@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-13 01:27'
+updated_date: '2026-05-13 04:47'
 labels:
   - webui
   - chat
@@ -33,16 +33,21 @@ Finish the remaining main WebUI /chat cockpit work on the existing draft PR #158
 - [x] #3 Cockpit rails and status strip expose direct controls/status for the highest-value shared chat state without creating rail-local duplicate state: context/session controls, runtime/model/persona controls, degraded/error/streaming state, and independent rail visibility where supported.
 - [x] #4 Focused unit/component tests cover new shared-state controls and layout behavior; real-server Playwright coverage exercises the running backend without mocked API data or route interception.
 - [x] #5 Known baseline blockers are documented separately from this PR's changed behavior, and the draft PR is pushed with verification evidence.
+- [x] #6 Context rail is a mature context work surface with visible source inventory, per-source actions, empty/degraded states, and real shared-state wiring.
+- [x] #7 Runtime rail is a mature operational inspector with provider/model routing state, scoped settings summary, character/persona state, tool availability, and turn recovery controls.
+- [x] #8 Status strip acts as a prioritized diagnostic/action surface instead of a passive pill list, with clear hierarchy for streaming, degraded, error, no-model, unsaved, and context-active states.
+- [x] #9 Mobile cockpit uses a deliberate drawer/sheet/tab interaction that keeps the composer usable and preserves keyboard/touch accessibility.
+- [x] #10 Visual hierarchy, density, copy, iconography, focus behavior, and responsive screenshots pass a full UI/design QA sweep against real /chat states.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Stage 1: Reconcile spec/plan with the single-PR scope for PR #1582.
-Stage 2: Add independent cockpit context/runtime rail visibility controls with persisted state and tests.
-Stage 3: Add remaining direct rail/status controls only where they map to existing shared /chat state and handlers.
-Stage 4: Expand real-server Playwright verification against the running backend without mocked API data or route interception.
-Stage 5: Push PR #1582 as draft with focused verification evidence and documented baseline blockers.
+Stage 6: Mature cockpit IA and test targets. Update the design/plan to replace first-slice language with the fully mature cockpit merge bar and identify component-level test expectations.
+Stage 7: Context rail maturity. Add source-oriented context inventory, per-source actions, richer empty/degraded states, and tests for shared-state behavior.
+Stage 8: Runtime rail maturity. Add provider/model route diagnostics, scoped settings summary, character/persona state clarity, tools/MCP availability summary, recovery controls, and tests.
+Stage 9: Status strip and responsive cockpit maturity. Rework the strip into a prioritized diagnostic/action surface and replace mobile details with a cockpit sheet/tab pattern that preserves composer usability.
+Stage 10: Visual QA and verification. Run focused Vitest, real-server Playwright against /chat with no route mocks, screenshot desktop/mobile states, diff check, and document remaining baseline blockers separately.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -85,22 +90,20 @@ Reopened for new PR #1582 review comments posted after CI closeout: validate the
 PR #1582 review follow-up: fixed the new valid Qodo/Cubic comments. ServerReadinessGate now emits readiness state after allowed children mount; /chat tracks degraded readiness separately from degraded check names; provider-qualified compare branches preserve provider:model identity while sending the bare model id to the API; scoped OCR language values persist even when matching global defaults; selectedKnowledge clearing is typed as nullable; the real-server cockpit spec no longer embeds a fallback API key; and cockpit English locale keys now mirror into extension public locale messages.
 
 Verification for latest review follow-up: ServerReadinessGate degraded test passed (5 tests). Focused UI suites passed: Playground cockpit controls, playground locale mirror, model scoped settings, resolve-api-provider, and chat-action-utils RAG/compare helpers (39 tests). Real-server /chat cockpit Playwright passed against http://127.0.0.1:8000 with degraded health from chacha_notes and no route interception (3 tests). git diff --check passed. Package UI tsc remains blocked by unrelated baseline test/type errors; verify:design-system-state remains blocked by unrelated Chatbooks baseline entries after the new Playground state-label findings were removed. Bandit was not applicable because this follow-up touched TypeScript/TSX/JSON/Playwright/Markdown only.
+
+Merge bar changed from first complete slice to fully mature main /chat cockpit. Reopened TASK-295 for additional UI/design completion in the same draft PR #1582, still scoped to main /chat only and not sidepanel/sidebar.
+
+Completed mature main /chat cockpit slice in draft PR #1582. Added actionable context-source inventory, runtime/provider diagnostics, scoped setting summaries, MCP/tool entry points, prioritized status strip actions, controlled mobile cockpit tabs, shared message-count state, and stale i18n count recovery.
+
+Mature cockpit verification: focused cockpit Vitest passed (20 tests); real-server Playwright /chat cockpit passed against http://127.0.0.1:8000 with no route interception (3 tests); screenshot harness returned a 200 chat completion with two rendered messages and status strip text showing 2 messages; git diff --check passed; filtered package-ui tsc output had no changed Playground-file errors; design-state filter showed only the existing allowed PlaygroundForm baseline, while the full command remains blocked by existing Chatbooks/shared-product-state baseline findings. Bandit not applicable because only frontend/docs/e2e files were touched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the main /chat cockpit single-PR slice for draft PR #1582: independent rail visibility, direct shared-state rail actions, degraded-health cockpit warnings, and real-server parity coverage are now in the PR branch. Verification includes focused component tests, readiness-gate tests, real-server Playwright without route mocks, and a real-server screenshot capture.
+Completed the fully mature main /chat cockpit slice in the existing draft PR #1582, still scoped to the main chat page only. The cockpit now exposes source-level context management, runtime/provider diagnostics, scoped provider:model settings, tool/MCP entry points, turn recovery controls, status-strip actions, mobile cockpit tabs, and real-server coverage without mocked API data.
 
-Review follow-up fixed the remaining active scoped-settings defect and revalidated the PR review-comment surface with focused UI, backend, and real-server /chat coverage.
-
-CI follow-up scoped the Playground gate install away from extension WXT preparation and verified the exact gate scripts locally before pushing.
-
-Extended the install-time WXT prepare skip across non-extension frontend/e2e workflows after the same install-time timeout affected onboarding/UX checks.
-
-Closeout refresh confirmed all actionable PR review threads are resolved and the PR remains draft. The remaining red GitHub status is the broad Full Suite matrix timing out/cancelling in non-chat test coverage, not a targeted /chat or frontend gate regression from this PR.
-
-Latest review follow-up fixed the new Qodo/Cubic issues around readiness-event timing, degraded status display, provider-qualified compare identity, scoped OCR settings, nullable knowledge clearing, locale coverage, and real-server API-key handling. Focused unit/component tests and the real-server /chat Playwright spec passed; known repo-wide type/design-state baselines remain unrelated to this /chat slice.
+Verification is recorded with focused Vitest, real-server Playwright, screenshot evidence, diff check, filtered typecheck, and design-state baseline notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
