@@ -182,6 +182,12 @@ ACP retention and redaction rules already cover session detail, events,
 artifacts, diagnostics, and audit views. Workspace integration should consume
 those views rather than reimplement redaction.
 
+The workspace handoff should stay coordinated with the retention/export/delete
+policy tracked in #1512 and the support/audit redaction work tracked in #1513.
+Until those issues are fully closed, this integration must not introduce a
+separate workspace-level ACP retention pipeline or bypass the existing ACP
+support-safe view controls.
+
 Workspace-level history should show safe previews and link to the authenticated
 ACP detail routes. Support-safe views should prefer the existing `redacted=true`
 ACP route behavior and sanitized diagnostic/audit metadata.

@@ -33,7 +33,8 @@ import {
   Settings,
   Star,
   Share2,
-  CircleHelp
+  CircleHelp,
+  Bot
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -88,6 +89,7 @@ import {
   normalizeRolloutPercentage
 } from "@/utils/feature-rollout"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
+import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -171,6 +173,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [editName, setEditName] = React.useState("")
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
+  const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [deleteConfirmInput, setDeleteConfirmInput] = React.useState("")
   const [deleteTargetWorkspace, setDeleteTargetWorkspace] = React.useState<{
@@ -516,6 +519,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     // Save current workspace before navigating
     saveCurrentWorkspace()
     navigate("/")
+  }
+
+  const handleOpenAgentTaskModal = () => {
+    setAgentTaskModalOpen(true)
+  }
+
+  const handleCloseAgentTaskModal = () => {
+    setAgentTaskModalOpen(false)
+  }
+
+  const handleOpenAgentTasksPage = () => {
+    setAgentTaskModalOpen(false)
+    navigate("/agent-tasks")
   }
 
   const handleCreateNewWorkspace = () => {
@@ -1443,6 +1459,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     ...(workspaceId
       ? [
           {
+            key: "create-agent-task",
+            icon: <Bot className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.createAgentTask",
+              "Create agent task"
+            ),
+            onClick: handleOpenAgentTaskModal
+          },
+          {
             key: "duplicate-current",
             icon: <Copy className="h-4 w-4" />,
             label: t(
@@ -1729,6 +1754,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </Tooltip>
         </Dropdown>
       </div>
+
+      <WorkspaceAgentTaskHandoffModal
+        open={agentTaskModalOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        workspaceTag={workspaceTag}
+        onBeforeSubmit={saveCurrentWorkspace}
+        onCancel={handleCloseAgentTaskModal}
+        onOpenAgentTasks={handleOpenAgentTasksPage}
+      />
 
       <input
         ref={importFileInputRef}
@@ -2456,7 +2491,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         }}
         centered
         maskClosable={false}
-        destroyOnClose
+        destroyOnHidden
       >
         {deleteTargetWorkspace && (
           <div className="space-y-3">
