@@ -4664,7 +4664,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-info-l-1fyinzi",
+    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-info-l-1cmka5v",
     "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -4675,7 +4675,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-warnin-1703bpg",
+    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-warnin-1345qhv",
     "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -5320,17 +5320,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/WritingPlayground/index.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Ready",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx before the guard.",
     "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },

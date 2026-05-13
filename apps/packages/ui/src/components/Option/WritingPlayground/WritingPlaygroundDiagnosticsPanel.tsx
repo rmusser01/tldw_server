@@ -1,5 +1,6 @@
 import type { FC } from "react"
 import { Alert, Card, Empty, Tag } from "antd"
+import { getDesignSystemState } from "@/design-system"
 import { WritingPlaygroundResponseInspectorCard } from "./WritingPlaygroundResponseInspectorCard"
 import { WritingPlaygroundTokenInspectorCard } from "./WritingPlaygroundTokenInspectorCard"
 import { WritingPlaygroundWordcloudCard } from "./WritingPlaygroundWordcloudCard"
@@ -21,6 +22,7 @@ export const WritingPlaygroundDiagnosticsPanel: FC<
   const { enabled: responseEnabled, ...responseCardProps } = response
   const { enabled: tokenEnabled, ...tokenCardProps } = token
   const { enabled: wordcloudEnabled, ...wordcloudCardProps } = wordcloud
+  const readyState = status === "ready" ? getDesignSystemState("ready") : null
 
   return (
     <Card
@@ -32,7 +34,7 @@ export const WritingPlaygroundDiagnosticsPanel: FC<
             ? t("option:writingPlayground.diagnosticsWarning", "Warning")
             : status === "busy"
               ? t("option:writingPlayground.diagnosticsBusy", "Busy")
-              : t("option:writingPlayground.diagnosticsReady", "Ready")}
+              : t("option:writingPlayground.diagnosticsReady", readyState?.label ?? "")}
         </Tag>
         {showOffline ? (
           <Alert
