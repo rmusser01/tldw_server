@@ -123,7 +123,8 @@ Contract rules:
    in size, and validated by the renderer adapter before activation.
 6. States and fallback chains reuse the existing Persona visual state model.
 7. V2 manifests must not contain remote URLs, absolute paths, path traversal
-   paths, executable HTML, executable JavaScript, or unreviewed SVG.
+   paths, executable HTML, executable JavaScript, unreviewed SVG, or embedded
+   data such as base64 payloads or Data URIs.
 
 ## Compatibility and Migration
 
@@ -148,7 +149,7 @@ V2 should be additive. There is no automatic migration from V1.
 V2 should expand asset roles without changing ownership semantics. Roles are
 renderer metadata, not storage permission boundaries.
 
-Required common roles:
+Required common role categories:
 
 1. `fallback_preview`: bounded raster image used whenever the renderer is
    unsupported, disabled, loading, or failed.
@@ -156,6 +157,12 @@ Required common roles:
    `.riv`, or a validated Lottie JSON file.
 3. `license_notice`: optional user-visible license/readme file retained for
    portability and review.
+
+These names are cross-renderer categories. A concrete asset row may use a
+literal common role when the file is renderer-neutral, or a renderer-specific
+role that declares it satisfies the common category. For example, a Live2D
+`live2d_model_manifest` asset satisfies the `source_manifest` category rather
+than requiring a second duplicate `source_manifest` asset row.
 
 Live2D-oriented roles:
 
@@ -186,7 +193,8 @@ Non-sprite archive import must be preview-first and commit-second.
 Preview flow:
 
 1. Normalize archive paths and reject absolute paths, path traversal, duplicate
-   member ambiguity, hidden executable payloads, and remote references.
+   member ambiguity, hidden executable payloads, remote references, and embedded
+   data references.
 2. Identify the candidate renderer by manifest `renderer_type` and
    `manifest_version`.
 3. Ask the backend renderer registry for an import-preview validator.
@@ -229,44 +237,57 @@ V2 needs different validation strictness at each lifecycle stage:
 3. Candidate accept: validates the proposed manifest and asset references using
    the same rules as reviewed import commit, then creates an inactive pack or
    draft candidate.
-4. Activation: requires `can_activate`, `can_render_buddy`, a valid static
-   fallback, resolved required visual states, and renderer-specific activation
-   validation.
+4. Activation: requires `can_activate`, `buddy_runtime_supported`, a valid
+   static fallback, resolved required visual states, and renderer-specific
+   activation validation. For V2 activation, `idle`, `listening`, `thinking`,
+   `speaking`, and `error` must resolve either directly or through fallback
+   chains. A renderer may support additional states, but it cannot activate with
+   less than this baseline unless a future endpoint version explicitly changes
+   the Persona visual state contract.
 5. Runtime render: treats renderer load failure as a diagnostic and falls back
    to static/text Buddy instead of changing pack state.
 
 ## Renderer Capability Contract
 
 The existing `GET /api/v1/persona/visual-renderers` contract should grow before
-any V2 renderer is activatable.
+any V2 renderer is activatable. The current response fields are already
+implemented and typed by the backend and WebUI, so V2 must extend them
+additively. It must not silently rename existing fields; any rename would need a
+versioned endpoint or explicit migration plan.
 
-Each renderer capability should expose:
+Existing fields to preserve:
 
 1. `renderer_type`
 2. `display_name`
-3. `supported_manifest_versions`
-4. `renderer_contract_versions`
-5. `supported_asset_roles`
-6. `allowed_mime_types`
-7. `allowed_extensions`
-8. `max_file_count`
-9. `max_total_bytes`
-10. `max_texture_width`
-11. `max_texture_height`
-12. `can_validate`
-13. `can_import_preview`
-14. `can_export`
-15. `can_activate`
-16. `can_render_buddy`
-17. `feature_flag`
-18. `setup_status`
-19. `setup_blockers`
-20. `requires_static_fallback`
-21. `requires_license_ack`
+3. `manifest_versions`
+4. `can_validate`
+5. `can_activate`
+6. `buddy_runtime_supported`
+7. `import_supported`
+8. `export_supported`
+9. `disabled_reason`
+
+Additive V2 fields can include:
+
+1. `renderer_contract_versions`
+2. `supported_asset_roles`
+3. `required_role_categories`
+4. `role_category_map`
+5. `allowed_mime_types`
+6. `allowed_extensions`
+7. `max_file_count`
+8. `max_total_bytes`
+9. `max_texture_width`
+10. `max_texture_height`
+11. `feature_flag`
+12. `setup_status`
+13. `setup_blockers`
+14. `requires_static_fallback`
+15. `requires_license_ack`
 
 Capability status should be explicit. A renderer can be known but not usable.
-Clients must treat `can_activate: false` and `can_render_buddy: false` as hard
-runtime boundaries.
+Clients must treat `can_activate: false` and `buddy_runtime_supported: false` as
+hard runtime boundaries.
 
 ## Buddy Runtime Behavior
 
@@ -315,18 +336,20 @@ Manifest V2 import and activation must enforce:
 1. No remote URLs in manifests or renderer-specific files.
 2. No executable JavaScript, HTML, or arbitrary web components in uploaded
    packs.
-3. SVG is rejected unless a future renderer-specific validator explicitly
+3. No embedded binary data in manifests, including base64 payloads and Data
+   URIs. Binary assets must flow through asset storage and renderer validation.
+4. SVG is rejected unless a future renderer-specific validator explicitly
    sanitizes and rasterizes it before storage.
-4. Archive paths are normalized before validation; absolute paths, path
+5. Archive paths are normalized before validation; absolute paths, path
    traversal, duplicate entries, symlinks, and hardlinks are blockers.
-5. Renderer source manifests are parsed with renderer-specific schemas, not
+6. Renderer source manifests are parsed with renderer-specific schemas, not
    string rewriting.
-6. Every renderer-specific file reference must resolve to an archive member and
+7. Every renderer-specific file reference must resolve to an archive member and
    then to a created asset row.
-7. Checksums should be recorded for renderer-specific files before commit.
-8. Renderer adapters must have bounded canvas dimensions and texture limits.
-9. Optional dependency and license states must be surfaced before activation.
-10. Exports must include enough metadata to reconstruct the draft pack, but
+8. Checksums should be recorded for renderer-specific files before commit.
+9. Renderer adapters must have bounded canvas dimensions and texture limits.
+10. Optional dependency and license states must be surfaced before activation.
+11. Exports must include enough metadata to reconstruct the draft pack, but
     import into another instance still requires preview and explicit activation.
 
 ## Live2D Implications
@@ -334,7 +357,8 @@ Manifest V2 import and activation must enforce:
 Manifest V2 does not implement Live2D. It unblocks a later Live2D spike by
 making the required gates explicit:
 
-1. `.model3.json` becomes a `source_manifest` style asset role.
+1. `.model3.json` maps to a concrete `live2d_model_manifest` asset role that
+   satisfies the common `source_manifest` category.
 2. `.moc3`, textures, motions, expressions, physics, and pose files get
    renderer-specific asset roles.
 3. Import preview can validate model-relative references before asset rows are
