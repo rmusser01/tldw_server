@@ -28,6 +28,14 @@ into "this is for me" stories.
 Detailed feature inventory, exact scripts, shot lists, recording runbooks, and
 asset checklists are deliberately deferred to the next planning phase.
 
+After design review, this spec adds four guardrails that should shape the next
+phase:
+
+- Claims must be tied to visible product evidence.
+- WebUI and extension roles must be mapped before scripts are written.
+- Recording readiness must be checked before production takes.
+- Published clips must carry enough version context to avoid stale claims.
+
 ## Goals
 
 1. Create a reusable video campaign architecture for demonstrating the WebUI
@@ -51,6 +59,98 @@ asset checklists are deliberately deferred to the next planning phase.
 - Do not add WebUI or extension demo-mode behavior as part of this design.
 - Do not choose final publishing copy, thumbnails, or channel-specific metadata
   in this design.
+
+## Design Review Adjustments
+
+The initial design is directionally correct, but a critique pass found several
+risks that should be handled before script planning begins.
+
+### Claim And Evidence Ledger
+
+Script planning should create a simple claim ledger before narration is
+finalized. Each meaningful marketing claim should map to:
+
+- The exact visible UI or workflow that proves it.
+- The product surface that supports it today.
+- The seed data needed to reproduce it.
+- Any limitation or qualifier that must be stated or avoided.
+
+This is especially important for privacy, citations, team workflows, media
+processing, and provider/model flexibility. If a claim cannot be shown in the
+current product, it should either be cut, softened, or moved to a roadmap note
+outside the demo.
+
+### WebUI And Extension Surface Map
+
+The next planning phase should explicitly decide which surface owns each
+workflow moment:
+
+- Use the extension for in-browser entry points: current-page context, clipping,
+  quick questions, sidepanel interactions, and handoff into the broader product.
+- Use the WebUI for deeper workspace flows: organized knowledge work, media
+  review, source management, generated outputs, notes, prompts, settings, and
+  admin/config proof.
+- Use both surfaces together only when the handoff is important to the story.
+
+This avoids forcing full-product workflows into the sidepanel or making the
+extension look like a separate product.
+
+### Script-Planning Feature Matrix
+
+Full feature coverage belongs in the next phase, but it should be structured.
+The script plan should classify features into:
+
+- Must show in the master walkthrough.
+- Persona-specific proof points.
+- Short-clip candidates.
+- Mention-only features.
+- Excluded or deferred features.
+
+This keeps the 20-30 minute walkthrough dense without becoming an incoherent
+inventory tour.
+
+### Recording Readiness Gate
+
+Before recording production takes, the runbook should include a readiness gate:
+
+- Server and WebUI reachable.
+- Extension connected to the intended server.
+- Demo data seeded and verified.
+- Expected model/media outputs already rehearsed.
+- Slow processing steps preprocessed or assigned a fallback.
+- Browser profile scrubbed of private data.
+- API keys, tokens, account emails, local paths, and private files hidden.
+- Text, cursor, and zoom readable at final export resolution.
+- Captions or transcript planned for accessibility and reuse.
+
+### Asset Versioning And Staleness Control
+
+Each published or retained video asset should have an asset manifest entry that
+records:
+
+- Recording date.
+- Product commit or release tag when practical.
+- Server mode and relevant build/profile.
+- Persona or campaign target.
+- Source demo data package.
+- Claims or features demonstrated.
+- Known limitations or refresh triggers.
+
+This prevents old clips from silently outliving the product behavior they show.
+
+## Script Planning Inputs
+
+The next planning phase should not start from a blank page. It should produce:
+
+- A feature and claim matrix.
+- A WebUI/extension surface map.
+- A demo data manifest.
+- A master walkthrough script outline.
+- Persona cut outlines.
+- A recording readiness checklist.
+- An asset manifest template.
+
+These artifacts can live under the follow-up `Docs/Product/DemoVideos/` area.
 
 ## Audience Strategy
 
@@ -86,6 +186,7 @@ It should:
 - Use a real local server.
 - Show the WebUI and extension connected to the same server.
 - Use seeded, public, redistributable demo sources.
+- Keep each major claim tied to visible proof in the UI.
 - Be chaptered for YouTube and reuse.
 - Cover setup and configuration only to the depth needed to build trust.
 - Trim or time-compress slow media and model-processing steps.
@@ -106,6 +207,8 @@ The master footage should feed:
   docs.
 
 Each derived asset should link back to the full walkthrough where appropriate.
+Each derived asset should reuse the same claim ledger so persona framing does
+not create inconsistent product promises.
 
 ## Full Walkthrough Chapter Model
 
@@ -318,6 +421,8 @@ The seed set should be curated before recording and should include:
 - Example prompts.
 - Example flashcards or quizzes.
 - Example source-backed chat history if useful.
+- A small manifest describing where each source came from and why it is safe to
+  show.
 
 All demo data must be public, non-sensitive, and safe to redistribute in
 screenshots or recordings. Do not use private API keys, personal notes, private
@@ -339,7 +444,13 @@ The environment should use a clean browser profile with:
 Choose sources that demonstrate breadth without adding legal or privacy risk.
 Preprocess slow media items before recording when needed.
 
-### 2. Build A Recording Runbook
+### 2. Build The Feature And Claim Matrix
+
+Before writing scripts, map the desired feature coverage against visible proof,
+persona relevance, surface ownership, and known limitations. This is where full
+feature coverage should be handled.
+
+### 3. Build A Recording Runbook
 
 Each walkthrough chapter should have a checklist containing:
 
@@ -350,10 +461,17 @@ Each walkthrough chapter should have a checklist containing:
 - Query or action to perform.
 - Expected visible result.
 - Fallback if model or media processing is slow.
+- Claim ledger entries covered by the chapter.
+- Whether the action must be shown live or can use seeded/preprocessed output.
 
 The runbook is a follow-up artifact, not part of this design.
 
-### 3. Record Master Footage
+### 4. Pass Recording Readiness
+
+Run a short rehearsal before final capture. Verify connection, seeded data,
+expected results, privacy scrub, visual readability, and fallback states.
+
+### 5. Record Master Footage
 
 Record each chapter as a separate take, even if the final video is edited as one
 continuous walkthrough. This makes re-recording and persona cuts easier.
@@ -367,7 +485,7 @@ Recommended capture posture:
 - Narration can be recorded live or added after editing, but the final script
   should stay synchronized with what is visible.
 
-### 4. Edit The Full Walkthrough
+### 6. Edit The Full Walkthrough
 
 The master edit should:
 
@@ -378,12 +496,12 @@ The master edit should:
 - Show enough configuration to build trust but not so much that the video turns
   into documentation.
 
-### 5. Cut Persona Videos
+### 7. Cut Persona Videos
 
 Persona videos should reuse master footage as much as possible. Add custom
 openings, bridge narration, and closing calls to action for each audience.
 
-### 6. Cut Short Clips
+### 8. Cut Short Clips
 
 Short clips should be derived after the persona videos so they inherit the same
 claims and visual proof.
@@ -397,7 +515,7 @@ Likely clip types:
 - Private/self-hosted setup proof.
 - Extension sidepanel to WebUI handoff.
 
-### 7. Publish And Maintain
+### 9. Publish And Maintain
 
 Publish the campaign as a set:
 
@@ -409,12 +527,16 @@ Publish the campaign as a set:
 
 Treat demo videos like docs. Refresh the master walkthrough when major UI,
 extension, setup, or workflow changes make the old footage misleading.
+Keep asset manifests with the published set so stale clips can be found and
+retired.
 
 ## Follow-Up Artifacts
 
 The next phase should create a dedicated demo-video documentation area, likely:
 
 - `Docs/Product/DemoVideos/README.md`
+- `Docs/Product/DemoVideos/feature-claim-matrix.md`
+- `Docs/Product/DemoVideos/surface-map.md`
 - `Docs/Product/DemoVideos/full-walkthrough-runbook.md`
 - `Docs/Product/DemoVideos/persona-self-hoster-privacy.md`
 - `Docs/Product/DemoVideos/persona-student-researcher.md`
@@ -422,6 +544,8 @@ The next phase should create a dedicated demo-video documentation area, likely:
 - `Docs/Product/DemoVideos/persona-team-knowledge.md`
 - `Docs/Product/DemoVideos/persona-writer-knowledge-worker.md`
 - `Docs/Product/DemoVideos/asset-checklist.md`
+- `Docs/Product/DemoVideos/asset-manifest.md`
+- `Docs/Product/DemoVideos/recording-readiness-checklist.md`
 
 These should be created during script and runbook planning, after full feature
 coverage is enumerated.
@@ -459,6 +583,22 @@ Mitigation:
 Tie scripts to visible UI evidence. Re-record or retire clips when routes,
 capabilities, or workflows materially change.
 
+### Risk: Persona Marketing Overstates Current Support
+
+Mitigation:
+
+Use the claim ledger and feature matrix to separate demonstrated current
+features from roadmap or mention-only material. Be especially careful with team,
+sharing, admin, and privacy claims.
+
+### Risk: Surface Confusion Weakens The Product Story
+
+Mitigation:
+
+Use the surface map to keep the extension positioned as the in-browser capture
+and assistant entry point, and the WebUI as the deeper workspace. Show handoff
+only when it clarifies the workflow.
+
 ### Risk: Demo Data Leaks Sensitive Information
 
 Mitigation:
@@ -476,3 +616,5 @@ This design is complete when:
 - The real-app production workflow is documented.
 - Follow-up runbook and script artifacts are identified without being
   implemented here.
+- The design review guardrails for claims, surface mapping, readiness, and
+  asset staleness are documented.
