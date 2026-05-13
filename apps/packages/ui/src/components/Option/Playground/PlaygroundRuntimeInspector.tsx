@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { getDesignSystemState } from "@/design-system";
 
 const railSectionClass = "rounded-md border border-border bg-surface px-3 py-2";
 const railHeadingClass = "text-[11px] font-semibold uppercase text-text-muted";
@@ -27,6 +28,10 @@ export type PlaygroundRuntimeInspectorProps = {
 
 const interpolateCountFallback = (value: string, count: number) =>
   value.replace(/\{\{\s*count\s*\}\}/g, String(count));
+
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
+const ERROR_STATE_LABEL = getDesignSystemState("error").label;
+const READY_STATE_LABEL = getDesignSystemState("ready").label;
 
 export const PlaygroundRuntimeInspector = ({
   streaming,
@@ -70,10 +75,10 @@ export const PlaygroundRuntimeInspector = ({
     status === "streaming"
       ? t("cockpit.streaming", "Streaming")
       : status === "degraded"
-        ? t("cockpit.degraded", "Degraded")
+        ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
         : status === "error"
-          ? t("cockpit.error", "Error")
-          : t("cockpit.ready", "Ready");
+          ? t("cockpit.error", ERROR_STATE_LABEL)
+          : t("cockpit.ready", READY_STATE_LABEL);
   const messageLabel = interpolateCountFallback(
     t("cockpit.messageCount", "{{count}} messages", {
       count: messageCount,
@@ -109,7 +114,9 @@ export const PlaygroundRuntimeInspector = ({
         </dl>
         {routeLabel ? (
           <p className={railMutedClass}>
-            {t("cockpit.route", `Route ${routeLabel}`)}
+            {t("cockpit.route", `Route ${routeLabel}`, {
+              route: routeLabel,
+            })}
           </p>
         ) : null}
         {canStopStreaming && onStopStreaming ? (

@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const renderGate = async (allowDegraded = false) => {
@@ -19,6 +19,30 @@ const mockHealth = (body: unknown, ok = true) => {
     status: ok ? 200 : 503,
     json: async () => body
   } as Response)
+}
+
+const ReadinessEventChild = ({
+  onReadiness
+}: {
+  onReadiness: (detail: unknown) => void
+}) => {
+  React.useEffect(() => {
+    const handleReadiness = (event: Event) => {
+      onReadiness(
+        (event as CustomEvent<{ state?: string; degradedChecks?: string[] }>)
+          .detail
+      )
+    }
+    window.addEventListener("tldw:server-readiness-state", handleReadiness)
+    return () => {
+      window.removeEventListener(
+        "tldw:server-readiness-state",
+        handleReadiness
+      )
+    }
+  }, [onReadiness])
+
+  return <div data-testid="readiness-event-child">Mounted child</div>
 }
 
 describe("ServerReadinessGate degraded health", () => {
@@ -78,6 +102,33 @@ describe("ServerReadinessGate degraded health", () => {
         readinessListener
       )
     }
+  })
+
+  it("emits degraded readiness after allowed children mount", async () => {
+    const childReadinessListener = vi.fn()
+    const { ServerReadinessGate } = await import(
+      "@web/components/networking/ServerReadinessGate"
+    )
+    mockHealth({
+      status: "degraded",
+      checks: {
+        chacha_notes: { status: "degraded" }
+      }
+    })
+
+    render(
+      <ServerReadinessGate allowDegraded>
+        <ReadinessEventChild onReadiness={childReadinessListener} />
+      </ServerReadinessGate>
+    )
+
+    expect(await screen.findByTestId("readiness-event-child")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(childReadinessListener).toHaveBeenCalledWith({
+        state: "degraded",
+        degradedChecks: ["chacha_notes"]
+      })
+    })
   })
 
   it("keeps degraded health behind the readiness screen when degraded health is not allowed", async () => {

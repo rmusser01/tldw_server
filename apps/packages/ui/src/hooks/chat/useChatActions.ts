@@ -99,6 +99,7 @@ import {
   chatSubmitFailed,
   chatSubmitSkipped,
   normalizeChatSubmitResult,
+  resolveCompareModelSelection,
   resolveTurnFileRetrievalEnabled,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn,
@@ -2678,10 +2679,11 @@ export const useChatActions = ({
           }
 
           const comparePromises = models.map(async (modelKey) => {
-            const modelSelection =
-              parseProviderQualifiedModelSelection(modelKey)
-            const modelId = modelSelection.modelId || modelKey
-            const historyForModel = buildHistoryForModel(baseMessages, modelId)
+            const modelSelection = resolveCompareModelSelection(modelKey)
+            const historyForModel = buildHistoryForModel(
+              baseMessages,
+              modelSelection.historyModelKey
+            )
             try {
               return toChatSubmitResult(
                 await normalChatMode(
@@ -2698,10 +2700,10 @@ export const useChatActions = ({
                         compareEnhancedParams.currentChatModelSettings,
                         modelSelection.provider
                       ),
-                    selectedModel: modelId,
+                    selectedModel: modelSelection.selectedModel,
                     clusterId,
                     assistantMessageType: "compare:reply",
-                    modelIdOverride: modelId,
+                    modelIdOverride: modelSelection.historyModelKey,
                     assistantParentMessageId: compareUserMessageId,
                     historyForModel
                   }
@@ -2791,10 +2793,11 @@ export const useChatActions = ({
     const baseHistory = history
     const userMessageId = generateID()
     const assistantMessageId = generateID()
+    const modelSelection = resolveCompareModelSelection(modelId)
     const userParentMessageId = getLastThreadMessageId(
       baseMessages,
       clusterId,
-      modelId
+      modelSelection.historyModelKey
     )
 
     try {
@@ -2805,13 +2808,20 @@ export const useChatActions = ({
         ...chatModeParams,
         uploadedFiles: uploadedFiles
       }
-      const historyForModel = buildHistoryForModel(baseMessages, modelId)
+      const historyForModel = buildHistoryForModel(
+        baseMessages,
+        modelSelection.historyModelKey
+      )
       const perModelOverrides = {
-        selectedModel: modelId,
+        selectedModel: modelSelection.selectedModel,
+        currentChatModelSettings: applySelectionProviderToSettings(
+          enhancedChatModeParams.currentChatModelSettings,
+          modelSelection.provider
+        ),
         clusterId,
         userMessageType: "compare:perModelUser",
         assistantMessageType: "compare:reply",
-        modelIdOverride: modelId,
+        modelIdOverride: modelSelection.historyModelKey,
         userMessageId,
         assistantMessageId,
         userParentMessageId,
@@ -3156,7 +3166,12 @@ export const useChatActions = ({
       return null
     }
 
-    const messageIds = getCompareBranchMessageIds(messages, clusterId, modelId)
+    const modelSelection = resolveCompareModelSelection(modelId)
+    const messageIds = getCompareBranchMessageIds(
+      messages,
+      clusterId,
+      modelSelection.historyModelKey
+    )
     if (messageIds.length === 0) {
       return null
     }

@@ -195,4 +195,14 @@ describe("resolveExplicitProviderForSelectedModel", () => {
       })
     ).toBe("anthropic")
   })
+
+  it("keeps the current provider-qualified provider when a tldw override matches the same model", () => {
+    expect(
+      resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: "openrouter:anthropic/claude-3.5-sonnet",
+        requestedSelectedModel: "tldw:anthropic/claude-3.5-sonnet",
+        explicitProvider: undefined
+      })
+    ).toBe("openrouter")
+  })
 })

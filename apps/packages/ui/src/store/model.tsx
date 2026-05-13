@@ -435,11 +435,7 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
     setThinking: (value) =>
       set((state) => applyActiveSettingsUpdate(state, { thinking: value })),
     setOcrLanguage: (value) =>
-      set((state) =>
-        state.ocrLanguage === value
-          ? state
-          : applyActiveSettingsUpdate(state, { ocrLanguage: value })
-      ),
+      set((state) => applyActiveSettingsUpdate(state, { ocrLanguage: value })),
     setHistoryMessageLimit: (value) =>
       set((state) =>
         applyActiveSettingsUpdate(state, { historyMessageLimit: value })

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { getDesignSystemState } from "@/design-system";
 import type { PlaygroundCockpitMode } from "./PlaygroundCockpitShell";
 
 export type PlaygroundStatusStripProps = {
@@ -11,6 +12,7 @@ export type PlaygroundStatusStripProps = {
   hasContext: boolean;
   contextSummary?: string[];
   temporaryChat?: boolean;
+  degraded?: boolean;
   degradedChecks?: string[];
   errorMessage?: string | null;
 };
@@ -20,6 +22,10 @@ const pillClass =
 
 const interpolateCountFallback = (value: string, count: number) =>
   value.replace(/\{\{\s*count\s*\}\}/g, String(count));
+
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
+const ERROR_STATE_LABEL = getDesignSystemState("error").label;
+const READY_STATE_LABEL = getDesignSystemState("ready").label;
 
 export const PlaygroundStatusStrip = ({
   mode,
@@ -31,17 +37,19 @@ export const PlaygroundStatusStrip = ({
   hasContext,
   contextSummary = [],
   temporaryChat,
+  degraded = false,
   degradedChecks = [],
   errorMessage,
 }: PlaygroundStatusStripProps) => {
   const { t } = useTranslation("playground");
+  const isDegraded = degraded || degradedChecks.length > 0;
   const runtimeLabel = errorMessage
-    ? t("cockpit.error", "Error")
-    : degradedChecks.length > 0
-      ? t("cockpit.degraded", "Degraded")
+    ? t("cockpit.error", ERROR_STATE_LABEL)
+    : isDegraded
+      ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
       : streaming
         ? t("cockpit.streaming", "Streaming")
-        : t("cockpit.ready", "Ready");
+        : t("cockpit.ready", READY_STATE_LABEL);
   const messageLabel = interpolateCountFallback(
     t("cockpit.messageCount", "{{count}} messages", {
       count: messageCount,

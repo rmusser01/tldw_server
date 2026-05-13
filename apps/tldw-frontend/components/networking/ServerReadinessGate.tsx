@@ -110,20 +110,17 @@ export const ServerReadinessGate: React.FC<{
       if (cancelled) return
 
       if (result.state === "ready") {
-        emitServerReadinessState("ready")
         setGate("ready")
         return
       }
 
       if (result.state === "degraded" && allowDegraded) {
-        emitServerReadinessState("degraded", result.degradedChecks)
         setDegradedChecks(result.degradedChecks)
         setGate("degraded")
         return
       }
 
       if (Date.now() >= deadline) {
-        emitServerReadinessState("blocked")
         setGate("timeout")
         return
       }
@@ -141,6 +138,30 @@ export const ServerReadinessGate: React.FC<{
       if (retryTimer) window.clearTimeout(retryTimer)
     }
   }, [allowDegraded, bypass])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined" || bypass) return
+    const state =
+      gate === "ready"
+        ? "ready"
+        : gate === "degraded"
+          ? "degraded"
+          : gate === "timeout"
+            ? "blocked"
+            : null
+    if (!state) return
+
+    const emitTimer = window.setTimeout(() => {
+      emitServerReadinessState(
+        state,
+        state === "degraded" ? degradedChecks : []
+      )
+    }, 0)
+
+    return () => {
+      window.clearTimeout(emitTimer)
+    }
+  }, [bypass, degradedChecks, gate])
 
   if (bypass || gate === "ready" || gate === "timeout") {
     return <>{children}</>

@@ -144,11 +144,9 @@ export const resolveExplicitProviderForSelectedModel = ({
   }
 
   const normalizedExplicitProvider = normalizeProvider(explicitProvider)
-  if (!normalizedExplicitProvider) return undefined
-
   const normalizedRequestedModel = normalizeModelId(requestedSelection.modelId)
   if (!normalizedRequestedModel) {
-    return normalizedExplicitProvider
+    return normalizedExplicitProvider || undefined
   }
 
   const currentSelection = parseProviderQualifiedModelSelection(
@@ -166,7 +164,8 @@ export const resolveExplicitProviderForSelectedModel = ({
     return currentSelection.provider
   }
 
-  return normalizedRequestedModel === normalizedCurrentModel
+  return normalizedExplicitProvider &&
+    normalizedRequestedModel === normalizedCurrentModel
     ? normalizedExplicitProvider
     : undefined
 }

@@ -188,7 +188,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   const selectedModel =
     selectedModelSelection.modelId || rawSelectedModel
   const modelIdOverride = rawModelIdOverride
-    ? parseProviderQualifiedModelSelection(rawModelIdOverride).modelId
+    ? String(rawModelIdOverride).trim()
     : undefined
 
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()

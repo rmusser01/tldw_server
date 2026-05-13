@@ -35,6 +35,7 @@ import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption } from "@/store/option";
 import { useArtifactsStore } from "@/store/artifacts";
+import { getDesignSystemState } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
 import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
@@ -106,6 +107,8 @@ const renderArtifactsPanel = () => (
 );
 
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
+type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
 
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
@@ -130,6 +133,8 @@ export const Playground = () => {
   const [serverDegradedChecks, setServerDegradedChecks] = React.useState<
     string[]
   >([]);
+  const [serverReadinessState, setServerReadinessState] =
+    React.useState<ServerReadinessState>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const { t } = useTranslation(["playground", "common"]);
@@ -274,7 +279,14 @@ export const Playground = () => {
         state?: string;
         degradedChecks?: unknown;
       }>).detail;
-      if (detail?.state !== "degraded") {
+      const nextState =
+        detail?.state === "ready" ||
+        detail?.state === "degraded" ||
+        detail?.state === "blocked"
+          ? detail.state
+          : null;
+      setServerReadinessState(nextState);
+      if (nextState !== "degraded") {
         setServerDegradedChecks([]);
         return;
       }
@@ -1438,10 +1450,17 @@ export const Playground = () => {
     (message) => message.role === "assistant",
   );
   const runtimeStatusDetail =
-    serverDegradedChecks.length > 0
-      ? `${toText(t("playground:cockpit.degraded", "Degraded"))}: ${serverDegradedChecks.join(
-          ", ",
-        )}`
+    serverReadinessState === "degraded"
+      ? serverDegradedChecks.length > 0
+        ? `${toText(
+            t("playground:cockpit.degraded", DEGRADED_STATE_LABEL),
+          )}: ${serverDegradedChecks.join(", ")}`
+        : toText(
+            t(
+              "playground:cockpit.degradedServerHealth",
+              "Server health is degraded",
+            ),
+          )
       : null;
   const hasChatContext = Boolean(
     attachedResearchContext ||
@@ -1472,6 +1491,7 @@ export const Playground = () => {
             t(
               "playground:cockpit.contextFilesCountMany",
               `${contextFileCount} files`,
+              { count: contextFileCount },
             ),
           )
       : null,
@@ -1484,6 +1504,7 @@ export const Playground = () => {
             t(
               "playground:cockpit.contextKnowledgeCountMany",
               `${selectedKnowledgeCount} knowledge items`,
+              { count: selectedKnowledgeCount },
             ),
           )
       : null,
@@ -1494,6 +1515,7 @@ export const Playground = () => {
             t(
               "playground:cockpit.contextMediaCountMany",
               `${ragMediaIdCount} media scopes`,
+              { count: ragMediaIdCount },
             ),
           )
       : null,
@@ -1530,7 +1552,7 @@ export const Playground = () => {
       runtimeStatus={
         streaming
           ? "streaming"
-          : serverDegradedChecks.length > 0
+          : serverReadinessState === "degraded"
             ? "degraded"
             : "ready"
       }
@@ -1557,6 +1579,7 @@ export const Playground = () => {
       hasContext={hasChatContext}
       contextSummary={statusContextSummary}
       temporaryChat={temporaryChat}
+      degraded={serverReadinessState === "degraded"}
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
     />

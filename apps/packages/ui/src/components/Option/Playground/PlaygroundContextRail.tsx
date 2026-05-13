@@ -72,6 +72,7 @@ export const PlaygroundContextRail = ({
             label: t(
               "cockpit.contextResearchCountMany",
               `${contextCounts.research} research attachments`,
+              { count: contextCounts.research },
             ),
             clearLabel: t(
               "cockpit.clearResearchContext",
@@ -91,6 +92,7 @@ export const PlaygroundContextRail = ({
             label: t(
               "cockpit.contextFilesCountMany",
               `${contextCounts.files} files`,
+              { count: contextCounts.files },
             ),
             clearLabel: t("cockpit.clearFiles", "Clear files"),
             onClear: onClearFiles,
@@ -107,6 +109,7 @@ export const PlaygroundContextRail = ({
             label: t(
               "cockpit.contextKnowledgeCountMany",
               `${contextCounts.knowledge} knowledge items`,
+              { count: contextCounts.knowledge },
             ),
             clearLabel: t("cockpit.clearKnowledge", "Clear knowledge"),
             onClear: onClearKnowledge,
@@ -123,6 +126,7 @@ export const PlaygroundContextRail = ({
             label: t(
               "cockpit.contextMediaCountMany",
               `${contextCounts.media} media scopes`,
+              { count: contextCounts.media },
             ),
             clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
             onClear: onClearMedia,

@@ -127,6 +127,26 @@ describe("provider:model scoped chat model settings", () => {
     expect(useStoreChatModelSettings.getState().temperature).toBe(0.7)
   })
 
+  it("persists scoped OCR language updates even when they match the current global value", () => {
+    const store = useStoreChatModelSettings.getState()
+
+    store.updateSettings({ ocrLanguage: "eng" })
+    store.setActiveSettingsScope("openai:gpt-4o")
+    useStoreChatModelSettings.getState().setOcrLanguage("eng")
+
+    expect(
+      useStoreChatModelSettings.getState().scopedSettingsByModelKey[
+        "openai:gpt-4o"
+      ]
+    ).toMatchObject({ ocrLanguage: "eng" })
+
+    useStoreChatModelSettings.getState().setActiveSettingsScope(undefined)
+    useStoreChatModelSettings.getState().setOcrLanguage("fra")
+    useStoreChatModelSettings.getState().setActiveSettingsScope("openai:gpt-4o")
+
+    expect(useStoreChatModelSettings.getState().ocrLanguage).toBe("eng")
+  })
+
   it("hydrates effective settings when switching active model scopes", () => {
     const store = useStoreChatModelSettings.getState()
 

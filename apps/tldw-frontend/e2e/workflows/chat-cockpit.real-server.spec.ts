@@ -14,7 +14,9 @@ const serverUrl = (
 ).replace(/\/$/, '');
 
 const apiKey =
-  process.env.TLDW_E2E_API_KEY || process.env.TLDW_API_KEY || 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY';
+  process.env.TLDW_E2E_API_KEY || process.env.TLDW_API_KEY || '';
+
+test.skip(!apiKey, 'TLDW_E2E_API_KEY or TLDW_API_KEY is required for real-server chat cockpit checks');
 
 type ApiHit = {
   method: string;

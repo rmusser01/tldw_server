@@ -416,4 +416,27 @@ describe("Playground cockpit controls", () => {
       "chacha_notes",
     );
   });
+
+  it("keeps the cockpit visibly degraded when readiness details are empty", async () => {
+    messageOptionState.value.streaming = false;
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "degraded", degradedChecks: [] },
+        }),
+      );
+    });
+
+    const runtimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Degraded")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
+      "Degraded",
+    );
+  });
 });

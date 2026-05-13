@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-12 19:30'
+updated_date: '2026-05-13 01:27'
 labels:
   - webui
   - chat
@@ -79,6 +79,12 @@ Extended CI install fix after Onboarding E2E Gate failed with the same root caus
 Extended non-extension frontend CI workflows now set SKIP_WXT_PREPARE=1: ci frontend lint, frontend-required, frontend UX gates, frontend e2e tiers, plus the already-pushed Playground quality gate. Verification: SKIP_WXT_PREPARE=1 bun install --frozen-lockfile from apps completed with no changes; exact Playground gate scripts had already passed locally; git diff --check passed. actionlint is validated by GitHub CI because it is not installed locally.
 
 CI closeout refresh: PR #1582 is still open and draft on codex/chat-degraded-health. Live checks now show targeted frontend/build/lint/e2e/security/required aggregate gates passing after the SKIP_WXT_PREPARE workflow fixes. Remaining red checks are only the broad Full Suite matrix jobs. Representative Full Suite Ubuntu/Python 3.11 job 75624023692 was cancelled at the one-hour job limit during Run tests (Audio); earlier root-level/Admin steps passed, later modules were skipped due cancellation, and the job's Fail if any module failed step itself succeeded. Review threads are all resolved.
+
+Reopened for new PR #1582 review comments posted after CI closeout: validate the new Qodo and Cubic findings against current code, fix still-valid /chat/model/readiness issues, rerun focused tests, and keep the PR draft.
+
+PR #1582 review follow-up: fixed the new valid Qodo/Cubic comments. ServerReadinessGate now emits readiness state after allowed children mount; /chat tracks degraded readiness separately from degraded check names; provider-qualified compare branches preserve provider:model identity while sending the bare model id to the API; scoped OCR language values persist even when matching global defaults; selectedKnowledge clearing is typed as nullable; the real-server cockpit spec no longer embeds a fallback API key; and cockpit English locale keys now mirror into extension public locale messages.
+
+Verification for latest review follow-up: ServerReadinessGate degraded test passed (5 tests). Focused UI suites passed: Playground cockpit controls, playground locale mirror, model scoped settings, resolve-api-provider, and chat-action-utils RAG/compare helpers (39 tests). Real-server /chat cockpit Playwright passed against http://127.0.0.1:8000 with degraded health from chacha_notes and no route interception (3 tests). git diff --check passed. Package UI tsc remains blocked by unrelated baseline test/type errors; verify:design-system-state remains blocked by unrelated Chatbooks baseline entries after the new Playground state-label findings were removed. Bandit was not applicable because this follow-up touched TypeScript/TSX/JSON/Playwright/Markdown only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -93,6 +99,8 @@ CI follow-up scoped the Playground gate install away from extension WXT preparat
 Extended the install-time WXT prepare skip across non-extension frontend/e2e workflows after the same install-time timeout affected onboarding/UX checks.
 
 Closeout refresh confirmed all actionable PR review threads are resolved and the PR remains draft. The remaining red GitHub status is the broad Full Suite matrix timing out/cancelling in non-chat test coverage, not a targeted /chat or frontend gate regression from this PR.
+
+Latest review follow-up fixed the new Qodo/Cubic issues around readiness-event timing, degraded status display, provider-qualified compare identity, scoped OCR settings, nullable knowledge clearing, locale coverage, and real-server API-key handling. Focused unit/component tests and the real-server /chat Playwright spec passed; known repo-wide type/design-state baselines remain unrelated to this /chat slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
