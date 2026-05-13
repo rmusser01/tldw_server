@@ -1,8 +1,9 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Alert, Button, Input, Modal } from "antd"
+import { Button, Input, Modal } from "antd"
 import { ExternalLink } from "lucide-react"
 
+import { Alert } from "@/components/ui"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
 import {
@@ -401,27 +402,27 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
       <div className="space-y-4">
         {error && (
           <Alert
-            type="error"
-            title={error}
-            showIcon
-          />
+            variant="error"
+          >
+            {error}
+          </Alert>
         )}
         {createdTask && (
           <Alert
-            type="success"
+            variant="success"
             title={t(
               "playground:workspace.agentTaskCreated",
               "Agent task created"
             )}
-            description={
-              <div className="flex flex-wrap gap-2 text-sm">
-                <span>ACP workspace #{createdTask.acpWorkspaceId}</span>
-                <span>Project #{createdTask.projectId}</span>
-                <span>Task #{createdTask.taskId}</span>
-              </div>
-            }
-            showIcon
-          />
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex flex-wrap gap-2 text-sm">
+              <span>ACP workspace #{createdTask.acpWorkspaceId}</span>
+              <span>Project #{createdTask.projectId}</span>
+              <span>Task #{createdTask.taskId}</span>
+            </div>
+          </Alert>
         )}
 
         <div className="space-y-1.5">
