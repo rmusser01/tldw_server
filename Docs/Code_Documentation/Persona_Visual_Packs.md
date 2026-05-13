@@ -112,9 +112,9 @@ frames:
 
 The referenced asset row should use `asset_role: "sprite_sheet"` and must still
 be a bounded raster image accepted by the normal visual upload/import path.
-Backend validation rejects non-integer regions, negative x/y coordinates,
-non-positive width/height dimensions, or out-of-bounds regions when source
-dimensions are known. When dimensions are not yet available, draft validation
+Backend validation rejects non-integer coordinates or dimensions, negative x/y
+coordinates, or non-positive width/height dimensions. It also rejects out-of-bounds
+regions when source dimensions are known. When dimensions are not yet available, draft validation
 can accept integer regions with non-negative x/y coordinates and positive
 width/height dimensions, and the Buddy renderer remains fail-soft at runtime if
 a region cannot be rendered safely.
