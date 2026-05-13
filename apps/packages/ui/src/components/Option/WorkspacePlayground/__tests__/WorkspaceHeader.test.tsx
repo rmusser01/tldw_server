@@ -1353,7 +1353,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
 
     fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
-    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks")
+    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
   })
 
   it("surfaces ACP bridge setup failures without creating project or task records", async () => {

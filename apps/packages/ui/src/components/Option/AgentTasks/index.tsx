@@ -30,18 +30,30 @@ import {
   Search,
   ExternalLink,
 } from "lucide-react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
 import { buildACPSetupIssues, normalizeACPHealthStatus, type ACPSetupIssue } from "@/services/acp/readiness"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 
 // Types matching the backend orchestration API
+type CanonicalWorkspaceLink = {
+  acp_workspace_id?: number | null
+  canonical_workspace_id?: string | null
+  canonical_workspace_source?: string | null
+  link_status?: string | null
+}
+
 type ProjectSummary = {
   id: number
   name: string
   description?: string
+  workspace_id?: number | null
   user_id: number
   created_at: string
+  metadata?: Record<string, unknown>
+  canonical_workspace?: CanonicalWorkspaceLink | null
   task_summary?: {
     total_tasks: number
     status_counts: Record<string, number>
@@ -60,6 +72,8 @@ type TaskItem = {
   max_review_attempts: number
   created_at: string
   updated_at: string
+  metadata?: Record<string, unknown>
+  canonical_workspace?: CanonicalWorkspaceLink | null
   runs?: RunItem[]
 }
 
@@ -120,6 +134,8 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION =
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE = "AGENT_ORCHESTRATION_UNSUPPORTED"
 const AGENT_ORCHESTRATION_PROJECTS_PATH = "/api/v1/agent-orchestration/projects"
 const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
+const ALL_WORKSPACES_FILTER_VALUE = "__all_workspaces__"
+const LINKED_CANONICAL_WORKSPACE_STATUS = "linked"
 
 const STATUS_COLORS: Record<string, string> = {
   todo: "default",
@@ -142,6 +158,38 @@ const navigateOptionRoute = (path: string) => {
     return
   }
   window.location.hash = path
+}
+
+const normalizeWorkspaceFilterId = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+const readWorkspaceFilterFromSearch = (search: string): string | null => {
+  const params = new URLSearchParams(search)
+  return (
+    normalizeWorkspaceFilterId(params.get("workspace")) ||
+    normalizeWorkspaceFilterId(params.get("workspace_id")) ||
+    normalizeWorkspaceFilterId(params.get("canonical_workspace_id"))
+  )
+}
+
+const getCanonicalWorkspaceId = (
+  projectOrTask: ProjectSummary | TaskItem
+): string | null => {
+  return (
+    normalizeWorkspaceFilterId(projectOrTask.canonical_workspace?.canonical_workspace_id) ||
+    normalizeWorkspaceFilterId(projectOrTask.metadata?.canonical_workspace_id)
+  )
+}
+
+const getCanonicalWorkspaceLinkStatus = (
+  project: ProjectSummary
+): string | null => {
+  return normalizeWorkspaceFilterId(project.canonical_workspace?.link_status)?.toLowerCase() ?? null
 }
 
 const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
@@ -188,6 +236,8 @@ const ensureOrchestrationResponse = async (response: Response): Promise<void> =>
 export const AgentTasksPage: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const { config: connectionConfig } = useCanonicalConnectionConfig()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
@@ -200,6 +250,11 @@ export const AgentTasksPage: React.FC = () => {
   const [setupLoading, setSetupLoading] = useState(false)
   const [taskDetail, setTaskDetail] = useState<TaskDetailItem | null>(null)
   const [taskDetailLoading, setTaskDetailLoading] = useState(false)
+  const [projectsLoadedSuccessfully, setProjectsLoadedSuccessfully] = useState(false)
+  const workspaceFilterId = useMemo(
+    () => readWorkspaceFilterFromSearch(location.search),
+    [location.search]
+  )
 
   // Modal states
   const [showProjectModal, setShowProjectModal] = useState(false)
@@ -252,6 +307,7 @@ export const AgentTasksPage: React.FC = () => {
     setIsUnsupported(true)
     setError(null)
     setProjects([])
+    setProjectsLoadedSuccessfully(false)
     setTasks([])
     setSelectedProjectId(null)
   }, [])
@@ -333,6 +389,7 @@ export const AgentTasksPage: React.FC = () => {
     if (!apiBase) return
     setLoading(true)
     setError(null)
+    setProjectsLoadedSuccessfully(false)
     try {
       const supported = await hasOrchestrationSupport()
       if (!supported) {
@@ -345,10 +402,12 @@ export const AgentTasksPage: React.FC = () => {
       const data = await res.json()
       setIsUnsupported(false)
       setProjects(normalizeListPayload<ProjectSummary>(data, "projects"))
+      setProjectsLoadedSuccessfully(true)
     } catch (err) {
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
+        setProjectsLoadedSuccessfully(false)
         setError(err instanceof Error ? err.message : "Failed to load projects")
       }
     } finally {
@@ -558,7 +617,126 @@ export const AgentTasksPage: React.FC = () => {
     }
   }
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId)
+  const workspaceOptions = useMemo(() => {
+    const options = new Map<string, string>()
+    if (workspaceFilterId) {
+      options.set(workspaceFilterId, workspaceFilterId)
+    }
+    for (const project of projects) {
+      const canonicalWorkspaceId = getCanonicalWorkspaceId(project)
+      if (canonicalWorkspaceId) {
+        options.set(canonicalWorkspaceId, canonicalWorkspaceId)
+      }
+    }
+    return Array.from(options, ([value, label]) => ({ value, label }))
+  }, [projects, workspaceFilterId])
+
+  const workspaceSelectOptions = useMemo(
+    () => [
+      { value: ALL_WORKSPACES_FILTER_VALUE, label: "All workspaces" },
+      ...workspaceOptions
+    ],
+    [workspaceOptions]
+  )
+
+  const filteredProjects = useMemo(() => {
+    if (!workspaceFilterId) {
+      return projects
+    }
+    return projects.filter(
+      (project) => getCanonicalWorkspaceId(project) === workspaceFilterId
+    )
+  }, [projects, workspaceFilterId])
+
+  const visibleTasks = useMemo(() => {
+    if (!workspaceFilterId) {
+      return tasks
+    }
+    return tasks.filter((task) => {
+      const taskWorkspaceId = getCanonicalWorkspaceId(task)
+      return !taskWorkspaceId || taskWorkspaceId === workspaceFilterId
+    })
+  }, [tasks, workspaceFilterId])
+
+  const workspaceSetupIssues = useMemo<ACPSetupIssue[]>(() => {
+    if (!workspaceFilterId || loading || isUnsupported || !projectsLoadedSuccessfully) {
+      return []
+    }
+
+    const matchingProjects = filteredProjects
+    if (matchingProjects.length === 0) {
+      return [
+        {
+          code: "canonical_workspace_bridge_missing",
+          title: `No ACP execution workspace is linked to ${workspaceFilterId}`,
+          description:
+            "Create an agent task from WorkspacePlayground so the execution root, environment, and MCP readiness can be validated before dispatch."
+        }
+      ]
+    }
+
+    const hasLinkedProject = matchingProjects.some(
+      (project) =>
+        getCanonicalWorkspaceLinkStatus(project) ===
+        LINKED_CANONICAL_WORKSPACE_STATUS
+    )
+    const unlinkedProject = matchingProjects.find((project) => {
+      const status = getCanonicalWorkspaceLinkStatus(project)
+      return status !== null && status !== LINKED_CANONICAL_WORKSPACE_STATUS
+    })
+    if (!hasLinkedProject && unlinkedProject) {
+      const status = getCanonicalWorkspaceLinkStatus(unlinkedProject) || "unknown"
+      return [
+        {
+          code: "canonical_workspace_bridge_unlinked",
+          title: `ACP execution workspace link is ${status}`,
+          description:
+            "Recreate the workspace handoff from WorkspacePlayground so root, environment, and MCP readiness are checked before dispatch."
+        }
+      ]
+    }
+
+    return []
+  }, [
+    filteredProjects,
+    isUnsupported,
+    loading,
+    projectsLoadedSuccessfully,
+    workspaceFilterId
+  ])
+
+  const updateWorkspaceFilter = useCallback(
+    (nextWorkspaceFilterId: string | null) => {
+      const params = new URLSearchParams(location.search)
+      params.delete("workspace")
+      params.delete("workspace_id")
+      params.delete("canonical_workspace_id")
+      if (nextWorkspaceFilterId) {
+        params.set("workspace", nextWorkspaceFilterId)
+      }
+      const search = params.toString()
+      navigate(
+        {
+          pathname: location.pathname,
+          search: search ? `?${search}` : ""
+        },
+        { replace: true }
+      )
+    },
+    [location.pathname, location.search, navigate]
+  )
+
+  useEffect(() => {
+    if (
+      selectedProjectId !== null &&
+      !filteredProjects.some((project) => project.id === selectedProjectId)
+    ) {
+      setSelectedProjectId(null)
+      setTasks([])
+    }
+  }, [filteredProjects, selectedProjectId])
+
+  const selectedProject = filteredProjects.find((p) => p.id === selectedProjectId)
 
   return (
     <div className="space-y-6">
@@ -598,8 +776,43 @@ export const AgentTasksPage: React.FC = () => {
           showIcon
         />
       )}
+      {!isUnsupported && workspaceSetupIssues.length > 0 && (
+        <Alert
+          type="warning"
+          message="Workspace setup needs attention"
+          description={
+            <AgentTasksSetupDescription
+              body="Resolve these workspace setup items before dispatching task runs."
+              issues={workspaceSetupIssues}
+              showAgentRegistry={false}
+              showWorkspacePlayground
+            />
+          }
+          showIcon
+        />
+      )}
       {error && (
         <Alert type="error" message={error} closable onClose={() => setError(null)} />
+      )}
+
+      {(workspaceOptions.length > 0 || workspaceFilterId) && (
+        <div className="flex flex-wrap items-center gap-3 border border-border bg-surface px-4 py-3">
+          <span className="text-sm font-medium">Canonical workspace</span>
+          <Select
+            aria-label="Workspace filter"
+            value={workspaceFilterId ?? ALL_WORKSPACES_FILTER_VALUE}
+            options={workspaceSelectOptions}
+            onChange={(value) => {
+              const nextValue = String(value || "")
+              updateWorkspaceFilter(
+                nextValue === ALL_WORKSPACES_FILTER_VALUE
+                  ? null
+                  : normalizeWorkspaceFilterId(nextValue)
+              )
+            }}
+            style={{ minWidth: 240 }}
+          />
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -635,9 +848,13 @@ export const AgentTasksPage: React.FC = () => {
             <div className="flex justify-center py-8">
               <Spin />
             </div>
-          ) : projects.length === 0 ? (
+          ) : filteredProjects.length === 0 ? (
             <Empty
-              description="No projects yet"
+              description={
+                workspaceFilterId
+                  ? "No projects linked to this workspace yet"
+                  : "No projects yet"
+              }
               className="py-8"
             >
               <Button type="primary" onClick={() => setShowProjectModal(true)}>
@@ -646,7 +863,7 @@ export const AgentTasksPage: React.FC = () => {
             </Empty>
           ) : (
             <div className="divide-y divide-border">
-              {projects.map((project) => (
+              {filteredProjects.map((project) => (
                 <div
                   key={project.id}
                   className={`flex cursor-pointer items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover ${
@@ -661,6 +878,11 @@ export const AgentTasksPage: React.FC = () => {
                   />
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate">{project.name}</div>
+                    {getCanonicalWorkspaceId(project) && (
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        Workspace: {getCanonicalWorkspaceId(project)}
+                      </div>
+                    )}
                     {project.task_summary && (
                       <div className="flex gap-1 text-xs text-muted-foreground mt-0.5">
                         <span>{project.task_summary.total_tasks} tasks</span>
@@ -730,7 +952,7 @@ export const AgentTasksPage: React.FC = () => {
             <div className="flex justify-center py-8">
               <Spin />
             </div>
-          ) : tasks.length === 0 ? (
+          ) : visibleTasks.length === 0 ? (
             <Empty description="No tasks yet" className="py-8">
               <Button type="primary" onClick={() => setShowTaskModal(true)}>
                 Create Task
@@ -738,11 +960,11 @@ export const AgentTasksPage: React.FC = () => {
             </Empty>
           ) : (
             <div className="space-y-3">
-              {tasks.map((task) => (
+              {visibleTasks.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}
-                  allTasks={tasks}
+                  allTasks={visibleTasks}
                   onDispatchRun={handleDispatchRun}
                   onReview={handleSubmitReview}
                   onInspectTask={handleInspectTask}
@@ -809,7 +1031,7 @@ export const AgentTasksPage: React.FC = () => {
             <Select
               placeholder="No dependency"
               allowClear
-              options={tasks.map((t) => ({
+              options={visibleTasks.map((t) => ({
                 value: t.id,
                 label: `#${t.id}: ${t.title}`,
               }))}
@@ -851,7 +1073,14 @@ export const AgentTasksPage: React.FC = () => {
 const AgentTasksSetupDescription: React.FC<{
   body: string
   issues: ACPSetupIssue[]
-}> = ({ body, issues }) => (
+  showAgentRegistry?: boolean
+  showWorkspacePlayground?: boolean
+}> = ({
+  body,
+  issues,
+  showAgentRegistry = true,
+  showWorkspacePlayground = false
+}) => (
   <div className="space-y-3">
     <div>{body}</div>
     <ul className="m-0 space-y-2 pl-4">
@@ -863,13 +1092,24 @@ const AgentTasksSetupDescription: React.FC<{
       ))}
     </ul>
     <div className="flex flex-wrap gap-2">
-      <Button
-        size="small"
-        icon={<ExternalLink className="h-3 w-3" />}
-        onClick={() => navigateOptionRoute("/agents")}
-      >
-        Open Agent Registry
-      </Button>
+      {showAgentRegistry && (
+        <Button
+          size="small"
+          icon={<ExternalLink className="h-3 w-3" />}
+          onClick={() => navigateOptionRoute("/agents")}
+        >
+          Open Agent Registry
+        </Button>
+      )}
+      {showWorkspacePlayground && (
+        <Button
+          size="small"
+          icon={<ExternalLink className="h-3 w-3" />}
+          onClick={() => navigateOptionRoute(WORKSPACE_PLAYGROUND_PATH)}
+        >
+          Open WorkspacePlayground
+        </Button>
+      )}
       <Button
         size="small"
         icon={<ExternalLink className="h-3 w-3" />}
