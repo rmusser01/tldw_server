@@ -282,6 +282,12 @@ export type ClientPath =
   | "/api/v1/moderation/blocklist/append"
   | "/api/v1/moderation/blocklist/{item_id}"
   | "/api/v1/moderation/blocklist/lint"
+  | "/api/v1/moderation/review/items"
+  | "/api/v1/moderation/review/items/{item_id}"
+  | "/api/v1/moderation/review/items/{item_id}/decision"
+  | "/api/v1/moderation/review/items/{item_id}/undo"
+  | "/api/v1/moderation/review/bulk-decision"
+  | "/api/v1/moderation/review/audit"
   | "/api/v1/moderation/test"
 
 

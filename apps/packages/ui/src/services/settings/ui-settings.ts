@@ -445,7 +445,8 @@ export const HEADER_SHORTCUT_IDS = [
   "admin-integrations",
   "documentation",
   "chatbooks-playground",
-  "moderation-playground",
+  "moderation-review",
+  "moderation-rules",
   "family-guardrails",
   "guardian",
   "admin-llamacpp",
@@ -476,11 +477,17 @@ const coerceHeaderShortcutSelection = (
   if (!Array.isArray(value)) return fallback
   const allowed = new Set<HeaderShortcutId>(HEADER_SHORTCUT_IDS)
   const required = new Set<HeaderShortcutId>(REQUIRED_HEADER_SHORTCUT_IDS)
+  const legacyMap: Record<string, HeaderShortcutId[]> = {
+    "moderation-playground": ["moderation-review", "moderation-rules"]
+  }
   const unique = new Set<HeaderShortcutId>()
   for (const entry of value) {
     if (typeof entry !== "string") continue
-    if (allowed.has(entry as HeaderShortcutId)) {
-      unique.add(entry as HeaderShortcutId)
+    const mappedEntries = legacyMap[entry] ?? [entry as HeaderShortcutId]
+    for (const mapped of mappedEntries) {
+      if (allowed.has(mapped)) {
+        unique.add(mapped)
+      }
     }
   }
   for (const requiredId of required) {
@@ -531,7 +538,7 @@ export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
   "watchlists",
   "document-workspace",
   "flashcards",
-  "moderation-playground",
+  "moderation-review",
   "tts-playground",
   "stt-playground"
 ]
@@ -551,7 +558,8 @@ const coerceSidebarShortcutSelection = (
   const allowed = new Set<SidebarShortcutId>(SIDEBAR_SHORTCUT_IDS)
   const legacyMap: Record<string, SidebarShortcutId> = {
     knowledge: "knowledge-qa",
-    "multi-item": "multi-item-review"
+    "multi-item": "multi-item-review",
+    "moderation-playground": "moderation-rules"
   }
   const unique = new Set<SidebarShortcutId>()
   for (const entry of value) {

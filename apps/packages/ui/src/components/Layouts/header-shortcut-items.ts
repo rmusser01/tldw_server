@@ -46,6 +46,8 @@ import type { UserPersona } from "@/types/connection"
 import {
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH,
   REPO2TXT_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
@@ -270,13 +272,22 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         descriptionDefault: "Set up family profiles, safety templates, and invite guardians"
       },
       {
-        id: "moderation-playground",
-        to: "/moderation-playground",
+        id: "moderation-review",
+        to: MODERATION_REVIEW_PATH,
+        icon: ClipboardList,
+        labelKey: "option:moderationReview.nav",
+        labelDefault: "Moderation Review",
+        descriptionKey: "option:moderationReview.desc",
+        descriptionDefault: "Review flagged items, escalations, and decisions"
+      },
+      {
+        id: "moderation-rules",
+        to: MODERATION_RULES_PATH,
         icon: ShieldCheck,
-        labelKey: "option:moderationPlayground.nav",
-        labelDefault: "Content Controls",
-        descriptionKey: "option:moderationPlayground.desc",
-        descriptionDefault: "Content safety rules, blocklists, and testing"
+        labelKey: "option:moderationRules.nav",
+        labelDefault: "Content Rules",
+        descriptionKey: "option:moderationRules.desc",
+        descriptionDefault: "Configure moderation policies, blocklists, and testing"
       },
       {
         id: "guardian",
@@ -603,7 +614,8 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
     "chat",
     "media",
     "family-guardrails",
-    "moderation-playground",
+    "moderation-review",
+    "moderation-rules",
     "guardian",
     "settings"
   ],

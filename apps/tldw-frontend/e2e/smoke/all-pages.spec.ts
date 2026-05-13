@@ -85,10 +85,16 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
     routeLabel: 'Chunking Playground',
   },
   {
-    name: 'Moderation Playground',
-    path: '/moderation-playground',
-    routeId: 'moderation-playground',
-    routeLabel: 'Moderation Playground',
+    name: 'Moderation Review',
+    path: '/moderation',
+    routeId: 'moderation-review',
+    routeLabel: 'Moderation Review',
+  },
+  {
+    name: 'Content Rules',
+    path: '/moderation/rules',
+    routeId: 'moderation-rules',
+    routeLabel: 'Content Rules',
   },
   { name: 'Collections', path: '/collections', routeId: 'collections', routeLabel: 'Collections' },
   {

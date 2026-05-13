@@ -97,6 +97,17 @@ const RuleItem: React.FC<{
 
 const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides, messageApi }) => {
   const { draft, updateDraft, isDirty, bannedRules, notifyRules } = overrides
+  const userPickerId = React.useId()
+  const userIdErrorId = React.useId()
+  const inputActionId = React.useId()
+  const outputActionId = React.useId()
+  const redactReplacementId = React.useId()
+  const phrasePatternId = React.useId()
+  const phraseActionLabelId = React.useId()
+  const phrasePhaseId = React.useId()
+  const tableFilterId = React.useId()
+  const phraseActionBlockRef = React.useRef<HTMLButtonElement>(null)
+  const phraseActionWarnRef = React.useRef<HTMLButtonElement>(null)
 
   // Local state for add-phrase form
   const [phrasePattern, setPhrasePattern] = React.useState("")
@@ -134,6 +145,27 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
     }
   }
 
+  const handlePhraseActionKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentAction: "block" | "warn"
+  ) => {
+    let nextAction: "block" | "warn" | null = null
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextAction = currentAction === "block" ? "warn" : "block"
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextAction = currentAction === "warn" ? "block" : "warn"
+    } else if (event.key === "Home") {
+      nextAction = "block"
+    } else if (event.key === "End") {
+      nextAction = "warn"
+    }
+    if (!nextAction) return
+    event.preventDefault()
+    setPhraseAction(nextAction)
+    const nextRef = nextAction === "block" ? phraseActionBlockRef : phraseActionWarnRef
+    window.setTimeout(() => nextRef.current?.focus(), 0)
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -149,7 +181,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
   const handleDelete = () => {
     Modal.confirm({
       title: "Delete user override?",
-      content: `This will permanently remove the override for "${ctx.activeUserId}". This cannot be undone.`,
+      content: `This will permanently remove the override for "${ctx.activeUserId}" and return that user to the global moderation policy. This cannot be undone from the UI.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
@@ -179,7 +211,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
     if (!ids.length) return
     Modal.confirm({
       title: `Delete ${ids.length} override(s)?`,
-      content: "This will permanently remove the selected overrides.",
+      content: `This will permanently remove overrides for: ${ids.join(", ")}. Affected users will fall back to the global moderation policy.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
@@ -207,7 +239,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
   const handleDeleteUser = (userId: string) => {
     Modal.confirm({
       title: "Delete user override?",
-      content: `Remove override for "${userId}"?`,
+      content: `Remove override for "${userId}" and return this user to the global moderation policy? This cannot be undone from the UI.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
@@ -265,6 +297,8 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
     return parts.join(" | ")
   }
 
+  const activeDraftSummary = summarizeOverride(draft as Record<string, any>)
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -278,13 +312,18 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
         <h3 className="font-semibold text-text mb-3">User Override Editor</h3>
 
         {!ctx.activeUserId ? (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label htmlFor={userPickerId} className="sr-only">
+              Search or enter user ID
+            </label>
             <input
+              id={userPickerId}
               type="text"
               placeholder="Search or enter user ID"
               value={ctx.userIdDraft}
               onChange={(e) => ctx.setUserIdDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && ctx.loadUser()}
+              aria-describedby={overrides.userIdError ? userIdErrorId : undefined}
               className="flex-1 px-3 py-2 text-sm border border-border rounded-md bg-bg text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
@@ -305,6 +344,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
               type="button"
               onClick={ctx.clearUser}
               className="text-sm text-text-muted hover:text-text underline"
+              aria-label={`Clear active user ${ctx.activeUserId}`}
             >
               Clear
             </button>
@@ -312,7 +352,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
         )}
 
         {overrides.userIdError && (
-          <p className="mt-2 text-sm text-blue-600 dark:text-blue-400">
+          <p id={userIdErrorId} className="mt-2 text-sm text-blue-600 dark:text-blue-400" aria-live="polite">
             {overrides.userIdError}
           </p>
         )}
@@ -328,7 +368,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
             {/* Quick Presets */}
             <section className="rounded-lg border border-border bg-surface/50 p-4">
               <h4 className="text-sm font-semibold text-text mb-2">Quick Presets</h4>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {Object.entries(PRESET_PROFILES).map(([key, preset]) => (
                   <Tooltip key={key} title={preset.description}>
                     <button
@@ -375,8 +415,9 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
             <section className="rounded-lg border border-border bg-surface/50 p-4 space-y-3">
               <h4 className="text-sm font-semibold text-text">Actions</h4>
               <div>
-                <label className="block text-xs text-text-muted mb-1">Input action</label>
+                <label htmlFor={inputActionId} className="block text-xs text-text-muted mb-1">Input action</label>
                 <select
+                  id={inputActionId}
                   value={draft.input_action ?? "block"}
                   onChange={(e) => updateDraft({ input_action: e.target.value as any })}
                   className="w-full px-3 py-2 text-sm border border-border rounded-md bg-bg text-text focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -390,8 +431,9 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-text-muted mb-1">Output action</label>
+                <label htmlFor={outputActionId} className="block text-xs text-text-muted mb-1">Output action</label>
                 <select
+                  id={outputActionId}
                   value={draft.output_action ?? "redact"}
                   onChange={(e) => updateDraft({ output_action: e.target.value as any })}
                   className="w-full px-3 py-2 text-sm border border-border rounded-md bg-bg text-text focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -405,8 +447,9 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-text-muted mb-1">Redact replacement text</label>
+                <label htmlFor={redactReplacementId} className="block text-xs text-text-muted mb-1">Redact replacement text</label>
                 <input
+                  id={redactReplacementId}
                   type="text"
                   value={draft.redact_replacement ?? ""}
                   onChange={(e) => updateDraft({ redact_replacement: e.target.value })}
@@ -424,6 +467,14 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                 onChange={(cats) => updateDraft({ categories_enabled: cats })}
               />
             </section>
+
+            <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+              <h4 className="text-sm font-semibold mb-1">Effective After Save</h4>
+              <p className="text-sm">{activeDraftSummary}</p>
+              <p className="mt-1 text-xs opacity-80">
+                This summary applies only to {ctx.activeUserId}; other users keep the global policy unless they have their own override.
+              </p>
+            </section>
           </div>
 
           {/* ---- Right column: Phrase Lists ---- */}
@@ -432,7 +483,11 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
             <section className="rounded-lg border border-border bg-surface/50 p-4">
               <h4 className="text-sm font-semibold text-text mb-3">Add Phrase Rule</h4>
               <div className="space-y-3">
+                <label htmlFor={phrasePatternId} className="sr-only">
+                  Phrase pattern
+                </label>
                 <input
+                  id={phrasePatternId}
                   type="text"
                   placeholder="Pattern (e.g. badword or ^regex$)"
                   value={phrasePattern}
@@ -442,10 +497,22 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                   data-testid="phrase-pattern-input"
                 />
                 <div className="flex flex-wrap gap-3 items-center">
-                  <div className="flex rounded-md border border-border overflow-hidden">
+                  <span id={phraseActionLabelId} className="sr-only">
+                    Phrase action
+                  </span>
+                  <div
+                    className="flex rounded-md border border-border overflow-hidden"
+                    role="radiogroup"
+                    aria-labelledby={phraseActionLabelId}
+                  >
                     <button
+                      ref={phraseActionBlockRef}
                       type="button"
+                      role="radio"
+                      aria-checked={phraseAction === "block"}
+                      tabIndex={phraseAction === "block" ? 0 : -1}
                       onClick={() => setPhraseAction("block")}
+                      onKeyDown={(event) => handlePhraseActionKeyDown(event, "block")}
                       className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                         phraseAction === "block"
                           ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
@@ -455,8 +522,13 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                       Ban
                     </button>
                     <button
+                      ref={phraseActionWarnRef}
                       type="button"
+                      role="radio"
+                      aria-checked={phraseAction === "warn"}
+                      tabIndex={phraseAction === "warn" ? 0 : -1}
                       onClick={() => setPhraseAction("warn")}
+                      onKeyDown={(event) => handlePhraseActionKeyDown(event, "warn")}
                       className={`px-3 py-1.5 text-xs font-medium border-l border-border transition-colors ${
                         phraseAction === "warn"
                           ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
@@ -466,11 +538,15 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                       Notify
                     </button>
                   </div>
+                  <label htmlFor={phrasePhaseId} className="sr-only">
+                    Phrase phase
+                  </label>
                   <select
+                    id={phrasePhaseId}
                     value={phrasePhase}
                     onChange={(e) => setPhrasePhase(e.target.value as any)}
                     className="px-2 py-1.5 text-xs border border-border rounded-md bg-bg text-text focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    aria-label="Phase"
+                    aria-label="Phrase phase"
                   >
                     <option value="input">Input</option>
                     <option value="output">Output</option>
@@ -538,7 +614,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
       {/* Action Buttons (visible when activeUserId is set) */}
       {/* ================================================================== */}
       {ctx.activeUserId && (
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
             type="button"
             onClick={handleSave}
@@ -569,9 +645,9 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
       {/* All User Overrides Table (always visible) */}
       {/* ================================================================== */}
       <section className="rounded-lg border border-border bg-surface/50 p-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-semibold text-text">All User Overrides</h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {selectedRows.size > 0 && (
               <button
                 type="button"
@@ -584,7 +660,11 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
             )}
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+              <label htmlFor={tableFilterId} className="sr-only">
+                Filter user overrides
+              </label>
               <input
+                id={tableFilterId}
                 type="text"
                 placeholder="Filter users..."
                 value={tableFilter}
@@ -602,7 +682,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="overrides-table">
+            <table className="min-w-[680px] w-full text-sm" data-testid="overrides-table">
               <thead>
                 <tr className="border-b border-border text-left text-text-muted">
                   <th className="py-2 pr-2 w-8">

@@ -37,6 +37,11 @@ import {
 import { Navigate } from "react-router-dom"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
+import {
+  MODERATION_PLAYGROUND_LEGACY_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH
+} from "@/routes/route-paths"
 
 export type RouteKind = "options" | "sidepanel"
 
@@ -187,6 +192,8 @@ const OptionSources = lazy(() => import("./option-sources"))
 const OptionSourcesNew = lazy(() => import("./option-sources-new"))
 const OptionSourcesDetail = lazy(() => import("./option-sources-detail"))
 const OptionWritingPlayground = lazy(() => import("./option-writing-playground"))
+const OptionModerationReview = lazy(() => import("./option-moderation-review"))
+const OptionModerationRules = lazy(() => import("./option-moderation-rules"))
 const OptionModerationPlayground = lazy(() => import("./option-moderation-playground"))
 const OptionFamilyGuardrailsWizard = lazy(
   () => import("./option-family-guardrails-wizard")
@@ -536,14 +543,30 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/moderation-playground",
-    element: <OptionModerationPlayground />,
+    path: MODERATION_REVIEW_PATH,
+    element: <OptionModerationReview />,
     nav: {
       group: "server",
-      labelToken: "option:moderationPlayground.nav",
+      labelToken: "option:moderationReview.nav",
       icon: ShieldCheck,
       order: 12
     }
+  },
+  {
+    kind: "options",
+    path: MODERATION_RULES_PATH,
+    element: <OptionModerationRules />,
+    nav: {
+      group: "server",
+      labelToken: "option:moderationRules.nav",
+      icon: ShieldCheck,
+      order: 12.1
+    }
+  },
+  {
+    kind: "options",
+    path: MODERATION_PLAYGROUND_LEGACY_PATH,
+    element: <OptionModerationPlayground />
   },
   {
     kind: "options",
