@@ -15,6 +15,11 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.Persona.visual_asset_constraints import (
+    ALLOWED_VISUAL_MIME_TYPES,
+    MAX_VISUAL_IMAGE_DIMENSION,
+    VISUAL_MIME_EXTENSIONS,
+)
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
     remap_visual_manifest_assets,
@@ -28,24 +33,10 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
-ALLOWED_VISUAL_MIME_TYPES = frozenset(
-    {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-    }
-)
 MAX_VISUAL_UPLOAD_BYTES = 10_485_760
-MAX_VISUAL_IMAGE_DIMENSION = 4096
 VISUAL_STORAGE_PREFIX = "persona_visuals"
 
-_MIME_EXTENSIONS = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
+_MIME_EXTENSIONS = VISUAL_MIME_EXTENSIONS
 _IMAGE_VALIDATION_ERRORS = (
     OSError,
     ValueError,

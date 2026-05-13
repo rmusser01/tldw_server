@@ -60,6 +60,20 @@ capability contract is now in place; sprite-sheet frame regions are supported
 inside `sprite_frames`, and any future non-sprite adapter should reuse the
 registry instead of adding another hardcoded renderer path.
 
+The renderer capability response is additive. Clients should continue to read
+the original fields (`renderer_type`, `manifest_versions`, `can_validate`,
+`can_activate`, `buddy_runtime_supported`, `import_supported`,
+`export_supported`, and `disabled_reason`) and may also read Manifest V2 planning
+metadata such as `renderer_contract_versions`, `supported_asset_roles`,
+`required_role_categories`, `role_category_map`, MIME/extension limits, texture
+limits, `setup_status`, `setup_blockers`, `requires_static_fallback`, and
+`requires_license_ack`. `sprite_frames` remains the only activatable
+Buddy-runtime renderer. A non-sprite renderer such as `live2d` can appear in the
+capability list with `can_validate: false`, `can_activate: false`,
+`buddy_runtime_supported: false`, and a blocker such as
+`runtime_adapter_not_implemented`; that is an explicit future/disabled state,
+not a runtime support claim.
+
 ### Sprite Atlas Frames
 
 Sprite atlases are represented as `sprite_frames` packs. In this slice,

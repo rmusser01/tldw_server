@@ -124,21 +124,46 @@ def test_list_persona_visual_renderer_capabilities(persona_db: CharactersRAGDB) 
         response = client.get("/api/v1/persona/visual-renderers")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "renderers": [
-            {
-                "renderer_type": "sprite_frames",
-                "display_name": "Sprite frames",
-                "manifest_versions": [1],
-                "can_validate": True,
-                "can_activate": True,
-                "buddy_runtime_supported": True,
-                "import_supported": True,
-                "export_supported": True,
-                "disabled_reason": None,
-            }
-        ]
+    payload = response.json()
+    assert [renderer["renderer_type"] for renderer in payload["renderers"]] == [
+        "sprite_frames",
+        "live2d",
+    ]
+
+    sprite_frames = payload["renderers"][0]
+    expected_existing_fields = {
+        "renderer_type": "sprite_frames",
+        "display_name": "Sprite frames",
+        "manifest_versions": [1],
+        "can_validate": True,
+        "can_activate": True,
+        "buddy_runtime_supported": True,
+        "import_supported": True,
+        "export_supported": True,
+        "disabled_reason": None,
     }
+    for key, value in expected_existing_fields.items():
+        assert sprite_frames[key] == value
+    assert sprite_frames["renderer_contract_versions"] == [1]
+    assert "sprite_sheet" in sprite_frames["supported_asset_roles"]
+    assert sprite_frames["setup_status"] == "supported"
+    assert sprite_frames["setup_blockers"] == []
+
+    live2d = payload["renderers"][1]
+    assert live2d["renderer_type"] == "live2d"
+    assert live2d["manifest_versions"] == [2]
+    assert live2d["renderer_contract_versions"] == [1]
+    assert live2d["required_role_categories"] == ["fallback_preview", "source_manifest"]
+    assert live2d["role_category_map"]["source_manifest"] == ["live2d_model_manifest"]
+    assert live2d["can_validate"] is False
+    assert live2d["can_activate"] is False
+    assert live2d["buddy_runtime_supported"] is False
+    assert live2d["import_supported"] is False
+    assert live2d["export_supported"] is False
+    assert live2d["requires_static_fallback"] is True
+    assert live2d["setup_status"] == "unsupported_renderer"
+    assert "runtime_adapter_not_implemented" in live2d["setup_blockers"]
+    assert live2d["disabled_reason"] == "runtime_adapter_not_implemented"
 
 
 def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(

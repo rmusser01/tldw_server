@@ -9,6 +9,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    PersonaVisualRendererSetupStatus,
+)
+
 
 PersonaMode = Literal["session_scoped", "persistent_scoped"]
 PersonaScopeRuleType = Literal["conversation_id", "character_id", "media_id", "media_tag", "note_id"]
@@ -197,6 +201,21 @@ class PersonaVisualRendererCapabilityResponse(BaseModel):
     import_supported: bool
     export_supported: bool
     disabled_reason: str | None = None
+    renderer_contract_versions: list[int] = Field(default_factory=list)
+    supported_asset_roles: list[str] = Field(default_factory=list)
+    required_role_categories: list[str] = Field(default_factory=list)
+    role_category_map: dict[str, list[str]] = Field(default_factory=dict)
+    allowed_mime_types: list[str] = Field(default_factory=list)
+    allowed_extensions: list[str] = Field(default_factory=list)
+    max_file_count: int | None = None
+    max_total_bytes: int | None = None
+    max_texture_width: int | None = None
+    max_texture_height: int | None = None
+    feature_flag: str | None = None
+    setup_status: PersonaVisualRendererSetupStatus = "supported"
+    setup_blockers: list[str] = Field(default_factory=list)
+    requires_static_fallback: bool = False
+    requires_license_ack: bool = False
 
 
 class PersonaVisualRendererCapabilitiesResponse(BaseModel):

@@ -15,6 +15,13 @@ export type PersonaVisualRendererType =
   | "static_image"
   | "live2d"
 
+export type PersonaVisualRendererSetupStatus =
+  | "supported"
+  | "unsupported_renderer"
+  | "feature_gated"
+  | "dependency_missing"
+  | "license_review_required"
+
 export interface PersonaVisualRendererCapability {
   renderer_type: string
   display_name: string
@@ -25,6 +32,21 @@ export interface PersonaVisualRendererCapability {
   import_supported: boolean
   export_supported: boolean
   disabled_reason?: string | null
+  renderer_contract_versions?: number[]
+  supported_asset_roles?: string[]
+  required_role_categories?: string[]
+  role_category_map?: Record<string, string[]>
+  allowed_mime_types?: string[]
+  allowed_extensions?: string[]
+  max_file_count?: number | null
+  max_total_bytes?: number | null
+  max_texture_width?: number | null
+  max_texture_height?: number | null
+  feature_flag?: string | null
+  setup_status?: PersonaVisualRendererSetupStatus
+  setup_blockers?: string[]
+  requires_static_fallback?: boolean
+  requires_license_ack?: boolean
 }
 
 export interface PersonaVisualRendererCapabilitiesResponse {

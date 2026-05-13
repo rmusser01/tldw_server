@@ -28,7 +28,22 @@ describe("persona visuals service", () => {
         buddy_runtime_supported: true,
         import_supported: true,
         export_supported: true,
-        disabled_reason: null
+        disabled_reason: null,
+        renderer_contract_versions: [1],
+        supported_asset_roles: ["frame", "sprite_sheet"],
+        required_role_categories: [],
+        role_category_map: { sprite_sheet: ["sprite_sheet"] },
+        allowed_mime_types: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+        allowed_extensions: [".png", ".jpg", ".jpeg", ".webp", ".gif"],
+        max_file_count: 256,
+        max_total_bytes: 104857600,
+        max_texture_width: 4096,
+        max_texture_height: 4096,
+        feature_flag: null,
+        setup_status: "supported",
+        setup_blockers: [],
+        requires_static_fallback: false,
+        requires_license_ack: false
       }
     ]
     mocks.fetchWithAuth.mockResolvedValueOnce({
