@@ -141,8 +141,8 @@ const assertCoreComposerControls = async (
   }
 
   await expect(page.getByTestId('model-selector').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: /Select a Prompt/i })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Select character or persona/i })).toBeVisible();
+  await expect(page.getByTestId('chat-prompt-select')).toBeVisible();
+  await expect(page.getByTestId('character-select')).toBeVisible();
   await expect(page.getByTestId('attachment-button')).toBeVisible();
   await expect(page.getByTestId('tools-button')).toBeVisible();
 
@@ -294,8 +294,11 @@ test.describe('/chat cockpit real-server parity', () => {
     const runtimeInspector = page.getByTestId('playground-runtime-inspector');
     await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
     await expect(runtimeInspector.getByText('Scoped settings')).toBeVisible();
-    await expect(runtimeInspector.getByRole('heading', { name: 'Tools' })).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'Open MCP tools' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'MCP tool choice Auto' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
     const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
@@ -345,11 +348,11 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await page.keyboard.press('Escape');
 
-    await page.getByRole('button', { name: /Select a Prompt/i }).click();
+    await contextRail.getByRole('button', { name: 'Select a prompt' }).click();
     await expect(page.getByText(/Prompt|Search/i).first()).toBeVisible();
     await page.keyboard.press('Escape');
 
-    await page.getByRole('button', { name: /Select character or persona/i }).click();
+    await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
     await expect(page.getByText(/Character|No character/i).first()).toBeVisible();
     await page.keyboard.press('Escape');
 
@@ -357,7 +360,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByText(/Clear conversation|More tools/i).first()).toBeVisible();
     await page.keyboard.press('Escape');
 
-    await page.getByRole('button', { name: 'Open model settings' }).click();
+    await runtimeInspector.getByRole('button', { name: 'Open Model & Chat settings' }).click();
     const modelSettingsDialog = page.getByRole('dialog', {
       name: 'Current Chat Model Settings',
     });
@@ -366,14 +369,16 @@ test.describe('/chat cockpit real-server parity', () => {
     await modelSettingsDialog.getByRole('button', { name: 'Close' }).click();
     await expect(modelSettingsDialog).toBeHidden();
 
-    await page.getByRole('button', { name: 'Open character settings' }).click();
-    const actorSettingsDialog = page.getByRole('dialog', {
-      name: 'Scene Director (Actor)',
+    await runtimeInspector.getByRole('button', { name: 'Configure MCP tools' }).click();
+    const mcpSettingsDialog = page.getByRole('dialog', {
+      name: 'MCP tool settings',
     });
-    await expect(actorSettingsDialog).toBeVisible();
-    await expect(actorSettingsDialog.getByText('Quick setup')).toBeVisible();
-    await actorSettingsDialog.getByRole('button', { name: 'Close' }).click();
-    await expect(actorSettingsDialog).toBeHidden();
+    await expect(mcpSettingsDialog).toBeVisible();
+    await mcpSettingsDialog
+      .getByTestId('mcp-settings-modal-footer')
+      .getByRole('button', { name: 'Close' })
+      .click();
+    await expect(mcpSettingsDialog).toBeHidden();
 
     await page.getByRole('button', { name: 'Enter focus chat' }).click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
@@ -484,9 +489,10 @@ test.describe('/chat cockpit real-server parity', () => {
     const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
     await expect(runtimePanel.getByText('Provider route')).toBeVisible();
     await expect(runtimePanel.getByText('Scoped settings')).toBeVisible();
-    await expect(runtimePanel.getByRole('heading', { name: 'Tools' })).toBeVisible();
-    await expect(runtimePanel.getByRole('button', { name: 'Open model settings' })).toBeVisible();
-    await expect(runtimePanel.getByRole('button', { name: 'Open character settings' })).toBeVisible();
+    await expect(runtimePanel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
+    await expect(runtimePanel.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
+    await expect(runtimePanel.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
+    await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Enter focus chat' }).click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(

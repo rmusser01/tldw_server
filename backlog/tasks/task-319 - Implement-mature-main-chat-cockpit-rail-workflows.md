@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - codex
 created_date: '2026-05-13 14:55'
-updated_date: '2026-05-13 15:17'
+updated_date: '2026-05-13 19:52'
 labels:
   - webui
   - chat
@@ -30,14 +30,14 @@ Implement the approved remaining main WebUI /chat cockpit rail work in PR #1582.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Main /chat rails expose first-class prompt selection/status/clear controls using the existing prompt state without clearing unrelated context.
-- [ ] #2 Runtime rail exposes direct MCP tool choice and settings workflows using existing chat MCP state, with clear unavailable/degraded states and no MCP Hub lifecycle/policy mutation.
+- [x] #1 Main /chat rails expose first-class prompt selection/status/clear controls using the existing prompt state without clearing unrelated context.
+- [x] #2 Runtime rail exposes direct MCP tool choice and settings workflows using existing chat MCP state, with clear unavailable/degraded states and no MCP Hub lifecycle/policy mutation.
 - [ ] #3 Runtime rail presents Model & Chat settings with provider:model scope clarity and preserves scoped settings isolation.
-- [ ] #4 Character / Persona is a first-class rail workflow distinct from Scene Director/ActorPopout and supports none/character/persona states without sidepanel/sidebar behavior.
-- [ ] #5 Context rail includes prompt context and preserves isolated clear/remove behavior for context classes that affect the next reply.
-- [ ] #6 Existing composer/focus-mode chat workflows remain present and working until rail equivalents are verified.
-- [ ] #7 Focused component/integration tests cover the rail workflows, shared state paths, keyboard/focus behavior, and disabled/degraded states.
-- [ ] #8 Real-server Playwright coverage uses the running server without mocked payloads or page.route for merge-critical proof, tolerates unrelated degraded subsystems with warnings, and restores any mutated setting or uses disposable data.
+- [x] #4 Character / Persona is a first-class rail workflow distinct from Scene Director/ActorPopout and supports none/character/persona states without sidepanel/sidebar behavior.
+- [x] #5 Context rail includes prompt context and preserves isolated clear/remove behavior for context classes that affect the next reply.
+- [x] #6 Existing composer/focus-mode chat workflows remain present and working until rail equivalents are verified.
+- [x] #7 Focused component/integration tests cover the rail workflows, shared state paths, keyboard/focus behavior, and disabled/degraded states.
+- [x] #8 Real-server Playwright coverage uses the running server without mocked payloads or page.route for merge-critical proof, tolerates unrelated degraded subsystems with warnings, and restores any mutated setting or uses disposable data.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -61,14 +61,16 @@ Implemented the main /chat cockpit rail workflow slice: prompt selection/clearin
 Verification: focused Vitest cockpit suite passed: `bunx vitest run src/components/Option/Playground/__tests__/playground-cockpit-actions.test.ts src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-maturity.test.tsx` => 6 files / 41 tests passed. `git diff --check` passed.
 
 Verification caveat: `bun run verify:design-system-state` still fails on existing shared-product-state baseline/stale entries outside this /chat slice, especially Chatbooks and other non-chat pages; no unrelated baseline cleanup performed.
+
+Real-server validation: backend http://127.0.0.1:8000 returned degraded status only for chacha_notes; /chat remained usable with warnings. Updated apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts to cover the mature cockpit rail labels/flows and ran it against the PR worktree WebUI on localhost:3002 with TLDW_WEB_AUTOSTART=false and no route mocks: 3 tests passed. Captured real conversation screenshot at /private/tmp/tldw-chat-cockpit-real-conversation.png after a 200 chat completion through openai:gpt-4o-mini. Bandit not run because this checkpoint touches only frontend TypeScript/Playwright/Backlog markdown, no Python.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
