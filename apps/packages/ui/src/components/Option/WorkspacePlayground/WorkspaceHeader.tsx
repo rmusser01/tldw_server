@@ -531,7 +531,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleOpenAgentTasksPage = () => {
     setAgentTaskModalOpen(false)
-    navigate("/agent-tasks")
+    const canonicalWorkspaceId = workspaceId?.trim()
+    if (!canonicalWorkspaceId) {
+      navigate("/agent-tasks")
+      return
+    }
+    const params = new URLSearchParams({ workspace: canonicalWorkspaceId })
+    navigate(`/agent-tasks?${params.toString()}`)
   }
 
   const handleCreateNewWorkspace = () => {
