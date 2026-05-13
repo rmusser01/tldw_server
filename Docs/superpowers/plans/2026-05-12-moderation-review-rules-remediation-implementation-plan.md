@@ -511,22 +511,22 @@ Expected: `/moderation` is usable with seeded/mocked review items and all requir
 
 **Implementation Tasks:**
 
-- [ ] Add decision history to item detail response. Include only sanitized actor id, action, resulting status, reason, timestamps, undo eligibility, and redaction state.
+- [x] Add decision history to item detail response. Include only sanitized actor id, action, resulting status, reason, timestamps, undo eligibility, and redaction state.
 
-- [ ] Ensure undo tokens are stored hashed, expire, and are single-use. Undo should append an audit event and restore the previous status only when no later decision superseded it.
+- [x] Ensure undo tokens are stored hashed, expire, and are single-use. Undo should append an audit event and restore the previous status only when no later decision superseded it.
 
-- [ ] Add audit list filters by `item_id`, `decision_id`, `actor`, `action`, `date_from`, `date_to`, `cursor`, and `limit`.
+- [x] Add audit list filters by `item_id`, `decision_id`, `actor`, `action`, `date_from`, `date_to`, `cursor`, and `limit`.
 
-- [ ] Add explicit redaction support for review item content when source data deletion or privacy policy requires it. Redacted items should keep metadata/audit records but replace excerpt/context/match samples with safe placeholders.
+- [x] Add explicit redaction support for review item content when source data deletion or privacy policy requires it. Redacted items should keep metadata/audit records but replace excerpt/context/match samples with safe placeholders.
 
-- [ ] Build `AuditTimeline.tsx` and surface it in item detail. Keep raw JSON behind a details element only for debugging-safe payloads.
+- [x] Build `AuditTimeline.tsx` and surface it in item detail. Keep raw JSON behind a details element only for debugging-safe payloads.
 
-- [ ] Add sanitized audit export service only if the backend endpoint is ready; otherwise leave export as a documented Stage 6 follow-up within the task.
+- [x] Add sanitized audit export service only if the backend endpoint is ready; otherwise leave export as a documented Stage 6 follow-up within the task. No export endpoint was added in Stage 6; the supported v1 surface remains filtered audit listing until an export endpoint is explicitly designed.
 
 **Tests:**
 
-- [ ] Backend tests for undo expiration, single-use undo, later-decision conflict, audit list filters, and content redaction.
-- [ ] Frontend tests for audit timeline, redacted content state, and undo disabled/expired states.
+- [x] Backend tests for undo expiration, single-use undo, later-decision conflict, audit list filters, and content redaction.
+- [x] Frontend tests for audit timeline, redacted content state, and undo disabled/expired states.
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_review_audit.py -q`
 
@@ -534,7 +534,7 @@ Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationReview/__
 
 Expected: decisions are auditable and undo/redaction behavior is explicit in UI and backend.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -578,7 +578,7 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: repeat-review workflow can be completed without opening every item, while destructive actions remain confirmed and audited.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ---
 

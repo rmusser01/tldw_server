@@ -8,6 +8,7 @@ type DecisionBarProps = {
   deciding?: ModerationDecisionAction | "undo" | null
   onDecision: (action: ModerationDecisionAction, reason?: string) => Promise<void> | void
   undoToken?: string | null
+  undoExpiresAt?: string | null
   onUndo?: () => Promise<void> | void
 }
 
@@ -18,10 +19,18 @@ export const DecisionBar: React.FC<DecisionBarProps> = ({
   deciding,
   onDecision,
   undoToken,
+  undoExpiresAt,
   onUndo
 }) => {
   const [reason, setReason] = React.useState("")
   const [validation, setValidation] = React.useState<string | null>(null)
+  const undoExpired = React.useMemo(() => {
+    if (!undoExpiresAt) {
+      return false
+    }
+    const expires = new Date(undoExpiresAt).getTime()
+    return Number.isFinite(expires) && expires < Date.now()
+  }, [undoExpiresAt])
 
   const runDecision = async (action: ModerationDecisionAction) => {
     if (decisionRequiresReason(action) && !reason.trim()) {
@@ -69,10 +78,11 @@ export const DecisionBar: React.FC<DecisionBarProps> = ({
           <button
             type="button"
             onClick={() => void onUndo()}
-            disabled={Boolean(deciding)}
+            disabled={Boolean(deciding) || undoExpired}
+            title={undoExpired ? "Undo expired" : undoExpiresAt ? `Undo expires ${undoExpiresAt}` : undefined}
             className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-300 dark:hover:bg-blue-950/30"
           >
-            {deciding === "undo" ? "Undoing" : "Undo decision"}
+            {deciding === "undo" ? "Undoing" : undoExpired ? "Undo expired" : "Undo decision"}
           </button>
         )}
       </div>

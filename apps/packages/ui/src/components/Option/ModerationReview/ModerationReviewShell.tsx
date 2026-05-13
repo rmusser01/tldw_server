@@ -180,6 +180,7 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
               deciding={queue.deciding}
               onDecision={queue.decideSelected}
               undoToken={queue.undo?.token || null}
+              undoExpiresAt={queue.undo?.expiresAt || null}
               onUndo={queue.undoDecision}
             />
           </aside>

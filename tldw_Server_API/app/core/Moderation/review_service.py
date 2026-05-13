@@ -116,7 +116,7 @@ class ModerationReviewService:
         return self.store.list_items(filters=filters, limit=limit, cursor=cursor)
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
-        return self.store.get_item(item_id)
+        return self.store.get_item(item_id, include_history=True)
 
     def record_item(self, payload: dict[str, Any]) -> dict[str, Any]:
         safe_payload = dict(payload)
@@ -180,16 +180,22 @@ class ModerationReviewService:
         self,
         *,
         item_id: str | None = None,
+        decision_id: str | None = None,
         actor_id: str | None = None,
         action: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         return self.store.list_audit(
             item_id=item_id,
+            decision_id=decision_id,
             actor_id=actor_id,
             action=action,
+            date_from=date_from,
+            date_to=date_to,
             limit=limit,
             cursor=cursor,
         )

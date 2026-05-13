@@ -56,7 +56,8 @@ def test_review_service_maps_decisions_to_statuses_and_uses_actor_from_call(tmp_
 
     audit = service.list_audit(item_id=item["id"], limit=10)
     assert audit["events"][0]["actor_id"] == "principal:reviewer"
-    assert audit["events"][0]["action"] == "decision.redact"
+    assert audit["events"][0]["action"] == "content.redacted"
+    assert audit["events"][1]["action"] == "decision.redact"
 
 
 @pytest.mark.unit

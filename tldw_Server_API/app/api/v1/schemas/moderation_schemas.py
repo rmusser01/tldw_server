@@ -190,6 +190,20 @@ class ModerationReviewMatch(BaseModel):
     confidence: float | None = Field(None, ge=0, le=1)
 
 
+class ModerationReviewDecisionHistoryEntry(BaseModel):
+    id: str
+    action: ModerationDecisionAction
+    status: ModerationReviewStatus
+    previous_status: ModerationReviewStatus
+    actor_id: str
+    reason: str | None = None
+    decided_at: str
+    undo_eligible: bool = False
+    undo_expires_at: str | None = None
+    undone_at: str | None = None
+    redaction_state: Literal["not_redacted", "redacted"] = "not_redacted"
+
+
 class ModerationReviewItem(BaseModel):
     id: str
     status: ModerationReviewStatus
@@ -204,12 +218,13 @@ class ModerationReviewItem(BaseModel):
     category: str | None = None
     safe_fields: dict[str, bool] = Field(default_factory=dict)
     excerpt: str
-    context: dict[str, str] | None = None
+    context: dict[str, Any] | None = None
     effective_policy: dict[str, Any] = Field(default_factory=dict)
     matches: list[ModerationReviewMatch] = Field(default_factory=list)
     recommended_action: ModerationDecisionAction | None = None
     retention_expires_at: str | None = None
     content_redacted_at: str | None = None
+    decision_history: list[ModerationReviewDecisionHistoryEntry] = Field(default_factory=list)
 
 
 class ModerationReviewListResponse(BaseModel):
@@ -233,6 +248,8 @@ class ModerationReviewDecision(BaseModel):
     decided_by: str
     reason: str | None = None
     decided_at: str
+    undo_expires_at: str | None = None
+    undone_at: str | None = None
     undo_token: str | None = None
 
 

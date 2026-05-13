@@ -1,7 +1,8 @@
 import React from "react"
-import { FileText, ShieldAlert } from "lucide-react"
+import { FileText, ShieldAlert, ShieldOff } from "lucide-react"
 
 import type { ModerationReviewItem } from "@/services/moderation"
+import { AuditTimeline } from "./AuditTimeline"
 import {
   formatReviewDate,
   getReviewItemSourceLabel,
@@ -42,6 +43,7 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
   }
 
   const safeWarnings = getSafeFieldWarnings(item)
+  const isContentRedacted = Boolean(item.content_redacted_at) || item.excerpt === "[content redacted]"
 
   return (
     <article className="space-y-4 rounded-lg border border-border bg-surface p-4" aria-labelledby="review-detail-title">
@@ -74,6 +76,16 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
             Some policy fields are unavailable
           </div>
           <p className="mt-1">Unavailable safe fields: {safeWarnings.join(", ")}.</p>
+        </div>
+      )}
+
+      {isContentRedacted && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+          <div className="flex items-center gap-2 font-semibold">
+            <ShieldOff className="h-4 w-4" aria-hidden="true" />
+            Review content redacted
+          </div>
+          <p className="mt-1">Excerpt, context, and match samples have been replaced with safe placeholders.</p>
         </div>
       )}
 
@@ -136,6 +148,8 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
           </div>
         </div>
       </details>
+
+      <AuditTimeline decisions={item.decision_history || []} />
     </article>
   )
 }

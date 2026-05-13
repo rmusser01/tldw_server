@@ -147,12 +147,27 @@ export interface ModerationReviewItem {
   category?: string | null
   safe_fields: Record<string, boolean>
   excerpt: string
-  context?: Record<string, string> | null
+  context?: Record<string, any> | null
   effective_policy: Record<string, any>
   matches: ModerationReviewMatch[]
   recommended_action?: ModerationDecisionAction | null
   retention_expires_at?: string | null
   content_redacted_at?: string | null
+  decision_history?: ModerationReviewDecisionHistoryEntry[]
+}
+
+export interface ModerationReviewDecisionHistoryEntry {
+  id: string
+  action: ModerationDecisionAction
+  status: ModerationReviewStatus
+  previous_status: ModerationReviewStatus
+  actor_id: string
+  reason?: string | null
+  decided_at: string
+  undo_eligible: boolean
+  undo_expires_at?: string | null
+  undone_at?: string | null
+  redaction_state: "not_redacted" | "redacted"
 }
 
 export interface ModerationReviewListParams {
@@ -188,6 +203,8 @@ export interface ModerationReviewDecision {
   decided_by: string
   reason?: string | null
   decided_at: string
+  undo_expires_at?: string | null
+  undone_at?: string | null
   undo_token?: string | null
 }
 
@@ -220,8 +237,11 @@ export interface ModerationReviewBulkDecisionResponse {
 
 export interface ModerationReviewAuditParams {
   item_id?: string
+  decision_id?: string
   actor?: string
   action?: string
+  date_from?: string
+  date_to?: string
   limit?: number
   cursor?: string | null
 }
@@ -460,8 +480,11 @@ export async function listModerationReviewAudit(
 ): Promise<ModerationReviewAuditResponse> {
   const query = buildModerationReviewQuery(params as Record<string, string | number | null | undefined>, [
     "item_id",
+    "decision_id",
     "actor",
     "action",
+    "date_from",
+    "date_to",
     "limit",
     "cursor"
   ])

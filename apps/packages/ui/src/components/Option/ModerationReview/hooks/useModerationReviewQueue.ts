@@ -30,6 +30,7 @@ export interface ModerationReviewUndoState {
   itemId: string
   token: string
   action: ModerationDecisionAction
+  expiresAt?: string | null
 }
 
 const DEFAULT_FILTERS: ModerationReviewFilters = {
@@ -186,7 +187,16 @@ export function useModerationReviewQueue() {
           reason: reason?.trim() || undefined
         })
         setSelectedItem(response.item)
-        setUndo(response.undo_token ? { itemId: selectedItemId, token: response.undo_token, action } : null)
+        setUndo(
+          response.undo_token
+            ? {
+                itemId: selectedItemId,
+                token: response.undo_token,
+                action,
+                expiresAt: response.decision.undo_expires_at || null
+              }
+            : null
+        )
         await refresh()
         setSelectedItem(response.item)
         setSelectedItemId(response.item.id)

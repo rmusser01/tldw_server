@@ -114,7 +114,10 @@ def test_review_store_redacts_content_but_keeps_audit_and_metadata(tmp_path):
     redacted = store.redact_item_content(item["id"], actor_id="privacy-officer")
 
     assert redacted["excerpt"] == "[content redacted]"
-    assert redacted["context"] == {}
+    assert redacted["context"] == {
+        "redacted": True,
+        "message": "Context removed from moderation review item",
+    }
     assert redacted["matches"][0]["sample"] == "[content redacted]"
     assert redacted["content_redacted_at"] is not None
     assert redacted["safe_fields"]["excerpt"] is False

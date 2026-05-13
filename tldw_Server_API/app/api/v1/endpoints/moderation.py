@@ -625,6 +625,10 @@ async def undo_review_decision(
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Undo token not found") from exc
+    except ValueError as exc:
+        detail = str(exc) or "Undo is no longer available"
+        code = status.HTTP_410_GONE if "expired" in detail else status.HTTP_409_CONFLICT
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @review_router.post(
@@ -659,16 +663,22 @@ async def bulk_decide_review_items(
 )
 async def list_review_audit(
     item_id: str | None = Query(None),
+    decision_id: str | None = Query(None),
     actor_id: str | None = Query(None, alias="actor"),
     action: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(None),
 ) -> ModerationReviewAuditResponse:
     service = get_moderation_review_service()
     return service.list_audit(
         item_id=item_id,
+        decision_id=decision_id,
         actor_id=actor_id,
         action=action,
+        date_from=date_from,
+        date_to=date_to,
         limit=limit,
         cursor=cursor,
     )
