@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-13 06:25'
-updated_date: '2026-05-13 06:32'
+updated_date: '2026-05-13 14:17'
 labels:
   - persona
   - buddy
@@ -64,6 +64,12 @@ Verification: pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py 
 Fresh verification on 2026-05-12: python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q passed with 59 passed; bun run test -- src/services/__tests__/persona-visuals.test.ts passed with 2 passed; git diff --check passed; Bandit JSON results length was 0 with all severity/confidence counts 0.
 
 Known skips/blockers: none. Final frontend verification used the package-local bun run test command so Vitest loaded the workspace config and aliases correctly.
+
+Review follow-up started for PR #1630. Still-valid findings to address: GIF capability/upload MIME drift, immutable role_category_map registry state, setup_status type safety, live2d disabled_reason API assertion, and endpoint conversion simplification if Pydantic validation accepts the immutable registry values.
+
+Review follow-up fixed PR #1630 comments: shared GIF-capable raster MIME/extension constants now feed both upload validation and renderer capability metadata; role_category_map is converted to an immutable mappingproxy with tuple values at capability construction; setup_status uses the shared Literal alias and invalid values raise ValueError; live2d.disabled_reason is asserted in the API contract test; endpoint mapping now relies on Pydantic coercion for tuple/mapping fields.
+
+Review-fix verification: focused red tests failed before implementation for GIF drift, mutable role_category_map, invalid setup_status, and missing live2d disabled_reason coverage. After fixes, pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_service.py -q passed with 75 passed; bun run test -- src/services/__tests__/persona-visuals.test.ts passed with 2 passed; git diff --check passed; Bandit review-fix JSON results length was 0 with all severity/confidence counts 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -72,6 +78,8 @@ Known skips/blockers: none. Final frontend verification used the package-local b
 Added the Manifest V2 renderer capability foundation for Persona/Buddy visual packs. The backend registry and /api/v1/persona/visual-renderers response now expose additive renderer metadata for contract versions, asset roles, role-category mapping, limits, setup status/blockers, and fallback/license requirements while preserving existing response fields. sprite_frames remains the only activatable Buddy-runtime renderer, and live2d is represented only as an explicit disabled future-state capability. Shared UI types, service coverage, docs, and the PRD now reflect that boundary.
 
 Draft PR: https://github.com/rmusser01/tldw_server/pull/1630
+
+Review follow-up for PR #1630 addressed the still-valid bot findings: GIF upload/capability drift, mutable nested registry metadata, setup_status type safety, live2d disabled_reason API coverage, and redundant endpoint conversion code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

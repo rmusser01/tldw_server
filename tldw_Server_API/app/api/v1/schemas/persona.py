@@ -9,6 +9,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    PersonaVisualRendererSetupStatus,
+)
+
 
 PersonaMode = Literal["session_scoped", "persistent_scoped"]
 PersonaScopeRuleType = Literal["conversation_id", "character_id", "media_id", "media_tag", "note_id"]
@@ -28,13 +32,6 @@ PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview
 PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
 PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
 PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
-PersonaVisualRendererSetupStatus = Literal[
-    "supported",
-    "unsupported_renderer",
-    "feature_gated",
-    "dependency_missing",
-    "license_review_required",
-]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",

@@ -163,6 +163,7 @@ def test_list_persona_visual_renderer_capabilities(persona_db: CharactersRAGDB) 
     assert live2d["requires_static_fallback"] is True
     assert live2d["setup_status"] == "unsupported_renderer"
     assert "runtime_adapter_not_implemented" in live2d["setup_blockers"]
+    assert live2d["disabled_reason"] == "runtime_adapter_not_implemented"
 
 
 def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(

@@ -50,6 +50,8 @@ def test_renderer_capability_registry_exposes_v2_metadata_without_enabling_live2
     assert sprite_frames.renderer_contract_versions == (1,)
     assert "frame" in sprite_frames.supported_asset_roles
     assert "sprite_sheet" in sprite_frames.supported_asset_roles
+    assert "image/gif" in sprite_frames.allowed_mime_types
+    assert ".gif" in sprite_frames.allowed_extensions
     assert sprite_frames.required_role_categories == ()
     assert sprite_frames.can_validate is True
     assert sprite_frames.can_activate is True
@@ -75,6 +77,29 @@ def test_renderer_capability_registry_exposes_v2_metadata_without_enabling_live2
     assert live2d.setup_status == "unsupported_renderer"
     assert "runtime_adapter_not_implemented" in live2d.setup_blockers
     assert live2d.disabled_reason == "runtime_adapter_not_implemented"
+
+
+def test_renderer_capability_role_category_map_is_immutable() -> None:
+    live2d = get_persona_visual_renderer_capability("live2d")
+
+    assert live2d is not None
+    with pytest.raises(TypeError):
+        live2d.role_category_map["source_manifest"] = ("source_manifest",)
+
+
+def test_renderer_capability_rejects_unknown_setup_status() -> None:
+    with pytest.raises(ValueError, match="setup_status"):
+        PersonaVisualRendererCapability(
+            renderer_type="broken",
+            display_name="Broken",
+            manifest_versions=(2,),
+            can_validate=False,
+            can_activate=False,
+            buddy_runtime_supported=False,
+            import_supported=False,
+            export_supported=False,
+            setup_status="not_real",
+        )
 
 
 def test_renderer_capability_lookup_keeps_live2d_non_activatable() -> None:
