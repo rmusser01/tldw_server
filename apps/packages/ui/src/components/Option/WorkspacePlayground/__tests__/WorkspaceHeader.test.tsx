@@ -44,6 +44,17 @@ const registryStateOverrides = vi.hoisted(() => ({
   degradedLabel: "Registry Degraded",
   missingDegraded: false
 }))
+const connectionConfigState = vi.hoisted(() => ({
+  config: {
+    serverUrl: "http://127.0.0.1:8000",
+    authMode: "single-user" as const,
+    apiKey: "test-api-key",
+    accessToken: ""
+  }
+}))
+const fetchMockState = vi.hoisted(() => ({
+  fetch: vi.fn()
+}))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
 
@@ -188,6 +199,13 @@ vi.mock("@/store/connection", () => ({
   useConnectionStore: (
     selector: (state: typeof mockConnectionStoreState) => unknown
   ) => selector(mockConnectionStoreState)
+}))
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: connectionConfigState.config,
+    loading: false
+  })
 }))
 
 vi.mock("@/design-system", async (importActual) => {
@@ -454,6 +472,16 @@ describe("WorkspaceHeader workspace browser modal", () => {
       bytes: 16000,
       updatedAt: new Date("2026-02-25T10:00:00.000Z")
     })
+    connectionConfigState.config = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key",
+      accessToken: ""
+    }
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch: ${String(input)}`)
+    })
+    vi.stubGlobal("fetch", fetchMockState.fetch)
   })
 
   it("opens view-all modal and filters workspaces by search query", async () => {
@@ -1176,5 +1204,177 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
     expect(screen.queryByText("Telemetry summary")).not.toBeInTheDocument()
+  })
+
+  it("creates an ACP-backed agent task for the current workspace", async () => {
+    fetchMockState.fetch.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const body =
+          typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/workspaces/canonical-bridge"
+        ) {
+          expect(init?.method).toBe("POST")
+          expect((init?.headers as Record<string, string>)["X-API-KEY"]).toBe(
+            "test-api-key"
+          )
+          expect(body).toMatchObject({
+            canonical_workspace_id: "workspace-alpha",
+            canonical_workspace_source: "workspace_playground",
+            root_path: "/Users/macbook-dev/src/alpha",
+            metadata: {
+              created_from: "workspace_playground",
+              canonical_workspace_id: "workspace-alpha"
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 33,
+              name: "Alpha Research execution",
+              root_path: "/Users/macbook-dev/src/alpha",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "workspace_playground",
+                link_status: "linked"
+              }
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ) {
+          expect(init?.method).toBe("POST")
+          expect(body).toMatchObject({
+            name: "Alpha Research agent work",
+            workspace_id: 33,
+            metadata: {
+              created_from: "workspace_playground",
+              canonical_workspace_id: "workspace-alpha",
+              acp_workspace_id: 33
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 44,
+              name: "Alpha Research agent work",
+              workspace_id: 33
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+        ) {
+          expect(init?.method).toBe("POST")
+          expect(body).toMatchObject({
+            title: "Summarize workspace blockers",
+            description: "Review the current sources and identify blockers.",
+            agent_type: "codex",
+            metadata: {
+              created_from: "workspace_playground",
+              canonical_workspace_id: "workspace-alpha",
+              acp_workspace_id: 33
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 55,
+              project_id: 44,
+              title: "Summarize workspace blockers"
+            })
+          } as Response
+        }
+
+        throw new Error(`unexpected fetch: ${url}`)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/Users/macbook-dev/src/alpha" }
+    })
+    fireEvent.change(within(modal).getByLabelText("Task title"), {
+      target: { value: "Summarize workspace blockers" }
+    })
+    fireEvent.change(within(modal).getByLabelText("Task description"), {
+      target: { value: "Review the current sources and identify blockers." }
+    })
+    fireEvent.change(within(modal).getByLabelText("Agent type"), {
+      target: { value: "codex" }
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Create task" }))
+
+    await waitFor(() => {
+      expect(fetchMockState.fetch).toHaveBeenCalledTimes(3)
+      expect(within(modal).getByText("Agent task created")).toBeInTheDocument()
+      expect(within(modal).getByText("ACP workspace #33")).toBeInTheDocument()
+    })
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
+    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks")
+  })
+
+  it("surfaces ACP bridge setup failures without creating project or task records", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        detail: {
+          code: "workspace_root_not_allowed",
+          message: "Root path is outside the configured ACP allowlist."
+        }
+      })
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/private/not-allowed" }
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Create task" }))
+
+    await waitFor(() => {
+      expect(fetchMockState.fetch).toHaveBeenCalledTimes(1)
+      expect(
+        within(modal).getByText("Root path is outside the configured ACP allowlist.")
+      ).toBeInTheDocument()
+    })
   })
 })
