@@ -39,25 +39,51 @@ def _activatable_manifest() -> dict:
     }
 
 
-def test_renderer_capability_registry_lists_only_sprite_frames_in_v1() -> None:
+def test_renderer_capability_registry_exposes_v2_metadata_without_enabling_live2d() -> None:
     capabilities = list_persona_visual_renderer_capabilities()
 
-    assert [cap.renderer_type for cap in capabilities] == ["sprite_frames"]
-    capability = capabilities[0]
-    assert capability.display_name == "Sprite frames"
-    assert capability.manifest_versions == (1,)
-    assert capability.can_validate is True
-    assert capability.can_activate is True
-    assert capability.buddy_runtime_supported is True
-    assert capability.import_supported is True
-    assert capability.export_supported is True
-    assert capability.disabled_reason is None
+    assert [cap.renderer_type for cap in capabilities] == ["sprite_frames", "live2d"]
+    by_renderer = {cap.renderer_type: cap for cap in capabilities}
+    sprite_frames = by_renderer["sprite_frames"]
+    assert sprite_frames.display_name == "Sprite frames"
+    assert sprite_frames.manifest_versions == (1,)
+    assert sprite_frames.renderer_contract_versions == (1,)
+    assert "frame" in sprite_frames.supported_asset_roles
+    assert "sprite_sheet" in sprite_frames.supported_asset_roles
+    assert sprite_frames.required_role_categories == ()
+    assert sprite_frames.can_validate is True
+    assert sprite_frames.can_activate is True
+    assert sprite_frames.buddy_runtime_supported is True
+    assert sprite_frames.import_supported is True
+    assert sprite_frames.export_supported is True
+    assert sprite_frames.setup_status == "supported"
+    assert sprite_frames.setup_blockers == ()
+    assert sprite_frames.disabled_reason is None
+
+    live2d = by_renderer["live2d"]
+    assert live2d.manifest_versions == (2,)
+    assert live2d.renderer_contract_versions == (1,)
+    assert "live2d_model_manifest" in live2d.supported_asset_roles
+    assert live2d.required_role_categories == ("fallback_preview", "source_manifest")
+    assert live2d.role_category_map["source_manifest"] == ("live2d_model_manifest",)
+    assert live2d.can_validate is False
+    assert live2d.can_activate is False
+    assert live2d.buddy_runtime_supported is False
+    assert live2d.import_supported is False
+    assert live2d.export_supported is False
+    assert live2d.requires_static_fallback is True
+    assert live2d.setup_status == "unsupported_renderer"
+    assert "runtime_adapter_not_implemented" in live2d.setup_blockers
+    assert live2d.disabled_reason == "runtime_adapter_not_implemented"
 
 
-def test_renderer_capability_lookup_rejects_unknown_or_future_renderers() -> None:
+def test_renderer_capability_lookup_keeps_live2d_non_activatable() -> None:
     assert get_persona_visual_renderer_capability("sprite_frames") is not None
     assert get_persona_visual_renderer_capability(" sprite_frames ") is None
-    assert get_persona_visual_renderer_capability("live2d") is None
+    live2d = get_persona_visual_renderer_capability("live2d")
+    assert live2d is not None
+    assert live2d.can_validate is False
+    assert live2d.can_activate is False
     assert get_persona_visual_renderer_capability("sprite_sheet") is None
     assert get_persona_visual_renderer_capability("not_real") is None
 

@@ -3661,7 +3661,7 @@ async def get_persona_buddy(
 async def list_persona_visual_renderers(
     _current_user: User = Depends(get_request_user),
 ) -> PersonaVisualRendererCapabilitiesResponse:
-    """List enabled Persona/Buddy visual renderer capabilities for this server."""
+    """List known Persona/Buddy visual renderer capabilities for this server."""
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     _require_current_user_id(_current_user)
@@ -3677,6 +3677,24 @@ async def list_persona_visual_renderers(
                 import_supported=capability.import_supported,
                 export_supported=capability.export_supported,
                 disabled_reason=capability.disabled_reason,
+                renderer_contract_versions=list(capability.renderer_contract_versions),
+                supported_asset_roles=list(capability.supported_asset_roles),
+                required_role_categories=list(capability.required_role_categories),
+                role_category_map={
+                    category: list(roles)
+                    for category, roles in capability.role_category_map.items()
+                },
+                allowed_mime_types=list(capability.allowed_mime_types),
+                allowed_extensions=list(capability.allowed_extensions),
+                max_file_count=capability.max_file_count,
+                max_total_bytes=capability.max_total_bytes,
+                max_texture_width=capability.max_texture_width,
+                max_texture_height=capability.max_texture_height,
+                feature_flag=capability.feature_flag,
+                setup_status=capability.setup_status,
+                setup_blockers=list(capability.setup_blockers),
+                requires_static_fallback=capability.requires_static_fallback,
+                requires_license_ack=capability.requires_license_ack,
             )
             for capability in list_persona_visual_renderer_capabilities()
         ]

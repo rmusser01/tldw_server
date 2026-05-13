@@ -587,11 +587,17 @@ baseline. The first reference-backed V1 slices are now covered:
 10. Sprite atlas V1.1 remains inside `sprite_frames`: atlas assets use
     `asset_role: "sprite_sheet"` and frame-level `region` rectangles, not a
     separate `sprite_sheet` renderer or manifest version bump.
-11. Live2D or other renderer adapter implementation remains future work after
-    non-sprite manifest V2, import-preview validation hooks, dependency gates,
-    licensing review, and fallback requirements are separately scoped. The
-    Manifest V2 design slice is tracked by #1623 and
+11. The Manifest V2 design slice is tracked by #1623 and
     `Docs/Design/2026-05-13-persona-visual-manifest-v2-contract.md`.
+12. The Manifest V2 capability foundation is tracked by #1628. It exposes
+    additive renderer metadata such as contract versions, asset roles,
+    role-category mapping, setup status/blockers, limits, and fallback/license
+    requirements from the existing renderer capability endpoint.
+13. Live2D or other renderer adapter implementation remains future work after
+    import-preview validation hooks, dependency gates, licensing review, fallback
+    requirements, and runtime adapter tests are separately scoped. Capability
+    entries for these renderers must be treated as disabled/future state unless
+    `can_validate`, `can_activate`, and `buddy_runtime_supported` are all true.
 
 ---
 
