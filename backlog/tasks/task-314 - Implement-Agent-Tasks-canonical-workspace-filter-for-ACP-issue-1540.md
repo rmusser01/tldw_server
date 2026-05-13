@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-05-13 05:49'
-updated_date: '2026-05-13 06:03'
+updated_date: '2026-05-13 06:08'
 labels:
   - ACP
   - workspace
@@ -14,6 +14,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1540'
   - 'https://github.com/rmusser01/tldw_server/pull/1625'
+  - 'https://github.com/rmusser01/tldw_server/pull/1627'
 documentation:
   - Docs/Design/ACP_Workspace_Integration_Decision_2026_05.md
 priority: high
@@ -67,6 +68,8 @@ Implementation notes: Agent Tasks now reads workspace/workspace_id/canonical_wor
 Verification: red run failed as expected before implementation. Final focused Vitest passed: bunx vitest run src/components/Option/AgentTasks/__tests__/AgentTasksPage.connection.test.tsx src/components/Option/WorkspacePlayground/__tests__/WorkspaceHeader.test.tsx --maxWorkers=1 --no-file-parallelism => 2 files, 38 tests passed. Targeted TypeScript pass used /private/tmp/acp-agent-tasks-tsconfig.json with touched files plus ambient/test globals. Full UI tsc remains blocked by existing unrelated baseline errors across many tests/services. git diff --check passed. Bandit not run because touched implementation is TypeScript/frontend docs/backlog only and no Python files are in scope.
 
 Post-rebase verification on current origin/dev: focused Vitest passed again with 2 files and 38 tests; targeted TypeScript pass using /private/tmp/acp-agent-tasks-tsconfig.json passed; git diff --check origin/dev...HEAD passed.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1627. Kept draft because the AI-generated PR policy requires a human-owned Change summary before merge and #1540 has later history/diagnostic-link slices remaining.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
