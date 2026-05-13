@@ -1,11 +1,11 @@
 ---
 id: TASK-319
 title: Implement mature main /chat cockpit rail workflows
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-13 14:55'
-updated_date: '2026-05-13 19:52'
+updated_date: '2026-05-13 20:01'
 labels:
   - webui
   - chat
@@ -32,7 +32,7 @@ Implement the approved remaining main WebUI /chat cockpit rail work in PR #1582.
 <!-- AC:BEGIN -->
 - [x] #1 Main /chat rails expose first-class prompt selection/status/clear controls using the existing prompt state without clearing unrelated context.
 - [x] #2 Runtime rail exposes direct MCP tool choice and settings workflows using existing chat MCP state, with clear unavailable/degraded states and no MCP Hub lifecycle/policy mutation.
-- [ ] #3 Runtime rail presents Model & Chat settings with provider:model scope clarity and preserves scoped settings isolation.
+- [x] #3 Runtime rail presents Model & Chat settings with provider:model scope clarity and preserves scoped settings isolation.
 - [x] #4 Character / Persona is a first-class rail workflow distinct from Scene Director/ActorPopout and supports none/character/persona states without sidepanel/sidebar behavior.
 - [x] #5 Context rail includes prompt context and preserves isolated clear/remove behavior for context classes that affect the next reply.
 - [x] #6 Existing composer/focus-mode chat workflows remain present and working until rail equivalents are verified.
@@ -63,14 +63,24 @@ Verification: focused Vitest cockpit suite passed: `bunx vitest run src/componen
 Verification caveat: `bun run verify:design-system-state` still fails on existing shared-product-state baseline/stale entries outside this /chat slice, especially Chatbooks and other non-chat pages; no unrelated baseline cleanup performed.
 
 Real-server validation: backend http://127.0.0.1:8000 returned degraded status only for chacha_notes; /chat remained usable with warnings. Updated apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts to cover the mature cockpit rail labels/flows and ran it against the PR worktree WebUI on localhost:3002 with TLDW_WEB_AUTOSTART=false and no route mocks: 3 tests passed. Captured real conversation screenshot at /private/tmp/tldw-chat-cockpit-real-conversation.png after a 200 chat completion through openai:gpt-4o-mini. Bandit not run because this checkpoint touches only frontend TypeScript/Playwright/Backlog markdown, no Python.
+
+Provider:model scoped-settings acceptance closed from existing code and focused regression evidence: PlaygroundForm updates the active chat-model settings scope from selectedModelKey, and useStoreChatModelSettings stores effective overrides per normalized provider:model key. Verification: bunx vitest run src/store/__tests__/model.scoped-settings.test.ts => 1 file / 8 tests passed.
+
+Review follow-up: addressed the six latest CodeRabbit /chat cockpit threads by extracting mobile-panel resolution, making context/status mapped keys collision-safe, refactoring runtime provider:model display parsing while preserving provider-qualified route-label precedence, and making the real-server spec's Node fs import explicit. Verification: git diff --check passed; focused cockpit Vitest suite passed 6 files / 41 tests; real-server Playwright spec passed 3 tests against http://127.0.0.1:8000 and PR frontend http://localhost:3002 with no route interception.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the mature main /chat cockpit rail workflows for PR #1582: first-class prompt management in the left rail, context inventory and isolated clears, direct Model & Chat settings, Character / Persona entry points, MCP tool choice/settings controls, degraded-health warnings that still permit chat, focus-mode preservation, responsive cockpit rails, and real-server Playwright proof. Review follow-up addressed the latest cockpit readability/key/import comments without expanding scope beyond the main /chat page.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

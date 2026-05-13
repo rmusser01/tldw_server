@@ -26,6 +26,18 @@ export type PlaygroundCockpitShellProps = {
   children: React.ReactNode;
 };
 
+const resolveVisibleMobilePanel = (
+  resolvedMobilePanel: PlaygroundCockpitMobilePanel,
+  leftRailVisible: boolean,
+  rightRailVisible: boolean,
+): PlaygroundCockpitMobilePanel => {
+  if (resolvedMobilePanel === "runtime" && rightRailVisible) return "runtime";
+  if (resolvedMobilePanel === "context" && leftRailVisible) return "context";
+  if (leftRailVisible) return "context";
+  if (rightRailVisible) return "runtime";
+  return null;
+};
+
 export const PlaygroundCockpitShell = ({
   mode,
   onModeChange,
@@ -62,16 +74,11 @@ export const PlaygroundCockpitShell = ({
     },
     [onMobilePanelChange],
   );
-  const visibleMobilePanel =
-    resolvedMobilePanel === "runtime" && rightRailVisible
-      ? "runtime"
-      : resolvedMobilePanel === "context" && leftRailVisible
-        ? "context"
-        : leftRailVisible
-          ? "context"
-          : rightRailVisible
-            ? "runtime"
-            : null;
+  const visibleMobilePanel = resolveVisibleMobilePanel(
+    resolvedMobilePanel,
+    leftRailVisible,
+    rightRailVisible,
+  );
   const leftRailLabel = leftRailVisible
     ? t("cockpit.hideContextRail", "Hide context rail")
     : t("cockpit.showContextRail", "Show context rail");

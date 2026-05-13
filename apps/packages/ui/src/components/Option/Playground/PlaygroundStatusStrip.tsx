@@ -124,16 +124,16 @@ export const PlaygroundStatusStrip = ({
             {t("cockpit.contextActive", "Context active")}
           </span>
         ) : null}
-        {contextSummary.map((item) => (
-          <span className={pillClass} key={item}>
+        {contextSummary.map((item, index) => (
+          <span className={pillClass} key={`context-${index}-${item}`}>
             {item}
           </span>
         ))}
         {errorMessage ? (
           <span className={pillClass}>{errorMessage}</span>
         ) : (
-          degradedChecks.map((check) => (
-            <span className={pillClass} key={check}>
+          degradedChecks.map((check, index) => (
+            <span className={pillClass} key={`degraded-${index}-${check}`}>
               {check}
             </span>
           ))

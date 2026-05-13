@@ -237,7 +237,8 @@ const assertProviderQualifiedPayload = async (page: Page, response: Response) =>
 
 test.describe('/chat cockpit real-server parity', () => {
   test('does not intercept backend routes in this real-server spec', async ({}, testInfo) => {
-    const { readFileSync } = await import('node:fs');
+    const fs = await import('node:fs');
+    const { readFileSync } = fs;
     const source = readFileSync(testInfo.file, 'utf8');
     const forbiddenCall = ['page', 'route'].join('.') + '(';
     expect(source).not.toContain(forbiddenCall);

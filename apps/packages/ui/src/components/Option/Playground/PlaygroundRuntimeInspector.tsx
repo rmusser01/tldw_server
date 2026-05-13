@@ -97,21 +97,24 @@ export const PlaygroundRuntimeInspector = ({
 }: PlaygroundRuntimeInspectorProps) => {
   const { t } = useTranslation("playground");
   const effectiveMessageCount = useCockpitMessageCount(messageCount);
-  const selectedModelParts =
-    !selectedProvider && selectedModel && selectedModel.includes(":")
-      ? selectedModel.split(":")
-      : null;
-  const displayProvider =
-    selectedProvider || selectedModelParts?.[0] || null;
-  const displayModel =
-    selectedModelParts && selectedModelParts.length > 1
-      ? selectedModelParts.slice(1).join(":")
-      : selectedProvider && selectedModel?.startsWith(`${selectedProvider}:`)
-        ? selectedModel.slice(selectedProvider.length + 1)
-        : selectedModel || null;
+  const selectedModelHasProvider = Boolean(selectedModel?.includes(":"));
+  const selectedModelSeparator = selectedModel?.indexOf(":") ?? -1;
+  let displayProvider = selectedProvider || null;
+  let displayModel = selectedModel || null;
+
+  if (!selectedProvider && selectedModelSeparator > 0) {
+    displayProvider = selectedModel?.slice(0, selectedModelSeparator) || null;
+    displayModel = selectedModel?.slice(selectedModelSeparator + 1) || null;
+  } else if (
+    selectedProvider &&
+    selectedModel?.startsWith(`${selectedProvider}:`)
+  ) {
+    displayModel = selectedModel.slice(selectedProvider.length + 1);
+  }
+
   const routeLabel =
     providerRouteLabel ||
-    (selectedModel?.includes(":")
+    (selectedModelHasProvider
       ? selectedModel
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`

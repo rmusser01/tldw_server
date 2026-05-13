@@ -259,17 +259,17 @@ export const PlaygroundContextRail = ({
             className="mt-2 flex flex-wrap gap-1.5 text-xs text-text-muted"
             aria-label={t("cockpit.contextSummary", "Context summary")}
           >
-            {contextSummary.map((item) => (
+            {contextSummary.map((item, index) => (
               <li
-                key={item}
+                key={`summary-${index}-${item}`}
                 className="rounded border border-border bg-surface2 px-2 py-0.5"
               >
                 {item}
               </li>
             ))}
-            {countLabels.map((item) => (
+            {countLabels.map((item, index) => (
               <li
-                key={item.label}
+                key={`count-${index}-${item.label}`}
                 className="flex items-center gap-1 rounded border border-border bg-surface2 px-2 py-0.5"
               >
                 <span className="min-w-0 truncate">{item.label}</span>
