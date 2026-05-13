@@ -124,6 +124,52 @@ describe("persona visual renderer registry", () => {
     expect(onRenderError).toHaveBeenCalledWith(null)
   })
 
+  it("renders sprite atlas regions through the registered sprite frame renderer", () => {
+    const onRenderError = vi.fn()
+
+    render(
+      <PersonaVisualRendererHost
+        pack={buildPack({
+          manifest: {
+            ...buildPack().manifest,
+            animations: {
+              idle: {
+                frames: [
+                  {
+                    asset_id: "sheet-1",
+                    region: { x: 16, y: 8, width: 24, height: 32 }
+                  }
+                ]
+              }
+            }
+          },
+          assets_by_id: {
+            "sheet-1": {
+              id: "sheet-1",
+              url: "/assets/sheet.png",
+              mime_type: "image/png",
+              asset_role: "sprite_sheet",
+              width: 96,
+              height: 64
+            }
+          }
+        })}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(screen.getByTestId("persona-visual-frame")).toHaveStyle({
+      backgroundImage: "url(/assets/sheet.png)",
+      backgroundPosition: "-16px -8px",
+      backgroundSize: "96px 64px",
+      width: "24px",
+      height: "32px"
+    })
+    expect(onRenderError).toHaveBeenCalledWith(null)
+  })
+
   it("mounts supported renderers so they can report render errors", () => {
     const onRenderError = vi.fn()
 
@@ -148,6 +194,47 @@ describe("persona visual renderer registry", () => {
     expect(screen.getByText("Buddy")).toBeInTheDocument()
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
     expect(onRenderError).toHaveBeenCalledWith("missing_asset")
+  })
+
+  it("keeps unsupported sprite atlas regions fail-soft through the registered renderer", () => {
+    const onRenderError = vi.fn()
+
+    render(
+      <PersonaVisualRendererHost
+        pack={buildPack({
+          manifest: {
+            ...buildPack().manifest,
+            animations: {
+              idle: {
+                frames: [
+                  {
+                    asset_id: "sheet-1",
+                    region: { x: 80, y: 0, width: 32, height: 32 }
+                  }
+                ]
+              }
+            }
+          },
+          assets_by_id: {
+            "sheet-1": {
+              id: "sheet-1",
+              url: "/assets/sheet.png",
+              mime_type: "image/png",
+              asset_role: "sprite_sheet",
+              width: 96,
+              height: 64
+            }
+          }
+        })}
+        state="idle"
+        fallbackLabel="Buddy"
+        onRenderError={onRenderError}
+      />
+    )
+
+    expect(screen.getByText("Buddy")).toBeInTheDocument()
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+    expect(onRenderError).toHaveBeenCalledWith("unsupported_region")
   })
 
   it("falls back for unsupported renderer packs", () => {

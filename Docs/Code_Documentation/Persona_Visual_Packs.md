@@ -60,6 +60,63 @@ capability contract is now in place; sprite-sheet frame regions are supported
 inside `sprite_frames`, and any future non-sprite adapter should reuse the
 registry instead of adding another hardcoded renderer path.
 
+### Sprite Atlas Frames
+
+Sprite atlases are represented as `sprite_frames` packs. In this slice,
+`sprite_sheet` is an asset role, not a separate `renderer_type`; manifests that
+set `renderer_type: "sprite_sheet"` are still unsupported for activation.
+
+Atlas-backed animations reference the atlas asset from each frame and include a
+pixel `region` rectangle. The same atlas asset can be reused across multiple
+frames:
+
+```json
+{
+  "manifest_version": 1,
+  "renderer_type": "sprite_frames",
+  "states": {
+    "idle": { "animation_id": "idle_loop" },
+    "listening": { "animation_id": "idle_loop" },
+    "thinking": { "animation_id": "idle_loop" },
+    "speaking": { "animation_id": "speak_loop" },
+    "error": { "animation_id": "idle_loop" }
+  },
+  "animations": {
+    "idle_loop": {
+      "frame_rate": 8,
+      "frames": [
+        {
+          "asset_id": "atlas-main",
+          "region": { "x": 0, "y": 0, "width": 128, "height": 128 },
+          "duration_ms": 120
+        },
+        {
+          "asset_id": "atlas-main",
+          "region": { "x": 128, "y": 0, "width": 128, "height": 128 },
+          "duration_ms": 120
+        }
+      ]
+    },
+    "speak_loop": {
+      "frame_rate": 12,
+      "frames": [
+        {
+          "asset_id": "atlas-main",
+          "region": { "x": 0, "y": 128, "width": 128, "height": 128 }
+        }
+      ]
+    }
+  }
+}
+```
+
+The referenced asset row should use `asset_role: "sprite_sheet"` and must still
+be a bounded raster image accepted by the normal visual upload/import path.
+Backend validation rejects non-integer, non-positive, or out-of-bounds regions
+when source dimensions are known. When dimensions are not yet available, draft
+validation can accept positive integer regions and the Buddy renderer remains
+fail-soft at runtime if a region cannot be rendered safely.
+
 ## Personal Library
 
 The personal library is a user-scoped metadata layer over existing Persona

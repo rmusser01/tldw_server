@@ -258,6 +258,39 @@ def test_accepts_sprite_sheet_regions_and_preview_frame() -> None:
     assert result.manifest["animations"]["idle"]["preview_frame"] == 1
 
 
+def test_activatable_manifest_accepts_sprite_sheet_regions_with_known_dimensions() -> None:
+    manifest = _activatable_manifest()
+    for index, animation in enumerate(manifest["animations"].values()):
+        animation.pop("asset_ids", None)
+        animation["frames"] = [
+            {
+                "asset_id": "sheet-asset",
+                "region": {
+                    "x": index * 64,
+                    "y": 0,
+                    "width": 64,
+                    "height": 64,
+                },
+                "duration_ms": 120,
+            }
+        ]
+
+    result = validate_visual_manifest(
+        manifest,
+        available_asset_ids={"sheet-asset"},
+        available_asset_dimensions={"sheet-asset": (512, 128)},
+        require_activatable=True,
+    )
+
+    assert set(result.resolved_required_states) == REQUIRED_VISUAL_STATES
+    assert result.manifest["renderer_type"] == "sprite_frames"
+    for animation in result.manifest["animations"].values():
+        frame = animation["frames"][0]
+        assert frame["asset_id"] == "sheet-asset"
+        assert frame["region"]["width"] == 64
+        assert frame["region"]["height"] == 64
+
+
 def test_rejects_sprite_sheet_regions_outside_asset_bounds() -> None:
     manifest = {
         "manifest_version": 1,
@@ -283,6 +316,39 @@ def test_rejects_sprite_sheet_regions_outside_asset_bounds() -> None:
             available_asset_dimensions={"sheet-asset": (256, 128)},
             require_activatable=False,
         )
+
+
+def test_accepts_sprite_sheet_regions_without_dimensions_until_asset_metadata_exists() -> None:
+    manifest = {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": {"idle": {"animation_id": "idle"}},
+        "animations": {
+            "idle": {
+                "frames": [
+                    {
+                        "asset_id": "sheet-asset",
+                        "region": {"x": 200, "y": 0, "width": 128, "height": 128},
+                    }
+                ],
+                "frame_rate": 8,
+            }
+        },
+    }
+
+    result = validate_visual_manifest(
+        manifest,
+        available_asset_ids={"sheet-asset"},
+        available_asset_dimensions={},
+        require_activatable=False,
+    )
+
+    assert result.manifest["animations"]["idle"]["frames"][0]["region"] == {
+        "x": 200,
+        "y": 0,
+        "width": 128,
+        "height": 128,
+    }
 
 
 def test_rejects_preview_frame_out_of_range() -> None:
