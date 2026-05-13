@@ -39,3 +39,6 @@ artifact status semantics, and persistence behavior between the two.
 - Whether ChatWorkspace becomes a mode inside WorkspacePlayground.
 - Whether DocumentWorkspace writes selected documents into workspace sources by default.
 - Which collaboration semantics are required before enterprise pilots.
+- How ACP execution workspaces attach to the canonical workspace without
+  creating a parallel ACP-only workspace model. See
+  `ACP_Workspace_Integration_Decision_2026_05.md`.

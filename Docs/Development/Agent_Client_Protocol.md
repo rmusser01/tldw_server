@@ -479,6 +479,11 @@ sessions with:
 - enabled workspace MCP servers converted to `mcpServers`.
 - workspace `env_vars` forwarded as per-session `env`.
 
+For product-level workspace membership, ACP execution workspaces attach to the
+canonical workspace model rather than defining a separate product workspace.
+See `../Design/ACP_Workspace_Integration_Decision_2026_05.md` for the bridge
+contract between `/api/v1/workspaces` and `/api/v1/agent-orchestration`.
+
 For the standard runner, per-session env is sent with `session/new`. For sandbox
 mode, per-session env is merged over `[ACP-SANDBOX].agent_env` and passed to the
 entrypoint as `ACP_AGENT_ENV_JSON`; only the per-session env is also included on

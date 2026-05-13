@@ -39,6 +39,11 @@ commands, release gates, runtime caveats, and final closeout evidence.
 [ACP_Governance_Audit.md](../Development/ACP_Governance_Audit.md) summarizes
 the current governance, RBAC, approval, and audit model.
 
+[ACP_Workspace_Integration_Decision_2026_05.md](../Design/ACP_Workspace_Integration_Decision_2026_05.md)
+records the maturity decision for connecting ACP projects, tasks, runs,
+reviews, and diagnostics to the canonical workspace model without creating a
+parallel ACP-only workspace product.
+
 ## 3) Current Implementation Status
 
 | Area | Status | Notes |
