@@ -86,6 +86,6 @@ describe("AnswerPanel workspace handoff", () => {
       type: "workspace_handoff",
       source_count: 1,
     })
-    expect(navigateMock).toHaveBeenCalledWith("/workspace-playground")
+    expect(navigateMock).toHaveBeenCalledWith("/research-studio")
   })
 })

@@ -3,6 +3,7 @@ import type { ReactElement } from "react"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
 import { Navigate } from "react-router-dom"
+import { RouteAliasNavigate } from "./RouteAliasNavigate"
 import {
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
@@ -10,7 +11,10 @@ import {
   MODERATION_REVIEW_PATH,
   MODERATION_RULES_PATH,
   PROTOTYPE_WORKSPACES_PATH,
-  REPO2TXT_PATH
+  RESEARCH_STUDIO_PATH,
+  REPO2TXT_PATH,
+  WORKSPACE_PLAYGROUND_PATH,
+  WORKSPACE_STUDIO_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
@@ -469,8 +473,18 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/workspace-playground",
+    path: RESEARCH_STUDIO_PATH,
     element: <OptionWorkspacePlayground />,
+  },
+  {
+    kind: "options",
+    path: WORKSPACE_PLAYGROUND_PATH,
+    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
+  },
+  {
+    kind: "options",
+    path: WORKSPACE_STUDIO_PATH,
+    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
   },
   {
     kind: "options",

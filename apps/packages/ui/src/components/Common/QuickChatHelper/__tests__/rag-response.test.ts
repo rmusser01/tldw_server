@@ -26,9 +26,9 @@ describe("buildQuickChatRagReply", () => {
       results: [
         {
           content:
-            "Workspace Playground helps discover tools and route users to specialized pages for each workflow.",
+            "Research Studio helps discover tools and route users to specialized pages for each workflow.",
           metadata: {
-            title: "Workspace Playground guide",
+            title: "Research Studio guide",
             source: "Documentation"
           }
         }
@@ -38,7 +38,7 @@ describe("buildQuickChatRagReply", () => {
     const result = buildQuickChatRagReply(response)
     expect(result.hasContext).toBe(true)
     expect(result.message).toContain("I found relevant documentation snippets")
-    expect(result.message).toContain("Workspace Playground guide")
+    expect(result.message).toContain("Research Studio guide")
   })
 
   it("returns no-context fallback when response has no answer/docs", () => {

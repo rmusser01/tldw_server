@@ -169,7 +169,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
       },
       {
         id: "workspace-playground",
-        to: "/workspace-playground",
+        to: "/research-studio",
         icon: GitCompare,
         labelKey: "settings:researchStudioNav",
         labelDefault: "Research Studio",

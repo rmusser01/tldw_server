@@ -2247,6 +2247,13 @@ export class TldwApiClientBase {
   }
 
   // RAG Methods
+  async getResearchStudioCapabilities(): Promise<unknown> {
+    return await this.request<unknown>({
+      path: '/api/v1/research-studio/capabilities',
+      method: 'GET'
+    })
+  }
+
   async ragHealth(): Promise<any> {
     return await this.request<any>({ path: '/api/v1/rag/health', method: 'GET' })
   }

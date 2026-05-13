@@ -1841,7 +1841,7 @@ test.describe("KnowledgeQA Workflow", () => {
         .getByRole("button", { name: /^Open in Workspace$/i })
         .evaluate((button: HTMLButtonElement) => button.click())
 
-      await authedPage.waitForURL(/\/workspace-playground(?:\?|$)/, {
+      await authedPage.waitForURL(/\/research-studio(?:\?|$)/, {
         timeout: 10_000
       })
       await workspacePage.waitForReady()
