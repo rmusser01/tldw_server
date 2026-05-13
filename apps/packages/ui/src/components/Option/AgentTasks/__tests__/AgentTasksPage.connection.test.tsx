@@ -1,5 +1,6 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import AgentTasksPage from "../index"
@@ -145,6 +146,31 @@ vi.mock("antd", () => {
   }
 })
 
+const LocationProbe = () => {
+  const location = useLocation()
+  return (
+    <div data-testid="agent-tasks-route">
+      {location.pathname}
+      {location.search}
+    </div>
+  )
+}
+
+const renderAgentTasksPage = (route = "/agent-tasks") =>
+  render(
+    <MemoryRouter initialEntries={[route]}>
+      <AgentTasksPage />
+    </MemoryRouter>
+  )
+
+const renderAgentTasksPageWithRouteProbe = (route = "/agent-tasks") =>
+  render(
+    <MemoryRouter initialEntries={[route]}>
+      <AgentTasksPage />
+      <LocationProbe />
+    </MemoryRouter>
+  )
+
 describe("AgentTasksPage connection and payload normalization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -240,7 +266,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
   })
 
   it("loads projects and tasks from canonical config-backed requests even when legacy storage is stale", async () => {
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     const projectButton = await screen.findByText("Research Project")
     expect(projectButton).toBeInTheDocument()
@@ -266,7 +292,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
       }))
     )
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     expect(await screen.findByText("Agent orchestration unavailable")).toBeInTheDocument()
     expect(
@@ -302,7 +328,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     expect(await screen.findByText("Agent orchestration unavailable")).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -355,7 +381,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     expect(await screen.findByText("ACP setup needs attention")).toBeInTheDocument()
     expect(screen.getByText("Runner is missing")).toBeInTheDocument()
@@ -403,7 +429,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     expect(await screen.findByText("No projects yet")).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
@@ -537,7 +563,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     const projectButton = await screen.findByText("Research Project")
     fireEvent.click(projectButton)
@@ -555,7 +581,6 @@ describe("AgentTasksPage connection and payload normalization", () => {
   })
 
   it("uses the route workspace filter to show only linked canonical workspace projects and tasks", async () => {
-    window.location.hash = "#/agent-tasks?workspace=workspace-alpha"
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === "http://127.0.0.1:8000/openapi.json") {
@@ -645,9 +670,12 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPageWithRouteProbe("/agent-tasks?workspace=workspace-alpha")
 
     expect(await screen.findByText("Alpha Project")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-alpha"
+    )
     expect(screen.queryByText("Beta Project")).toBeNull()
     expect(screen.getAllByText("Workspace: workspace-alpha").length).toBeGreaterThan(0)
 
@@ -658,10 +686,19 @@ describe("AgentTasksPage connection and payload normalization", () => {
       "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/8/tasks",
       expect.anything()
     )
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "workspace-beta" }
+    })
+
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-beta"
+    )
+    expect(await screen.findByText("Beta Project")).toBeInTheDocument()
+    expect(screen.queryByText("Alpha Project")).toBeNull()
   })
 
   it("surfaces workspace setup gaps when the selected canonical workspace has no linked ACP execution project", async () => {
-    window.location.hash = "#/agent-tasks?workspace=workspace-missing"
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === "http://127.0.0.1:8000/openapi.json") {
@@ -694,7 +731,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage("/agent-tasks?workspace=workspace-missing")
 
     expect(await screen.findByText("Workspace setup needs attention")).toBeInTheDocument()
     expect(
@@ -707,5 +744,116 @@ describe("AgentTasksPage connection and payload normalization", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open workspaceplayground/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
+  })
+
+  it("does not report missing workspace setup when project loading failed", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({
+            detail: "Project API unavailable"
+          })
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPage("/agent-tasks?workspace=workspace-alpha")
+
+    expect(await screen.findByText("Project API unavailable")).toBeInTheDocument()
+    expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
+    expect(
+      screen.queryByText("No ACP execution workspace is linked to workspace-alpha")
+    ).toBeNull()
+  })
+
+  it("does not show an unlinked workspace warning when another matching project is linked", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Linked Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "workspace_playground",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Stale Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 34,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "workspace_playground",
+                link_status: "conflict"
+              }
+            }
+          ]
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPage("/agent-tasks?workspace=workspace-alpha")
+
+    expect(await screen.findByText("Linked Alpha Project")).toBeInTheDocument()
+    expect(screen.getByText("Stale Alpha Project")).toBeInTheDocument()
+    expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
+    expect(screen.queryByText("ACP execution workspace link is conflict")).toBeNull()
   })
 })

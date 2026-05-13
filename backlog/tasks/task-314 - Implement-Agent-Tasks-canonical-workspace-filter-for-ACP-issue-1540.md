@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-05-13 05:49'
-updated_date: '2026-05-13 06:08'
+updated_date: '2026-05-13 14:30'
 labels:
   - ACP
   - workspace
@@ -70,6 +70,8 @@ Verification: red run failed as expected before implementation. Final focused Vi
 Post-rebase verification on current origin/dev: focused Vitest passed again with 2 files and 38 tests; targeted TypeScript pass using /private/tmp/acp-agent-tasks-tsconfig.json passed; git diff --check origin/dev...HEAD passed.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1627. Kept draft because the AI-generated PR policy requires a human-owned Change summary before merge and #1540 has later history/diagnostic-link slices remaining.
+
+PR #1627 review sweep: addressed 6 unresolved review threads. Changes: switched Agent Tasks workspace filter parsing to React Router location/navigation for MemoryRouter compatibility; synchronized manual workspace filter changes back to router search; suppressed workspace setup warnings unless project data loaded successfully; reused filteredProjects in workspace setup calculation; only reports unlinked bridge warning when no matching linked project exists; removed redundant active-workspace Tag. Added regression tests for MemoryRouter route updates, project-load failure diagnostics, and mixed linked/stale project state. Verification: focused Vitest now 2 files/40 tests passed; targeted touched-file TypeScript passed; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

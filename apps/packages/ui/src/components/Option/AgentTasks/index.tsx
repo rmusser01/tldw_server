@@ -30,6 +30,7 @@ import {
   Search,
   ExternalLink,
 } from "lucide-react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
@@ -167,18 +168,8 @@ const normalizeWorkspaceFilterId = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null
 }
 
-const readWorkspaceFilterFromRoute = (): string | null => {
-  if (typeof window === "undefined") {
-    return null
-  }
-
-  const hash = window.location.hash || ""
-  const hashQueryIndex = hash.indexOf("?")
-  const params =
-    hashQueryIndex >= 0
-      ? new URLSearchParams(hash.slice(hashQueryIndex + 1))
-      : new URLSearchParams(window.location.search)
-
+const readWorkspaceFilterFromSearch = (search: string): string | null => {
+  const params = new URLSearchParams(search)
   return (
     normalizeWorkspaceFilterId(params.get("workspace")) ||
     normalizeWorkspaceFilterId(params.get("workspace_id")) ||
@@ -245,6 +236,8 @@ const ensureOrchestrationResponse = async (response: Response): Promise<void> =>
 export const AgentTasksPage: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const { config: connectionConfig } = useCanonicalConnectionConfig()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
@@ -257,8 +250,10 @@ export const AgentTasksPage: React.FC = () => {
   const [setupLoading, setSetupLoading] = useState(false)
   const [taskDetail, setTaskDetail] = useState<TaskDetailItem | null>(null)
   const [taskDetailLoading, setTaskDetailLoading] = useState(false)
-  const [workspaceFilterId, setWorkspaceFilterId] = useState<string | null>(() =>
-    readWorkspaceFilterFromRoute()
+  const [projectsLoadedSuccessfully, setProjectsLoadedSuccessfully] = useState(false)
+  const workspaceFilterId = useMemo(
+    () => readWorkspaceFilterFromSearch(location.search),
+    [location.search]
   )
 
   // Modal states
@@ -308,23 +303,11 @@ export const AgentTasksPage: React.FC = () => {
     orchestrationSupportRef.current = null
   }, [connectionConfig])
 
-  React.useEffect(() => {
-    if (typeof window === "undefined") {
-      return
-    }
-    const syncWorkspaceFilter = () => {
-      setWorkspaceFilterId(readWorkspaceFilterFromRoute())
-    }
-    window.addEventListener("hashchange", syncWorkspaceFilter)
-    return () => {
-      window.removeEventListener("hashchange", syncWorkspaceFilter)
-    }
-  }, [])
-
   const markUnsupported = useCallback(() => {
     setIsUnsupported(true)
     setError(null)
     setProjects([])
+    setProjectsLoadedSuccessfully(false)
     setTasks([])
     setSelectedProjectId(null)
   }, [])
@@ -406,6 +389,7 @@ export const AgentTasksPage: React.FC = () => {
     if (!apiBase) return
     setLoading(true)
     setError(null)
+    setProjectsLoadedSuccessfully(false)
     try {
       const supported = await hasOrchestrationSupport()
       if (!supported) {
@@ -418,10 +402,12 @@ export const AgentTasksPage: React.FC = () => {
       const data = await res.json()
       setIsUnsupported(false)
       setProjects(normalizeListPayload<ProjectSummary>(data, "projects"))
+      setProjectsLoadedSuccessfully(true)
     } catch (err) {
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
+        setProjectsLoadedSuccessfully(false)
         setError(err instanceof Error ? err.message : "Failed to load projects")
       }
     } finally {
@@ -673,13 +659,11 @@ export const AgentTasksPage: React.FC = () => {
   }, [tasks, workspaceFilterId])
 
   const workspaceSetupIssues = useMemo<ACPSetupIssue[]>(() => {
-    if (!workspaceFilterId || loading || isUnsupported) {
+    if (!workspaceFilterId || loading || isUnsupported || !projectsLoadedSuccessfully) {
       return []
     }
 
-    const matchingProjects = projects.filter(
-      (project) => getCanonicalWorkspaceId(project) === workspaceFilterId
-    )
+    const matchingProjects = filteredProjects
     if (matchingProjects.length === 0) {
       return [
         {
@@ -691,11 +675,16 @@ export const AgentTasksPage: React.FC = () => {
       ]
     }
 
+    const hasLinkedProject = matchingProjects.some(
+      (project) =>
+        getCanonicalWorkspaceLinkStatus(project) ===
+        LINKED_CANONICAL_WORKSPACE_STATUS
+    )
     const unlinkedProject = matchingProjects.find((project) => {
       const status = getCanonicalWorkspaceLinkStatus(project)
       return status !== null && status !== LINKED_CANONICAL_WORKSPACE_STATUS
     })
-    if (unlinkedProject) {
+    if (!hasLinkedProject && unlinkedProject) {
       const status = getCanonicalWorkspaceLinkStatus(unlinkedProject) || "unknown"
       return [
         {
@@ -708,7 +697,34 @@ export const AgentTasksPage: React.FC = () => {
     }
 
     return []
-  }, [isUnsupported, loading, projects, workspaceFilterId])
+  }, [
+    filteredProjects,
+    isUnsupported,
+    loading,
+    projectsLoadedSuccessfully,
+    workspaceFilterId
+  ])
+
+  const updateWorkspaceFilter = useCallback(
+    (nextWorkspaceFilterId: string | null) => {
+      const params = new URLSearchParams(location.search)
+      params.delete("workspace")
+      params.delete("workspace_id")
+      params.delete("canonical_workspace_id")
+      if (nextWorkspaceFilterId) {
+        params.set("workspace", nextWorkspaceFilterId)
+      }
+      const search = params.toString()
+      navigate(
+        {
+          pathname: location.pathname,
+          search: search ? `?${search}` : ""
+        },
+        { replace: true }
+      )
+    },
+    [location.pathname, location.search, navigate]
+  )
 
   useEffect(() => {
     if (
@@ -788,7 +804,7 @@ export const AgentTasksPage: React.FC = () => {
             options={workspaceSelectOptions}
             onChange={(value) => {
               const nextValue = String(value || "")
-              setWorkspaceFilterId(
+              updateWorkspaceFilter(
                 nextValue === ALL_WORKSPACES_FILTER_VALUE
                   ? null
                   : normalizeWorkspaceFilterId(nextValue)
@@ -796,7 +812,6 @@ export const AgentTasksPage: React.FC = () => {
             }}
             style={{ minWidth: 240 }}
           />
-          {workspaceFilterId && <Tag>Workspace: {workspaceFilterId}</Tag>}
         </div>
       )}
 
