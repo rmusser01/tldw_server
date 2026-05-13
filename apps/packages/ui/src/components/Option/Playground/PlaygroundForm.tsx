@@ -176,6 +176,7 @@ import { buildConversationSummaryCheckpointPrompt } from "./conversation-summary
 import {
   OPEN_ACTOR_SETTINGS_EVENT,
   OPEN_KNOWLEDGE_PANEL_EVENT,
+  OPEN_MCP_SETTINGS_EVENT,
   OPEN_MCP_TOOLS_EVENT,
   OPEN_MODEL_SETTINGS_EVENT,
   OPEN_TURN_TOOLS_EVENT,
@@ -715,6 +716,7 @@ export const PlaygroundForm = ({
     toolChoice,
   });
   const setMcpPopoverOpen = mcpCtrl.setMcpPopoverOpen;
+  const { mcpSettingsOpen, setMcpSettingsOpen } = mcpCtrl;
   const handleModuleSelect = React.useCallback(
     (value?: string[]) => {
       setToolModules(Array.isArray(value) ? value : []);
@@ -1238,6 +1240,19 @@ export const PlaygroundForm = ({
       window.removeEventListener(OPEN_MCP_TOOLS_EVENT, handler);
     };
   }, [closeComposerPopoversExcept, setMcpPopoverOpen]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      closeComposerPopoversExcept("mcp");
+      setMcpPopoverOpen(false);
+      setMcpSettingsOpen(true);
+    };
+    window.addEventListener(OPEN_MCP_SETTINGS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_MCP_SETTINGS_EVENT, handler);
+    };
+  }, [closeComposerPopoversExcept, setMcpPopoverOpen, setMcpSettingsOpen]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3296,7 +3311,6 @@ export const PlaygroundForm = ({
     normalizeImageGenerationEventSyncMode: normalizeImageGenSyncMode,
     normalizeImageGenerationEventSyncPolicy: normalizeImageGenSyncPolicy,
   } = imageGen;
-  const { mcpSettingsOpen, setMcpSettingsOpen } = mcpCtrl;
   React.useEffect(() => {
     setOptionalPanelVisible("mcp-tools", mcpSettingsOpen);
     if (mcpSettingsOpen || toolChoice !== "none") {

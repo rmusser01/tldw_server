@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
 import {
+  OPEN_ASSISTANT_SELECT_EVENT,
+  OPEN_MCP_SETTINGS_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
 } from "../playground-cockpit-actions";
@@ -22,7 +24,10 @@ const messageOptionState = vi.hoisted(() => ({
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
+    selectedSystemPrompt: "" as string | null,
     setSelectedSystemPrompt: vi.fn(),
+    selectedQuickPrompt: null as string | null,
+    setSelectedQuickPrompt: vi.fn(),
     selectedModel: "openai:gpt-4.1-mini" as string | null,
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
@@ -32,10 +37,18 @@ const messageOptionState = vi.hoisted(() => ({
     streaming: true,
     selectedCharacter: { id: "character-1", name: "Mira Vale" },
     setSelectedCharacter: vi.fn(),
+    selectedAssistant: {
+      kind: "character",
+      id: "character-1",
+      name: "Mira Vale",
+    } as { kind: "character" | "persona"; id: string; name: string } | null,
+    setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
     temporaryChat: true,
     webSearch: true,
+    toolChoice: "auto" as const,
+    setToolChoice: vi.fn(),
     selectedKnowledge: [{ id: "knowledge-1", title: "Research notes" }],
     ragMediaIds: [101, 202],
     setSelectedKnowledge: vi.fn(),
@@ -102,7 +115,10 @@ vi.mock("@/db/dexie/helpers", () => ({
 }));
 
 vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn() }),
+  useStoreChatModelSettings: () => ({
+    systemPrompt: "",
+    setSystemPrompt: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/useSmartScroll", () => ({
@@ -217,13 +233,24 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.historyId = "history-1";
     messageOptionState.value.serverChatId = "chat-1";
     messageOptionState.value.streaming = true;
+    messageOptionState.value.selectedSystemPrompt = "";
+    messageOptionState.value.setSelectedSystemPrompt = vi.fn();
+    messageOptionState.value.selectedQuickPrompt = null;
+    messageOptionState.value.setSelectedQuickPrompt = vi.fn();
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
     messageOptionState.value.selectedCharacter = {
       id: "character-1",
       name: "Mira Vale",
     };
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "character-1",
+      name: "Mira Vale",
+    };
     messageOptionState.value.temporaryChat = true;
     messageOptionState.value.webSearch = true;
+    messageOptionState.value.toolChoice = "auto";
+    messageOptionState.value.setToolChoice = vi.fn();
     messageOptionState.value.contextFiles = [{ id: "file-1", name: "brief.pdf" }];
     messageOptionState.value.setContextFiles = vi.fn();
     messageOptionState.value.selectedKnowledge = [
@@ -237,14 +264,19 @@ describe("Playground cockpit controls", () => {
   });
 
   it("surfaces existing context and runtime state in cockpit rails", async () => {
+    messageOptionState.value.selectedQuickPrompt = "Draft a concise summary";
     const openKnowledgePanel = vi.fn();
     const openModelSettings = vi.fn();
     const openActorSettings = vi.fn();
+    const openAssistantSelect = vi.fn();
+    const openMcpSettings = vi.fn();
     const toggleWebSearch = vi.fn();
     const setTemporaryChat = vi.fn();
     window.addEventListener("tldw:open-knowledge-panel", openKnowledgePanel);
     window.addEventListener("tldw:open-model-settings", openModelSettings);
     window.addEventListener("tldw:open-actor-settings", openActorSettings);
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+    window.addEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
     window.addEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
     window.addEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
 
@@ -261,6 +293,21 @@ describe("Playground cockpit controls", () => {
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
+      expect(within(contextRail).getByText("Prompts")).toBeInTheDocument();
+      expect(within(contextRail).getByText("Quick prompt")).toBeInTheDocument();
+      expect(
+        within(contextRail).getByText("Draft a concise summary"),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        within(contextRail).getByRole("button", { name: "Clear prompt" }),
+      );
+      expect(messageOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedSystemPrompt).toHaveBeenCalledWith(
+        "",
+      );
+      expect(messageOptionState.value.setContextFiles).not.toHaveBeenCalled();
       expect(within(contextRail).queryByText("1 file(s)")).toBeNull();
       fireEvent.click(
         within(contextRail).getByRole("button", { name: "Clear files" }),
@@ -332,21 +379,38 @@ describe("Playground cockpit controls", () => {
 
       fireEvent.click(
         within(runtimeInspector).getByRole("button", {
-          name: /open model settings/i,
+          name: /open model & chat settings/i,
         }),
       );
       fireEvent.click(
         within(runtimeInspector).getByRole("button", {
-          name: /open character settings/i,
+          name: /select character or persona/i,
+        }),
+      );
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: "MCP tool choice Required",
+        }),
+      );
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: "Configure MCP tools",
         }),
       );
 
       expect(openModelSettings).toHaveBeenCalledTimes(1);
-      expect(openActorSettings).toHaveBeenCalledTimes(1);
+      expect(openAssistantSelect).toHaveBeenCalledTimes(1);
+      expect(openActorSettings).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith(
+        "required",
+      );
+      expect(openMcpSettings).toHaveBeenCalledTimes(1);
     } finally {
       window.removeEventListener("tldw:open-knowledge-panel", openKnowledgePanel);
       window.removeEventListener("tldw:open-model-settings", openModelSettings);
       window.removeEventListener("tldw:open-actor-settings", openActorSettings);
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+      window.removeEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }

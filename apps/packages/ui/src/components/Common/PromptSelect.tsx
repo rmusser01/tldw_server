@@ -9,6 +9,7 @@ import { getAllPrompts } from "@/db/dexie/helpers"
 import type { Prompt } from "@/db/dexie/types"
 import { getDesignSystemState } from "@/design-system"
 import { useStorage } from "@plasmohq/storage/hook"
+import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
 import { IconButton } from "./IconButton"
 import {
   normalizeSystemPromptOverrideValue,
@@ -234,6 +235,19 @@ export const PromptSelect: React.FC<Props> = ({
   ])
 
   // Focus search input when dropdown opens
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleOpenPromptSelect = () => {
+      setDropdownOpen(true)
+    }
+
+    window.addEventListener(OPEN_PROMPT_SELECT_EVENT, handleOpenPromptSelect)
+    return () => {
+      window.removeEventListener(OPEN_PROMPT_SELECT_EVENT, handleOpenPromptSelect)
+    }
+  }, [])
+
   useEffect(() => {
     if (!dropdownOpen) {
       setSearchText("") // Clear search when closed

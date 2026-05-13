@@ -29,6 +29,13 @@ const renderRail = (
       media: 0,
       research: 0,
     },
+    promptSummary: {
+      state: "none" as const,
+      label: "No prompt selected",
+      detail: "No prompt context will be added.",
+    },
+    promptSelectControl: null,
+    onClearPrompt: vi.fn(),
     onOpenSearchContext: vi.fn(),
     onClearFiles: vi.fn(),
     onClearKnowledge: vi.fn(),
@@ -71,6 +78,55 @@ describe("PlaygroundContextRail first-slice controls", () => {
     );
 
     expect(props.onOpenSearchContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders prompt state as first-class context and clears only prompt context", () => {
+    const props = renderRail({
+      hasContext: true,
+      promptSummary: {
+        state: "system",
+        label: "Socratic tutor",
+        detail: "System prompt selected",
+      },
+      promptSelectControl: (
+        <button type="button" aria-label="Select a prompt">
+          Select prompt
+        </button>
+      ),
+      contextCounts: {
+        files: 1,
+        knowledge: 1,
+        media: 0,
+        research: 0,
+      },
+    });
+
+    expect(screen.getByText("Prompts")).toBeInTheDocument();
+    expect(screen.getByText("Socratic tutor")).toBeInTheDocument();
+    expect(screen.getByText("System prompt selected")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select a prompt" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear prompt" }));
+
+    expect(props.onClearPrompt).toHaveBeenCalledTimes(1);
+    expect(props.onClearFiles).not.toHaveBeenCalled();
+    expect(props.onClearKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("identifies inline custom prompt context without requiring a template", () => {
+    renderRail({
+      hasContext: true,
+      promptSummary: {
+        state: "custom",
+        label: "Custom prompt",
+        detail: "Inline system prompt active",
+      },
+    });
+
+    expect(screen.getByText("Custom prompt")).toBeInTheDocument();
+    expect(screen.getByText("Inline system prompt active")).toBeInTheDocument();
   });
 
   it("switches between saved and temporary session modes through the supplied callback", () => {

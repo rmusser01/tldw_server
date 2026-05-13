@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import {
   BookOpen,
@@ -24,6 +25,14 @@ type ContextCountItem = {
   label: string;
   clearLabel: string;
   onClear: (() => void) | undefined;
+};
+
+export type PlaygroundPromptContextState = "none" | "system" | "quick" | "custom";
+
+export type PlaygroundPromptSummary = {
+  state: PlaygroundPromptContextState;
+  label: string;
+  detail?: string | null;
 };
 
 export type PlaygroundContextSourceState =
@@ -61,6 +70,9 @@ export type PlaygroundContextRailProps = {
     media: number;
     research: number;
   };
+  promptSummary?: PlaygroundPromptSummary;
+  promptSelectControl?: React.ReactNode;
+  onClearPrompt?: () => void;
   onOpenSearchContext: () => void;
   onClearFiles?: () => void;
   onClearKnowledge?: () => void;
@@ -95,6 +107,9 @@ export const PlaygroundContextRail = ({
   temporaryChat,
   onToggleTemporaryChat,
   contextCounts,
+  promptSummary,
+  promptSelectControl,
+  onClearPrompt,
   onOpenSearchContext,
   onClearFiles,
   onClearKnowledge,
@@ -105,6 +120,16 @@ export const PlaygroundContextRail = ({
   const activeSourceCount = contextSources.filter(
     (source) => source.state !== "disabled",
   ).length;
+  const effectivePromptSummary =
+    promptSummary || {
+      state: "none" as const,
+      label: t("cockpit.noPromptSelected", "No prompt selected"),
+      detail: t(
+        "cockpit.noPromptContext",
+        "No prompt context will be added.",
+      ),
+    };
+  const promptActive = effectivePromptSummary.state !== "none";
   const sourceCountLabel =
     activeSourceCount === 1
       ? t("cockpit.activeSourceCountOne", "1 active source")
@@ -373,6 +398,43 @@ export const PlaygroundContextRail = ({
           >
             {t("cockpit.searchContext", "Search & Context")}
           </button>
+        </div>
+      </section>
+
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.promptContext", "Prompt context")}
+      >
+        <h2 className={railHeadingClass}>{t("cockpit.prompts", "Prompts")}</h2>
+        <div className="mt-1 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className={railValueClass}>{effectivePromptSummary.label}</p>
+            {effectivePromptSummary.detail ? (
+              <p className={railMutedClass}>{effectivePromptSummary.detail}</p>
+            ) : null}
+          </div>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sourceStateClass(
+              promptActive ? "active" : "disabled",
+            )}`}
+          >
+            {promptActive
+              ? t("cockpit.active", "Active")
+              : t("cockpit.idle", "Idle")}
+          </span>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {promptSelectControl}
+          {promptActive && onClearPrompt ? (
+            <button
+              type="button"
+              className={railActionClass}
+              aria-label={t("cockpit.clearPrompt", "Clear prompt")}
+              onClick={onClearPrompt}
+            >
+              {t("cockpit.clearPrompt", "Clear prompt")}
+            </button>
+          ) : null}
         </div>
       </section>
 

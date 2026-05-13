@@ -26,6 +26,14 @@ export type RuntimeToolSummary = {
   onOpen?: () => void;
 };
 
+export type RuntimeToolChoice = "auto" | "required" | "none";
+
+export type RuntimeAssistantSummary = {
+  mode: "none" | "character" | "persona";
+  name?: string | null;
+  detail?: string | null;
+};
+
 export type PlaygroundRuntimeInspectorProps = {
   streaming: boolean;
   selectedProvider?: string | null | undefined;
@@ -35,9 +43,15 @@ export type PlaygroundRuntimeInspectorProps = {
   runtimeStatusDetail?: string | null;
   messageCount: number;
   threadSearchOpen: boolean;
-  selectedCharacterName: string | null | undefined;
+  selectedCharacterName?: string | null | undefined;
+  assistantSummary?: RuntimeAssistantSummary;
   onOpenModelSettings: () => void;
-  onOpenCharacterSettings: () => void;
+  onOpenCharacterSettings?: () => void;
+  onOpenAssistantSelect?: () => void;
+  onOpenSceneDirector?: () => void;
+  toolChoice?: RuntimeToolChoice;
+  onToolChoiceChange?: (choice: RuntimeToolChoice) => void;
+  onOpenMcpSettings?: () => void;
   canStopStreaming?: boolean;
   onStopStreaming?: () => void;
   canRegenerate?: boolean;
@@ -66,8 +80,14 @@ export const PlaygroundRuntimeInspector = ({
   messageCount,
   threadSearchOpen,
   selectedCharacterName,
+  assistantSummary,
   onOpenModelSettings,
   onOpenCharacterSettings,
+  onOpenAssistantSelect,
+  onOpenSceneDirector,
+  toolChoice,
+  onToolChoiceChange,
+  onOpenMcpSettings,
   canStopStreaming = false,
   onStopStreaming,
   canRegenerate = false,
@@ -113,6 +133,40 @@ export const PlaygroundRuntimeInspector = ({
     }),
     effectiveMessageCount,
   );
+  const effectiveAssistantSummary: RuntimeAssistantSummary =
+    assistantSummary ||
+    (selectedCharacterName
+      ? {
+          mode: "character",
+          name: selectedCharacterName,
+          detail: t("cockpit.characterSelected", "Character selected"),
+        }
+      : {
+          mode: "none",
+          name: null,
+          detail: t("cockpit.noAssistantSelected", "No assistant selected"),
+        });
+  const assistantLabel =
+    effectiveAssistantSummary.name ||
+    t("cockpit.noAssistantSelected", "No assistant selected");
+  const assistantModeLabel =
+    effectiveAssistantSummary.mode === "persona"
+      ? t("cockpit.personaMode", "Persona")
+      : effectiveAssistantSummary.mode === "character"
+        ? t("cockpit.characterMode", "Character")
+        : t("cockpit.noAssistantMode", "None");
+  const openAssistant = onOpenAssistantSelect || onOpenCharacterSettings;
+  const openSceneDirector = onOpenSceneDirector || onOpenCharacterSettings;
+  const toolChoices: Array<{ value: RuntimeToolChoice; label: string }> = [
+    { value: "auto", label: t("cockpit.toolChoiceAuto", "Auto") },
+    { value: "required", label: t("cockpit.toolChoiceRequired", "Required") },
+    { value: "none", label: t("cockpit.toolChoiceNone", "None") },
+  ];
+  const mcpToolsLabel = t("cockpit.mcpTools", "MCP tools");
+  const toolCardLabel =
+    toolSummary?.label === mcpToolsLabel
+      ? t("cockpit.chatToolAccess", "Chat tool access")
+      : toolSummary?.label;
 
   return (
     <div
@@ -193,38 +247,83 @@ export const PlaygroundRuntimeInspector = ({
 
       <section
         className={railSectionClass}
-        aria-label={t("cockpit.modelAndCharacter", "Model and character")}
+        aria-label={t("cockpit.modelAndChatSettings", "Model & Chat settings")}
       >
         <h2 className={railHeadingClass}>
-          {t("cockpit.modelCharacter", "Model & character")}
+          {t("cockpit.modelChat", "Model & Chat")}
         </h2>
         <div className="mt-2 flex flex-col gap-2">
           <button
             type="button"
             onClick={onOpenModelSettings}
             className={`${railActionClass} justify-start gap-1.5`}
-            aria-label={t("cockpit.openModelSettings", "Open model settings")}
-          >
-            <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("cockpit.modelSettings", "Model settings")}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenCharacterSettings}
-            className={`${railActionClass} justify-start gap-1.5`}
             aria-label={t(
-              "cockpit.openCharacterSettings",
-              "Open character settings",
+              "cockpit.openModelChatSettings",
+              "Open Model & Chat settings",
             )}
           >
-            <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("cockpit.character", "Character")}
+            <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("cockpit.modelChatSettings", "Model & Chat settings")}
           </button>
         </div>
-        <p className={railMutedClass}>
-          {selectedCharacterName ||
-            t("cockpit.noCharacterSelected", "No character selected")}
-        </p>
+      </section>
+
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.characterPersona", "Character / Persona")}
+      >
+        <h2 className={railHeadingClass}>
+          {t("cockpit.characterPersona", "Character / Persona")}
+        </h2>
+        <div className="mt-1 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className={railValueClass}>{assistantLabel}</p>
+            <p className={railMutedClass}>
+              {effectiveAssistantSummary.detail || assistantModeLabel}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
+            {assistantModeLabel}
+          </span>
+        </div>
+        <div className="mt-2 flex flex-col gap-2">
+          {openAssistant ? (
+            <button
+              type="button"
+              onClick={openAssistant}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t(
+                "cockpit.selectCharacterPersona",
+                "Select character or persona",
+              )}
+            >
+              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.selectAssistant", "Select assistant")}
+            </button>
+          ) : null}
+          {effectiveAssistantSummary.mode === "character" && openSceneDirector ? (
+            <button
+              type="button"
+              onClick={openSceneDirector}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t(
+                "cockpit.openSceneDirector",
+                "Open Scene Director",
+              )}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.sceneDirector", "Scene Director")}
+            </button>
+          ) : null}
+        </div>
+        {effectiveAssistantSummary.mode === "persona" ? (
+          <p className={railMutedClass}>
+            {t(
+              "cockpit.personaActorUnavailable",
+              "Scene Director is available for character-backed chats.",
+            )}
+          </p>
+        ) : null}
       </section>
 
       <section
@@ -255,9 +354,9 @@ export const PlaygroundRuntimeInspector = ({
 
       <section
         className={railSectionClass}
-        aria-label={t("cockpit.toolAvailability", "Tool availability")}
+        aria-label={mcpToolsLabel}
       >
-        <h2 className={railHeadingClass}>{t("cockpit.tools", "Tools")}</h2>
+        <h2 className={railHeadingClass}>{mcpToolsLabel}</h2>
         {toolSummary ? (
           <div className="mt-2 rounded-md border border-border bg-bg px-2.5 py-2">
             <div className="flex items-start gap-2">
@@ -270,7 +369,7 @@ export const PlaygroundRuntimeInspector = ({
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-text">
-                  {toolSummary.label}
+                  {toolCardLabel}
                 </p>
                 {toolSummary.detail ? (
                   <p className="mt-0.5 text-xs text-text-muted">
@@ -288,6 +387,39 @@ export const PlaygroundRuntimeInspector = ({
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("cockpit.openTools", "Open tools")}
+              </button>
+            ) : null}
+            {toolChoice && onToolChoiceChange ? (
+              <div
+                className="mt-3 grid grid-cols-3 gap-1"
+                aria-label={t("cockpit.mcpToolChoice", "MCP tool choice")}
+              >
+                {toolChoices.map((choice) => (
+                  <button
+                    key={choice.value}
+                    type="button"
+                    className={railActionClass}
+                    aria-label={t(
+                      `cockpit.mcpToolChoice.${choice.value}`,
+                      `MCP tool choice ${choice.label}`,
+                    )}
+                    aria-pressed={toolChoice === choice.value}
+                    onClick={() => onToolChoiceChange(choice.value)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {onOpenMcpSettings ? (
+              <button
+                type="button"
+                className={`${railActionClass} mt-2 gap-1.5`}
+                onClick={onOpenMcpSettings}
+                aria-label={t("cockpit.configureMcpTools", "Configure MCP tools")}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("cockpit.configureMcp", "Configure MCP")}
               </button>
             ) : null}
           </div>

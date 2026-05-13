@@ -3,12 +3,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   OPEN_ACTOR_SETTINGS_EVENT,
+  OPEN_ASSISTANT_SELECT_EVENT,
   OPEN_KNOWLEDGE_PANEL_EVENT,
+  OPEN_MCP_SETTINGS_EVENT,
   OPEN_MODEL_SETTINGS_EVENT,
+  OPEN_PROMPT_SELECT_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
   openActorSettings,
+  openAssistantSelector,
+  openMcpSettings,
   openModelSettings,
+  openPromptSelector,
   openSearchAndContext,
   setTemporaryChatFromCockpit,
   toggleWebSearchFromCockpit,
@@ -50,6 +56,38 @@ describe("playground cockpit actions", () => {
     openActorSettings();
 
     await expect(event).resolves.toMatchObject({ type: OPEN_ACTOR_SETTINGS_EVENT });
+  });
+
+  it("opens the assistant selector as the cockpit character/persona primary path", async () => {
+    const event = nextCustomEvent<{ tab: "persona"; source: string }>(
+      OPEN_ASSISTANT_SELECT_EVENT,
+    );
+
+    openAssistantSelector({ tab: "persona" });
+
+    await expect(event).resolves.toMatchObject({
+      type: OPEN_ASSISTANT_SELECT_EVENT,
+      detail: { tab: "persona", source: "playground-cockpit" },
+    });
+  });
+
+  it("opens MCP settings directly instead of only the composer MCP popover", async () => {
+    const event = nextCustomEvent(OPEN_MCP_SETTINGS_EVENT);
+
+    openMcpSettings();
+
+    await expect(event).resolves.toMatchObject({ type: OPEN_MCP_SETTINGS_EVENT });
+  });
+
+  it("opens the shared prompt selector from the cockpit rail", async () => {
+    const event = nextCustomEvent<{ source: string }>(OPEN_PROMPT_SELECT_EVENT);
+
+    openPromptSelector();
+
+    await expect(event).resolves.toMatchObject({
+      type: OPEN_PROMPT_SELECT_EVENT,
+      detail: { source: "playground-cockpit" },
+    });
   });
 
   it("toggles web search through the cockpit bridge event", async () => {

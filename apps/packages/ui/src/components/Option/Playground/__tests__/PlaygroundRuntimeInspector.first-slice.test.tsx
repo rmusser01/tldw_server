@@ -23,9 +23,17 @@ const renderInspector = (
     runtimeStatusDetail: null,
     messageCount: 2,
     threadSearchOpen: false,
-    selectedCharacterName: "Mira Vale",
+    assistantSummary: {
+      mode: "character" as const,
+      name: "Mira Vale",
+      detail: "Character selected",
+    },
     onOpenModelSettings: vi.fn(),
-    onOpenCharacterSettings: vi.fn(),
+    onOpenAssistantSelect: vi.fn(),
+    onOpenSceneDirector: vi.fn(),
+    onOpenMcpSettings: vi.fn(),
+    toolChoice: "auto" as const,
+    onToolChoiceChange: vi.fn(),
     canStopStreaming: false,
     onStopStreaming: vi.fn(),
     canRegenerate: true,
@@ -63,18 +71,52 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens model and character settings through supplied callbacks", () => {
+  it("opens model/chat settings and assistant selection through supplied callbacks", () => {
     const props = renderInspector();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open model settings" }),
+      screen.getByRole("button", { name: "Open Model & Chat settings" }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Open character settings" }),
+      screen.getByRole("button", { name: "Select character or persona" }),
     );
 
     expect(props.onOpenModelSettings).toHaveBeenCalledTimes(1);
-    expect(props.onOpenCharacterSettings).toHaveBeenCalledTimes(1);
+    expect(props.onOpenAssistantSelect).toHaveBeenCalledTimes(1);
+    expect(props.onOpenSceneDirector).not.toHaveBeenCalled();
+  });
+
+  it("keeps Scene Director secondary to the primary assistant selector", () => {
+    const props = renderInspector();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Scene Director" }),
+    );
+
+    expect(props.onOpenSceneDirector).toHaveBeenCalledTimes(1);
+    expect(props.onOpenAssistantSelect).not.toHaveBeenCalled();
+  });
+
+  it("changes MCP tool choice and opens MCP settings directly", () => {
+    const props = renderInspector({
+      toolSummary: {
+        state: "available",
+        label: "MCP tools",
+        detail: "3 chat tools enabled",
+      },
+    });
+
+    expect(
+      screen.getByRole("button", { name: "MCP tool choice Auto" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "MCP tool choice Required" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Configure MCP tools" }));
+
+    expect(props.onToolChoiceChange).toHaveBeenCalledWith("required");
+    expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
   });
 
   it("calls the existing stop handler while streaming", () => {
@@ -136,9 +178,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         runtimeStatusDetail={null}
         messageCount={2}
         threadSearchOpen={false}
-        selectedCharacterName={null}
+        assistantSummary={{ mode: "none", name: null, detail: null }}
         onOpenModelSettings={vi.fn()}
-        onOpenCharacterSettings={vi.fn()}
+        onOpenAssistantSelect={vi.fn()}
         canStopStreaming
         onStopStreaming={vi.fn()}
       />,
@@ -156,9 +198,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         runtimeStatusDetail="Provider metadata degraded"
         messageCount={2}
         threadSearchOpen={false}
-        selectedCharacterName={null}
+        assistantSummary={{ mode: "none", name: null, detail: null }}
         onOpenModelSettings={vi.fn()}
-        onOpenCharacterSettings={vi.fn()}
+        onOpenAssistantSelect={vi.fn()}
       />,
     );
 
@@ -175,9 +217,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         runtimeStatusDetail="Provider failed"
         messageCount={2}
         threadSearchOpen={false}
-        selectedCharacterName={null}
+        assistantSummary={{ mode: "none", name: null, detail: null }}
         onOpenModelSettings={vi.fn()}
-        onOpenCharacterSettings={vi.fn()}
+        onOpenAssistantSelect={vi.fn()}
       />,
     );
 

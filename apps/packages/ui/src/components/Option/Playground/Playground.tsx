@@ -8,16 +8,20 @@ import {
 import {
   PlaygroundContextRail,
   type PlaygroundContextSource,
+  type PlaygroundPromptSummary,
 } from "./PlaygroundContextRail";
 import {
   PlaygroundRuntimeInspector,
   type RuntimeSettingSummary,
+  type RuntimeToolChoice,
 } from "./PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
 import {
   openActorSettings,
-  openMcpTools,
+  openAssistantSelector,
+  openMcpSettings,
   openModelSettings,
+  openPromptSelector,
   openSearchAndContext,
   setTemporaryChatFromCockpit,
   toggleWebSearchFromCockpit,
@@ -200,6 +204,9 @@ export const Playground = () => {
     setHistoryId,
     setHistory,
     setMessages,
+    selectedQuickPrompt,
+    setSelectedQuickPrompt,
+    selectedSystemPrompt,
     setSelectedSystemPrompt,
     setSelectedModel,
     setServerChatId,
@@ -213,14 +220,18 @@ export const Playground = () => {
     compareFeatureEnabled,
     temporaryChat,
     webSearch,
+    toolChoice,
+    setToolChoice,
     selectedKnowledge,
     setSelectedKnowledge,
     ragMediaIds,
     setRagMediaIds,
     stopStreamingRequest,
     regenerateLastMessage,
+    selectedAssistant,
   } = useMessageOption();
   const {
+    systemPrompt,
     setSystemPrompt,
     temperature,
     topP,
@@ -280,9 +291,6 @@ export const Playground = () => {
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
-  );
-  const setSelectedQuickPrompt = useStoreMessageOption(
-    (state) => state.setSelectedQuickPrompt,
   );
   const normalizedChatLayoutMode: PlaygroundCockpitMode =
     chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
@@ -1490,6 +1498,50 @@ export const Playground = () => {
   const ragMediaIdCount = Array.isArray(ragMediaIds)
     ? ragMediaIds.length
     : 0;
+  const trimmedSystemPrompt = String(systemPrompt || "").trim();
+  const hasPromptContext = Boolean(
+    selectedSystemPrompt || selectedQuickPrompt || trimmedSystemPrompt.length > 0,
+  );
+  const promptSummary: PlaygroundPromptSummary = selectedSystemPrompt
+    ? {
+        state: "system",
+        label: toText(t("playground:cockpit.systemPrompt", "System prompt")),
+        detail: selectedSystemPrompt,
+      }
+    : selectedQuickPrompt
+      ? {
+          state: "quick",
+          label: toText(t("playground:cockpit.quickPrompt", "Quick prompt")),
+          detail: selectedQuickPrompt,
+        }
+      : trimmedSystemPrompt.length > 0
+        ? {
+            state: "custom",
+            label: toText(t("playground:cockpit.customPrompt", "Custom prompt")),
+            detail: toText(
+              t(
+                "playground:cockpit.inlineSystemPromptActive",
+                "Inline system prompt active",
+              ),
+            ),
+          }
+        : {
+            state: "none",
+            label: toText(
+              t("playground:cockpit.noPromptSelected", "No prompt selected"),
+            ),
+            detail: toText(
+              t(
+                "playground:cockpit.noPromptContext",
+                "No prompt context will be added.",
+              ),
+            ),
+          };
+  const clearPromptContextFromCockpit = React.useCallback(() => {
+    setSelectedQuickPrompt(null);
+    setSelectedSystemPrompt("");
+    setSystemPrompt("");
+  }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
   const canRegenerateLastResponse = messages.some(
     (message) => message.role === "assistant",
   );
@@ -1511,7 +1563,8 @@ export const Playground = () => {
       webSearch ||
       contextFileCount > 0 ||
       selectedKnowledgeCount > 0 ||
-      ragMediaIdCount > 0,
+      ragMediaIdCount > 0 ||
+      hasPromptContext,
   );
   const sessionLabel = temporaryChat
     ? toText(t("playground:cockpit.sessionTemporary", "Temporary chat"))
@@ -1687,6 +1740,7 @@ export const Playground = () => {
       : null,
   ].filter((item): item is RuntimeSettingSummary => Boolean(item));
   const statusContextSummary = [
+    hasPromptContext ? promptSummary.label : null,
     webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
     contextFileCount > 0
       ? contextFileCount === 1
@@ -1742,6 +1796,18 @@ export const Playground = () => {
         media: ragMediaIdCount,
         research: attachedResearchContext ? 1 : 0,
       }}
+      promptSummary={promptSummary}
+      promptSelectControl={
+        <button
+          type="button"
+          className="inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          aria-label={toText(t("playground:cockpit.selectPrompt", "Select a prompt"))}
+          onClick={openPromptSelector}
+        >
+          {toText(t("playground:cockpit.selectPrompt", "Select prompt"))}
+        </button>
+      }
+      onClearPrompt={clearPromptContextFromCockpit}
       onOpenSearchContext={() => openSearchAndContext({ tab: "search" })}
       onClearFiles={() => setContextFiles([])}
       onClearKnowledge={() => setSelectedKnowledge(null)}
@@ -1765,24 +1831,42 @@ export const Playground = () => {
       runtimeStatusDetail={runtimeStatusDetail}
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
-      selectedCharacterName={selectedCharacter?.name || null}
+      assistantSummary={{
+        mode: selectedAssistant?.kind || "none",
+        name: selectedAssistant?.name || selectedCharacter?.name || null,
+        detail: selectedAssistant?.kind
+          ? selectedAssistant.kind === "persona"
+            ? toText(t("playground:cockpit.personaSelected", "Persona selected"))
+            : toText(
+                t("playground:cockpit.characterSelected", "Character selected"),
+              )
+          : toText(
+              t(
+                "playground:cockpit.noAssistantSelected",
+                "No assistant selected",
+              ),
+            ),
+      }}
       onOpenModelSettings={openModelSettings}
-      onOpenCharacterSettings={openActorSettings}
+      onOpenAssistantSelect={() => openAssistantSelector({ tab: "character" })}
+      onOpenSceneDirector={openActorSettings}
       canStopStreaming={streaming}
       onStopStreaming={() => stopStreamingRequest()}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
       settingSummaries={runtimeSettingSummaries}
+      toolChoice={toolChoice as RuntimeToolChoice}
+      onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
+      onOpenMcpSettings={openMcpSettings}
       toolSummary={{
         state: "available",
         label: toText(t("playground:cockpit.mcpTools", "MCP tools")),
         detail: toText(
           t(
             "playground:cockpit.toolsComposerManaged",
-            "Open composer tool controls to inspect availability.",
+            "Configure chat tool exposure for the next turn.",
           ),
         ),
-        onOpen: openMcpTools,
       }}
     />
   );
