@@ -4,7 +4,7 @@ title: Migrate QuizWorkspace setup-required label to design-system registry
 status: Done
 assignee: []
 created_date: '2026-05-13 01:40'
-updated_date: '2026-05-13 02:02'
+updated_date: '2026-05-13 02:12'
 labels:
   - design-system
   - frontend
@@ -55,12 +55,18 @@ Verification:
 - Bandit skipped: touched code is frontend TypeScript, JSON baseline, and task documentation only.
 
 Pull request: https://github.com/rmusser01/tldw_server/pull/1622
+
+Review follow-up plan: add a regression test that simulates getDesignSystemState("setup_required") returning undefined, then make QuizWorkspace tolerate that missing registry value without crashing while preserving the existing registry-backed path. Re-run the focused Quiz test, product-state guard test, verify:design-system-state, diff checks, and touched-path TypeScript filter before closing the PR thread.
+
+Review follow-up verification: added a regression test for a missing setup_required registry entry; red run failed at QuizWorkspace.tsx with Cannot read properties of undefined (reading 'label'); after optional chaining fallback, bun run test src/components/Quiz/__tests__/QuizWorkspace.connection-state.test.tsx --reporter=dot passed 7 tests. Also passed product-state guard unit tests, verify:design-system-state, baseline JSON parse, git diff --check, and touched-path TypeScript filtering with no diagnostics for QuizWorkspace or its connection-state test. Bandit skipped again because touched files are frontend TypeScript and Backlog task docs only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 QuizWorkspace now reads its setup-required product-state badge label from the canonical design-system state registry, the focused connection-state test covers the registry-backed label path, and the product-state baseline no longer carries the QuizWorkspace setup-required exception.
+
+Review follow-up: QuizWorkspace now tolerates a missing setup_required registry result by using optional chaining with an empty label fallback, and the connection-state regression test covers that path.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

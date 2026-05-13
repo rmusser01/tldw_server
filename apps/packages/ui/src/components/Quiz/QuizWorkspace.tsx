@@ -531,7 +531,7 @@ export const QuizWorkspace: React.FC = () => {
       const setupRequiredState = getDesignSystemState("setup_required")
 
       return {
-        badgeLabel: setupRequiredState.label,
+        badgeLabel: setupRequiredState?.label ?? "",
         title: t("option:quiz.setupTitle", {
           defaultValue: "Finish setup to use Quiz Playground"
         }),
