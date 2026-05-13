@@ -5,7 +5,9 @@ import { getDesignSystemState } from "@/design-system"
 import { WritingPlaygroundDiagnosticsPanel } from "../WritingPlaygroundDiagnosticsPanel"
 import type { WritingPlaygroundDiagnosticsPanelProps } from "../WritingPlaygroundDiagnostics.types"
 
-const registryReadyLabel = "Registry Ready"
+const { registryReadyLabel } = vi.hoisted(() => ({
+  registryReadyLabel: "Registry Ready"
+}))
 
 vi.mock("@/design-system", async (importActual) => {
   const actual = await importActual<typeof import("@/design-system")>()

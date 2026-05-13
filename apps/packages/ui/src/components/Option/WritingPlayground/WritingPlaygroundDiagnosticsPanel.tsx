@@ -6,6 +6,8 @@ import { WritingPlaygroundTokenInspectorCard } from "./WritingPlaygroundTokenIns
 import { WritingPlaygroundWordcloudCard } from "./WritingPlaygroundWordcloudCard"
 import type { WritingPlaygroundDiagnosticsPanelProps } from "./WritingPlaygroundDiagnostics.types"
 
+const READY_STATE_LABEL = getDesignSystemState("ready").label
+
 export const WritingPlaygroundDiagnosticsPanel: FC<
   WritingPlaygroundDiagnosticsPanelProps
 > = ({
@@ -22,7 +24,6 @@ export const WritingPlaygroundDiagnosticsPanel: FC<
   const { enabled: responseEnabled, ...responseCardProps } = response
   const { enabled: tokenEnabled, ...tokenCardProps } = token
   const { enabled: wordcloudEnabled, ...wordcloudCardProps } = wordcloud
-  const readyState = status === "ready" ? getDesignSystemState("ready") : null
 
   return (
     <Card
@@ -34,7 +35,7 @@ export const WritingPlaygroundDiagnosticsPanel: FC<
             ? t("option:writingPlayground.diagnosticsWarning", "Warning")
             : status === "busy"
               ? t("option:writingPlayground.diagnosticsBusy", "Busy")
-              : t("option:writingPlayground.diagnosticsReady", readyState?.label ?? "")}
+              : t("option:writingPlayground.diagnosticsReady", READY_STATE_LABEL)}
         </Tag>
         {showOffline ? (
           <Alert

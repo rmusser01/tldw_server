@@ -4664,7 +4664,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-info-l-1cmka5v",
+    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-info-l-1cwjvuu",
     "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -4675,7 +4675,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-warnin-1345qhv",
+    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-warnin-12u64sw",
     "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
