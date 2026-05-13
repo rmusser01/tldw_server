@@ -26,7 +26,8 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => (
 export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loading = false }) => {
   if (loading) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4" role="status">
+      <div className="rounded-lg border border-border bg-surface p-4" role="status" aria-live="polite">
+        <span className="sr-only">Loading review item detail</span>
         <div className="h-3 w-32 rounded bg-surface3" />
         <div className="mt-3 h-3 w-full rounded bg-surface3" />
         <div className="mt-2 h-3 w-2/3 rounded bg-surface3" />

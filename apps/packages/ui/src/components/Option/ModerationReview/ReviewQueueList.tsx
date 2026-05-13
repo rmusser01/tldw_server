@@ -24,10 +24,16 @@ export const ReviewQueueList: React.FC<ReviewQueueListProps> = ({
   onSelect,
   onToggleSelected
 }) => {
+  const bulkSelectionEnabled = Boolean(onToggleSelected)
+  const headerColumns = bulkSelectionEnabled
+    ? "lg:grid-cols-[36px_110px_90px_120px_80px_1fr_150px]"
+    : "lg:grid-cols-[110px_90px_120px_80px_1fr_150px]"
+  const rowColumns = bulkSelectionEnabled ? "lg:grid-cols-[36px_1fr]" : "lg:grid-cols-1"
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="hidden grid-cols-[36px_110px_90px_120px_80px_1fr_150px] gap-3 border-b border-border bg-surface2 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted lg:grid">
-        <div>Select</div>
+      <div className={`hidden gap-3 border-b border-border bg-surface2 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted lg:grid ${headerColumns}`}>
+        {bulkSelectionEnabled && <div>Select</div>}
         <div>Status</div>
         <div>Severity</div>
         <div>Category</div>
@@ -43,19 +49,21 @@ export const ReviewQueueList: React.FC<ReviewQueueListProps> = ({
             <div
               key={item.id}
               role="listitem"
-              className={`grid gap-2 border-b border-border px-3 py-3 last:border-b-0 lg:grid-cols-[36px_1fr] lg:items-center ${
+              className={`grid gap-2 border-b border-border px-3 py-3 last:border-b-0 lg:items-center ${rowColumns} ${
                 selected ? "bg-blue-50 text-blue-950 dark:bg-blue-950/30 dark:text-blue-100" : "bg-surface hover:bg-surface2"
               }`}
             >
-              <div className="flex items-start">
-                <input
-                  type="checkbox"
-                  checked={selectedForBulk}
-                  onChange={() => onToggleSelected?.(item.id)}
-                  aria-label={`Select review item ${item.id}`}
-                  className="mt-1 h-4 w-4 rounded border-border text-blue-600 focus:ring-2 focus:ring-blue-500/30"
-                />
-              </div>
+              {bulkSelectionEnabled && (
+                <div className="flex items-start">
+                  <input
+                    type="checkbox"
+                    checked={selectedForBulk}
+                    onChange={() => onToggleSelected?.(item.id)}
+                    aria-label={`Select review item ${item.id}`}
+                    className="mt-1 h-4 w-4 rounded border-border text-blue-600 focus:ring-2 focus:ring-blue-500/30"
+                  />
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => onSelect(item.id)}

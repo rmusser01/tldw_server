@@ -235,15 +235,21 @@ async def test_moderation_review_list_allows_reviewer_read_without_admin():
     )
 
     class _ReviewService:
+        def __init__(self) -> None:
+            self.kwargs: dict[str, object] = {}
+
         def list_items(self, **_: object) -> dict:
+            self.kwargs = _
             return {"items": [], "next_cursor": None, "total": 0}
 
-    app = _build_app(principal=principal, moderation_service=_ReviewService())
+    service = _ReviewService()
+    app = _build_app(principal=principal, moderation_service=service)
 
     with TestClient(app) as client:
-        resp = client.get("/api/v1/moderation/review/items")
+        resp = client.get("/api/v1/moderation/review/items?sort=oldest")
 
     assert resp.status_code == 200
+    assert service.kwargs["sort"] == "oldest"
     assert resp.json() == {"items": [], "next_cursor": None, "total": 0}
 
 

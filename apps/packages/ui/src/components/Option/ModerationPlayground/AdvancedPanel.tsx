@@ -146,8 +146,13 @@ const AdvancedPanel: React.FC<AdvancedPanelProps> = ({ settings, blocklist, over
               returnFocus()
             },
             onOk: async () => {
-              await blocklist.confirmRawReplace()
-              messageApi.success("Blocklist replaced successfully")
+              try {
+                await blocklist.confirmRawReplace()
+                messageApi.success("Blocklist replaced successfully")
+              } catch (err: any) {
+                messageApi.error(err?.message || "Failed to replace blocklist")
+                throw err
+              }
             }
           })
         } catch (err: any) {

@@ -159,13 +159,16 @@ export const ReviewQueueToolbar: React.FC<ReviewQueueToolbarProps> = ({
           <button
             type="button"
             onClick={() => {
-              onSavePreset?.(presetName)
-              if (presetName.trim()) {
-                setSelectedPreset(presetName.trim())
-                setPresetName("")
+              const normalized = presetName.trim()
+              if (!normalized) {
+                return
               }
+              onSavePreset?.(normalized)
+              setSelectedPreset(normalized)
+              setPresetName("")
             }}
-            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text hover:bg-surface3"
+            disabled={!presetName.trim()}
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text hover:bg-surface3 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Save preset
           </button>

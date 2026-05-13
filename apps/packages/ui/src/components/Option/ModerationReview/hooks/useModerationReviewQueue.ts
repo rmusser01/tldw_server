@@ -63,6 +63,7 @@ function toListParams(filters: ModerationReviewFilters): ModerationReviewListPar
     source_id: filters.source_id.trim() || undefined,
     user_id: filters.user_id.trim() || undefined,
     q: filters.q.trim() || undefined,
+    sort: filters.sort,
     cursor: filters.cursor || undefined,
     limit: 50
   }
@@ -110,6 +111,11 @@ function filterMatchesActiveStatus(item: ModerationReviewItem, filters: Moderati
   return !filters.status || item.status === filters.status
 }
 
+type LoadFiltersOptions = {
+  append?: boolean
+  selectedItemFallback?: ModerationReviewItem | null
+}
+
 export function useModerationReviewQueue() {
   const [filters, setFilters] = React.useState<ModerationReviewFilters>(DEFAULT_FILTERS)
   const [items, setItems] = React.useState<ModerationReviewItem[]>([])
@@ -142,7 +148,10 @@ export function useModerationReviewQueue() {
     []
   )
 
-  const loadFilters = React.useCallback(async (activeFilters: ModerationReviewFilters) => {
+  const loadFilters = React.useCallback(async (
+    activeFilters: ModerationReviewFilters,
+    options: LoadFiltersOptions = {}
+  ) => {
     setLoading(true)
     setError(null)
     setPartial(false)
@@ -150,17 +159,29 @@ export function useModerationReviewQueue() {
     try {
       const response = await listModerationReviewItems(toListParams(activeFilters))
       const sorted = sortReviewItems(response.items || [], activeFilters.sort)
-      setItems(sorted)
-      setSelectedIds((current) => new Set([...current].filter((itemId) => sorted.some((item) => item.id === itemId))))
-      setTotal(typeof response.total === "number" ? response.total : sorted.length)
+      const nextItems = options.append
+        ? sortReviewItems([
+            ...items.filter((item) => !sorted.some((nextItem) => nextItem.id === item.id)),
+            ...sorted
+          ], activeFilters.sort)
+        : sorted
+      setItems(nextItems)
+      setSelectedIds((current) => new Set([...current].filter((itemId) => nextItems.some((item) => item.id === itemId))))
+      setTotal(typeof response.total === "number" ? response.total : nextItems.length)
       setNextCursor(response.next_cursor || null)
-      const preferredId =
-        selectedItemId && sorted.some((item) => item.id === selectedItemId)
-          ? selectedItemId
-          : sorted[0]?.id || null
+      const fallbackItem = options.selectedItemFallback || null
+      const hasFallbackSelection = Boolean(
+        selectedItemId && fallbackItem && fallbackItem.id === selectedItemId
+      )
+      const hasSelectedItemInPage = Boolean(
+        selectedItemId && nextItems.some((item) => item.id === selectedItemId)
+      )
+      const preferredId = hasSelectedItemInPage || hasFallbackSelection
+        ? selectedItemId
+        : nextItems[0]?.id || null
       setSelectedItemId(preferredId)
       if (preferredId) {
-        const fallback = sorted.find((item) => item.id === preferredId) || null
+        const fallback = nextItems.find((item) => item.id === preferredId) || fallbackItem
         setSelectedItem(fallback)
         try {
           const detail = await getModerationReviewItem(preferredId)
@@ -182,10 +203,10 @@ export function useModerationReviewQueue() {
     } finally {
       setLoading(false)
     }
-  }, [selectedItemId])
+  }, [items, selectedItemId])
 
-  const refresh = React.useCallback(async () => {
-    await loadFilters(filters)
+  const refresh = React.useCallback(async (options: LoadFiltersOptions = {}) => {
+    await loadFilters(filters, options)
   }, [filters, loadFilters])
 
   const loadNextPage = React.useCallback(async () => {
@@ -194,7 +215,7 @@ export function useModerationReviewQueue() {
     }
     const nextFilters = { ...filters, cursor: nextCursor }
     setFilters(nextFilters)
-    await loadFilters(nextFilters)
+    await loadFilters(nextFilters, { append: true })
   }, [filters, loadFilters, nextCursor])
 
   React.useEffect(() => {
@@ -283,9 +304,7 @@ export function useModerationReviewQueue() {
               }
             : null
         )
-        await refresh()
-        setSelectedItem(response.item)
-        setSelectedItemId(response.item.id)
+        await refresh({ selectedItemFallback: response.item })
       } catch (requestError) {
         setError(requestError)
       } finally {
@@ -306,9 +325,7 @@ export function useModerationReviewQueue() {
       setSelectedItem(item)
       setSelectedItemId(item.id)
       setUndo(null)
-      await refresh()
-      setSelectedItem(item)
-      setSelectedItemId(item.id)
+      await refresh({ selectedItemFallback: item })
     } catch (requestError) {
       setError(requestError)
     } finally {

@@ -29,6 +29,7 @@ export const BulkDecisionBar: React.FC<BulkDecisionBarProps> = ({
 }) => {
   const [reason, setReason] = React.useState("")
   const [validation, setValidation] = React.useState<string | null>(null)
+  const reasonValidationId = React.useId()
   const disabled = selectedCount === 0 || Boolean(deciding)
 
   const runBulkDecision = async (action: ModerationDecisionAction) => {
@@ -61,9 +62,15 @@ export const BulkDecisionBar: React.FC<BulkDecisionBarProps> = ({
               rows={2}
               className="min-w-[260px] resize-y rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               placeholder="Required for block, redact, and escalate"
+              aria-invalid={Boolean(validation)}
+              aria-describedby={validation ? reasonValidationId : undefined}
             />
           </label>
-          {validation && <div className="mt-2 text-sm font-medium text-red-600">{validation}</div>}
+          {validation && (
+            <div id={reasonValidationId} role="alert" className="mt-2 text-sm font-medium text-red-600">
+              {validation}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {ACTIONS.map((action) => (

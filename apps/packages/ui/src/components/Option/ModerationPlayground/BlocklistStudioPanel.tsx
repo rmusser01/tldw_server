@@ -380,6 +380,9 @@ const BlocklistStudioPanel: React.FC<BlocklistStudioPanelProps> = ({ blocklist, 
   // Pagination
   const totalItems = filteredRows.length
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
+  React.useEffect(() => {
+    setPage((current) => Math.max(1, Math.min(current, totalPages)))
+  }, [totalPages])
   const pagedItems = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // ---------------------------------------------------------------------------

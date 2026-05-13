@@ -1270,7 +1270,14 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
             )
 
     # Reviewer: read media + claims and moderation review decisions
-    reviewer_perms = ['media.read', 'claims.review', 'moderation.review.read', 'moderation.review.decide']
+    reviewer_perms = [
+        'media.read',
+        'claims.review',
+        'moderation.review.read',
+        'moderation.review.decide',
+        'moderation.review.bulk_decide',
+        'moderation.audit.read',
+    ]
     for code in reviewer_perms:
         pid = _id('permissions', code)
         if pid is not None and reviewer_id is not None:

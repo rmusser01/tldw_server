@@ -295,6 +295,39 @@ describe("ModerationReviewShell", () => {
     )
   })
 
+  it("appends the next page instead of replacing the current worklist", async () => {
+    const user = userEvent.setup()
+    mocks.listModerationReviewItems
+      .mockResolvedValueOnce({
+        items: [reviewItem],
+        total: 2,
+        next_cursor: "1"
+      })
+      .mockResolvedValueOnce({
+        items: [reviewItem2],
+        total: 2,
+        next_cursor: null
+      })
+    mocks.getModerationReviewItem.mockImplementation((itemId: string) =>
+      Promise.resolve(itemId === "review-2" ? reviewItem2 : reviewItem)
+    )
+
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByRole("button", { name: /load next page/i }))
+
+    await waitFor(() => {
+      expect(mocks.listModerationReviewItems).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          cursor: "1",
+          sort: "newest"
+        })
+      )
+    })
+    expect(screen.getAllByText(/hello \[REDACTED\]/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/second \[REDACTED\]/i).length).toBeGreaterThan(0)
+  })
+
   it("handles scoped keyboard shortcuts without firing while typing", async () => {
     const user = userEvent.setup()
     mocks.listModerationReviewItems.mockResolvedValue({

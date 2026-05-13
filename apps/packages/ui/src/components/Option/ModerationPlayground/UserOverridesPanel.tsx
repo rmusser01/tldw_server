@@ -106,6 +106,8 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
   const phraseActionLabelId = React.useId()
   const phrasePhaseId = React.useId()
   const tableFilterId = React.useId()
+  const phraseActionBlockRef = React.useRef<HTMLButtonElement>(null)
+  const phraseActionWarnRef = React.useRef<HTMLButtonElement>(null)
 
   // Local state for add-phrase form
   const [phrasePattern, setPhrasePattern] = React.useState("")
@@ -160,6 +162,8 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
     if (!nextAction) return
     event.preventDefault()
     setPhraseAction(nextAction)
+    const nextRef = nextAction === "block" ? phraseActionBlockRef : phraseActionWarnRef
+    window.setTimeout(() => nextRef.current?.focus(), 0)
   }
 
   const handleSave = async () => {
@@ -502,6 +506,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                     aria-labelledby={phraseActionLabelId}
                   >
                     <button
+                      ref={phraseActionBlockRef}
                       type="button"
                       role="radio"
                       aria-checked={phraseAction === "block"}
@@ -517,6 +522,7 @@ const UserOverridesPanel: React.FC<UserOverridesPanelProps> = ({ ctx, overrides,
                       Ban
                     </button>
                     <button
+                      ref={phraseActionWarnRef}
                       type="button"
                       role="radio"
                       aria-checked={phraseAction === "warn"}

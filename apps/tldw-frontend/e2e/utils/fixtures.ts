@@ -3,6 +3,7 @@
  */
 import { test as base, expect, type Page } from "@playwright/test"
 import { readFileSync } from "node:fs"
+import path from "node:path"
 import {
   seedAuth,
   TEST_CONFIG,
@@ -150,7 +151,7 @@ export interface ModerationReviewItemsFixture {
 
 export function loadModerationReviewItemsFixture(): ModerationReviewItemsFixture {
   return JSON.parse(
-    readFileSync("e2e/fixtures/moderation-review-items.json", "utf8")
+    readFileSync(path.resolve(__dirname, "../fixtures/moderation-review-items.json"), "utf8")
   ) as ModerationReviewItemsFixture
 }
 

@@ -99,6 +99,7 @@ describe("moderation service contract", () => {
       source_id: "conversation-1",
       user_id: "user-1",
       q: "redacted",
+      sort: "oldest",
       limit: 25,
       cursor: "50"
     })
@@ -107,7 +108,7 @@ describe("moderation service contract", () => {
       expect.objectContaining({
         method: "GET",
         path:
-          "/api/v1/moderation/review/items?status=needs_review&category=pii&severity=high&source_type=chat&source_id=conversation-1&user_id=user-1&q=redacted&limit=25&cursor=50"
+          "/api/v1/moderation/review/items?status=needs_review&category=pii&severity=high&source_type=chat&source_id=conversation-1&user_id=user-1&q=redacted&sort=oldest&limit=25&cursor=50"
       })
     )
   })

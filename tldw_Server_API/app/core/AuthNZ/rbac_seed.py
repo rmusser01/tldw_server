@@ -65,6 +65,8 @@ def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissio
                 "claims.review",
                 "moderation.review.read",
                 "moderation.review.decide",
+                "moderation.review.bulk_decide",
+                "moderation.audit.read",
             )
             if p in base
         ],

@@ -1,7 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { message, Skeleton } from "antd"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { testModeration } from "@/services/moderation"
@@ -31,6 +31,10 @@ const TABS = [
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
+const TAB_KEYS = new Set<TabKey>(TABS.map((tab) => tab.key))
+
+const isTabKey = (value: string | null): value is TabKey =>
+  Boolean(value && TAB_KEYS.has(value as TabKey))
 
 const HERO_STYLE: React.CSSProperties = {
   background:
@@ -49,9 +53,11 @@ export const ModerationPlaygroundShell: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const online = useServerOnline()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { uxState } = useConnectionUxState()
   const [messageApi, contextHolder] = message.useMessage()
   const [activeTab, setActiveTab] = React.useState<TabKey>("policy")
+  const requestedTab = searchParams.get("tab")
   const tabPanelBaseId = React.useId()
   const tabRefs = React.useRef<Record<TabKey, HTMLButtonElement | null>>({
     policy: null,
@@ -81,6 +87,12 @@ export const ModerationPlaygroundShell: React.FC = () => {
     setActiveTab(tab)
     tabRefs.current[tab]?.focus()
   }
+
+  React.useEffect(() => {
+    if (isTabKey(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab)
+    }
+  }, [activeTab, requestedTab])
 
   const handleTabKeyDown = (
     event: React.KeyboardEvent<HTMLButtonElement>,
@@ -420,7 +432,7 @@ export const ModerationPlaygroundShell: React.FC = () => {
               data-testid={`moderation-tab-${tab.key}`}
               role="tab"
               aria-selected={activeTab === tab.key}
-              aria-controls={getTabPanelId(tab.key)}
+              aria-controls={activeTab === tab.key ? getTabPanelId(tab.key) : undefined}
               tabIndex={activeTab === tab.key ? 0 : -1}
               onClick={() => setActiveTab(tab.key)}
               onKeyDown={(event) => handleTabKeyDown(event, tab.key)}

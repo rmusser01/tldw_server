@@ -51,6 +51,8 @@ def test_review_service_maps_decisions_to_statuses_and_uses_actor_from_call(tmp_
     )
 
     assert response["item"]["status"] == "redacted"
+    assert response["item"]["decision_history"]
+    assert response["item"]["decision_history"][0]["action"] == "redact"
     assert response["decision"]["decided_by"] == "principal:reviewer"
     assert response["undo_token"]
 

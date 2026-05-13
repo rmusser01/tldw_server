@@ -2650,28 +2650,37 @@ async def create_chat_completion(
                             with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
                                 metrics.track_moderation_input(str(req_user_id or client_id), inj_mod['action'], category=(inj_mod.get('category') or "default"))
                             # Audit moderation decision
-                            await write_mandatory_moderation_audit(
-                                audit_service=audit_service,
-                                audit_context=context,
-                                audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                                action="moderation.input",
-                                result=("failure" if inj_mod['blocked'] else "success"),
-                                metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
-                            )
-                            if inj_mod["action"] != "pass" and is_moderation_review_capture_enabled():
-                                with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-                                    capture_moderation_review_item(
-                                        phase="input",
-                                        action=str(inj_mod["action"]),
-                                        excerpt="[matched content redacted]",
-                                        category=inj_mod.get("category"),
-                                        matched_pattern=inj_mod.get("pattern"),
-                                        effective_policy=policy.to_dict() if hasattr(policy, "to_dict") else {},
-                                        source_type="chat",
-                                        source_id=str(request_data.conversation_id) if request_data.conversation_id else None,
-                                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                                        session_id=None,
-                                    )
+                                await write_mandatory_moderation_audit(
+                                    audit_service=audit_service,
+                                    audit_context=context,
+                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                    action="moderation.input",
+                                    result=("failure" if inj_mod['blocked'] else "success"),
+                                    metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
+                                )
+                                if inj_mod["action"] != "pass" and is_moderation_review_capture_enabled():
+                                    try:
+                                        await asyncio.to_thread(
+                                            partial(
+                                                capture_moderation_review_item,
+                                                phase="input",
+                                                action=str(inj_mod["action"]),
+                                                excerpt="[matched content redacted]",
+                                                category=inj_mod.get("category"),
+                                                matched_pattern=inj_mod.get("pattern"),
+                                                effective_policy=policy.to_dict() if hasattr(policy, "to_dict") else {},
+                                                source_type="chat",
+                                                source_id=str(request_data.conversation_id) if request_data.conversation_id else None,
+                                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                                                session_id=None,
+                                            )
+                                        )
+                                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                                        logger.warning(
+                                            "Moderation review capture failed in chat endpoint: {}: {}",
+                                            type(exc).__name__,
+                                            str(exc),
+                                        )
                         except MandatoryAuditWriteError as exc:
                             raise HTTPException(
                                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -80,6 +80,9 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
 
   const handleShortcut = React.useCallback(
     (event: React.KeyboardEvent<HTMLElement>) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return
+      }
       if (shouldIgnoreShortcut(event.target)) {
         return
       }

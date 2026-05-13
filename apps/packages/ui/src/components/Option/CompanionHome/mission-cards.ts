@@ -49,7 +49,7 @@ export const MISSION_CARDS: MissionCard[] = [
     title: "Test your rules",
     description: "Try your content rules in the Test Sandbox to see them in action.",
     icon: MessageSquare,
-    href: "/moderation/rules",
+    href: "/moderation/rules?tab=test",
     persona: ["family"],
     prerequisiteMilestones: ["first_connection"],
     linkedMilestone: "content_rules_tested",

@@ -12,7 +12,8 @@ const connectionState = {
     | "error_auth"
     | "error_unreachable"
     | "unconfigured",
-  navigate: vi.fn()
+  navigate: vi.fn(),
+  search: ""
 }
 
 const mockBlocklist = {
@@ -51,7 +52,8 @@ vi.mock("react-router-dom", async () => {
   )
   return {
     ...actual,
-    useNavigate: () => connectionState.navigate
+    useNavigate: () => connectionState.navigate,
+    useSearchParams: () => [new URLSearchParams(connectionState.search)]
   }
 })
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -87,6 +89,7 @@ describe("ModerationPlaygroundShell", () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
     connectionState.online = true
     connectionState.uxState = "connected_ok"
+    connectionState.search = ""
     mockBlocklist.isDirtyRaw = false
   })
 
@@ -136,6 +139,17 @@ describe("ModerationPlaygroundShell", () => {
     await waitFor(() => {
       expect(markMilestone).toHaveBeenCalledWith("content_rules_tested")
     })
+  })
+
+  it("opens the Test Sandbox from the tab query parameter", async () => {
+    connectionState.search = "tab=test"
+
+    render(<ModerationPlaygroundShell />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /test/i })).toHaveAttribute("aria-selected", "true")
+    })
+    expect(markMilestone).toHaveBeenCalledWith("content_rules_tested")
   })
 
   it("renders context bar with scope selector", () => {

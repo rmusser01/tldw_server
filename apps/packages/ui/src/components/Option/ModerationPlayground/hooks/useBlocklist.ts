@@ -75,7 +75,9 @@ const summarizeLineChanges = (previousText: string, nextText: string) => {
 }
 
 const hasManagedLintMetadata = (item: BlocklistManagedItem): boolean =>
-  item.pattern_type !== undefined
+  item.pattern_type !== undefined &&
+  item.action !== undefined &&
+  item.ok !== undefined
 
 export function useBlocklist(): BlocklistState {
   const [rawText, setRawText] = React.useState("")

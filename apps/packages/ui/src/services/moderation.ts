@@ -178,6 +178,7 @@ export interface ModerationReviewListParams {
   source_id?: string
   user_id?: string
   q?: string
+  sort?: ModerationReviewSort
   limit?: number
   cursor?: string | null
 }
@@ -427,6 +428,7 @@ export async function listModerationReviewItems(
     "source_id",
     "user_id",
     "q",
+    "sort",
     "limit",
     "cursor"
   ])

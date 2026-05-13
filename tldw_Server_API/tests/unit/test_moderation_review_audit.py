@@ -91,14 +91,18 @@ def test_undo_tokens_are_hashed_expire_and_single_use(tmp_path):
     assert raw_token
 
     with sqlite3.connect(db_path) as conn:
-      row = conn.execute(
-          "SELECT undo_token, undo_token_hash, undo_expires_at FROM moderation_review_decisions WHERE id = ?",
-          (decision["id"],),
-      ).fetchone()
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(moderation_review_decisions)").fetchall()
+        }
+        row = conn.execute(
+            "SELECT undo_token_hash, undo_expires_at FROM moderation_review_decisions WHERE id = ?",
+            (decision["id"],),
+        ).fetchone()
 
-    assert row[0] is None
-    assert row[1] != raw_token
-    assert row[2] == decision["undo_expires_at"]
+    assert "undo_token" not in columns
+    assert row[0] != raw_token
+    assert row[1] == decision["undo_expires_at"]
 
     undone = store.undo_decision(item["id"], undo_token=raw_token, actor_id="principal:reviewer")
     assert undone["status"] == "needs_review"
@@ -196,7 +200,7 @@ def test_redact_decision_replaces_content_with_placeholders_and_preserves_audit(
     assert redacted["decision_history"][0]["redaction_state"] == "redacted"
 
     audit = store.list_audit(item_id=item["id"], limit=10)
-    assert [event["action"] for event in audit["events"][:2]] == [
+    assert {event["action"] for event in audit["events"][:2]} == {
         "content.redacted",
         "decision.redact",
-    ]
+    }

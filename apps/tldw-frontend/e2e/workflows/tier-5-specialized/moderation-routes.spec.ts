@@ -116,6 +116,9 @@ test.describe("Moderation routes", () => {
       waitUntil: "domcontentloaded",
     })
 
+    await expect(authedPage).toHaveURL(/\/moderation\/rules(?:$|[?#])/, {
+      timeout: 15_000,
+    })
     await expect(
       authedPage
         .getByRole("heading", { name: /content rules/i })
@@ -138,13 +141,8 @@ test.describe("Moderation routes", () => {
       waitUntil: "domcontentloaded",
     })
 
-    const { response } = await apiCall.catch(() => ({
-      response: { status: () => 0 },
-    }))
-
-    if (response.status() > 0) {
-      expect(response.status()).toBeLessThan(500)
-    }
+    const { response } = await apiCall
+    expect(response.status()).toBeLessThan(500)
 
     await assertNoCriticalErrors(diagnostics)
   })

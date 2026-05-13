@@ -2498,7 +2498,7 @@ def _capture_moderation_review_item_safely(
         policy_snapshot = effective_policy.to_dict() if hasattr(effective_policy, "to_dict") else {}
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         policy_snapshot = {}
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+    try:
         capture_moderation_review_item(
             phase=phase,
             action=action,
@@ -2511,6 +2511,15 @@ def _capture_moderation_review_item_safely(
             user_id=user_id,
             session_id=session_id,
         )
+    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Moderation review capture failed in chat service: {}: {}", type(exc).__name__, str(exc))
+
+
+async def _capture_moderation_review_item_safely_async(**kwargs: Any) -> None:
+    action = kwargs.get("action")
+    if not action or action == "pass" or not is_moderation_review_capture_enabled():
+        return
+    await asyncio.to_thread(partial(_capture_moderation_review_item_safely, **kwargs))
 
 
 async def moderate_input_messages(
@@ -2694,24 +2703,24 @@ async def moderate_input_messages(
 
         with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
             metrics.track_moderation_input(str(req_user_id or client_id), resolved_action, category=(category or "default"))
-        await write_mandatory_moderation_audit(
-            audit_service=audit_service,
-            audit_context=audit_context,
-            audit_event_type=audit_event_type,
-            action="moderation.input",
-            result=("failure" if resolved_action == "block" else "success"),
-            metadata={"phase": "input", "action": resolved_action, "pattern": sample},
-        )
-        _capture_moderation_review_item_safely(
-            phase="input",
-            action=resolved_action,
-            excerpt=sample,
-            category=category,
-            matched_pattern=matched_pattern,
-            effective_policy=eff_policy,
-            source_id=str(conv_id) if conv_id is not None else None,
-            user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-        )
+            await write_mandatory_moderation_audit(
+                audit_service=audit_service,
+                audit_context=audit_context,
+                audit_event_type=audit_event_type,
+                action="moderation.input",
+                result=("failure" if resolved_action == "block" else "success"),
+                metadata={"phase": "input", "action": resolved_action, "pattern": sample},
+            )
+            await _capture_moderation_review_item_safely_async(
+                phase="input",
+                action=resolved_action,
+                excerpt=sample,
+                category=category,
+                matched_pattern=matched_pattern,
+                effective_policy=eff_policy,
+                source_id=str(conv_id) if conv_id is not None else None,
+                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+            )
 
         if resolved_action == "block":
             block_detail = "Input violates moderation policy"
@@ -3890,7 +3899,13 @@ async def execute_streaming_call(
     if hasattr(raw_stream_iter, "__iter__") and not hasattr(raw_stream_iter, "__aiter__"):
         raw_stream_iter = wrap_sync_stream(raw_stream_iter)
 
-    stream_mod_state = {"block_logged": False, "redact_logged": False}
+    stream_mod_state = {
+        "block_logged": False,
+        "redact_logged": False,
+        "block_capture_logged": False,
+        "redact_capture_logged": False,
+        "warn_capture_logged": False,
+    }
     loop_compat_enabled = False
     loop_compat_run_id = str(final_conversation_id or f"run_{_uuid.uuid4().hex[:12]}")
     try:
@@ -3988,96 +4003,102 @@ async def execute_streaming_call(
                         if action == "redact":
                             moderation.redact_text(full_reply, eff_policy)
 
-                if action == "block":
-                    if not stream_mod_state["block_logged"]:
-                        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                            metrics.track_moderation_stream_block(
-                                str(req_user_id or client_id),
-                                category=(category or "default"),
-                            )
-                        try:
-                            if audit_service and audit_context:
-                                _schedule_background_task(
-                                    audit_service.log_event(
-                                        event_type=AuditEventType.SECURITY_VIOLATION,
-                                        context=audit_context,
-                                        action="moderation.output",
-                                        result="failure",
-                                        metadata={
-                                            "phase": "output",
-                                            "streaming": True,
-                                            "action": "block",
-                                            "pattern": sample,
-                                        },
-                                    ),
-                                    task_name="chat.stream.save.output.block.audit",
+                    if action == "block":
+                        if not stream_mod_state["block_logged"]:
+                            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                                metrics.track_moderation_stream_block(
+                                    str(req_user_id or client_id),
+                                    category=(category or "default"),
                                 )
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        _capture_moderation_review_item_safely(
-                            phase="output",
-                            action="block",
-                            excerpt=sample,
-                            category=category,
-                            matched_pattern=matched_pattern,
-                            effective_policy=eff_policy,
-                            source_id=str(final_conversation_id) if final_conversation_id else None,
-                            user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                        )
-                        stream_mod_state["block_logged"] = True
-                    post_stream_blocked = True
-                    full_reply_to_save = None
-                elif action == "redact":
-                    if not stream_mod_state["redact_logged"]:
-                        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                            metrics.track_moderation_output(
-                                str(req_user_id or client_id),
-                                "redact",
-                                streaming=True,
-                                category=(category or "default"),
+                            try:
+                                if audit_service and audit_context:
+                                    _schedule_background_task(
+                                        audit_service.log_event(
+                                            event_type=AuditEventType.SECURITY_VIOLATION,
+                                            context=audit_context,
+                                            action="moderation.output",
+                                            result="failure",
+                                            metadata={
+                                                "phase": "output",
+                                                "streaming": True,
+                                                "action": "block",
+                                                "pattern": sample,
+                                            },
+                                        ),
+                                        task_name="chat.stream.save.output.block.audit",
+                                    )
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            stream_mod_state["block_logged"] = True
+                        if not stream_mod_state["block_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="block",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(final_conversation_id) if final_conversation_id else None,
+                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
                             )
-                        try:
-                            if audit_service and audit_context:
-                                _schedule_background_task(
-                                    audit_service.log_event(
-                                        event_type=AuditEventType.SECURITY_VIOLATION,
-                                        context=audit_context,
-                                        action="moderation.output",
-                                        result="success",
-                                        metadata={
-                                            "phase": "output",
-                                            "streaming": True,
-                                            "action": "redact",
-                                            "pattern": sample,
-                                        },
-                                    ),
-                                    task_name="chat.stream.save.output.redact.audit",
+                            stream_mod_state["block_capture_logged"] = True
+                        post_stream_blocked = True
+                        full_reply_to_save = None
+                    elif action == "redact":
+                        if not stream_mod_state["redact_logged"]:
+                            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                                metrics.track_moderation_output(
+                                    str(req_user_id or client_id),
+                                    "redact",
+                                    streaming=True,
+                                    category=(category or "default"),
                                 )
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        _capture_moderation_review_item_safely(
-                            phase="output",
-                            action="redact",
-                            excerpt=sample,
-                            category=category,
-                            matched_pattern=matched_pattern,
-                            effective_policy=eff_policy,
-                            source_id=str(final_conversation_id) if final_conversation_id else None,
-                            user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                        )
-                        stream_mod_state["redact_logged"] = True
-                    full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
-                elif action == "warn":
-                    _capture_moderation_review_item_safely(
-                        phase="output",
-                        action="warn",
-                        excerpt=sample,
-                        category=category,
-                        matched_pattern=matched_pattern,
-                        effective_policy=eff_policy,
-                        source_id=str(final_conversation_id) if final_conversation_id else None,
-                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                    )
+                            try:
+                                if audit_service and audit_context:
+                                    _schedule_background_task(
+                                        audit_service.log_event(
+                                            event_type=AuditEventType.SECURITY_VIOLATION,
+                                            context=audit_context,
+                                            action="moderation.output",
+                                            result="success",
+                                            metadata={
+                                                "phase": "output",
+                                                "streaming": True,
+                                                "action": "redact",
+                                                "pattern": sample,
+                                            },
+                                        ),
+                                        task_name="chat.stream.save.output.redact.audit",
+                                    )
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            stream_mod_state["redact_logged"] = True
+                        if not stream_mod_state["redact_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="redact",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(final_conversation_id) if final_conversation_id else None,
+                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                            )
+                            stream_mod_state["redact_capture_logged"] = True
+                        full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
+                    elif action == "warn":
+                        if not stream_mod_state["warn_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="warn",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(final_conversation_id) if final_conversation_id else None,
+                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                            )
+                            stream_mod_state["warn_capture_logged"] = True
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -5216,10 +5237,10 @@ async def execute_non_stream_call(
                                 "pattern": sample,
                             },
                         )
-                    _capture_moderation_review_item_safely(
-                        phase="output",
-                        action="block",
-                        excerpt=sample,
+                        await _capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="block",
+                            excerpt=sample,
                         category=out_category2,
                         matched_pattern=matched_pattern,
                         effective_policy=eff_policy,
@@ -5255,10 +5276,10 @@ async def execute_non_stream_call(
                             )
                     except MandatoryAuditWriteError:
                         raise
-                    _capture_moderation_review_item_safely(
-                        phase="output",
-                        action="redact",
-                        excerpt=sample,
+                        await _capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="redact",
+                            excerpt=sample,
                         category=out_category2,
                         matched_pattern=matched_pattern,
                         effective_policy=eff_policy,
@@ -5282,11 +5303,11 @@ async def execute_non_stream_call(
                                     msg["content"] = content_to_save
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         pass
-                if resolved_action == "warn":
-                    _capture_moderation_review_item_safely(
-                        phase="output",
-                        action="warn",
-                        excerpt=sample,
+                    if resolved_action == "warn":
+                        await _capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="warn",
+                            excerpt=sample,
                         category=out_category2,
                         matched_pattern=matched_pattern,
                         effective_policy=eff_policy,

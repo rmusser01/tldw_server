@@ -65,8 +65,18 @@ def test_review_store_creates_schema_and_idempotent_items(tmp_path):
 @pytest.mark.unit
 def test_review_store_filters_paginates_decides_undoes_and_audits(tmp_path):
     store = ModerationReviewStore(tmp_path / "moderation_review.db")
-    item_a = store.upsert_item(_item_payload(idempotency_key="a", category="pii", severity="high"))
-    item_b = store.upsert_item(_item_payload(idempotency_key="b", category="toxicity", severity="medium"))
+    item_a = store.upsert_item(_item_payload(
+        idempotency_key="a",
+        category="pii",
+        severity="high",
+        created_at="2026-05-12T20:00:00Z",
+    ))
+    item_b = store.upsert_item(_item_payload(
+        idempotency_key="b",
+        category="toxicity",
+        severity="medium",
+        created_at="2026-05-12T20:01:00Z",
+    ))
 
     page_1 = store.list_items(filters={"status": "needs_review"}, limit=1)
     assert [item["id"] for item in page_1["items"]] == [item_b["id"]]
@@ -75,6 +85,9 @@ def test_review_store_filters_paginates_decides_undoes_and_audits(tmp_path):
     page_2 = store.list_items(filters={"status": "needs_review"}, limit=1, cursor=page_1["next_cursor"])
     assert [item["id"] for item in page_2["items"]] == [item_a["id"]]
     assert page_2["next_cursor"] is None
+
+    oldest_first = store.list_items(filters={"status": "needs_review", "sort": "oldest"}, limit=2)
+    assert [item["id"] for item in oldest_first["items"]] == [item_a["id"], item_b["id"]]
 
     filtered = store.list_items(filters={"category": "pii"}, limit=10)
     assert [item["id"] for item in filtered["items"]] == [item_a["id"]]

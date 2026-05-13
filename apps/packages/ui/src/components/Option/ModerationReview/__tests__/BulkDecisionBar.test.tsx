@@ -42,6 +42,8 @@ describe("BulkDecisionBar", () => {
 
     await user.click(screen.getByRole("button", { name: /redact selected/i }))
     expect(screen.getByText(/reason required/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/bulk decision reason/i)).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByText(/reason required/i)).toHaveAttribute("role", "alert")
     expect(onBulkDecision).not.toHaveBeenCalled()
 
     await user.type(screen.getByLabelText(/bulk decision reason/i), "Privacy request")

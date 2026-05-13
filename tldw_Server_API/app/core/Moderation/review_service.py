@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Moderation.review_store import ModerationReviewStore
+from tldw_Server_API.app.core.DB_Management.Moderation_Review_DB import ModerationReviewStore
 from tldw_Server_API.app.core.testing import is_truthy
 
 
@@ -100,6 +100,7 @@ class ModerationReviewService:
         source_id: str | None = None,
         user_id: str | None = None,
         q: str | None = None,
+        sort: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
         **_: Any,
@@ -112,6 +113,7 @@ class ModerationReviewService:
             "source_id": source_id,
             "user_id": user_id,
             "q": q,
+            "sort": sort,
         }
         return self.store.list_items(filters=filters, limit=limit, cursor=cursor)
 
@@ -137,11 +139,15 @@ class ModerationReviewService:
         if action not in _ACTION_STATUS:
             raise ValueError(f"unsupported moderation decision action: {action}")
         decision = self.store.record_decision(item_id, action=action, decided_by=actor_id, reason=reason)
-        item = self.store.get_item(item_id)
+        item = self.store.get_item(item_id, include_history=True)
         return {"item": item, "decision": decision, "undo_token": decision.get("undo_token")}
 
     def undo_decision(self, item_id: str, *, undo_token: str, actor_id: str) -> dict[str, Any]:
-        return self.store.undo_decision(item_id, undo_token=undo_token, actor_id=actor_id)
+        self.store.undo_decision(item_id, undo_token=undo_token, actor_id=actor_id)
+        item = self.store.get_item(item_id, include_history=True)
+        if item is None:
+            raise KeyError(item_id)
+        return item
 
     def bulk_decision(
         self,
@@ -282,5 +288,5 @@ def capture_moderation_review_item(**kwargs: Any) -> dict[str, Any] | None:
     try:
         return get_moderation_review_service().record_item(payload)
     except Exception as exc:
-        logger.warning("Moderation review capture failed: {}", type(exc).__name__)
+        logger.warning("Moderation review capture failed: {}: {}", type(exc).__name__, str(exc))
         return None

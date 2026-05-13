@@ -90,8 +90,7 @@ function hasUserOverride(effective: Record<string, any>): boolean {
     effective.user_override ||
     effective.user_overrides ||
     effective.override_applied ||
-    effective.per_user_override_applied ||
-    effective.user_id
+    effective.per_user_override_applied
   )
 }
 

@@ -295,7 +295,7 @@ export const normalizeManagedBlocklistRows = (
     return {
       ...item,
       rowKind,
-      pattern: item.sample ?? parsed.pattern,
+      pattern: parsed.pattern,
       action: item.action ?? parsed.action,
       replacement: item.replacement ?? parsed.replacement,
       categories: item.categories ?? parsed.categories,

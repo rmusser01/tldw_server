@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
@@ -97,6 +99,10 @@ def _normalize_optional_identifier(value: str | None) -> str | None:
 def _normalize_chat_type(value: str | None) -> str:
     normalized = str(value or "regular").strip().lower()
     return normalized or "regular"
+
+
+async def _run_review_store_call(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+    return await asyncio.to_thread(partial(func, *args, **kwargs))
 
 
 @rules_router.get("/moderation/users", response_model=ModerationUserOverridesResponse, summary="List all per-user moderation overrides", tags=["moderation"])
@@ -545,11 +551,14 @@ async def list_review_items(
     source_id: str | None = Query(None),
     user_id: str | None = Query(None),
     q: str | None = Query(None),
+    sort: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(None),
 ) -> ModerationReviewListResponse:
+    """List sanitized moderation review items with optional filters and pagination."""
     service = get_moderation_review_service()
-    return service.list_items(
+    return await _run_review_store_call(
+        service.list_items,
         status=status_filter,
         category=category,
         severity=severity,
@@ -557,6 +566,7 @@ async def list_review_items(
         source_id=source_id,
         user_id=user_id,
         q=q,
+        sort=sort,
         limit=limit,
         cursor=cursor,
     )
@@ -570,8 +580,9 @@ async def list_review_items(
     dependencies=[Depends(RequirePermission(MODERATION_REVIEW_READ))],
 )
 async def get_review_item(item_id: str) -> ModerationReviewItem:
+    """Return a sanitized moderation review item with decision history."""
     service = get_moderation_review_service()
-    item = service.get_item(item_id)
+    item = await _run_review_store_call(service.get_item, item_id)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
     return item
@@ -589,9 +600,11 @@ async def decide_review_item(
     payload: ModerationReviewDecisionRequest,
     principal: CurrentPrincipal,
 ) -> ModerationReviewDecisionResponse:
+    """Record a reviewer decision for a moderation review item."""
     service = get_moderation_review_service()
     try:
-        return service.record_decision(
+        return await _run_review_store_call(
+            service.record_decision,
             item_id,
             action=payload.action,
             actor_id=principal.principal_id,
@@ -616,9 +629,11 @@ async def undo_review_decision(
     payload: ModerationReviewUndoRequest,
     principal: CurrentPrincipal,
 ) -> ModerationReviewItem:
+    """Undo a recent reviewer decision when its undo token is still valid."""
     service = get_moderation_review_service()
     try:
-        return service.undo_decision(
+        return await _run_review_store_call(
+            service.undo_decision,
             item_id,
             undo_token=payload.undo_token,
             actor_id=principal.principal_id,
@@ -627,7 +642,7 @@ async def undo_review_decision(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Undo token not found") from exc
     except ValueError as exc:
         detail = str(exc) or "Undo is no longer available"
-        code = status.HTTP_410_GONE if "expired" in detail else status.HTTP_409_CONFLICT
+        code = status.HTTP_410_GONE if "expired" in detail.casefold() else status.HTTP_409_CONFLICT
         raise HTTPException(status_code=code, detail=detail) from exc
 
 
@@ -642,9 +657,11 @@ async def bulk_decide_review_items(
     payload: ModerationReviewBulkDecisionRequest,
     principal: CurrentPrincipal,
 ) -> ModerationReviewBulkDecisionResponse:
+    """Record the same reviewer decision for multiple moderation review items."""
     service = get_moderation_review_service()
     try:
-        return service.bulk_decision(
+        return await _run_review_store_call(
+            service.bulk_decision,
             item_ids=payload.item_ids,
             action=payload.action,
             actor_id=principal.principal_id,
@@ -671,8 +688,10 @@ async def list_review_audit(
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(None),
 ) -> ModerationReviewAuditResponse:
+    """List sanitized moderation review audit events."""
     service = get_moderation_review_service()
-    return service.list_audit(
+    return await _run_review_store_call(
+        service.list_audit,
         item_id=item_id,
         decision_id=decision_id,
         actor_id=actor_id,
