@@ -63,4 +63,25 @@ describe("LowQualityRecoveryBanner", () => {
     fireEvent.click(screen.getByRole("button", { name: /more specific/i }))
     expect(defaultProps.onRefine).toHaveBeenCalled()
   })
+
+  it("summarizes source diagnostics when low-confidence recovery has source status", () => {
+    render(
+      <LowQualityRecoveryBanner
+        {...defaultProps}
+        sourceStatus={{
+          media_db: { status: "searched", count: 2 },
+          notes: { status: "empty", count: 0, reason: "no_matching_entries" },
+          world_books: {
+            status: "unavailable",
+            count: 0,
+            reason: "no_retriever_configured",
+          },
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText("Source diagnostics: 1 searched, 1 empty, 1 unavailable.")
+    ).toBeInTheDocument()
+  })
 })

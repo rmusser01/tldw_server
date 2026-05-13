@@ -1,6 +1,6 @@
 import React from "react"
 import { Popover } from "antd"
-import { Layers, Globe, ChevronDown, Settings } from "lucide-react"
+import { Layers, Globe, ChevronDown, Settings, FolderPlus } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import { ALL_RAG_SOURCES, getRagSourceLabel } from "@/services/rag/sourceMetadata"
@@ -12,6 +12,7 @@ type CompactToolbarProps = {
   webEnabled: boolean
   onToggleWeb: () => void
   onOpenSourceSelector: () => void
+  onAddSources?: () => void
   onOpenSettings: () => void
   generationProvider: string | null
   generationModel: string | null
@@ -19,6 +20,7 @@ type CompactToolbarProps = {
   onGenerationModelChange: (model: string | null) => void
   contextChangedSinceLastRun: boolean
   scopeChangeDetails?: string[]
+  showAddSources?: boolean
   className?: string
 }
 
@@ -44,6 +46,7 @@ export function CompactToolbar({
   webEnabled,
   onToggleWeb,
   onOpenSourceSelector,
+  onAddSources,
   onOpenSettings,
   generationProvider,
   generationModel,
@@ -51,10 +54,22 @@ export function CompactToolbar({
   onGenerationModelChange,
   contextChangedSinceLastRun,
   scopeChangeDetails = [],
+  showAddSources = false,
   className,
 }: CompactToolbarProps) {
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
+      {showAddSources ? (
+        <button
+          type="button"
+          onClick={onAddSources ?? onOpenSourceSelector}
+          className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[11px] font-medium text-primaryStrong hover:bg-primary/15 transition-colors"
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
+          Add sources
+        </button>
+      ) : null}
+
       {/* Sources pill */}
       <button
         type="button"
@@ -107,8 +122,8 @@ export function CompactToolbar({
         type="button"
         onClick={onOpenSettings}
         className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border text-text-muted hover:bg-surface2 hover:text-text transition-colors"
-        aria-label="Open settings"
-        title="Open search settings"
+        aria-label="Open Knowledge QA settings"
+        title="Open Knowledge QA settings"
       >
         <Settings className="h-3.5 w-3.5" />
       </button>

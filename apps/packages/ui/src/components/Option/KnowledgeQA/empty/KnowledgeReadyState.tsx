@@ -8,6 +8,7 @@ type KnowledgeReadyStateProps = {
   onPromptClick: (prompt: string) => void
   onContinueRecent: () => void
   onSelectSources: () => void
+  onAddSources?: () => void
   hasSources: boolean
   hasRecentSession: boolean
   webFallbackEnabled?: boolean
@@ -19,6 +20,7 @@ export function KnowledgeReadyState({
   onPromptClick,
   onContinueRecent,
   onSelectSources,
+  onAddSources,
   hasSources,
   hasRecentSession,
   webFallbackEnabled = false,
@@ -26,6 +28,7 @@ export function KnowledgeReadyState({
 }: KnowledgeReadyStateProps) {
   const isReturningUser = hasRecentSession
   const [guideExpanded, setGuideExpanded] = useState(!isReturningUser)
+  const handleAddSources = onAddSources ?? onSelectSources
 
   // Collapse guide when history finishes loading and reveals a returning user
   useEffect(() => {
@@ -53,6 +56,10 @@ export function KnowledgeReadyState({
         <p className="mt-1 text-base font-medium">Search your documents and get cited answers</p>
         <p className="mt-2 text-sm text-text-muted">
           Get grounded answers with citations from your selected sources.
+        </p>
+        <p className="mt-2 text-sm text-text-muted">
+          This page answers questions over searchable sources. Add or manage sources
+          in their owner pages, then use /knowledge for QA.
         </p>
       </div>
 
@@ -84,10 +91,10 @@ export function KnowledgeReadyState({
                   <FolderPlus className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-primary" />
                   <button
                     type="button"
-                    onClick={onSelectSources}
+                    onClick={handleAddSources}
                     className="font-medium text-primary hover:underline"
                   >
-                    Add documents first
+                    Add searchable sources
                   </button>
                 </span>
               </li>
@@ -158,12 +165,15 @@ export function KnowledgeReadyState({
         >
           <p>
             {webFallbackEnabled
-              ? "No document sources are selected. Your search will use web results only."
+              ? "No document sources are selected. Web fallback uses your configured server default provider."
               : "No sources are selected. Select source categories to search, or enable web fallback."}
+          </p>
+          <p className="mt-1">
+            Queries stay on your tldw server unless web fallback is enabled.
           </p>
           <button
             type="button"
-            onClick={onSelectSources}
+            onClick={handleAddSources}
             className={cn(
               "mt-2 inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
               webFallbackEnabled
@@ -171,12 +181,17 @@ export function KnowledgeReadyState({
                 : "border-warn/40 hover:bg-warn/20"
             )}
           >
-            Open source settings
+            Add sources
           </button>
         </div>
       ) : null}
 
       <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2">
+        <p className="basis-full text-xs text-text-muted">
+          {hasRecentSession
+            ? "Recent QA session available."
+            : "No previous QA sessions yet."}
+        </p>
         <button
           type="button"
           onClick={onContinueRecent}

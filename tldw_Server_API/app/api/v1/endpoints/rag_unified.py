@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Dependencies
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -36,6 +37,7 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
@@ -102,6 +104,7 @@ def _build_unified_pipeline_kwargs(
     media_db: Any,
     chacha_db: CharactersRAGDB,
     current_user: Optional[User],
+    prompts_db: Optional[PromptsDatabase] = None,
     resolved_request: Optional[ResolvedRAGRequest] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
@@ -121,8 +124,11 @@ def _build_unified_pipeline_kwargs(
     payload["notes_db_path"] = db_paths.get("notes_db_path")
     payload["character_db_path"] = db_paths.get("character_db_path")
     payload["kanban_db_path"] = db_paths.get("kanban_db_path")
+    payload["prompts_db_path"] = db_paths.get("prompts_db_path")
     payload["media_db"] = media_db
     payload["chacha_db"] = chacha_db
+    if prompts_db is not None:
+        payload["prompts_db"] = prompts_db
     payload["index_namespace"] = retrieval_plan.index_namespace
     payload["retrieval_plan"] = retrieval_plan
     payload["user_id"] = resolved_request.user_id
@@ -174,6 +180,7 @@ def _build_standard_request_bundle(
     db_paths: dict[str, Optional[str]],
     media_db: Any,
     chacha_db: CharactersRAGDB,
+    prompts_db: Optional[PromptsDatabase] = None,
 ) -> ResolvedRequestBundle:
     """Resolve a standard request once and attach endpoint-owned pipeline resources."""
     return build_request_bundle(
@@ -188,6 +195,7 @@ def _build_standard_request_bundle(
             db_paths=db_paths,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             current_user=current_user,
             resolved_request=resolved_request,
             retrieval_plan=retrieval_plan,
@@ -1017,7 +1025,8 @@ async def unified_search_endpoint(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """
     Unified RAG search with all features as parameters.
@@ -1061,6 +1070,7 @@ async def unified_search_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
         standard_bundle = _build_standard_request_bundle(
             request,
@@ -1068,6 +1078,7 @@ async def unified_search_endpoint(
             db_paths=db_paths,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
         )
         strategy_value = str(standard_bundle.resolved_request.strategy).strip().lower()
 
@@ -1246,7 +1257,8 @@ async def unified_batch_endpoint(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """
     Batch processing endpoint for multiple queries.
@@ -1287,6 +1299,7 @@ async def unified_batch_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
 
         batch_bundle = _build_batch_request_bundle(
@@ -1360,6 +1373,7 @@ async def unified_batch_endpoint(
             max_concurrent=request.max_concurrent,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             on_query_done=on_query_done,
             **kwargs
         )
@@ -1541,6 +1555,7 @@ async def resume_batch_endpoint(
     principal: AuthPrincipal = Depends(get_auth_principal),
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
     try:
@@ -1603,6 +1618,7 @@ async def resume_batch_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, checkpoint.config.get("user_id")),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
         resume_request = _build_resume_batch_request(
             checkpoint.config,
@@ -1663,6 +1679,7 @@ async def resume_batch_endpoint(
             query_indices=remaining_indices,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             **kwargs,
         )
 
@@ -1742,7 +1759,8 @@ async def unified_search_stream_endpoint(
     request: UnifiedRAGRequest,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     if not request.enable_generation:
         raise HTTPException(status_code=400, detail="enable_generation must be true for streaming.")
@@ -1755,6 +1773,7 @@ async def unified_search_stream_endpoint(
         "notes_db_path": chacha_db.db_path if chacha_db else None,
         "character_db_path": chacha_db.db_path if chacha_db else None,
         "kanban_db_path": None,
+        "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
     }
     stream_bundle = _build_standard_request_bundle(
         request,
@@ -1762,11 +1781,14 @@ async def unified_search_stream_endpoint(
         db_paths=shared_db_paths,
         media_db=media_db,
         chacha_db=chacha_db,
+        prompts_db=prompts_db,
     )
     resolved_request = stream_bundle.resolved_request
     kanban_db_path = _resolve_kanban_db_path(current_user, resolved_request.user_id)
     stream_pipeline_kwargs = dict(stream_bundle.pipeline_kwargs)
     stream_pipeline_kwargs["kanban_db_path"] = kanban_db_path
+    stream_pipeline_kwargs["prompts_db_path"] = getattr(prompts_db, "db_path_str", None) if prompts_db else None
+    stream_pipeline_kwargs["prompts_db"] = prompts_db
     stream_pipeline_kwargs["resolved_request"] = resolved_request
     stream_pipeline_kwargs["retrieval_plan"] = stream_bundle.retrieval_plan
     request_defaults = {

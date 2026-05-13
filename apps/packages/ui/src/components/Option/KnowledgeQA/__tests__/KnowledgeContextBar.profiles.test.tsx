@@ -77,6 +77,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
       renderContextBar({
         preset: "fast",
         sources: ["media_db", "notes"],
+        includeMediaIds: [42],
+        includeNoteIds: ["note-1"],
         webEnabled: true,
       })
 
@@ -92,6 +94,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
       expect(stored[0]).toEqual({
         name: "My Research Setup",
         sources: ["media_db", "notes"],
+        includeMediaIds: [42],
+        includeNoteIds: ["note-1"],
         preset: "fast",
         enableWebFallback: true,
       })
@@ -149,6 +153,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
       const { props } = renderContextBar({
         preset: "fast",
         sources: ["media_db"],
+        includeMediaIds: [],
+        includeNoteIds: [],
         webEnabled: true,
       })
 
@@ -160,6 +166,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
         "notes",
         "chats",
       ])
+      expect(props.onIncludeMediaIdsChange).toHaveBeenCalledWith([])
+      expect(props.onIncludeNoteIdsChange).toHaveBeenCalledWith([])
       expect(props.onPresetChange).toHaveBeenCalledWith("thorough")
       // webEnabled is true, profile says false -> onToggleWeb should be called
       expect(props.onToggleWeb).toHaveBeenCalledTimes(1)
@@ -188,6 +196,36 @@ describe("KnowledgeContextBar saved search profiles", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: /Quick Check/i }))
 
       expect(props.onToggleWeb).not.toHaveBeenCalled()
+    })
+
+    it("restores saved specific source sets when a profile includes them", () => {
+      localStorage.setItem(
+        PROFILES_STORAGE_KEY,
+        JSON.stringify([
+          {
+            name: "Pinned Evidence",
+            sources: ["media_db", "notes"],
+            includeMediaIds: [42, 43],
+            includeNoteIds: ["note-1"],
+            preset: "balanced",
+            enableWebFallback: true,
+          },
+        ])
+      )
+
+      const { props } = renderContextBar({
+        sources: [],
+        includeMediaIds: [],
+        includeNoteIds: [],
+        webEnabled: true,
+      })
+
+      openProfileMenu()
+      fireEvent.click(screen.getByRole("menuitem", { name: /Pinned Evidence/i }))
+
+      expect(props.onSourcesChange).toHaveBeenCalledWith(["media_db", "notes"])
+      expect(props.onIncludeMediaIdsChange).toHaveBeenCalledWith([42, 43])
+      expect(props.onIncludeNoteIdsChange).toHaveBeenCalledWith(["note-1"])
     })
   })
 
@@ -295,6 +333,22 @@ describe("KnowledgeContextBar saved search profiles", () => {
           { name: "", sources: ["media_db"], preset: "fast", enableWebFallback: true },
           { name: "Bad preset", sources: ["media_db"], preset: "bogus", enableWebFallback: true },
           { name: "Bad source", sources: ["bogus"], preset: "fast", enableWebFallback: true },
+          {
+            name: "Bad specific IDs",
+            sources: ["media_db"],
+            includeMediaIds: "42",
+            includeNoteIds: "note-1",
+            preset: "fast",
+            enableWebFallback: true,
+          },
+          {
+            name: "Bad non-positive IDs",
+            sources: ["media_db"],
+            includeMediaIds: [42, 0, -3, 1.5],
+            includeNoteIds: ["note-1"],
+            preset: "fast",
+            enableWebFallback: true,
+          },
           { name: 123, sources: "not-an-array", preset: "fast", enableWebFallback: true },
           null,
           "just a string",
@@ -307,6 +361,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
       expect(screen.getByRole("menuitem", { name: /Valid/i })).toBeInTheDocument()
       expect(screen.queryByRole("menuitem", { name: /Bad preset/i })).not.toBeInTheDocument()
       expect(screen.queryByRole("menuitem", { name: /Bad source/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole("menuitem", { name: /Bad specific IDs/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole("menuitem", { name: /Bad non-positive IDs/i })).not.toBeInTheDocument()
       // The invalid entries should not appear
       expect(screen.queryByText("123")).not.toBeInTheDocument()
     })

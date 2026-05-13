@@ -30,12 +30,17 @@ Public request `sources` are:
 
 - `media_db`
 - `notes`
-- `characters`
 - `chats`
+- `characters`
 - `kanban`
+- `prompts`
+- `world_books`
+- `dictionaries`
 - `sql`
 
-`characters` and `chats` are separate public source values, but they currently share the character/chat retrieval backend. The service may normalize additional internal source names for backend flows, but clients should advertise and send only the public source values above unless a newer capabilities response explicitly documents more public values.
+`characters` and `chats` are separate public source values. `characters` maps to character-card data, while `chats` maps to chat history. Retrieval availability remains source-specific; clients should use `metadata.source_status` from search responses to decide whether a requested source was searched, empty, or unavailable in the current deployment.
+
+Generated, test, and workspace-scoped artifacts are excluded from normal search results unless the request includes an explicit `workspace_id` scope.
 
 ## Vector Store Support
 
