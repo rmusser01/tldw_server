@@ -397,7 +397,7 @@ automated repair endpoint.
 - No APFS clone execution path yet
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
-- Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, but it remains operator-driven and does not install or load launchd services automatically
+- Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, including explicit `launchd` operator commands, but it remains operator-driven and does not install or load launchd services automatically
 - No automatic orphan VM termination during diagnostics or repair; orphan termination is explicit repair-only behavior and is limited to owned `vz_linux` helper VMs
 
 Current diagnostics are mixed-mode:
@@ -475,6 +475,34 @@ tools/macos-vz-helper/scripts/vz-helperctl.py start
 tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
 tools/macos-vz-helper/scripts/vz-helperctl.py stop
 ```
+
+`launchd` is available when operators want to manage the helper through a
+LaunchAgent instead of the direct pid-file wrapper. Treat it as an explicit
+procedure: run `--dry-run` first, write the plist only with `--write-plist`, and
+create runtime/log directories only with `--create-dirs`.
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs \
+  --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd kickstart
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status
+tools/macos-vz-helper/scripts/vz-helperctl.py status
+tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
+  --bundle /path/to/canonical/bundle \
+  --entitlements /path/to/helper.entitlements
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout
+```
+
+The launchd path does not run from diagnostics, server startup, `status`,
+`plist`, or `smoke`. It also does not validate host reboot behavior; reboot
+testing remains a manual operator drill until a prepared runner can preserve
+logs and tolerate disruptive host lifecycle changes.
 
 Manual failure drills are opt-in and remain disabled for default smoke and
 scheduled host-gated runs. To include them, pass:

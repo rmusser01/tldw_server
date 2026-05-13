@@ -43,6 +43,8 @@ else:
 
 
 INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
+DEFAULT_LAUNCHD_LABEL = "org.tldw.macos-vz-helper"
+LAUNCHD_ACTIONS = {"bootstrap", "bootout", "kickstart", "status"}
 
 
 @dataclass(frozen=True)
@@ -238,7 +240,7 @@ def render_launchd_plist(
     helper_path: Path,
     socket_path: Path,
     log_dir: Path,
-    label: str = "org.tldw.macos-vz-helper",
+    label: str = DEFAULT_LAUNCHD_LABEL,
 ) -> str:
     stdout_path = log_dir / "helper.stdout.log"
     stderr_path = log_dir / "helper.stderr.log"
@@ -256,6 +258,130 @@ def render_launchd_plist(
         "RunAtLoad": False,
     }
     return plistlib.dumps(payload, sort_keys=True).decode("utf-8")
+
+
+def launchd_domain(uid: int | None = None) -> str:
+    """Return the per-user launchd GUI domain used for the helper LaunchAgent."""
+    return f"gui/{os.getuid() if uid is None else uid}"
+
+
+def launchd_service_target(label: str, *, uid: int | None = None) -> str:
+    """Return the launchd service target for commands that address a loaded job."""
+    return f"{launchd_domain(uid)}/{label}"
+
+
+def launchd_argv(
+    action: str,
+    *,
+    label: str = DEFAULT_LAUNCHD_LABEL,
+    plist_path: Path | None = None,
+    uid: int | None = None,
+) -> list[str]:
+    """Build the launchctl argv for an explicit operator lifecycle action."""
+    if action not in LAUNCHD_ACTIONS:
+        raise ValueError(f"unsupported launchd action: {action}")
+    if action == "bootstrap":
+        if plist_path is None:
+            raise ValueError("bootstrap requires a plist path")
+        return ["launchctl", "bootstrap", launchd_domain(uid), str(plist_path)]
+    if action == "status":
+        return ["launchctl", "print", launchd_service_target(label, uid=uid)]
+    if action == "kickstart":
+        return ["launchctl", "kickstart", "-k", launchd_service_target(label, uid=uid)]
+    return ["launchctl", "bootout", launchd_service_target(label, uid=uid)]
+
+
+def _prepare_launchd_plist(
+    *,
+    plist_path: Path,
+    helper_path: Path,
+    socket_path: Path,
+    log_dir: Path,
+    label: str,
+    write_plist: bool,
+    create_dirs: bool,
+    dry_run: bool,
+) -> CheckResult:
+    """Validate or explicitly write the helper LaunchAgent plist before bootstrap."""
+    if not write_plist:
+        if dry_run and not plist_path.exists():
+            return CheckResult(ok=True, reason="dry_run")
+        if not plist_path.exists():
+            return CheckResult(ok=False, reason="launchd_plist_missing", message=str(plist_path))
+        return validate_plist_match(plist_path, helper_path, socket_path, log_dir, label=label)
+
+    helper_result = validate_helper_binary(helper_path)
+    if not helper_result.ok:
+        return helper_result
+    socket_result = validate_socket_path(socket_path)
+    if not socket_result.ok:
+        return socket_result
+
+    directory_dry_run = dry_run or not create_dirs
+    for directory in (socket_path.parent, log_dir, log_dir / "serial", plist_path.parent):
+        directory_result = ensure_private_dir(directory, dry_run=directory_dry_run)
+        if not directory_result.ok:
+            return directory_result
+    if not create_dirs and not dry_run and not plist_path.parent.exists():
+        return CheckResult(ok=False, reason="helper_directory_missing", message=str(plist_path.parent))
+
+    if dry_run:
+        return CheckResult(ok=True, reason="dry_run")
+
+    rendered = render_launchd_plist(helper_path, socket_path, log_dir, label=label)
+    plist_path.write_text(rendered, encoding="utf-8")
+    return CheckResult(ok=True, reason="launchd_plist_written", message=str(plist_path))
+
+
+def run_launchd_action(
+    action: str,
+    *,
+    label: str = DEFAULT_LAUNCHD_LABEL,
+    plist_path: Path | None = None,
+    helper_path: Path | None = None,
+    socket_path: Path | None = None,
+    log_dir: Path | None = None,
+    uid: int | None = None,
+    dry_run: bool = False,
+    write_plist: bool = False,
+    create_dirs: bool = False,
+    command_runner: Callable[..., int] | None = None,
+) -> CheckResult:
+    """Run one explicit launchctl action without installing or loading implicitly."""
+    runner = command_runner or run_command
+    paths = default_paths()
+    resolved_plist_path = plist_path or paths.plist_path
+    resolved_helper_path = helper_path or DEFAULT_HELPER
+    resolved_socket_path = socket_path or paths.socket_path
+    resolved_log_dir = log_dir or paths.log_dir
+
+    if action == "bootstrap":
+        plist_result = _prepare_launchd_plist(
+            plist_path=resolved_plist_path,
+            helper_path=resolved_helper_path,
+            socket_path=resolved_socket_path,
+            log_dir=resolved_log_dir,
+            label=label,
+            write_plist=write_plist,
+            create_dirs=create_dirs,
+            dry_run=dry_run,
+        )
+        if not plist_result.ok:
+            return plist_result
+
+    if not dry_run and runner is run_command and shutil.which("launchctl") is None:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+
+    try:
+        argv = launchd_argv(action, label=label, plist_path=resolved_plist_path, uid=uid)
+    except ValueError as exc:
+        return CheckResult(ok=False, reason="launchd_action_invalid", message=str(exc))
+    code = runner(argv, dry_run=dry_run)
+    if code == 0:
+        return CheckResult(ok=True, reason="dry_run" if dry_run else "ok")
+    if code == 127:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+    return CheckResult(ok=False, reason=f"launchd_{action}_failed", message=str(code))
 
 
 def host_smoke_script_path() -> Path:
@@ -978,12 +1104,19 @@ def start_helper(
         _release_lifecycle_lock(pid_file, lock_fd)
 
 
-def validate_plist_match(plist_path: Path, helper_path: Path, socket_path: Path, log_dir: Path) -> CheckResult:
+def validate_plist_match(
+    plist_path: Path,
+    helper_path: Path,
+    socket_path: Path,
+    log_dir: Path,
+    *,
+    label: str = DEFAULT_LAUNCHD_LABEL,
+) -> CheckResult:
     if not plist_path.exists():
         return CheckResult(ok=True, reason="launchd_plist_missing", message=str(plist_path))
     try:
         actual = plistlib.loads(plist_path.read_bytes())
-        expected = plistlib.loads(render_launchd_plist(helper_path, socket_path, log_dir).encode("utf-8"))
+        expected = plistlib.loads(render_launchd_plist(helper_path, socket_path, log_dir, label=label).encode("utf-8"))
     except (OSError, plistlib.InvalidFileException, ValueError) as exc:
         return CheckResult(ok=False, reason="launchd_plist_mismatch", message=str(exc))
     if actual != expected:
@@ -1464,6 +1597,24 @@ def _restart_drill_command(args: argparse.Namespace) -> int:
     return 0 if all(result.ok for _, result in results) else 1
 
 
+def _launchd_command(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    result = run_launchd_action(
+        args.action,
+        label=args.label,
+        plist_path=Path(args.plist_output) if args.plist_output else paths.plist_path,
+        helper_path=Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        socket_path=Path(args.socket_path) if args.socket_path else paths.socket_path,
+        log_dir=Path(args.log_dir) if args.log_dir else paths.log_dir,
+        uid=args.uid,
+        dry_run=args.dry_run,
+        write_plist=args.write_plist,
+        create_dirs=args.create_dirs,
+    )
+    _print_results([("launchd", result)], as_json=args.json)
+    return 0 if result.ok else 1
+
+
 def _start_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = start_helper(
@@ -1566,6 +1717,20 @@ def build_parser() -> argparse.ArgumentParser:
     restart_drill.add_argument("--dry-run", action="store_true")
     restart_drill.add_argument("--json", action="store_true")
     restart_drill.set_defaults(func=_restart_drill_command)
+
+    launchd = subparsers.add_parser("launchd", help="run explicit launchctl helper lifecycle actions")
+    launchd.add_argument("action", choices=sorted(LAUNCHD_ACTIONS))
+    launchd.add_argument("--helper", "--helper-path", dest="helper_path")
+    launchd.add_argument("--socket", "--socket-path", dest="socket_path")
+    launchd.add_argument("--log-dir")
+    launchd.add_argument("--plist-output")
+    launchd.add_argument("--label", default=DEFAULT_LAUNCHD_LABEL)
+    launchd.add_argument("--uid", type=int)
+    launchd.add_argument("--write-plist", action="store_true")
+    launchd.add_argument("--create-dirs", action="store_true")
+    launchd.add_argument("--dry-run", action="store_true")
+    launchd.add_argument("--json", action="store_true")
+    launchd.set_defaults(func=_launchd_command)
 
     start = subparsers.add_parser("start", help="start the helper")
     start.add_argument("--helper", "--helper-path", dest="helper_path")

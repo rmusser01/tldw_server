@@ -43,6 +43,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py status
 tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
 tools/macos-vz-helper/scripts/vz-helperctl.py stop
 tools/macos-vz-helper/scripts/vz-helperctl.py plist
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
 ```
 
 The command uses stable user-owned defaults under
@@ -52,6 +53,27 @@ The command uses stable user-owned defaults under
 `plist` prints LaunchAgent scaffolding by default and does not create runtime
 directories unless `--create-dirs` is provided. It does not call `launchctl`,
 install services, or auto-upgrade helpers.
+
+`launchd` provides explicit operator actions for a LaunchAgent-managed helper.
+Use dry-run first to inspect the `launchctl` command, then opt into plist
+creation/loading only when intended:
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs \
+  --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd kickstart
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout
+```
+
+These commands never run automatically from `plist`, `status`, `smoke`, or
+server startup. They are operator-owned scaffolding and do not validate host
+reboot behavior.
 
 `restart-drill` is an operator-managed lifecycle drill for helpers already
 started through `vz-helperctl.py start`. It verifies the current managed helper

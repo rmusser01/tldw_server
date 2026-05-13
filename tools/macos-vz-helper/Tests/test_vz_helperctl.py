@@ -563,6 +563,131 @@ def test_plist_cli_writes_explicit_output_without_creating_runtime_dirs(tmp_path
     CASE.assertFalse(log_dir.exists())
 
 
+def test_launchd_argv_shapes(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    plist_path = tmp_path / "org.tldw.macos-vz-helper.plist"
+
+    CASE.assertEqual(helperctl.launchd_domain(501), "gui/501")
+    CASE.assertEqual(
+        helperctl.launchd_service_target("org.tldw.macos-vz-helper", uid=501),
+        "gui/501/org.tldw.macos-vz-helper",
+    )
+    CASE.assertEqual(
+        helperctl.launchd_argv(
+            "bootstrap",
+            label="org.tldw.macos-vz-helper",
+            plist_path=plist_path,
+            uid=501,
+        ),
+        ["launchctl", "bootstrap", "gui/501", str(plist_path)],
+    )
+    CASE.assertEqual(
+        helperctl.launchd_argv("status", label="org.tldw.macos-vz-helper", uid=501),
+        ["launchctl", "print", "gui/501/org.tldw.macos-vz-helper"],
+    )
+    CASE.assertEqual(
+        helperctl.launchd_argv("kickstart", label="org.tldw.macos-vz-helper", uid=501),
+        ["launchctl", "kickstart", "-k", "gui/501/org.tldw.macos-vz-helper"],
+    )
+    CASE.assertEqual(
+        helperctl.launchd_argv("bootout", label="org.tldw.macos-vz-helper", uid=501),
+        ["launchctl", "bootout", "gui/501/org.tldw.macos-vz-helper"],
+    )
+
+
+def test_launchd_bootstrap_requires_existing_plist_without_write(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    commands: list[list[str]] = []
+
+    result = helperctl.run_launchd_action(
+        "bootstrap",
+        label="org.tldw.macos-vz-helper",
+        plist_path=tmp_path / "missing.plist",
+        uid=501,
+        command_runner=lambda argv, **kwargs: commands.append(argv) or 0,
+    )
+
+    CASE.assertIs(result.ok, False)
+    CASE.assertEqual(result.reason, "launchd_plist_missing")
+    CASE.assertEqual(commands, [])
+
+
+def test_launchd_bootstrap_write_plist_creates_private_dirs_and_runs(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    helper = private_root / "macos-vz-helper"
+    socket_path = private_root / "runtime" / "helper.sock"
+    log_dir = private_root / "logs"
+    plist_path = private_root / "LaunchAgents" / "org.tldw.macos-vz-helper.plist"
+    commands: list[list[str]] = []
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+
+    result = helperctl.run_launchd_action(
+        "bootstrap",
+        label="org.tldw.macos-vz-helper",
+        plist_path=plist_path,
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        write_plist=True,
+        create_dirs=True,
+        uid=501,
+        command_runner=lambda argv, **kwargs: commands.append(argv) or 0,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(commands, [["launchctl", "bootstrap", "gui/501", str(plist_path)]])
+    CASE.assertTrue(plist_path.exists())
+    CASE.assertEqual(socket_path.parent.stat().st_mode & 0o777, 0o700)
+    CASE.assertEqual(log_dir.stat().st_mode & 0o777, 0o700)
+    CASE.assertEqual((log_dir / "serial").stat().st_mode & 0o777, 0o700)
+
+
+def test_launchd_cli_dry_run_prints_command(capsys: pytest.CaptureFixture[str]) -> None:
+    helperctl = load_helperctl()
+
+    code = helperctl.main(
+        [
+            "launchd",
+            "status",
+            "--label",
+            "org.tldw.test-helper",
+            "--uid",
+            "501",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("launchctl print gui/501/org.tldw.test-helper", captured.out)
+
+
+def test_launchd_cli_json_result(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    helperctl = load_helperctl()
+
+    monkeypatch.setattr(helperctl, "run_command", lambda argv, **kwargs: 0)
+
+    code = helperctl.main(
+        [
+            "launchd",
+            "status",
+            "--label",
+            "org.tldw.test-helper",
+            "--uid",
+            "501",
+            "--json",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(output, [{"name": "launchd", "ok": True, "reason": "ok", "message": ""}])
+
+
 def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsys):
     helperctl = load_helperctl()
     helper_path = tmp_path / "macos-vz-helper"
