@@ -2,6 +2,7 @@ import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { getDesignSystemState } from "@/design-system"
 import { QuizWorkspace } from "../QuizWorkspace"
 
 const mocks = vi.hoisted(() => ({
@@ -26,7 +27,9 @@ const mocks = vi.hoisted(() => ({
   capsLoading: false,
   navigate: vi.fn(),
   scrollToServerCard: vi.fn(),
-  checkOnce: vi.fn()
+  checkOnce: vi.fn(),
+  setupRequiredLabel: "Registry Setup Required",
+  missingDesignSystemStateKeys: new Set<string>()
 }))
 
 const interpolate = (template: string, values?: Record<string, unknown>) =>
@@ -83,6 +86,29 @@ vi.mock("@/hooks/useConnectionState", () => ({
   })
 }))
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        if (mocks.missingDesignSystemStateKeys.has(key)) {
+          return undefined as unknown as ReturnType<typeof actual.getDesignSystemState>
+        }
+
+        const state = actual.getDesignSystemState(key)
+        return state
+          ? {
+              ...state,
+              label:
+                key === "setup_required" ? mocks.setupRequiredLabel : state.label
+            }
+          : state
+      }
+    )
+  }
+})
+
 vi.mock("../hooks", () => ({
   useQuizzesQuery: () => ({ data: undefined, isLoading: false }),
   useAttemptsQuery: () => ({ data: { count: 0 } })
@@ -103,6 +129,9 @@ describe("QuizWorkspace connection and availability states", () => {
     mocks.navigate.mockReset()
     mocks.scrollToServerCard.mockReset()
     mocks.checkOnce.mockReset()
+    mocks.setupRequiredLabel = "Registry Setup Required"
+    mocks.missingDesignSystemStateKeys.clear()
+    vi.mocked(getDesignSystemState).mockClear()
   })
 
   it("renders an interactive local demo quiz flow when offline demo mode is enabled", async () => {
@@ -167,9 +196,26 @@ describe("QuizWorkspace connection and availability states", () => {
     expect(
       screen.getByText("Finish setup to use Quiz Playground")
     ).toBeInTheDocument()
+    expect(screen.getByText(mocks.setupRequiredLabel)).toBeInTheDocument()
+    expect(getDesignSystemState).toHaveBeenCalledWith("setup_required")
 
     fireEvent.click(screen.getByRole("button", { name: "Go to server card" }))
     expect(mocks.scrollToServerCard).toHaveBeenCalled()
+  })
+
+  it("keeps setup guidance renderable when the setup state registry entry is unavailable", () => {
+    mocks.isOnline = false
+    mocks.demoEnabled = false
+    mocks.uxState = "unconfigured"
+    mocks.hasCompletedFirstRun = false
+    mocks.missingDesignSystemStateKeys.add("setup_required")
+
+    expect(() => render(<QuizWorkspace />)).not.toThrow()
+
+    expect(
+      screen.getByText("Finish setup to use Quiz Playground")
+    ).toBeInTheDocument()
+    expect(getDesignSystemState).toHaveBeenCalledWith("setup_required")
   })
 
   it("shows unreachable guidance without hiding the demo preview", () => {
