@@ -7,6 +7,16 @@ import type { ApiSendResponse } from "@/services/api-send"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
 
 export type ModerationAction = "block" | "redact" | "warn" | "pass"
+export type ModerationReviewStatus =
+  | "needs_review"
+  | "approved"
+  | "blocked"
+  | "redacted"
+  | "dismissed"
+  | "escalated"
+export type ModerationDecisionAction = "approve" | "block" | "redact" | "dismiss" | "escalate"
+export type ModerationSeverity = "low" | "medium" | "high" | "critical"
+export type ModerationReviewSort = "newest" | "oldest"
 
 export interface ModerationOverrideRule {
   id: string
@@ -112,6 +122,140 @@ export interface ModerationTestResponse {
   redacted_text?: string | null
   effective: Record<string, any>
   category?: string | null
+}
+
+export interface ModerationReviewMatch {
+  rule_id?: string | null
+  pattern_type?: "literal" | "regex" | "pii" | "category" | null
+  category?: string | null
+  action?: ModerationAction | null
+  sample?: string | null
+  confidence?: number | null
+}
+
+export interface ModerationReviewItem {
+  id: string
+  status: ModerationReviewStatus
+  phase: "input" | "output"
+  source_type?: string | null
+  source_id?: string | null
+  user_id?: string | null
+  session_id?: string | null
+  created_at: string
+  updated_at?: string | null
+  severity?: ModerationSeverity | null
+  category?: string | null
+  safe_fields: Record<string, boolean>
+  excerpt: string
+  context?: Record<string, string> | null
+  effective_policy: Record<string, any>
+  matches: ModerationReviewMatch[]
+  recommended_action?: ModerationDecisionAction | null
+  retention_expires_at?: string | null
+  content_redacted_at?: string | null
+}
+
+export interface ModerationReviewListParams {
+  status?: ModerationReviewStatus | ""
+  category?: string
+  severity?: ModerationSeverity | ""
+  source_type?: string
+  source_id?: string
+  user_id?: string
+  q?: string
+  limit?: number
+  cursor?: string | null
+}
+
+export interface ModerationReviewListResponse {
+  items: ModerationReviewItem[]
+  next_cursor?: string | null
+  total?: number | null
+}
+
+export interface ModerationReviewDecisionRequest {
+  action: ModerationDecisionAction
+  reason?: string
+  actor_id?: string
+}
+
+export interface ModerationReviewDecision {
+  id: string
+  item_id: string
+  action: ModerationDecisionAction
+  status: ModerationReviewStatus
+  previous_status: ModerationReviewStatus
+  decided_by: string
+  reason?: string | null
+  decided_at: string
+  undo_token?: string | null
+}
+
+export interface ModerationReviewDecisionResponse {
+  item: ModerationReviewItem
+  decision: ModerationReviewDecision
+  undo_token?: string | null
+}
+
+export interface ModerationReviewBulkDecisionRequest {
+  item_ids: string[]
+  action: ModerationDecisionAction
+  reason?: string
+}
+
+export interface ModerationReviewBulkDecisionResult {
+  item_id: string
+  ok: boolean
+  item?: ModerationReviewItem | null
+  decision?: ModerationReviewDecision | null
+  undo_token?: string | null
+  error?: string | null
+}
+
+export interface ModerationReviewBulkDecisionResponse {
+  results: ModerationReviewBulkDecisionResult[]
+  ok_count: number
+  error_count: number
+}
+
+export interface ModerationReviewAuditParams {
+  item_id?: string
+  actor?: string
+  action?: string
+  limit?: number
+  cursor?: string | null
+}
+
+export interface ModerationReviewAuditEvent {
+  id: string
+  item_id?: string | null
+  decision_id?: string | null
+  actor_id?: string | null
+  action: string
+  summary?: string | null
+  created_at: string
+  metadata: Record<string, any>
+}
+
+export interface ModerationReviewAuditResponse {
+  events: ModerationReviewAuditEvent[]
+  next_cursor?: string | null
+}
+
+function buildModerationReviewQuery(
+  params: Record<string, string | number | null | undefined>,
+  keys: string[]
+): string {
+  const query = new URLSearchParams()
+  for (const key of keys) {
+    const value = params[key]
+    if (value === undefined || value === null || value === "") {
+      continue
+    }
+    query.set(key, String(value))
+  }
+  const text = query.toString()
+  return text ? `?${text}` : ""
 }
 
 export async function getModerationSettings(): Promise<ModerationSettingsResponse> {
@@ -249,5 +393,80 @@ export async function testModeration(
     path: "/api/v1/moderation/test",
     method: "POST",
     body: payload
+  })
+}
+
+export async function listModerationReviewItems(
+  params: ModerationReviewListParams = {}
+): Promise<ModerationReviewListResponse> {
+  const query = buildModerationReviewQuery(params as Record<string, string | number | null | undefined>, [
+    "status",
+    "category",
+    "severity",
+    "source_type",
+    "source_id",
+    "user_id",
+    "q",
+    "limit",
+    "cursor"
+  ])
+  return await bgRequest<ModerationReviewListResponse>({
+    path: appendPathQuery("/api/v1/moderation/review/items", query),
+    method: "GET"
+  })
+}
+
+export async function getModerationReviewItem(itemId: string): Promise<ModerationReviewItem> {
+  return await bgRequest<ModerationReviewItem>({
+    path: toAllowedPath(`/api/v1/moderation/review/items/${encodeURIComponent(itemId)}`),
+    method: "GET"
+  })
+}
+
+export async function decideModerationReviewItem(
+  itemId: string,
+  body: ModerationReviewDecisionRequest
+): Promise<ModerationReviewDecisionResponse> {
+  return await bgRequest<ModerationReviewDecisionResponse>({
+    path: toAllowedPath(`/api/v1/moderation/review/items/${encodeURIComponent(itemId)}/decision`),
+    method: "POST",
+    body
+  })
+}
+
+export async function undoModerationReviewDecision(
+  itemId: string,
+  undoToken: string
+): Promise<ModerationReviewItem> {
+  return await bgRequest<ModerationReviewItem>({
+    path: toAllowedPath(`/api/v1/moderation/review/items/${encodeURIComponent(itemId)}/undo`),
+    method: "POST",
+    body: { undo_token: undoToken }
+  })
+}
+
+export async function bulkDecideModerationReviewItems(
+  body: ModerationReviewBulkDecisionRequest
+): Promise<ModerationReviewBulkDecisionResponse> {
+  return await bgRequest<ModerationReviewBulkDecisionResponse>({
+    path: "/api/v1/moderation/review/bulk-decision",
+    method: "POST",
+    body
+  })
+}
+
+export async function listModerationReviewAudit(
+  params: ModerationReviewAuditParams = {}
+): Promise<ModerationReviewAuditResponse> {
+  const query = buildModerationReviewQuery(params as Record<string, string | number | null | undefined>, [
+    "item_id",
+    "actor",
+    "action",
+    "limit",
+    "cursor"
+  ])
+  return await bgRequest<ModerationReviewAuditResponse>({
+    path: appendPathQuery("/api/v1/moderation/review/audit", query),
+    method: "GET"
   })
 }

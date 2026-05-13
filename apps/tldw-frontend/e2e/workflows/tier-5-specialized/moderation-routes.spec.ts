@@ -80,7 +80,8 @@ test.describe("Moderation routes", () => {
     await expect(
       authedPage.getByRole("heading", { name: /moderation review/i })
     ).toBeVisible({ timeout: 15_000 })
-    await expect(authedPage.getByText(/live moderation review data is not connected/i)).toBeVisible()
+    await expect(authedPage.getByLabel(/status/i)).toBeVisible()
+    await expect(authedPage.getByText(/no review items match these filters/i)).toBeVisible()
     await expect(authedPage.getByRole("link", { name: /content rules/i })).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)

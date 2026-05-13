@@ -457,31 +457,31 @@ Expected: tests pass with review capture enabled only in tests that opt into it.
 
 **Implementation Tasks:**
 
-- [ ] Add TypeScript types and service functions for all Stage 4 review endpoints in `apps/packages/ui/src/services/moderation.ts`.
+- [x] Add TypeScript types and service functions for all Stage 4 review endpoints in `apps/packages/ui/src/services/moderation.ts`.
 
-- [ ] Build `useModerationReviewQueue` with state for `status`, `category`, `severity`, `source_type`, `source_id`, `user_id`, `q`, `date_from`, `date_to`, `sort`, `cursor`, `selectedItemId`, `loading`, `error`, `partial`, and `warnings`.
+- [x] Build `useModerationReviewQueue` with state for `status`, `category`, `severity`, `source_type`, `source_id`, `user_id`, `q`, local `sort`, `cursor`, `selectedItemId`, `loading`, `error`, `partial`, and `warnings`. Date filters are deferred until the backend exposes date query parameters.
 
-- [ ] Implement `ReviewQueueToolbar` with status, category/severity, source/user, date sort, search, and refresh. Keep controls dense and label every input.
+- [x] Implement `ReviewQueueToolbar` with status, category/severity, source/user, local sort, search, and refresh. Keep controls dense and label every input.
 
-- [ ] Implement `ReviewQueueList` as a responsive table/list hybrid. Desktop uses dense columns; mobile collapses to stacked rows. Required visible fields: status, severity, category, phase, source, user/session, created time, sanitized excerpt, recommended action.
+- [x] Implement `ReviewQueueList` as a responsive table/list hybrid. Desktop uses dense columns; mobile collapses to stacked rows. Required visible fields: status, severity, category, phase, source, user/session, created time, sanitized excerpt, recommended action.
 
-- [ ] Implement `ReviewItemDetail` with sanitized excerpt/context, provenance, effective policy, matches, prior decision, and warnings when safe fields are unavailable.
+- [x] Implement `ReviewItemDetail` with sanitized excerpt/context, provenance, effective policy, matches, and warnings when safe fields are unavailable. Prior decision history remains Stage 6 audit timeline scope.
 
-- [ ] Implement `DecisionBar` with approve, block, redact, dismiss, and escalate. Require reason for block, redact, and escalate; allow optional reason for approve/dismiss. Confirm destructive actions.
+- [x] Implement `DecisionBar` with approve, block, redact, dismiss, and escalate. Require reason for block, redact, and escalate; allow optional reason for approve/dismiss. Confirm destructive actions.
 
-- [ ] After a successful single-item decision, refresh counts, update selected item, and show an undo affordance when `undo_token` is returned.
+- [x] After a successful single-item decision, refresh counts, update selected item, and show an undo affordance when `undo_token` is returned.
 
-- [ ] Implement empty, loading, error, permission denied, backend unsupported, and partial-data states in `ReviewStatePanels.tsx`.
+- [x] Implement empty, loading, error, permission denied, backend unsupported, and partial-data states in `ReviewStatePanels.tsx`.
 
-- [ ] For extension wrapper, render compact queue controls and selected item summary if full table width is unavailable. Include "Open full review" action; do not redirect to rules.
+- [x] For extension wrapper, render compact queue controls and selected item summary if full table width is unavailable. Include "Open full review" action; do not redirect to rules.
 
 **Tests:**
 
-- [ ] Unit tests for service URL/query building and response typing.
-- [ ] Component tests for empty/loading/error/permission states.
-- [ ] Component tests for filters updating query state and refresh calls.
-- [ ] Component tests for decision reason validation and undo display.
-- [ ] E2E test using mocked review fixture to exercise list -> detail -> decision -> undo.
+- [x] Unit tests for service URL/query building and response typing.
+- [x] Component tests for empty/loading/error/permission states.
+- [x] Component tests for filters updating query state and refresh calls.
+- [x] Component tests for decision reason validation and undo display.
+- [x] E2E test using mocked review fixture to exercise list -> detail -> decision -> undo.
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationReview/__tests__/ModerationReviewShell.test.tsx apps/packages/ui/src/components/Option/ModerationReview/__tests__/review-utils.test.ts apps/packages/ui/src/services/__tests__/moderation.service.contract.test.ts`
 

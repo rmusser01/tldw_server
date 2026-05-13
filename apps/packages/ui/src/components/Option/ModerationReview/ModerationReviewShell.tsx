@@ -1,54 +1,27 @@
 import React from "react"
 import { Link } from "react-router-dom"
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ClipboardList,
-  History,
-  ListFilter,
-  ShieldCheck,
-  SlidersHorizontal
-} from "lucide-react"
+import { AlertTriangle, CheckCircle2, ClipboardList, ShieldCheck, SlidersHorizontal } from "lucide-react"
+
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { MODERATION_RULES_PATH } from "@/routes/route-paths"
+import { DecisionBar } from "./DecisionBar"
+import { useModerationReviewQueue } from "./hooks/useModerationReviewQueue"
+import { ReviewItemDetail } from "./ReviewItemDetail"
+import { ReviewQueueList } from "./ReviewQueueList"
+import { ReviewQueueToolbar } from "./ReviewQueueToolbar"
+import { ReviewStatePanels } from "./ReviewStatePanels"
 
 type ModerationReviewShellProps = {
   compact?: boolean
 }
-
-const QUEUE_PLACEHOLDERS = [
-  {
-    label: "Needs review",
-    value: "--",
-    description: "Awaiting live queue data"
-  },
-  {
-    label: "Blocked",
-    value: "--",
-    description: "Decision counts not connected yet"
-  },
-  {
-    label: "Redacted",
-    value: "--",
-    description: "Audit trail not connected yet"
-  }
-]
-
-const REVIEW_FILTERS = [
-  "All items",
-  "Needs decision",
-  "Escalated",
-  "High severity",
-  "Low confidence"
-]
 
 const backendStatusCopy = (online: boolean, uxState: string) => {
   if (online) {
     return {
       tone: "ok" as const,
       title: "Server reachable",
-      description: "Review queue endpoints will appear here when they are connected."
+      description: "Review queue endpoints are available when this server includes the moderation review backend."
     }
   }
   if (uxState === "error_auth" || uxState === "configuring_auth") {
@@ -79,10 +52,13 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
   const { uxState } = useConnectionUxState()
   const backendStatus = backendStatusCopy(online, uxState)
   const StatusIcon = backendStatus.tone === "ok" ? CheckCircle2 : AlertTriangle
+  const queue = useModerationReviewQueue()
+  const visibleTotal = queue.total ?? queue.items.length
+  const selectedStatus = queue.selectedItem?.status || "None"
 
   return (
     <section
-      className="space-y-6"
+      className="space-y-5"
       data-testid="moderation-review-shell"
       aria-labelledby="moderation-review-title"
     >
@@ -99,119 +75,116 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
             Moderation Review
           </h1>
           <p className="mt-2 text-sm leading-6 text-text-muted">
-            This route is reserved for reviewing flagged items, decisions, and
-            escalation history. Live moderation review data is not connected in
-            this slice yet.
+            Review sanitized moderation outcomes, inspect policy context, and record decisions with an audit trail.
           </p>
         </div>
-        <Link
-          to={MODERATION_RULES_PATH}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text transition hover:bg-surface3"
-        >
-          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-          Open Content Rules
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {compact && (
+            <Link
+              to="/moderation"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text transition hover:bg-surface3"
+            >
+              <ClipboardList className="h-4 w-4" aria-hidden="true" />
+              Open full review
+            </Link>
+          )}
+          <Link
+            to={MODERATION_RULES_PATH}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text transition hover:bg-surface3"
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            Open Content Rules
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        {QUEUE_PLACEHOLDERS.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-lg border border-border bg-surface p-4"
-          >
-            <div className="text-sm font-medium text-text-muted">{item.label}</div>
-            <div className="mt-2 text-2xl font-semibold text-text">{item.value}</div>
-            <div className="mt-1 text-xs text-text-muted">{item.description}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
-        <div className="rounded-xl border border-border bg-surface p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold text-text">
-            <ClipboardList className="h-4 w-4" aria-hidden="true" />
-            Review worklist
-          </div>
-          <div className="mt-4 rounded-lg border border-dashed border-border bg-surface2 p-5 text-sm text-text-muted">
-            The review queue is not connected yet. The next implementation
-            stage should connect flagged items with policy category, severity,
-            confidence, source context, and decision actions.
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="text-sm font-medium text-text-muted">Matching items</div>
+          <div className="mt-2 text-2xl font-semibold text-text">{queue.loading ? "--" : visibleTotal}</div>
+          <div className="mt-1 text-xs text-text-muted">Current filter result count</div>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="text-sm font-medium text-text-muted">Selected status</div>
+          <div className="mt-2 text-2xl font-semibold capitalize text-text">{selectedStatus.replace("_", " ")}</div>
+          <div className="mt-1 text-xs text-text-muted">Updates after each decision</div>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="flex items-start gap-3">
+            <StatusIcon
+              className={
+                backendStatus.tone === "ok"
+                  ? "mt-0.5 h-4 w-4 text-green-600"
+                  : "mt-0.5 h-4 w-4 text-yellow-600"
+              }
+              aria-hidden="true"
+            />
+            <div>
+              <div className="text-sm font-semibold text-text">{backendStatus.title}</div>
+              <p className="mt-1 text-xs text-text-muted">{backendStatus.description}</p>
+            </div>
           </div>
         </div>
-
-        <aside className="space-y-4">
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <div className="text-sm font-semibold text-text">
-              Backend contract pending
-            </div>
-            <p className="mt-1 text-sm text-text-muted">
-              Review queue, decision, and audit endpoints are planned for the
-              next slice.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <div className="text-sm font-semibold text-text">
-              Reviewer permission pending
-            </div>
-            <p className="mt-1 text-sm text-text-muted">
-              Role and permission copy will be wired once review actions are
-              connected.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <div className="flex items-start gap-3">
-              <StatusIcon
-                className={
-                  backendStatus.tone === "ok"
-                    ? "mt-0.5 h-4 w-4 text-green-600"
-                    : "mt-0.5 h-4 w-4 text-yellow-600"
-                }
-                aria-hidden="true"
-              />
-              <div>
-                <div className="text-sm font-semibold text-text">
-                  {backendStatus.title}
-                </div>
-                <p className="mt-1 text-sm text-text-muted">
-                  {backendStatus.description}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-text">
-              <ListFilter className="h-4 w-4" aria-hidden="true" />
-              Filters planned
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {REVIEW_FILTERS.map((filter) => (
-                <span
-                  key={filter}
-                  className="rounded-full border border-border bg-surface2 px-2.5 py-1 text-xs text-text-muted"
-                >
-                  {filter}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {!compact && (
-            <div className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-text">
-                <History className="h-4 w-4" aria-hidden="true" />
-                Audit trail
-              </div>
-              <p className="mt-2 text-sm text-text-muted">
-                Decision history, reviewer identity, and reversal controls are
-                planned for the live review workflow.
-              </p>
-            </div>
-          )}
-        </aside>
       </div>
+
+      <ReviewQueueToolbar
+        filters={queue.filters}
+        onFilterChange={queue.updateFilter}
+        onRefresh={queue.refresh}
+        loading={queue.loading}
+        compact={compact}
+      />
+
+      <ReviewStatePanels
+        loading={queue.loading}
+        error={queue.error}
+        partial={queue.partial}
+        warnings={queue.warnings}
+        empty={!queue.loading && !queue.error && queue.items.length === 0 && !queue.selectedItem}
+        onRetry={queue.refresh}
+      />
+
+      {!queue.loading && !queue.error && (queue.items.length > 0 || queue.selectedItem) && (
+        <div className={`grid gap-4 ${compact ? "grid-cols-1" : "xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]"}`}>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-text">
+              <ClipboardList className="h-4 w-4" aria-hidden="true" />
+              Review worklist
+            </div>
+            {queue.items.length > 0 ? (
+              <ReviewQueueList
+                items={queue.items}
+                selectedItemId={queue.selectedItemId}
+                onSelect={(itemId) => void queue.selectItem(itemId)}
+              />
+            ) : (
+              <div className="rounded-lg border border-border bg-surface2 p-4 text-sm text-text-muted">
+                The active filters no longer include this selected item.
+              </div>
+            )}
+            {queue.nextCursor && (
+              <button
+                type="button"
+                onClick={() => void queue.loadNextPage()}
+                className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text hover:bg-surface3"
+              >
+                Load next page
+              </button>
+            )}
+          </div>
+
+          <aside className="space-y-3">
+            <ReviewItemDetail item={queue.selectedItem} loading={queue.detailLoading} />
+            <DecisionBar
+              disabled={!queue.selectedItem}
+              deciding={queue.deciding}
+              onDecision={queue.decideSelected}
+              undoToken={queue.undo?.token || null}
+              onUndo={queue.undoDecision}
+            />
+          </aside>
+        </div>
+      )}
     </section>
   )
 }
