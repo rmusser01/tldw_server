@@ -2,6 +2,7 @@ import React from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { getDesignSystemState } from "@/design-system"
 import { AgentRegistryPage } from "../index"
 
 const storageMocks = vi.hoisted(() => ({
@@ -20,6 +21,18 @@ const acpMocks = vi.hoisted(() => ({
   }>,
   getAvailableAgents: vi.fn()
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) =>
+        actual.getDesignSystemState(key)
+    )
+  }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -202,6 +215,37 @@ describe("AgentRegistryPage connection config", () => {
           })
         })
       )
+    })
+  })
+
+  it("uses design-system state labels for runtime setup states", async () => {
+    acpMocks.getAvailableAgents.mockResolvedValue({
+      agents: [
+        {
+          type: "planner",
+          name: "Planner Agent",
+          description: "Plans work",
+          is_configured: true
+        },
+        {
+          type: "local-runner",
+          name: "Local Runner",
+          description: "Requires local setup",
+          is_configured: false
+        }
+      ]
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    expect(screen.getByText("Local Runner")).toBeInTheDocument()
+    expect(screen.getByText("Ready")).toBeInTheDocument()
+    expect(screen.getByText("Setup required")).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(getDesignSystemState).toHaveBeenCalledWith("ready")
+      expect(getDesignSystemState).toHaveBeenCalledWith("setup_required")
     })
   })
 
