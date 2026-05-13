@@ -41,7 +41,7 @@ export interface WorkspaceAgentTaskHandoffModalProps {
   workspaceId?: string | null
   workspaceName?: string | null
   workspaceTag?: string | null
-  onBeforeSubmit?: () => void
+  onBeforeSubmit?: () => Promise<void> | void
   onCancel: () => void
   onOpenAgentTasks: () => void
 }
@@ -90,7 +90,10 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
   onOpenAgentTasks
 }) => {
   const { t } = useTranslation(["playground", "common"])
-  const { config: connectionConfig } = useCanonicalConnectionConfig()
+  const {
+    config: connectionConfig,
+    loading: connectionConfigLoading
+  } = useCanonicalConnectionConfig()
   const [rootPath, setRootPath] = React.useState("")
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
@@ -151,10 +154,15 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
       const transport = buildRequestTransport(path)
       if (!transport) {
         throw new Error(
-          t(
-            "playground:workspace.agentTaskConnectionMissing",
-            "Backend connection is not configured."
-          )
+          connectionConfigLoading
+            ? t(
+                "playground:workspace.agentTaskConnectionLoading",
+                "Backend connection is still loading."
+              )
+            : t(
+                "playground:workspace.agentTaskConnectionMissing",
+                "Backend connection is not configured."
+              )
         )
       }
 
@@ -168,7 +176,35 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
       }
       return (await response.json()) as T
     },
-    [buildRequestTransport, getHeaders, t]
+    [buildRequestTransport, connectionConfigLoading, getHeaders, t]
+  )
+
+  const deleteProject = React.useCallback(
+    async (projectId: number): Promise<void> => {
+      const transport = buildRequestTransport(`${PROJECTS_PATH}/${projectId}`)
+      if (!transport) {
+        throw new Error(
+          connectionConfigLoading
+            ? t(
+                "playground:workspace.agentTaskConnectionLoading",
+                "Backend connection is still loading."
+              )
+            : t(
+                "playground:workspace.agentTaskConnectionMissing",
+                "Backend connection is not configured."
+              )
+        )
+      }
+
+      const response = await fetch(transport.url, {
+        method: "DELETE",
+        headers: getHeaders(transport)
+      })
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response))
+      }
+    },
+    [buildRequestTransport, connectionConfigLoading, getHeaders, t]
   )
 
   const handleSubmit = async () => {
@@ -176,6 +212,15 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
     const trimmedRootPath = rootPath.trim()
     const trimmedTitle = taskTitle.trim()
 
+    if (connectionConfigLoading) {
+      setError(
+        t(
+          "playground:workspace.agentTaskConnectionLoading",
+          "Backend connection is still loading."
+        )
+      )
+      return
+    }
     if (!canonicalWorkspaceId) {
       setError(
         t(
@@ -213,8 +258,9 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
       workspace_tag: workspaceTag?.trim() || null
     }
 
+    let createdProjectId: number | null = null
     try {
-      onBeforeSubmit?.()
+      await onBeforeSubmit?.()
       const bridge = await postJson<CanonicalBridgeResponse>(
         CANONICAL_BRIDGE_PATH,
         {
@@ -254,6 +300,7 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
           )
         )
       }
+      createdProjectId = project.id
 
       const task = await postJson<TaskResponse>(
         `${PROJECTS_PATH}/${project.id}/tasks`,
@@ -273,6 +320,7 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
           )
         )
       }
+      createdProjectId = null
 
       setCreatedTask({
         acpWorkspaceId,
@@ -280,6 +328,16 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
         taskId: task.id
       })
     } catch (err) {
+      if (createdProjectId != null) {
+        try {
+          await deleteProject(createdProjectId)
+        } catch (rollbackError) {
+          console.warn(
+            "[workspace-agent-task-handoff] Failed to roll back ACP project after task creation failure",
+            rollbackError
+          )
+        }
+      }
       setError(
         err instanceof Error
           ? err.message
@@ -293,6 +351,14 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
     }
   }
 
+  const handleCancel = React.useCallback(() => {
+    if (submitting) return
+    onCancel()
+  }, [onCancel, submitting])
+
+  const createTaskDisabled =
+    submitting || Boolean(createdTask) || connectionConfigLoading
+
   return (
     <Modal
       title={t(
@@ -300,10 +366,11 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
         "Create agent task"
       )}
       open={open}
-      onCancel={onCancel}
+      onCancel={handleCancel}
+      closable={!submitting}
       destroyOnHidden
       footer={[
-        <Button key="cancel" onClick={onCancel}>
+        <Button key="cancel" onClick={handleCancel} disabled={submitting}>
           {t("common:cancel", "Cancel")}
         </Button>,
         createdTask ? (
@@ -320,6 +387,7 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
             key="create-task"
             type="primary"
             loading={submitting}
+            disabled={createTaskDisabled}
             onClick={() => void handleSubmit()}
           >
             {t("playground:workspace.createAgentTaskSubmit", "Create task")}
@@ -328,6 +396,7 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
       ]}
       centered
       maskClosable={!submitting}
+      keyboard={!submitting}
     >
       <div className="space-y-4">
         {error && (

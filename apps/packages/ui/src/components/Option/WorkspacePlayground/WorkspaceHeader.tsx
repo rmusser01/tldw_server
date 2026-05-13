@@ -2491,7 +2491,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         }}
         centered
         maskClosable={false}
-        destroyOnClose
+        destroyOnHidden
       >
         {deleteTargetWorkspace && (
           <div className="space-y-3">
