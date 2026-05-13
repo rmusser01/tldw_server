@@ -67,6 +67,126 @@ def _valid_manifest(asset_id: str) -> dict[str, object]:
     }
 
 
+def _json_bytes(payload: object) -> bytes:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _live2d_v2_manifest() -> dict[str, object]:
+    return {
+        "manifest_version": 2,
+        "renderer_type": "live2d",
+        "renderer_contract_version": 1,
+        "renderer_assets": {
+            "fallback_preview_asset_id": "asset-fallback",
+            "source_manifest_asset_id": "asset-model",
+        },
+        "states": {
+            "idle": {"animation_id": "idle"},
+        },
+        "animations": {
+            "idle": {
+                "renderer_action": {
+                    "motion_group": "Idle",
+                    "loop": True,
+                },
+            },
+        },
+    }
+
+
+def _renderer_preview_archive(
+    tmp_path: Path,
+    *,
+    title: str,
+    visual_manifest: dict[str, object],
+    assets: list[dict[str, object]],
+    asset_files: dict[str, bytes] | None = None,
+) -> Path:
+    archive_path = tmp_path / f"{title.lower().replace(' ', '-')}.tldw-persona-vpack"
+    asset_files = asset_files or {}
+    archive_manifest = {
+        "schema_version": PERSONA_VISUAL_PACK_SCHEMA_VERSION,
+        "archive_profile": "backup",
+        "pack_title": title,
+        "renderer_type": visual_manifest.get("renderer_type"),
+        "counts": {
+            "assets": len(assets),
+            "assets_with_bytes": sum(
+                1
+                for asset in assets
+                if asset.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT
+            ),
+        },
+    }
+    pack_payload = {
+        "pack": {
+            "title": title,
+            "source_persona_id": "source-persona-v2",
+            "renderer_type": visual_manifest.get("renderer_type"),
+            "visual_manifest": visual_manifest,
+        }
+    }
+    entries: dict[str, bytes] = {
+        MANIFEST_PATH: _json_bytes(archive_manifest),
+        "metadata/pack.json": _json_bytes(pack_payload),
+        "metadata/assets.json": _json_bytes({"assets": assets}),
+        **asset_files,
+    }
+    checksums = {
+        member_path: sha256_bytes(member_bytes)
+        for member_path, member_bytes in entries.items()
+    }
+    entries[CHECKSUMS_PATH] = _json_bytes(dict(sorted(checksums.items())))
+
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for member_path, member_bytes in entries.items():
+            archive.writestr(member_path, member_bytes)
+    return archive_path
+
+
+def _live2d_preview_assets(
+    *,
+    include_fallback: bool = True,
+) -> tuple[list[dict[str, object]], dict[str, bytes]]:
+    fallback_bytes = _png_bytes()
+    model_bytes = b'{"Version":3,"FileReferences":{}}'
+    assets: list[dict[str, object]] = [
+        {
+            "source_asset_id": "asset-model",
+            "asset_role": "live2d_model_manifest",
+            "asset_bytes_status": ASSET_BYTES_STATUS_PRESENT,
+            "asset_path": "assets/persona_visuals/model.model3.json",
+            "asset_sha256": sha256_bytes(model_bytes),
+            "mime_type": "application/json",
+            "original_filename": "model.model3.json",
+        },
+    ]
+    asset_files = {
+        "assets/persona_visuals/model.model3.json": model_bytes,
+    }
+    if include_fallback:
+        assets.append(
+            {
+                "source_asset_id": "asset-fallback",
+                "asset_role": "fallback_preview",
+                "asset_bytes_status": ASSET_BYTES_STATUS_PRESENT,
+                "asset_path": "assets/persona_visuals/fallback.png",
+                "asset_sha256": sha256_bytes(fallback_bytes),
+                "mime_type": "image/png",
+                "width": 2,
+                "height": 3,
+                "original_filename": "fallback.png",
+            }
+        )
+        asset_files["assets/persona_visuals/fallback.png"] = fallback_bytes
+    return assets, asset_files
+
+
 def _patch_visuals_dir(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
     def _fake_visuals_dir(user_id: str) -> Path:
         root.mkdir(parents=True, exist_ok=True)
@@ -385,6 +505,102 @@ def test_import_preview_reports_missing_asset_bytes_as_warning(
     ]
     exported_assets = preview["bundle_summary"]["assets"]
     assert exported_assets[0]["asset_bytes_status"] == ASSET_BYTES_STATUS_MISSING  # nosec B101
+
+
+def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activation(
+    tmp_path: Path,
+) -> None:
+    assets, asset_files = _live2d_preview_assets()
+    archive_path = _renderer_preview_archive(
+        tmp_path,
+        title="Live2D Preview",
+        visual_manifest=_live2d_v2_manifest(),
+        assets=assets,
+        asset_files=asset_files,
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    renderer_preview = preview["proposed_plan"]["renderer_import_preview"]
+    assert preview["status"] == "blocked"  # nosec B101
+    assert preview["bundle_summary"]["renderer_type"] == "live2d"  # nosec B101
+    assert preview["proposed_plan"]["commit_eligible"] is False  # nosec B101
+    assert preview["proposed_plan"]["activation_eligible"] is False  # nosec B101
+    assert renderer_preview["status"] == "unsupported_renderer"  # nosec B101
+    assert renderer_preview["setup_status"] == "unsupported_renderer"  # nosec B101
+    assert renderer_preview["can_commit"] is False  # nosec B101
+    assert renderer_preview["activation_eligible"] is False  # nosec B101
+    assert "runtime_adapter_not_implemented" in renderer_preview["blockers"]  # nosec B101
+    assert renderer_preview["normalized_role_categories"]["fallback_preview"] == [  # nosec B101
+        "asset-fallback"
+    ]
+    assert renderer_preview["normalized_role_categories"]["source_manifest"] == [  # nosec B101
+        "asset-model"
+    ]
+
+
+def test_import_preview_reports_v2_missing_required_role_category(
+    tmp_path: Path,
+) -> None:
+    assets, asset_files = _live2d_preview_assets(include_fallback=False)
+    archive_path = _renderer_preview_archive(
+        tmp_path,
+        title="Live2D Missing Fallback",
+        visual_manifest=_live2d_v2_manifest(),
+        assets=assets,
+        asset_files=asset_files,
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    renderer_preview = preview["proposed_plan"]["renderer_import_preview"]
+    assert preview["status"] == "blocked"  # nosec B101
+    assert "missing_required_role_category:fallback_preview" in renderer_preview["blockers"]  # nosec B101
+    assert renderer_preview["normalized_role_categories"]["fallback_preview"] == []  # nosec B101
+    assert renderer_preview["normalized_role_categories"]["source_manifest"] == [  # nosec B101
+        "asset-model"
+    ]
+
+
+def test_import_preview_reports_v2_unknown_renderer_safely(
+    tmp_path: Path,
+) -> None:
+    visual_manifest = {
+        "manifest_version": 2,
+        "renderer_type": "unknown\nrenderer\\token",
+        "renderer_contract_version": 1,
+        "states": {},
+        "animations": {},
+    }
+    archive_path = _renderer_preview_archive(
+        tmp_path,
+        title="Unknown Renderer Preview",
+        visual_manifest=visual_manifest,
+        assets=[],
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    renderer_preview = preview["proposed_plan"]["renderer_import_preview"]
+    assert preview["status"] == "blocked"  # nosec B101
+    assert preview["proposed_plan"]["commit_eligible"] is False  # nosec B101
+    assert renderer_preview["status"] == "unsupported_renderer"  # nosec B101
+    assert renderer_preview["blockers"] == [  # nosec B101
+        "unknown_renderer:unknown\\nrenderer\\\\token"
+    ]
+    assert "\n" not in renderer_preview["blockers"][0]  # nosec B101
 
 
 def test_import_preview_rejects_unsupported_renderer_type_in_visual_manifest(

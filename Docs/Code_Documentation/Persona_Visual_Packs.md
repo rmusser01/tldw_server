@@ -83,6 +83,16 @@ commit eligibility, and activation eligibility. It does not parse archives,
 create asset rows, activate packs, or load renderer runtimes; the current V1
 archive preview and commit flow remains unchanged.
 
+Archive import preview now routes Manifest V2 renderer metadata through that
+validator and places the result in `proposed_plan.renderer_import_preview`.
+Known disabled renderers such as `live2d`, and unknown renderers, can therefore
+return review diagnostics without being treated as malformed V1 sprite-frame
+manifests. If the renderer preview is not commit-eligible, the preview row is
+stored with `status: "blocked"` and includes `commit_eligible: false`,
+`activation_eligible: false`, and `commit_blockers` in the proposed plan. This
+is still a review-only path: no asset rows or pack rows are committed, no pack is
+activated, no runtime renderer is loaded, and no MCP provider behavior is added.
+
 ### Sprite Atlas Frames
 
 Sprite atlases are represented as `sprite_frames` packs. In this slice,

@@ -344,6 +344,89 @@ async def test_persona_visual_import_preview_worker_updates_preview_without_muta
 
 
 @pytest.mark.asyncio
+async def test_persona_visual_import_preview_worker_persists_blocked_preview_status(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona import visual_jobs_worker as worker_module
+
+    class _BlockedPreviewer:
+        def create_preview(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "status": "blocked",
+                "archive_sha256": "a" * 64,
+                "canonical_payload_fingerprint": "b" * 64,
+                "schema_version": "tldw.persona_visual_pack.v1",
+                "bundle_summary": {"renderer_type": "live2d"},
+                "validation_warnings": [],
+                "conflicts": [],
+                "proposed_plan": {
+                    "renderer_import_preview": {"status": "unsupported_renderer"},
+                    "commit_eligible": False,
+                },
+                "quota_estimate": {
+                    "asset_bytes": 0,
+                    "present_asset_items": 0,
+                    "missing_asset_items": 0,
+                },
+                "required_choices": [],
+                "target_warnings": [],
+            }
+
+    archive_path = tmp_path / "incoming.tldw-persona-vpack"
+    archive_path.write_bytes(b"placeholder")
+    monkeypatch.setattr(
+        worker_module,
+        "PersonaVisualPackImportPreviewer",
+        _BlockedPreviewer,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-blocked",
+        status="queued",
+        archive_path=str(archive_path),
+    )
+    portability_job = repo.create_portability_job(
+        owner_user_id="user-1",
+        job_id="job-preview-blocked",
+        operation="import_preview",
+        status="queued",
+        stage="queued",
+        preview_id=str(preview["id"]),
+        archive_path=str(archive_path),
+    )
+    worker = worker_module.PersonaVisualPortabilityWorker(db=db_instance, repo=repo)
+
+    result = await worker.handle_job_async(
+        {
+            "id": "job-preview-blocked",
+            "job_type": PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
+            "owner_user_id": "user-1",
+            "payload": {
+                "user_id": "user-1",
+                "preview_id": str(preview["id"]),
+                "archive_path": str(archive_path),
+                "request_id": "req-worker-blocked",
+            },
+        }
+    )
+
+    updated_preview = repo.get_import_preview(str(preview["id"]), owner_user_id="user-1")
+    updated_job = repo.get_portability_job(str(portability_job["id"]), owner_user_id="user-1")
+    assert result["status"] == "previewed"
+    assert updated_preview is not None
+    assert updated_preview["status"] == "blocked"
+    assert json.loads(updated_preview["proposed_plan_json"])["commit_eligible"] is False
+    assert updated_job is not None
+    assert updated_job["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_persona_visual_import_preview_worker_persists_target_conflicts(
     db_instance: CharactersRAGDB,
     tmp_path: Path,
