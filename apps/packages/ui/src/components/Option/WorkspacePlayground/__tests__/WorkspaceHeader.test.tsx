@@ -1356,6 +1356,235 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
   })
 
+  it("shows recent ACP run history for the current workspace and opens diagnostics", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 44,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 77,
+              name: "Beta agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-beta",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 55,
+              project_id: 44,
+              title: "Summarize workspace blockers",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/55"
+      ) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 55,
+            project_id: 44,
+            title: "Summarize workspace blockers",
+            status: "complete",
+            runs: [
+              {
+                id: 88,
+                task_id: 55,
+                status: "completed",
+                agent_type: "codex",
+                result_summary: "Identified two release blockers.",
+                started_at: "2026-05-13T13:00:00.000Z",
+                completed_at: "2026-05-13T13:05:00.000Z",
+                session: {
+                  session_id: "sess-alpha",
+                  available: true,
+                  links: {
+                    diagnostics: "/api/v1/acp/sessions/sess-alpha/diagnostics",
+                    artifacts: "/api/v1/acp/sessions/sess-alpha/artifacts",
+                    audit: "/api/v1/acp/sessions/sess-alpha/audit"
+                  }
+                },
+                history: {
+                  audit_event_count: 2,
+                  artifact_count: 1,
+                  diagnostic_count: 3,
+                  result: {
+                    preview: "Workspace run preview"
+                  }
+                }
+              }
+            ]
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Alpha agent work")).toBeInTheDocument()
+    expect(
+      within(modal).getByText("Summarize workspace blockers")
+    ).toBeInTheDocument()
+    expect(within(modal).getByText("sess-alpha")).toBeInTheDocument()
+    expect(within(modal).getByText("1 artifacts")).toBeInTheDocument()
+    expect(within(modal).getByText("3 diagnostics")).toBeInTheDocument()
+    expect(
+      within(modal).getByText("Identified two release blockers.")
+    ).toBeInTheDocument()
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
+    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open diagnostics" }))
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/acp-playground?session=sess-alpha&view=diagnostics"
+    )
+  })
+
+  it("shows an empty ACP run history state for workspaces without runs", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => []
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText("No ACP runs linked to this workspace yet")
+    ).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows ACP run history load errors without setup guidance", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        detail: "Agent orchestration is temporarily unavailable"
+      })
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText(
+        "Agent orchestration is temporarily unavailable"
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows unsupported ACP run history state without setup guidance", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({
+        detail: "Not Found"
+      })
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText(
+        "Agent orchestration is not available on this server."
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
   it("surfaces ACP bridge setup failures without creating project or task records", async () => {
     fetchMockState.fetch.mockResolvedValue({
       ok: false,

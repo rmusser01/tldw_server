@@ -308,6 +308,13 @@ Scope:
 - Link to ACP detail/events/artifacts/diagnostics/audit routes.
 - Use redacted previews where support-safe views are required.
 
+Implementation note:
+
+- First UI pass adds WorkspacePlayground `ACP run history`, reusing existing
+  Agent Orchestration project/task/task-detail contracts and ACP Playground
+  session view routes. It intentionally does not add a new backend workspace
+  history endpoint or a parallel ACP workspace browser.
+
 ### Slice 5: Verification, Testing, And Closeout
 
 Goal: prove the integration behavior before closing #1540 and split any
