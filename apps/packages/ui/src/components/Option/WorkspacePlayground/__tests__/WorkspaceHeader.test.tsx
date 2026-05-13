@@ -40,8 +40,9 @@ const mockNormalizeWorkspaceBannerImage = vi.fn()
 const mockTrackWorkspacePlaygroundTelemetry = vi.fn()
 const mockGetWorkspacePlaygroundTelemetryState = vi.fn()
 const mockResetWorkspacePlaygroundTelemetryState = vi.fn()
-const registryLabels = vi.hoisted(() => ({
-  degraded: "Registry Degraded"
+const registryStateOverrides = vi.hoisted(() => ({
+  degradedLabel: "Registry Degraded",
+  missingDegraded: false
 }))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
@@ -195,10 +196,18 @@ vi.mock("@/design-system", async (importActual) => {
     ...actual,
     getDesignSystemState: vi.fn(
       (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        if (key === "degraded" && registryStateOverrides.missingDegraded) {
+          return undefined as unknown as ReturnType<
+            typeof actual.getDesignSystemState
+          >
+        }
         const state = actual.getDesignSystemState(key)
         return {
           ...state,
-          label: key === "degraded" ? registryLabels.degraded : state.label
+          label:
+            key === "degraded"
+              ? registryStateOverrides.degradedLabel
+              : state.label
         }
       }
     )
@@ -435,6 +444,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
       ]
     })
     mockResetWorkspacePlaygroundTelemetryState.mockResolvedValue(undefined)
+    registryStateOverrides.degradedLabel = "Registry Degraded"
+    registryStateOverrides.missingDegraded = false
     mockNormalizeWorkspaceBannerImage.mockResolvedValue({
       dataUrl: "data:image/webp;base64,banner",
       mimeType: "image/webp",
@@ -1009,7 +1020,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-telemetry")
   })
 
-  it("uses the design-system registry label for degraded connectivity telemetry", async () => {
+  it("uses the design-system registry label without coupling telemetry to display copy", async () => {
     mockConnectionStoreState.state = {
       ...mockConnectionStoreState.state,
       phase: ConnectionPhase.CONNECTED,
@@ -1031,11 +1042,42 @@ describe("WorkspaceHeader workspace browser modal", () => {
       expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "connectivity_state_changed",
-          to: registryLabels.degraded.toLowerCase()
+          to: "degraded"
         })
       )
     })
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
+  })
+
+  it("falls back when the degraded design-system registry entry is unavailable", async () => {
+    registryStateOverrides.missingDegraded = true
+    mockConnectionStoreState.state = {
+      ...mockConnectionStoreState.state,
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      errorKind: "partial",
+      knowledgeStatus: "ready"
+    }
+
+    expect(() => {
+      render(
+        <WorkspaceHeader
+          leftPaneOpen={true}
+          rightPaneOpen={true}
+          onToggleLeftPane={vi.fn()}
+          onToggleRightPane={vi.fn()}
+        />
+      )
+    }).not.toThrow()
+
+    await waitFor(() => {
+      expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "connectivity_state_changed",
+          to: "degraded"
+        })
+      )
+    })
   })
 
   it("loads rollout execution controls from localStorage in telemetry modal", async () => {

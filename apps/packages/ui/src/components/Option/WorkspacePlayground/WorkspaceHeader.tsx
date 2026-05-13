@@ -42,7 +42,7 @@ import type {
 } from "@/types/workspace"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useConnectionStore } from "@/store/connection"
-import { getDesignSystemState } from "@/design-system"
+import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { deriveConnectionUxState } from "@/types/connection"
 import {
   buildWorkspacePlaygroundConfusionDashboardSnapshot,
@@ -114,6 +114,11 @@ interface WorkspaceHeaderProps {
   /** Rollout gate for status/guardrails surfaces (connectivity/quota/conflict state). */
   statusGuardrailsEnabled?: boolean
 }
+
+type WorkspaceHeaderConnectionTelemetryStatus =
+  | "connected"
+  | "degraded"
+  | "disconnected"
 
 const TELEMETRY_EVENT_ORDER: WorkspacePlaygroundTelemetryEventType[] = [
   "status_viewed",
@@ -373,6 +378,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
     if (uxState === "connected_ok") {
       return {
+        telemetryStatus:
+          "connected" satisfies WorkspaceHeaderConnectionTelemetryStatus,
         label: t("playground:workspace.connectionConnected", "Connected"),
         detail: t(
           "playground:workspace.connectionConnectedDetail",
@@ -388,9 +395,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       uxState === "connected_degraded" ||
       uxState === "demo_mode"
     ) {
-      const degradedState = getDesignSystemState("degraded")
+      const degradedState = getDesignSystemState("degraded") as
+        | ReturnType<typeof getDesignSystemState>
+        | undefined
       return {
-        label: degradedState.label,
+        telemetryStatus:
+          "degraded" satisfies WorkspaceHeaderConnectionTelemetryStatus,
+        label: degradedState?.label ?? DESIGN_SYSTEM_STATES.degraded.label,
         detail: t(
           "playground:workspace.connectionDegradedDetail",
           "Connection degraded or still checking"
@@ -401,6 +412,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     }
 
     return {
+      telemetryStatus:
+        "disconnected" satisfies WorkspaceHeaderConnectionTelemetryStatus,
       label: t("playground:workspace.connectionDisconnected", "Disconnected"),
       detail: t(
         "playground:workspace.connectionDisconnectedDetail",
@@ -460,7 +473,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       lastConnectivityStatusRef.current = null
       return
     }
-    const nextStatus = connectionIndicator.label.toLowerCase()
+    const nextStatus = connectionIndicator.telemetryStatus
     const previousStatus = lastConnectivityStatusRef.current
     if (previousStatus === nextStatus) return
 
@@ -472,7 +485,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     })
 
     lastConnectivityStatusRef.current = nextStatus
-  }, [connectionIndicator.label, statusGuardrailsEnabled, workspaceId])
+  }, [connectionIndicator.telemetryStatus, statusGuardrailsEnabled, workspaceId])
 
   const handleStartEdit = () => {
     setEditName(workspaceName || "New Research")
