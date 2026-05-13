@@ -386,8 +386,10 @@ All renderer/provider follow-ups should enforce:
    import/export clarity inside `sprite_frames`; region validation and Buddy
    rendering already exist.
 3. Non-sprite manifest V2 design:
-   define renderer-specific asset roles, fallback requirements, and import
-   preview validation hooks.
+   tracked by #1623 and
+   `Docs/Design/2026-05-13-persona-visual-manifest-v2-contract.md`; define
+   renderer-specific asset roles, fallback requirements, and import-preview
+   validation hooks before enabling non-sprite runtime renderers.
 4. Live2D adapter spike:
    opt-in Web renderer proof of concept using local fixtures, explicit license
    gate, static fallback, and no automatic activation.

@@ -589,7 +589,9 @@ baseline. The first reference-backed V1 slices are now covered:
     separate `sprite_sheet` renderer or manifest version bump.
 11. Live2D or other renderer adapter implementation remains future work after
     non-sprite manifest V2, import-preview validation hooks, dependency gates,
-    licensing review, and fallback requirements are separately scoped.
+    licensing review, and fallback requirements are separately scoped. The
+    Manifest V2 design slice is tracked by #1623 and
+    `Docs/Design/2026-05-13-persona-visual-manifest-v2-contract.md`.
 
 ---
 
