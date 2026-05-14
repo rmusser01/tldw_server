@@ -27,6 +27,7 @@ import {
   type SandboxAdminRuntimeDiagnosticsItem,
   type SandboxAdminRuntimeDiagnosticsResponse
 } from "@/services/tldw/TldwApiClient"
+import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
 function formatStatValue(value: unknown): React.ReactNode {
@@ -90,6 +91,10 @@ const RUNTIME_WARNING_LABELS: Record<string, string> = {
   sandbox_exec_deprecated: "sandbox-exec deprecated",
   weaker_than_vm_isolation: "Weaker than VM isolation"
 }
+
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label ?? "ready"
+const UNAVAILABLE_STATE_LABEL =
+  getDesignSystemState("unavailable")?.label ?? "unavailable"
 
 type SandboxDiagnosticsErrorState = {
   title: string
@@ -578,10 +583,10 @@ const MonitoringDashboardPage: React.FC = () => {
               <Descriptions.Item label="Total">
                 {sandboxDiagnostics.summary.total}
               </Descriptions.Item>
-              <Descriptions.Item label="Ready">
+              <Descriptions.Item label={READY_STATE_LABEL}>
                 {sandboxDiagnostics.summary.ready}
               </Descriptions.Item>
-              <Descriptions.Item label="Unavailable">
+              <Descriptions.Item label={UNAVAILABLE_STATE_LABEL}>
                 {sandboxDiagnostics.summary.unavailable}
               </Descriptions.Item>
               <Descriptions.Item label="Host-gated">
