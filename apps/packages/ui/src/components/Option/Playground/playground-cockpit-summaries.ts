@@ -231,19 +231,19 @@ export function buildCockpitMcpSummary(input: {
     };
   }
 
-  if (input.toolsLoading) {
-    return {
-      state: "disabled",
-      label: copy.toolsLabel,
-      detail: input.disabledReason || copy.loadingDetail,
-    };
-  }
-
   if (input.healthState === "unhealthy" || input.healthState === "degraded") {
     return {
       state: "degraded",
       label: copy.toolsLabel,
       detail: input.disabledReason || copy.offlineDetail,
+    };
+  }
+
+  if (input.toolsLoading) {
+    return {
+      state: "disabled",
+      label: copy.toolsLabel,
+      detail: input.disabledReason || copy.loadingDetail,
     };
   }
 

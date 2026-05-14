@@ -185,6 +185,34 @@ describe("playground cockpit summary helpers", () => {
     expect(
       buildCockpitMcpSummary({
         hasMcp: true,
+        healthState: "unhealthy",
+        toolsLoading: true,
+        discoveredCount: 2,
+        chatToolCount: 1,
+      }),
+    ).toEqual({
+      state: "degraded",
+      label: "MCP tools",
+      detail: "MCP tools are offline",
+    });
+
+    expect(
+      buildCockpitMcpSummary({
+        hasMcp: true,
+        healthState: "degraded",
+        toolsLoading: true,
+        discoveredCount: 2,
+        chatToolCount: 1,
+      }),
+    ).toEqual({
+      state: "degraded",
+      label: "MCP tools",
+      detail: "MCP tools are offline",
+    });
+
+    expect(
+      buildCockpitMcpSummary({
+        hasMcp: true,
         healthState: "healthy",
         toolsLoading: false,
         discoveredCount: 0,

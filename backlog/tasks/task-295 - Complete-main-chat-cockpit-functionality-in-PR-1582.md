@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 02:25'
+updated_date: '2026-05-14 02:35'
 labels:
   - webui
   - chat
@@ -116,6 +116,8 @@ Task 0 state contract helper slice: added pure cockpit summary helper guard test
 Task 0 compliance follow-up: wired serverChatPersonaMemoryMode from useMessageOption into buildCockpitAssistantSummary and added a Playground cockpit regression test proving persona read/write memory mode renders in the runtime rail. Verification: focused helper plus cockpit-controls Vitest passed from apps/tldw-frontend with repo-installed Vitest (13 tests); git diff --check passed. Existing non-fatal mocked-server 400 chat-settings logs remain baseline.
 
 Task 0 code-quality follow-up: guarded selected prompt summaries against stale async prompt records by requiring selectedSystemPromptRecord.id to match the normalized selected prompt id; added helper regression coverage for mismatch fallback. Reworked cockpit summary helpers to accept caller-provided copy so Playground keeps translation at the component boundary while helpers remain pure, and narrowed MCP health state typing to the existing MCP health union plus degraded. Verification: focused helper plus cockpit-controls Vitest passed from apps/tldw-frontend with repo-installed Vitest (15 tests); git diff --check passed. Existing non-fatal mocked-server 400 chat-settings logs remain baseline.
+
+Task 0 final MCP state follow-up: moved unhealthy/degraded MCP health handling ahead of tools-loading in buildCockpitMcpSummary so known health failures remain visible during refetch/loading. Added helper coverage for unhealthy+loading and degraded+loading returning degraded/offline instead of disabled/loading. Verification: focused helper plus cockpit-controls Vitest passed from apps/tldw-frontend with repo-installed Vitest (15 tests); git diff --check passed. Existing non-fatal mocked-server 400 chat-settings logs remain baseline.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
