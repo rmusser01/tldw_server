@@ -5178,7 +5178,7 @@ async def start_persona_visual_pack_import_commit(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_commit_eligible",
             )
-        if str(preview.get("status") or "") != "completed":
+        if str(preview.get("status") or "").strip() != "completed":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_completed",

@@ -4,6 +4,7 @@ title: Harden Persona Visual import-commit eligibility revalidation
 status: Done
 assignee: []
 created_date: '2026-05-14 03:21'
+updated_date: '2026-05-14 05:56'
 labels:
   - persona
   - visual-packs
@@ -34,24 +35,17 @@ Implement GitHub issue #1657 as a focused Persona/Buddy visual-pack hardening sl
 - [x] #5 Focused backend regression tests cover stale stored ineligible preview metadata and revalidation-to-blocked behavior.
 <!-- AC:END -->
 
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
 ## Implementation Plan
 
+<!-- SECTION:PLAN:BEGIN -->
 1. Add server-side API queueing guard for completed import previews whose stored proposed plan explicitly marks commit_eligible false.
 2. Add importer-side guard before any pack or asset creation so stored previews and revalidated archive previews must be completed and commit-eligible.
 3. Add focused regression coverage for stored ineligible preview metadata and revalidation-to-blocked behavior.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 - Added a stored preview commit-eligibility helper in the Persona API endpoint before import-commit jobs are created.
 - Added shared importer validation that accepts legacy previews with no commit_eligible flag but rejects blocked previews or explicit commit_eligible false results.
 - Added regression coverage proving blocked revalidation fails the job with no additional draft pack created.
@@ -59,6 +53,8 @@ Implement GitHub issue #1657 as a focused Persona/Buddy visual-pack hardening sl
 - Review follow-up: aligned API `blocked` preview reporting with worker `import_preview_not_commit_eligible` handling.
 - Review follow-up: malformed or non-object stored `proposed_plan_json` now fails closed before job enqueueing or worker revalidation, while valid object metadata without `commit_eligible` remains eligible.
 - Review follow-up: verification commands in this task use repo-relative invocations instead of machine-local absolute paths.
+- PR #1684 review follow-up: added `replace_import_preview_proposed_plan_json()` so intentionally corrupted stored-plan fixture writes stay centralized in the DB repository instead of raw SQL in tests.
+- PR #1684 review follow-up: normalized the API completion-status recheck with `.strip()`, made stored-plan JSON parsing bytes-safe, and restored importer top-level blank-line spacing.
 
 ## Verification
 
@@ -70,11 +66,37 @@ Implement GitHub issue #1657 as a focused Persona/Buddy visual-pack hardening sl
 - Syntax: `python -m py_compile tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py` passed.
 - Whitespace: `git diff --check` passed.
 - Bandit: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py -f json -o /tmp/bandit_persona_visual_commit_guards_review.json` reported zero findings.
+- PR #1684 review regression: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_import_commit_eligibility.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q` passed with 66 tests.
+- PR #1684 review syntax: `python -m py_compile tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/DB_Management/PersonaVisualPortability_DB.py` passed.
+- PR #1684 review style: `python -m ruff check tldw_Server_API/app/core/Persona/visual_portability/importer.py --select E305 --preview` passed.
+- PR #1684 review whitespace: `git diff --check` passed.
+- PR #1684 review Bandit: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/DB_Management/PersonaVisualPortability_DB.py -f json -o /tmp/bandit_persona_visual_commit_guards_review2.json` reported zero findings.
 
 ## Known Skips
 
 - Optional Ruff full-file check on the touched files still reports existing I001 import-order findings in legacy modules; this narrow backend guard slice did not auto-sort large unrelated import blocks.
 
+PR #1684 review closeout refresh: rebased codex/persona-visual-commit-guards onto latest origin/dev so the PR diff is scoped back to Persona Visual import-commit guard files plus TASK-332.
+
+Added docstrings to the newly introduced regression tests and local test doubles to address the remaining CodeRabbit docstring coverage warning while leaving existing unrelated tests unchanged.
+
+Post-rebase verification: focused Persona pytest suite passed 66 tests; py_compile passed for changed API/core/tests; git diff --check passed; Ruff E305 passed for importer spacing; Bandit on touched production Python paths reported no findings.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
-Hardened Persona Visual import-commit so stored previews with explicit `commit_eligible: false`, blocked status, malformed stored plan JSON, or non-object stored plan JSON are rejected before job queueing or worker revalidation. Worker-side revalidation also rejects blocked or non-commit-eligible previews before draft pack or asset creation. Added focused API and worker regressions while preserving existing eligible preview behavior for valid plan objects without `commit_eligible`.
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened Persona Visual import-commit so stored previews with explicit `commit_eligible: false`, blocked status, malformed stored plan JSON, or non-object stored plan JSON are rejected before job queueing or worker revalidation. Worker-side revalidation also rejects blocked or non-commit-eligible previews before draft pack or asset creation. Added focused API and worker regressions while preserving existing eligible preview behavior for valid plan objects without `commit_eligible`. PR #1684 review follow-up also centralizes corrupted stored-plan fixture writes in the DB repository, normalizes API status checks consistently, and supports bytes-backed stored JSON parsing.
+
+Post-rebase review closeout added docstrings for new regression tests, verified the PR diff is scoped to Persona Visual import-commit guard files, and reran focused pytest, py_compile, git diff --check, Ruff E305, and Bandit with no failures/findings.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

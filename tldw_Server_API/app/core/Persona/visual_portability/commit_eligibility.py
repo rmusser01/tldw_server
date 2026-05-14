@@ -33,8 +33,8 @@ def import_preview_plan_from_stored_json(value: Any) -> tuple[Mapping[str, Any],
     if isinstance(value, list):
         return {}, False
     try:
-        parsed = json.loads(str(value))
-    except json.JSONDecodeError:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
         return {}, False
     if not isinstance(parsed, Mapping):
         return {}, False

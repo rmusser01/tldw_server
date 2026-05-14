@@ -21,13 +21,23 @@ def test_import_preview_result_rejects_missing_plan() -> None:
 
 
 def test_import_preview_plan_from_stored_json_allows_empty_legacy_plan() -> None:
+    """Treat missing legacy proposed-plan JSON as valid empty metadata."""
     plan, valid = import_preview_plan_from_stored_json("")
 
     assert valid is True
     assert plan == {}
 
 
+def test_import_preview_plan_from_stored_json_accepts_bytes_json() -> None:
+    """Parse byte-encoded proposed-plan JSON without coercing through repr text."""
+    plan, valid = import_preview_plan_from_stored_json(b'{"target_mode": "create_new"}')
+
+    assert valid is True
+    assert plan == {"target_mode": "create_new"}
+
+
 def test_import_preview_plan_from_stored_json_rejects_corrupted_or_non_object_plan() -> None:
+    """Reject malformed or non-object proposed-plan JSON from stored previews."""
     for raw_value in ("{not-json", "[]"):
         plan, valid = import_preview_plan_from_stored_json(raw_value)
 

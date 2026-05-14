@@ -1160,6 +1160,7 @@ async def test_persona_visual_import_commit_worker_rejects_invalid_stored_plan_b
     monkeypatch: pytest.MonkeyPatch,
     stored_plan_json: str,
 ) -> None:
+    """Fail import-commit jobs before revalidation when stored plan JSON is invalid."""
     from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
         PersonaVisualPortabilityRepository,
     )
@@ -1207,15 +1208,11 @@ async def test_persona_visual_import_commit_worker_rejects_invalid_stored_plan_b
         proposed_plan=preview_result["proposed_plan"],
         required_choices=preview_result["required_choices"],
     )
-    with db_instance.transaction() as conn:
-        conn.execute(
-            """
-            UPDATE persona_visual_pack_import_previews
-               SET proposed_plan_json = ?
-             WHERE id = ?
-            """,
-            (stored_plan_json, preview["id"]),
-        )
+    repo.replace_import_preview_proposed_plan_json(
+        str(preview["id"]),
+        stored_plan_json,
+        owner_user_id="user-1",
+    )
     portability_job = repo.create_portability_job(
         owner_user_id="user-1",
         job_id="job-commit-1",
@@ -1228,6 +1225,7 @@ async def test_persona_visual_import_commit_worker_rejects_invalid_stored_plan_b
 
     class _UnexpectedPreviewer:
         def create_preview(self, **_kwargs: Any) -> dict[str, Any]:
+            """Fail the test if invalid stored plans reach archive revalidation."""
             raise AssertionError("import commit revalidated a corrupt stored preview")
 
     monkeypatch.setattr(
@@ -1268,6 +1266,7 @@ async def test_persona_visual_import_commit_worker_rejects_revalidated_blocked_p
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Fail import-commit jobs when archive revalidation returns a blocked preview."""
     from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
         PersonaVisualPortabilityRepository,
     )
@@ -1327,6 +1326,7 @@ async def test_persona_visual_import_commit_worker_rejects_revalidated_blocked_p
 
     class _BlockedPreviewer:
         def create_preview(self, **_kwargs: Any) -> dict[str, Any]:
+            """Return a blocked revalidation result for the commit worker path."""
             blocked = dict(preview_result)
             blocked["status"] = "blocked"
             blocked["proposed_plan"] = {
