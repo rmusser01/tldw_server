@@ -1,7 +1,7 @@
 # ACP Agent Orchestration and Third-Party Agent Support PRD
 
 Author: tldw_server team
-Status: Current implementation record, refreshed from draft v0.1 on 2026-05-10
+Status: Current implementation record, refreshed for admin reporting closeout on 2026-05-14
 Parent epic: [#1471](https://github.com/rmusser01/tldw_server/issues/1471)
 Operational doc: [Agent_Client_Protocol.md](../Development/Agent_Client_Protocol.md)
 Release checklist: [ACP_Production_Readiness.md](../Development/ACP_Production_Readiness.md)
@@ -57,7 +57,7 @@ parallel ACP-only workspace product.
 | Governance, RBAC, and audit | Shipped by [#1476](https://github.com/rmusser01/tldw_server/issues/1476) | ACP control surfaces use token scope guards where applicable, prompt/permission flows use shared governance coordination, and audit events are sanitized. |
 | Workspace and sandbox readiness | Shipped with runtime caveats by [#1477](https://github.com/rmusser01/tldw_server/issues/1477) | Workspace roots fail closed; workspace MCP servers and env flow into sessions; sandbox mode merges configured and per-session env. Docker/Lima/VZ runtime verification remains host-specific. |
 | Schedules and triggers | Shipped by [#1474](https://github.com/rmusser01/tldw_server/issues/1474) | ACP schedules route through APScheduler to the core Scheduler `acp_run` handler; triggers sanitize secrets and expose operator state. |
-| Admin execution-health reporting | Backend contract added under [#1537](https://github.com/rmusser01/tldw_server/issues/1537) | `/api/v1/admin/acp/execution-health/summary` summarizes ACP sessions, failure buckets, setup blockers, retention/redaction posture, and downstream-agent compatibility evidence for admin display. |
+| Admin execution-health reporting | Shipped under [#1537](https://github.com/rmusser01/tldw_server/issues/1537) and [#1654](https://github.com/rmusser01/tldw_server/pull/1654) | `/api/v1/admin/acp/execution-health/summary` summarizes ACP sessions, failure buckets, setup blockers, retention/redaction posture, and downstream-agent compatibility evidence; Agent Registry consumes the summary for the initial admin display. |
 | Frontend setup/run/diagnose UX | Shipped by [#1473](https://github.com/rmusser01/tldw_server/issues/1473) | Agent Tasks, Agent Registry, and ACP Playground share connection/auth handling; Agent Tasks shows setup gaps and task diagnostics without manual ID copying. |
 | Production readiness closeout | Remaining under [#1472](https://github.com/rmusser01/tldw_server/issues/1472) | Final release signoff still needs the readiness matrix closeout, broader live-backend E2E, Go runner verification, and accepted runtime caveats. |
 
@@ -272,6 +272,41 @@ The current implementation exposes enough state to derive:
 - schedule queued, skipped, disabled, and error states
 - audit event volume by action and session
 
+### Admin Execution-Health Reporting
+
+[#1537](https://github.com/rmusser01/tldw_server/issues/1537) is the ACP
+admin reporting tracker. Its release contract is intentionally summary-first:
+the backend owns one compact execution-health summary, while drill-through
+remains on the existing task, run, session detail, events, artifacts,
+diagnostics, and audit endpoints.
+
+| Metric group | Contract |
+| --- | --- |
+| Sessions | `sessions.total` and `sessions.by_status` count ACP sessions in the requested `range_days` window. |
+| Failure buckets | `setup_blockers`, `runner_session_failures`, `reviewer_rejections`, `reviewer_failures`, `governance_denials`, `structured_completion_failures`, `sandbox_runtime_errors`, and `retention_redaction_actions` normalize common operator failure modes. |
+| Setup health | `agent`, `workspace`, `sandbox_runtime`, `mcp_injection`, and `scheduler_trigger_path` each report `status`, blocker codes, and evidence count. |
+| Compatibility | `agents[]`, `compatibility.by_support_state`, `compatibility.documented_unverified_agents`, `compatibility.live_certification_required`, and `compatibility.docs_url` prevent UI and release notes from overstating downstream-agent support. |
+| Retention and redaction | `retention` mirrors configured session/audit retention; `redaction` declares whether support-safe detail/events/artifacts, diagnostics, and audit metadata views are available. |
+
+| Surface | Status | Role |
+| --- | --- | --- |
+| Admin API | Shipped | `GET /api/v1/admin/acp/execution-health/summary?range_days=30` is the reporting contract. |
+| Agent Registry | Shipped in [#1654](https://github.com/rmusser01/tldw_server/pull/1654) | First admin-facing summary surface for sessions, compatibility, setup blockers, failure buckets, and retention/redaction posture. |
+| Agent Tasks | Existing drill-through surface | Use task detail and run history for per-task run/review context; add filters or summary badges only as a separate follow-up if product needs row-level reporting. |
+| ACP Playground diagnostics | Existing drill-through surface | Keep session diagnostics focused on the selected run/session; preflight setup hints can reuse the summary contract in a future follow-up. |
+| Admin/ops dashboards | Future packaging | Broader exports, trends, and alerting belong under the admin/deployment packaging track, not the initial #1537 closeout. |
+| Docs | Shipped here and in `Agent_Client_Protocol.md` | Product, operator, and readiness docs define metric semantics, dependencies, and release caveats. |
+
+The #1537 closeout depends on the retention and support-safe view work tracked
+by [#1512](https://github.com/rmusser01/tldw_server/issues/1512) and
+[#1513](https://github.com/rmusser01/tldw_server/issues/1513), and on the
+admin/deployment baseline tracked by
+[#1529](https://github.com/rmusser01/tldw_server/issues/1529). Remaining
+live-certification work for downstream agents stays in
+[#1563](https://github.com/rmusser01/tldw_server/issues/1563) and
+[#1564](https://github.com/rmusser01/tldw_server/issues/1564), not this
+summary-reporting issue.
+
 ## 13) Remaining Work Before Production Signoff
 
 These items remain under the #1471/#1472 closeout rather than this PRD refresh:
@@ -304,3 +339,6 @@ minimum, a release candidate needs:
   implementation, marked superseded route and pi-agent assumptions, linked the
   #1471 child issue map, and moved operator detail to the operational docs and
   readiness matrix.
+- 2026-05-14 admin reporting closeout: documented the #1537
+  execution-health metric groups, reporting surfaces, dependencies, and
+  follow-up split after the Agent Registry summary display shipped.
