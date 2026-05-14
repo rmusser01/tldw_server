@@ -124,7 +124,26 @@ vi.mock("@/design-system", async (importActual) => {
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key
+    t: (
+      key: string,
+      fallbackOrOptions?: string | Record<string, unknown>,
+      options?: Record<string, unknown>
+    ) => {
+      const values =
+        typeof fallbackOrOptions === "object" && fallbackOrOptions !== null
+          ? fallbackOrOptions
+          : options
+      const template =
+        typeof fallbackOrOptions === "string"
+          ? fallbackOrOptions
+          : typeof fallbackOrOptions?.defaultValue === "string"
+            ? String(fallbackOrOptions.defaultValue)
+            : key
+
+      return template.replace(/\{\{(\w+)}}/g, (_, token: string) =>
+        values?.[token] == null ? "" : String(values[token])
+      )
+    }
   })
 }))
 
@@ -472,5 +491,44 @@ describe("AgentRegistryPage connection config", () => {
     expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
     expect(screen.getByText("Execution health summary unavailable")).toBeInTheDocument()
     expect(screen.getByText("Runner Binary")).toBeInTheDocument()
+  })
+
+  it("treats malformed admin execution-health summaries as unavailable", async () => {
+    installACPFetchMock({
+      summaryPayload: {
+        sessions: {
+          total: 1
+        }
+      }
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    expect(screen.getByText("Execution health summary unavailable")).toBeInTheDocument()
+  })
+
+  it("uses safe defaults for partial admin execution-health summaries", async () => {
+    installACPFetchMock({
+      summaryPayload: {
+        ...baseExecutionHealthSummaryPayload,
+        sessions: {
+          total: 2
+        },
+        failure_buckets: null,
+        setup_health: null,
+        compatibility: null,
+        retention: null,
+        redaction: null
+      }
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    expect(await screen.findByText("2 sessions in 30d")).toBeInTheDocument()
+    expect(screen.getByText("No recent failure buckets")).toBeInTheDocument()
+    expect(screen.getByText("No setup blockers in this window")).toBeInTheDocument()
+    expect(screen.getByText("Review redaction settings")).toBeInTheDocument()
   })
 })

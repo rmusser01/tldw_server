@@ -365,6 +365,64 @@
     "noMatchesDescription": "Try a different search term.",
     "noMatchesList": "No matches in this source."
   },
+  "agentRegistry": {
+    "health": {
+      "title": "ACP System Health",
+      "runnerBinary": "Runner Binary",
+      "agentStatus": "Agent Status",
+      "apiKeys": "API Keys",
+      "unavailableTitle": "Health check unavailable",
+      "unavailableBody": "Could not reach the ACP health endpoint. Ensure the server is running."
+    },
+    "executionHealth": {
+      "title": "ACP Execution Health",
+      "unavailableTitle": "Execution health summary unavailable",
+      "unavailableBody": "The admin summary endpoint may require newer backend support or elevated permissions.",
+      "sessions": "Sessions",
+      "sessionWindowSingular": "{{total}} session in {{days}}d",
+      "sessionWindowPlural": "{{total}} sessions in {{days}}d",
+      "statusCount": "{{count}} {{status}}",
+      "noSessions": "No sessions recorded",
+      "compatibility": "Compatibility",
+      "liveCertificationRequired": "Live certification required",
+      "noLiveCertificationBlocker": "No live-certification blocker",
+      "supportStateCount": "{{count}} {{state}}",
+      "unverifiedAgents": "Unverified agents: {{agents}}",
+      "noDocumentedUnverifiedAgents": "No documented-unverified agents",
+      "executionEvidenceDocs": "Execution evidence docs",
+      "retentionAndRedaction": "Retention and redaction",
+      "retentionSummary": "Retention {{sessionDays}}d sessions / {{auditDays}}d audit",
+      "redactedDrillThroughEnabled": "Redacted drill-through enabled",
+      "reviewRedactionSettings": "Review redaction settings",
+      "failureBucketsTitle": "Failure buckets",
+      "noRecentFailureBuckets": "No recent failure buckets",
+      "setupHealthTitle": "Setup health",
+      "setupStatus": "{{label}} {{status}}",
+      "evidenceCount": "{{count}} evidence",
+      "setupBlockers": "{{label}} {{status}}: {{blockers}}",
+      "noSetupBlockers": "No setup blockers in this window",
+      "failureBuckets": {
+        "setupBlockers": "Setup blockers",
+        "runnerSessionFailures": "Runner/session failures",
+        "reviewerRejections": "Reviewer rejections",
+        "reviewerFailures": "Reviewer failures",
+        "governanceDenials": "Governance denials",
+        "structuredCompletionFailures": "Structured completion failures",
+        "sandboxRuntimeErrors": "Sandbox runtime errors",
+        "retentionRedactionActions": "Retention/redaction actions"
+      },
+      "setupDimensions": {
+        "agent": "Agent",
+        "workspace": "Workspace",
+        "sandboxRuntime": "Sandbox runtime",
+        "mcpInjection": "MCP injection",
+        "schedulerTriggerPath": "Scheduler trigger path"
+      }
+    },
+    "loadFailedTitle": "Agent registry could not load",
+    "registeredAgents": "Registered Agents",
+    "empty": "No agents registered"
+  },
   "promptStudio": {
     "title": "Prompt Studio Playground",
     "subtitle": "Manage Prompt Studio projects, prompts, executions, test cases, and evaluations.",
