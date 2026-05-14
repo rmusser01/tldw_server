@@ -1,10 +1,10 @@
 ---
 id: TASK-338
 title: Document traceable artifact contract and ACP output mapping
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-05-14 06:46'
-updated_date: '2026-05-14 07:10'
+updated_date: '2026-05-14 19:23'
 labels:
   - acp
   - docs
@@ -34,9 +34,13 @@ Define the traceable work-product artifact contract needed by issue #1525, then 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Add a product contract doc for traceable generated work-product artifacts (#1525). Status: Complete.
-2. Update ACP product/operator/readiness docs to map ACP run outputs into that contract (#1538). Status: Complete.
-3. Run docs-only verification, update task evidence, and open a PR. Status: Complete.
+1. Address live PR #1687 review findings. Status: Complete.
+2. Clarify producer_id versus workspace task_id in the artifact contract. Status: Complete.
+3. Add workspace-history linkage to artifact versioning. Status: Complete.
+4. Define CSV/XLSX lineage export convention. Status: Complete.
+5. Enumerate ACP artifact-detail visibility categories and redaction behavior. Status: Complete.
+6. Normalize docs to the canonical needs_revision state literal. Status: Complete.
+7. Keep Backlog task provisional until PR review/merge, then verify and push. Status: In Progress.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -45,20 +49,26 @@ Define the traceable work-product artifact contract needed by issue #1525, then 
 Added Traceable_Work_Product_Artifact_Contract.md for #1525, mapped ACP session outputs and promotable deliverables for #1538, and connected ACP PRD/operator/readiness/workspace docs to the contract. Verification so far: git diff --check passed; targeted rg presence and stale-language absence guards passed. Bandit is skipped because this slice only touches Markdown docs and Backlog metadata.
 
 Opened draft PR #1687 and posted closeout-evidence comments on issues #1525 and #1538. Both issues should remain open until PR #1687 is reviewed and merged.
+
+Reopened for PR #1687 review-fix pass. Live unresolved review threads: Gemini producer_id/task_id distinction, Gemini CSV/XLSX lineage convention, Qodo workspace-history revision linkage, Qodo ACP artifact-detail visibility, Qodo needs_revision state literal consistency, CodeRabbit provisional Backlog status until PR merge.
+
+Addressed review feedback locally: clarified ACP producer_id versus workspace task_id, linked version history to workspace history/audit events, specified CSV/XLSX lineage sidecar/hidden-sheet conventions, enumerated ACP artifact-detail visibility by category, normalized needs_revision literals, and kept task status provisional while PR #1687 remains in review.
+
+Review-fix verification before commit: git diff --check passed; presence guard found producer_id ACP Task ID semantics, workspace-history linkage, sidecar JSON lineage convention, ACP artifact-detail visibility table, needs_revision literal, and provisional Backlog status; stale-language guard found no hyphenated review-state spelling, no premature Done front matter, and no completed final-summary wording.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed docs/design slice for #1525 and #1538 in draft PR #1687. Added the traceable work-product artifact contract, mapped ACP run outputs and promotable deliverables into it, updated ACP readiness/operator/product/workspace docs, ran docs-only verification, and commented concrete evidence on both GitHub issues. Bandit was skipped because the touched scope is Markdown docs and Backlog metadata only.
+Pending final closeout until PR #1687 is reviewed and merged. The docs/design contract and PR review fixes are on the branch, but this task should not return to Done until the PR has passed review and merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

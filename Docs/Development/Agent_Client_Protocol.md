@@ -340,17 +340,30 @@ promotion contract is
 When an ACP output is promoted into a generated work-product artifact, the
 artifact record should keep:
 
-- ACP producer metadata: task ID, run ID, session ID, agent type (model/provider), reviewer run
-  ID when applicable, and normalized completion reason.
+- ACP producer metadata: ACP task ID as `producer_id`, run ID, session ID,
+  agent type, model/provider identifiers, reviewer run ID when applicable, and
+  normalized completion reason.
 - Source lineage: selected workspace sources, retrieval or MCP/tool evidence,
   citations, and uncited generated sections.
 - Review metadata: reviewer decision, rejection or revision reason code, retry
-  count, triage state, and accepted/needs-revision/rejected artifact state.
+  count, triage state, and `accepted`/`needs_revision`/`rejected` artifact
+  state.
 - Version metadata: root artifact ID, previous version ID, revision reason, and
   export references tied to the artifact version.
 - Redaction posture: full-fidelity owner/admin views can link back to ACP detail,
   events, artifacts, diagnostics, and audit; support-safe views must use the
   existing `?redacted=true` ACP surfaces and sanitized diagnostic/audit metadata.
+
+Artifact detail should expose ACP evidence by category rather than dumping raw
+session data into the polished artifact view:
+
+| ACP run element | Owner/admin artifact detail | Support-safe redacted detail |
+| --- | --- | --- |
+| Logs and event timeline | Link to authenticated ACP event/session drill-through with timestamps, tool names, status changes, and failure buckets. | Show sanitized status timeline, failure buckets, and stable event IDs; omit raw payloads, local paths, secrets, and command arguments. |
+| Prompts and transcripts | Link to full-fidelity ACP transcript views for authorized owners/admins when retention policy allows. | Show prompt/template IDs, redacted excerpts only when approved, and a link to `?redacted=true`; never inline full prompts or transcripts. |
+| Completion signals | Show normalized completion reason, output classification, artifact promotion decision, and source run/session IDs. | Show completion reason, promotion state, and stable IDs without raw model/tool payloads. |
+| Reviewer decisions | Show reviewer run ID, decision, reason code, retry count, triage state, and state transition into `draft`, `reviewing`, `accepted`, `needs_revision`, `rejected`, or `archived` views. | Show decision, reason code, retry count, and redacted reviewer metadata; omit private notes unless explicitly support-safe. |
+| Related artifacts and exports | Link related ACP session artifacts, promoted work-product versions, and export artifacts tied to the same run or version. | Show safe labels, artifact IDs, version IDs, export format/status, and redacted links only. |
 
 Do not promote these ACP records as work-product artifacts:
 

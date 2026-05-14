@@ -50,6 +50,16 @@ Every work product artifact needs these fields or direct equivalents:
 | Export state | Export format, export job/file IDs, generated-at timestamp, expiration or retention policy, and export errors. |
 | Governance and audit | Visibility, redaction posture, retention class, audit event references, and policy decision references when relevant. |
 
+`task_id` in the workspace placement group identifies the workspace task or
+product task that owns, receives, or displays the artifact. It is not the same
+thing as the generating ACP Task ID unless the workspace task and ACP task are
+explicitly the same object. `producer_type` and `producer_id` identify the
+generating subsystem and producer record. For `producer_type="acp"`,
+`producer_id` should be the ACP Task ID for the promoted deliverable, while
+`run_id` and `session_id` identify the concrete attempt and protocol session.
+If an artifact is only assigned to a workspace task after generation, keep that
+assignment in `task_id` and keep the generating ACP task in `producer_id`.
+
 The schema can be implemented as relational columns plus JSON metadata, but API
 responses should expose stable names for the groups above so frontend and
 external clients do not parse model text or ACP transcripts to reconstruct
@@ -100,6 +110,18 @@ Rejected artifacts can still be retained as versions when audit or reviewer
 history matters, but user-facing accepted/exported views should default to the
 latest accepted version.
 
+Artifact version history must be represented in workspace history or an
+equivalent audit timeline. Creating an artifact, creating a new version,
+changing review state, exporting, assigning, archiving, or restoring an artifact
+should emit a history event with `artifact_id`, `root_artifact_id`, `version`,
+`previous_version_id` when applicable, actor identity, workspace/project/task
+placement, and the review or revision reason. Workspace history entries should
+link back to the exact artifact version they describe so users can navigate from
+the timeline to the reviewed/exported version instead of only to the latest
+artifact. Support-safe history views should retain stable IDs and decision
+state while redacting prompts, transcripts, local paths, and sensitive tool
+payloads.
+
 ## Export Mapping
 
 Exports are representations of a work product, not the work product itself.
@@ -107,7 +129,7 @@ Exports are representations of a work product, not the work product itself.
 | Export target | Mapping expectation |
 | --- | --- |
 | Markdown/HTML/JSON | Preserve source-lineage metadata and artifact version identifiers. |
-| CSV/XLSX/data tables | Preserve table schema, source lineage for generated rows/columns, and export job ID. |
+| CSV/XLSX/data tables | Preserve table schema, source lineage for generated rows/columns, and export job ID. CSV exports should include lineage columns only when they do not corrupt the table contract; otherwise require a sidecar JSON manifest keyed by stable row/column IDs. XLSX exports can use a hidden lineage worksheet or the same sidecar manifest. |
 | Slides/DOCX/PDF | Preserve artifact ID/version in metadata or manifest and keep source/citation appendix when possible. |
 | Chatbooks | Include artifact manifest, source references, version chain, and export references without assuming all large binaries are bundled. |
 | Prompt/output surfaces | Link back to source artifact and version rather than copying detached generated text where possible. |

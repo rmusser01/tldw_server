@@ -337,7 +337,7 @@ Promotion should follow this workflow:
 3. Accepted or explicitly draftable deliverables create or update a work-product
    artifact with `producer_type="acp"`, ACP task/run/session IDs, source-lineage
    snapshot, review decision, artifact state, and version metadata.
-4. Rejected or needs-revision outputs remain linked to ACP task/run history and
+4. Rejected or `needs_revision` outputs remain linked to ACP task/run history and
    may create a new artifact version only when the user or reviewer requests a
    revised deliverable.
 5. Support-safe views use the existing ACP redaction contract for transcripts,
