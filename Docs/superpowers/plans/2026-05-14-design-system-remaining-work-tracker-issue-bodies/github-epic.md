@@ -19,30 +19,30 @@ Counts are refreshed after each merged migration PR. GitHub owns mutable tracker
 
 | Area | Issue | Backlog | Initial | Current | Rule Split | Latest PR | Status |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
-| Chat and Playground | TBD | TBD | 2 | 2 | `canonical-state-label`: 2 | TBD | Draft |
-| Ingestion, Library, and media | TBD | TBD | 39 | 39 | `antd-product-state-import`: 39 | TBD | Draft |
-| Jobs, Scheduler, and Watchlists | TBD | TBD | 52 | 52 | `antd-product-state-import`: 52 | TBD | Draft |
-| MCP and ACP | TBD | TBD | 45 | 45 | `antd-product-state-import`: 43, `canonical-state-label`: 2 | TBD | Draft |
-| Evaluations | TBD | TBD | 40 | 40 | `antd-product-state-import`: 40 | TBD | Draft |
-| Settings and account/security | TBD | TBD | 77 | 77 | `antd-product-state-import`: 71, `canonical-state-label`: 6 | TBD | Draft |
-| Admin and health expansion | TBD | TBD | 47 | 47 | `antd-product-state-import`: 45, `canonical-state-label`: 2 | TBD | Draft |
-| Prompt and Prompt Studio | TBD | TBD | 38 | 38 | `antd-product-state-import`: 38 | TBD | Draft |
-| Flashcards, Quiz, and study flows | TBD | TBD | 48 | 48 | `antd-product-state-import`: 48 | TBD | Draft |
-| Document and Workspace surfaces | TBD | TBD | 13 | 13 | `antd-product-state-import`: 13 | TBD | Draft |
-| Character, Persona, and presentation surfaces | TBD | TBD | 22 | 22 | `antd-product-state-import`: 16, `canonical-state-label`: 6 | TBD | Draft |
-| Writing and Review surfaces | TBD | TBD | 22 | 22 | `antd-product-state-import`: 21, `canonical-state-label`: 1 | TBD | Draft |
-| Other shared surfaces and long-tail triage | TBD | TBD | 55 | 55 | `antd-product-state-import`: 55 | TBD | Draft |
+| Chat and Playground | #1658 | TASK-45.44.1 | 2 | 2 | `canonical-state-label`: 2 | TBD | Open |
+| Ingestion, Library, and media | #1659 | TASK-45.44.2 | 39 | 39 | `antd-product-state-import`: 39 | TBD | Open |
+| Jobs, Scheduler, and Watchlists | #1660 | TASK-45.44.3 | 52 | 52 | `antd-product-state-import`: 52 | TBD | Open |
+| MCP and ACP | #1661 | TASK-45.44.4 | 45 | 45 | `antd-product-state-import`: 43, `canonical-state-label`: 2 | TBD | Open |
+| Evaluations | #1662 | TASK-45.44.5 | 40 | 40 | `antd-product-state-import`: 40 | TBD | Open |
+| Settings and account/security | #1663 | TASK-45.44.6 | 77 | 77 | `antd-product-state-import`: 71, `canonical-state-label`: 6 | TBD | Open |
+| Admin and health expansion | #1664 | TASK-45.44.7 | 47 | 47 | `antd-product-state-import`: 45, `canonical-state-label`: 2 | TBD | Open |
+| Prompt and Prompt Studio | #1665 | TASK-45.44.8 | 38 | 38 | `antd-product-state-import`: 38 | TBD | Open |
+| Flashcards, Quiz, and study flows | #1666 | TASK-45.44.9 | 48 | 48 | `antd-product-state-import`: 48 | TBD | Open |
+| Document and Workspace surfaces | #1667 | TASK-45.44.10 | 13 | 13 | `antd-product-state-import`: 13 | TBD | Open |
+| Character, Persona, and presentation surfaces | #1668 | TASK-45.44.11 | 22 | 22 | `antd-product-state-import`: 16, `canonical-state-label`: 6 | TBD | Open |
+| Writing and Review surfaces | #1669 | TASK-45.44.12 | 22 | 22 | `antd-product-state-import`: 21, `canonical-state-label`: 1 | TBD | Open |
+| Other shared surfaces and long-tail triage | #1670 | TASK-45.44.13 | 55 | 55 | `antd-product-state-import`: 55 | TBD | Open |
 
 ## Governance and System Hardening
 
 | Track | Issue | Backlog | Status | Latest PR |
 | --- | --- | --- | --- | --- |
-| Harden design-system baseline reporting and stale-entry cleanup | TBD | TBD | Draft | TBD |
-| Define design-system CI gate tightening path | TBD | TBD | Draft | TBD |
-| Design token, color, radius, and layout drift guards | TBD | TBD | Draft | TBD |
-| Define shared design-system component ownership plan | TBD | TBD | Draft | TBD |
-| Add shared design-system component documentation and examples | TBD | TBD | Draft | TBD |
-| Add Browser/WebUI/extension visual QA checklist | TBD | TBD | Draft | TBD |
+| Harden design-system baseline reporting and stale-entry cleanup | #1671 | TASK-45.44.14 | Open | TBD |
+| Define design-system CI gate tightening path | #1672 | TASK-45.44.15 | Open | TBD |
+| Design token, color, radius, and layout drift guards | #1673 | TASK-45.44.16 | Open | TBD |
+| Define shared design-system component ownership plan | #1674 | TASK-45.44.17 | Open | TBD |
+| Add shared design-system component documentation and examples | #1675 | TASK-45.44.18 | Open | TBD |
+| Add Browser/WebUI/extension visual QA checklist | #1676 | TASK-45.44.19 | Open | TBD |
 
 ## Operating Rules
 

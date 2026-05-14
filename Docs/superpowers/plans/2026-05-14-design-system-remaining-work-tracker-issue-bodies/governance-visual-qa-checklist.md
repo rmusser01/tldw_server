@@ -26,6 +26,10 @@ Included guard, doc, CI, or ownership decision:
 
 ## Tracking
 
-- Parent epic: TBD
-- Backlog task: TBD
-- PRs: TBD
+- Parent epic: https://github.com/rmusser01/tldw_server/issues/1655
+- Backlog task: TASK-45.44.19 (`backlog/tasks/task-45.44.19 - Add-Browser-WebUI-extension-visual-QA-checklist.md`)
+- PRs:
+
+| PR | Notes |
+| --- | --- |
+| TBD | |

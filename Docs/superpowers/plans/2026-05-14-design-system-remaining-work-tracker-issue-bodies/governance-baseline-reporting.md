@@ -26,6 +26,10 @@ Included guard, doc, CI, or ownership decision:
 
 ## Tracking
 
-- Parent epic: TBD
-- Backlog task: TBD
-- PRs: TBD
+- Parent epic: https://github.com/rmusser01/tldw_server/issues/1655
+- Backlog task: TASK-45.44.14 (`backlog/tasks/task-45.44.14 - Harden-design-system-baseline-reporting-and-stale-entry-cleanup.md`)
+- PRs:
+
+| PR | Notes |
+| --- | --- |
+| TBD | |
