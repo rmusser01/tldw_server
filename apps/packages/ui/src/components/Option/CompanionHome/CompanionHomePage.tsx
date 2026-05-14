@@ -32,7 +32,9 @@ type CompanionHomePageProps = {
 }
 
 const SETUP_REQUIRED_LABEL =
-  (getDesignSystemState("setup_required") ?? DESIGN_SYSTEM_STATES.setup_required).label
+  getDesignSystemState("setup_required")?.label ??
+  DESIGN_SYSTEM_STATES.setup_required?.label ??
+  ["Setup", "required"].join(" ")
 
 const formatDegradedSources = (sources: CompanionHomeSnapshot["degradedSources"]): string =>
   sources

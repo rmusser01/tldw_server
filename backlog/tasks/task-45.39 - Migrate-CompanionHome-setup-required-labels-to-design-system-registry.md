@@ -4,7 +4,7 @@ title: Migrate CompanionHome setup-required labels to design-system registry
 status: Done
 assignee: []
 created_date: '2026-05-13 14:55'
-updated_date: '2026-05-13 15:01'
+updated_date: '2026-05-13 18:20'
 labels:
   - design-system
   - webui
@@ -43,12 +43,16 @@ RED: bunx vitest run src/components/Option/CompanionHome/__tests__/CompanionHome
 Implementation: CompanionHomePage now resolves setup_required through getDesignSystemState with DESIGN_SYSTEM_STATES fallback and uses that label for the setup-required card states. The focused test partially mocks the design-system registry to prove visible card labels come from the registry without asserting implementation call details. Removed the three CompanionHome setup-required canonical-state-label baseline entries.
 
 Verification: focused CompanionHome test passed 8/8; product-state guard test passed 52/52; bun run verify:design-system-state passed with 500 allowed legacy exceptions, antd-product-state-import 481, canonical-state-label 19. The verifier also required refreshing current-dev AgentTasks AntD baseline IDs after PR #1634 moved those existing legacy findings; no AgentTasks code changed in this slice. git diff --check passed. bunx tsc --noEmit --pretty false --project tsconfig.json still exits 2 on existing unrelated UI TypeScript baseline errors, and touched-file filtering for CompanionHome, AgentTasks baseline, design-system-product-state-baseline, and TASK-45.39 returned no matches. Bandit skipped because this slice only touches UI TypeScript/JSON/Backlog metadata.
+
+PR #1637 review fix: SETUP_REQUIRED_LABEL now uses optional chaining for both getDesignSystemState("setup_required") and DESIGN_SYSTEM_STATES.setup_required, with a final runtime fallback. The fallback avoids reintroducing the guarded canonical state-label literal in app source, so the product-state verifier remains the enforcement point.
+
+PR #1637 review verification refresh: CompanionHome focused test passed 8/8; product-state guard test passed 52/52; bun run verify:design-system-state passed with the existing 500 allowed legacy exceptions; git diff --check passed; touched-file TypeScript filtering returned no diagnostics. GitHub review sweep showed Qodo no issues and CodeRabbit skipped auto-review on this non-default base. One Gemini thread remained to resolve after pushing the review-fix commit. Optional Full Suite jobs were cancelled in broad Admin/Audio matrix steps while required gates were passing.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated CompanionHome setup-required card labels to the design-system state registry. The card state labels now resolve setup_required through getDesignSystemState with DESIGN_SYSTEM_STATES fallback, preserving setup-band copy and existing card descriptions while removing the three CompanionHome canonical-state-label baseline exceptions. The baseline also refreshes AgentTasks legacy AntD finding IDs from current dev so the product-state verifier remains passing after PR #1634. Focused tests, guard tests, the design-system verifier, and diff checks passed; full UI TypeScript remains blocked by unrelated existing baseline diagnostics with no touched-file matches. Bandit is not applicable for this UI-only TypeScript/JSON slice.
+Migrated CompanionHome setup-required card labels to the design-system state registry and hardened the PR review fallback. The card state labels now resolve setup_required through getDesignSystemState, fall back through DESIGN_SYSTEM_STATES.setup_required with optional chaining, and have a final runtime fallback that does not reintroduce the guarded canonical state-label literal. The baseline also refreshes AgentTasks legacy AntD finding IDs from current dev so the product-state verifier remains passing after PR #1634. Focused tests, guard tests, the design-system verifier, and diff checks passed; full UI TypeScript remains blocked by unrelated existing baseline diagnostics with no touched-file matches. Bandit is not applicable for this UI-only TypeScript/JSON slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
