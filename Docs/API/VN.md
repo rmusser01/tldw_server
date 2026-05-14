@@ -87,3 +87,178 @@ version options with generation metadata for custom frontends:
 
 Setup warnings include missing or unavailable generation profile snapshots and
 incompatible generated output schemas.
+
+## Script Authoring Graph
+
+Custom frontends can request a computed authoring graph for VN scripts when
+`GET /api/v1/vn/vn-capabilities` returns:
+
+```json
+{
+  "features": {
+    "script_authoring_graph": true
+  }
+}
+```
+
+The graph API is read-only. It exposes backend-owned script structure without
+executing the script, calling models, mutating drafts, persisting graph
+snapshots, or providing a node-editor implementation.
+
+### Endpoints
+
+- `GET /api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph`
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview`
+- `GET /api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/graph`
+
+The draft graph endpoint reads the stored draft and returns
+`source: "stored_draft"` with the stored `base_revision`. It computes live
+validation diagnostics but does not persist them.
+
+The graph-preview endpoint accepts an unsaved draft and computes a graph
+without saving it:
+
+```json
+{
+  "draft_revision": 4,
+  "draft": {
+    "schema_version": "vn_script_program.v1",
+    "entry_label": "start",
+    "labels": {
+      "start": [
+        {"op": "narrate", "text": "Opening."},
+        {"op": "end"}
+      ]
+    }
+  }
+}
+```
+
+Preview responses use `source: "supplied_draft"` and still include the current
+stored `base_revision` for client conflict awareness. A stale
+`draft_revision` can produce a graph warning, but preview remains read-only and
+does not fail like draft mutation endpoints.
+
+The version graph endpoint reads an immutable published script version and
+returns `source: "published_version"` with `version_id`. Version validation
+uses published-version snapshot context when available, reported as
+`validation_context_source: "published_version_snapshot"`.
+
+### Response Envelope
+
+All graph endpoints return the same envelope:
+
+```json
+{
+  "schema_version": "vn_script_authoring_graph.v1",
+  "graph_semantics_version": "vn_script_authoring_graph_edges.v1",
+  "program_schema_version": "vn_script_program.v1",
+  "script_id": 12,
+  "source": "stored_draft",
+  "base_revision": 4,
+  "version_id": null,
+  "content_hash": "sha256:...",
+  "validation_context_source": "current_draft_context",
+  "truncated": false,
+  "limits": {
+    "max_labels": 500,
+    "max_ops": 5000,
+    "max_edges": 10000,
+    "max_supplied_draft_bytes": 1048576
+  },
+  "outline": {"entry_label": "start", "labels": []},
+  "graph": {"nodes": [], "edges": []},
+  "diagnostics": {"errors": [], "warnings": []},
+  "validation_diagnostics": {"valid": true, "errors": [], "warnings": []}
+}
+```
+
+Key fields:
+
+- `schema_version` identifies the response shape.
+- `graph_semantics_version` identifies static edge and reachability rules.
+- `source` is one of `stored_draft`, `supplied_draft`, or
+  `published_version`.
+- `content_hash` is a SHA-256 hash over the source program,
+  `program_schema_version`, and `graph_semantics_version`; it does not hash
+  diagnostics wording or the full response.
+- `validation_context_source` is `current_draft_context` for stored and
+  supplied drafts, or `published_version_snapshot` for version graphs.
+- `truncated` is true when a graph limit produced partial output; the
+  graph diagnostics explain which limit was reached.
+
+### Outline And Graph Layers
+
+`outline` is the compact layer for simple tree, sidebar, and label-list UIs.
+Each outline label includes:
+
+- `id`: stable API ID such as `label:start`.
+- `label`: raw display label.
+- `source_path`: bracket JSON path such as `$.labels['intro.scene']`.
+- `op_count`, `incoming_edge_count`, and `outgoing_edge_count`.
+- `reachable`: static reachability from `entry_label`.
+- `terminal`: one of `terminal`, `continues`, or `unknown`.
+- `summary`: compact text for display.
+
+`graph` is the detailed layer for advanced clients. It contains label nodes,
+operation nodes, and static edges. Node IDs are deterministic:
+
+- Labels: `label:<percent-encoded-label>`.
+- Operations: `op:<percent-encoded-label>:<zero-based-index>`.
+- Edges: `edge:<source-id>:<edge-type>:<target-id-or-missing-key>`.
+
+Labels are percent-encoded in IDs because raw labels can contain separators
+such as `.`, `:`, `/`, or spaces. Use the `label` field for display. Source
+paths always use bracket notation so label names with dots or dashes are not
+misread as object paths.
+
+V1 extracts only statically knowable control-flow edges:
+
+- `jump.target`
+- `choice.choices[].target`
+- `generate.on_generated_choice`
+- `generate.on_cancel`
+
+It does not infer random branches, conditionals, model-generated choices, or
+runtime fallthrough. Missing targets remain visible as edges with
+`target_id: null` and `missing_target: true`.
+
+### Diagnostics
+
+`diagnostics` are graph-construction diagnostics. They cover graph-specific
+conditions such as missing edge targets, unreachable labels, invalid label
+bodies, omitted edge targets, or output truncation. These diagnostics are
+intended to help authoring tools render partial structure from incomplete
+drafts.
+
+`validation_diagnostics` come from the VN script validator and remain the
+authoritative publish/runtime compatibility signal. A graph response can be
+useful even when validation is invalid, and graph diagnostics are not a
+replacement for validation diagnostics.
+
+### Limits And Truncation
+
+Graph output is bounded by:
+
+- `max_labels`: 500
+- `max_ops`: 5000
+- `max_edges`: 10000
+- `max_supplied_draft_bytes`: 1048576
+
+If a graph limit is reached, the response sets `truncated: true`, returns the
+partial graph, and includes a graph warning with the affected limit. Oversized
+supplied drafts are rejected before graph construction.
+
+### Custom Frontend Flow
+
+1. Read `GET /api/v1/vn/vn-capabilities` and check
+   `features.script_authoring_graph`.
+2. Fetch `GET /api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph` for the
+   saved draft, or call `draft/graph-preview` while the user edits unsaved JSON.
+3. Compare `content_hash` and `graph_semantics_version` before reusing cached
+   graph layout state.
+4. Render `outline` for simple navigation and `graph` for advanced views.
+5. Show `diagnostics` as graph-authoring hints and
+   `validation_diagnostics` as validation status.
+6. Use existing draft update and publish endpoints for mutations; graph
+   endpoints never save or execute script content.

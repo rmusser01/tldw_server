@@ -34,6 +34,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
     }
     scripted_generation_enabled = enabled_modules["scripts"] and enabled_modules["play"]
     script_authoring_catalog_enabled = enabled_modules["scripts"]
+    script_authoring_graph_enabled = enabled_modules["scripts"]
 
     return {
         "schema_version": "vn_capabilities.v1",
@@ -51,6 +52,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "scripted_generation_history": enabled_modules["play"],
             "scripted_generation_debug_detail": enabled_modules["play"],
             "script_authoring_catalog": script_authoring_catalog_enabled,
+            "script_authoring_graph": script_authoring_graph_enabled,
             "story_start": enabled_modules["play"],
             "tts_jobs": enabled_modules["audio"],
             "realtime_image_generation": False,
