@@ -218,6 +218,40 @@ Core implementation points:
 5. `PersonaVisualsModule` for MCP discovery and draft reuse on top of the same
    reference-backed service semantics.
 
+## External MCP-Compatible Pack Providers
+
+External MCP-compatible Persona Visual pack providers are review-input sources,
+not Persona Visual storage owners or runtime plugins. The contract is documented
+in
+`Docs/Design/2026-05-13-persona-visual-external-mcp-provider-contract.md`.
+
+Provider output can describe one of four durable review inputs:
+
+1. a `.tldw-persona-vpack` portable archive for import preview.
+2. a generated-candidate payload for an existing draft pack.
+3. a proposed manifest patch for an existing draft pack.
+4. a request to create a new inactive draft pack.
+
+Every provider result must be treated as untrusted until the tldw server
+validates it. Provider output must not activate a pack, mutate an active pack,
+write assets directly, bypass import preview, submit runtime renderer code, or
+grant renderer support by assertion. Renderer support still comes from the
+server renderer capability registry, and non-sprite proposals still need the
+Manifest V2 static fallback and renderer diagnostics described above.
+
+Portable archive provider results enter the same staged import flow as user
+uploads: preview first, explicit conflict choices where needed, commit to a
+reviewed draft only, and separate user activation later. Generated-candidate
+and manifest-patch provider results should use the same review semantics as
+local generation: provider asset handles are intake placeholders until the
+server validates metadata, copies bytes through approved storage paths, and
+assigns real asset ids.
+
+Provider provenance is metadata only. It must not override user ownership,
+persona scope, activation state, or personal-library source references. The
+personal library remains reference-backed and must not gain source display
+snapshots from provider metadata.
+
 ## Import Preview And Commit
 
 Import is staged:
