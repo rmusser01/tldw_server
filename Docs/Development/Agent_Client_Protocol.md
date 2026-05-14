@@ -136,6 +136,7 @@ source that supports the matrix.
 |`/api/v1/acp/tasks/{task_id}`|GET|Poll async ACP task status/result|
 |`/api/v1/acp/runs`|GET|List ACP run history|
 |`/api/v1/acp/runs/aggregate`|GET|Aggregate ACP usage and cost data|
+|`/api/v1/admin/acp/execution-health/summary`|GET|Admin summary of ACP session health, failure buckets, retention/redaction posture, and compatibility evidence|
 |`/api/v1/acp/sessions/{session_id}/rollback`|POST|Rollback a sandbox-backed session to a checkpoint|
 |`/api/v1/acp/sessions/{session_id}/checkpoints`|GET|List available session checkpoints|
 |`/api/v1/agent-orchestration/workspaces`|GET/POST|List or create ACP workspaces|
@@ -272,6 +273,35 @@ previews, sanitized audit metadata, sanitized diagnostics, automatic ACP
 session/audit retention maintenance, and opt-in redacted session/event/artifact
 views. Do not claim that the default drill-through endpoints are redacted; they
 remain intentionally full fidelity for authorized operators.
+
+### Admin Execution-Health Summary
+
+`GET /api/v1/admin/acp/execution-health/summary` provides the backend-owned
+admin reporting contract for ACP release readiness and future admin UI display.
+The endpoint aggregates existing ACP session history and configured agent
+metadata. It does not introduce a separate observability store.
+
+The response includes:
+
+- `sessions.total` and `sessions.by_status` for sessions considered in the
+  requested `range_days` lookback.
+- `failure_buckets.setup_blockers` for unconfigured or blocked agent setup
+  state, `runner_session_failures` for errored sessions and runner/session
+  failures, `reviewer_rejections` and `reviewer_failures` for review-loop
+  outcomes, and `governance_denials` for policy or permission-denial outcomes.
+- `agents[]` entries with per-agent setup and compatibility posture, including
+  `support_state`, `verification_level`, `setup_blocked`, and
+  `primary_blocker`.
+- `compatibility.by_support_state`, `documented_unverified_agents`, and
+  `live_certification_required` so admin reporting can distinguish documented
+  candidates from live-certified agents without overstating support.
+- `retention` and `redaction` summaries that mirror the configured ACP
+  retention policy and the support-safe redaction posture for details, events,
+  artifacts, diagnostics, and audit metadata.
+
+The initial contract intentionally stays summary-level. Operator drill-through
+continues to use the existing session detail, events, artifacts, diagnostics,
+audit, run-history, and task-detail endpoints listed above.
 
 ### Frontend Setup And Diagnostics Surfaces
 

@@ -268,6 +268,170 @@ class TestACPAgentMetrics:
 
 
 # ===========================================================================
+# 2b. GET /admin/acp/execution-health/summary
+# ===========================================================================
+
+
+class TestACPExecutionHealthSummary:
+    """Tests for the ACP admin execution-health summary endpoint."""
+
+    def test_execution_health_summary_empty_store(self, monkeypatch, tmp_path):
+        """An empty ACP store still reports configured retention/redaction posture."""
+        store = _make_store(tmp_path)
+
+        async def _run_test():
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                mock.AsyncMock(return_value=store),
+            )
+            from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
+                get_acp_execution_health_summary,
+            )
+
+            resp = await get_acp_execution_health_summary(range_days=30)
+
+            assert resp.sessions.total == 0
+            assert resp.sessions.by_status == {}
+            assert resp.failure_buckets.runner_session_failures == 0
+            assert resp.failure_buckets.reviewer_rejections == 0
+            assert resp.failure_buckets.governance_denials == 0
+            assert resp.retention.session_retention_days >= 0
+            assert resp.retention.audit_retention_days >= 0
+            assert resp.redaction.detail_events_artifacts_redacted_views is True
+            assert resp.redaction.diagnostics_sanitized is True
+            assert resp.redaction.audit_metadata_sanitized is True
+
+        _run(_run_test())
+
+    def test_execution_health_summary_buckets_failures_and_compatibility(self, monkeypatch, tmp_path):
+        """Representative sessions and agents are bucketed without overstating support."""
+        store = _make_store(tmp_path)
+
+        async def _fake_agents():
+            from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
+                ACPAgentEntrypointStatus,
+                ACPAgentInfo,
+            )
+
+            return [
+                ACPAgentInfo(
+                    type="stub",
+                    name="In-repo ACP stub",
+                    is_configured=True,
+                    support_state="supported_with_caveats",
+                    verification_level="stub_smoke_tested",
+                    compatibility_notes="Stub protocol evidence only.",
+                    entrypoint=ACPAgentEntrypointStatus(
+                        profile_key="stub",
+                        entrypoint_strategy="native_acp",
+                        probe_state="ready_to_probe",
+                        primary_blocker=None,
+                    ),
+                ),
+                ACPAgentInfo(
+                    type="codex",
+                    name="Codex CLI",
+                    is_configured=False,
+                    support_state="documented_unverified",
+                    verification_level="documented_only",
+                    compatibility_notes="Live ACP stdio certification is blocked.",
+                    entrypoint=ACPAgentEntrypointStatus(
+                        profile_key="codex",
+                        entrypoint_strategy="documented_candidate",
+                        probe_state="blocked",
+                        primary_blocker="adapter_required",
+                    ),
+                ),
+            ], "stub"
+
+        async def _run_test():
+            await _register_session(store, "s-error", agent_type="stub")
+            await _add_usage(store, "s-error", 10, 5)
+            store._db.set_session_status("s-error", "error")
+
+            await _register_session(store, "s-review", agent_type="stub")
+            await store.record_prompt(
+                "s-review",
+                [{"role": "user", "content": "review this"}],
+                {"role": "assistant", "content": {"reason_code": "reviewer_rejected"}},
+            )
+
+            await _register_session(store, "s-governance", agent_type="codex")
+            await store.record_prompt(
+                "s-governance",
+                [{"role": "user", "content": "run tool"}],
+                {"role": "assistant", "content": {"reason_code": "governance_denied"}},
+            )
+
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                mock.AsyncMock(return_value=store),
+            )
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents._get_available_agents",
+                _fake_agents,
+            )
+
+            from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
+                get_acp_execution_health_summary,
+            )
+
+            resp = await get_acp_execution_health_summary(range_days=30)
+
+            assert resp.sessions.total == 3
+            assert resp.sessions.by_status["error"] == 1
+            assert resp.sessions.by_status["active"] == 2
+            assert resp.failure_buckets.runner_session_failures == 1
+            assert resp.failure_buckets.reviewer_rejections == 1
+            assert resp.failure_buckets.governance_denials == 1
+            assert resp.failure_buckets.setup_blockers == 1
+            assert resp.compatibility.by_support_state["documented_unverified"] == 1
+            assert resp.compatibility.documented_unverified_agents == ["codex"]
+            assert resp.compatibility.live_certification_required is True
+
+        _run(_run_test())
+
+    def test_execution_health_summary_fails_closed_for_unknown_compatibility_values(self, monkeypatch, tmp_path):
+        """Unknown compatibility enums fall back to documented-unverified support."""
+        store = _make_store(tmp_path)
+
+        class _FakeAgent:
+            type = "legacy"
+            name = "Legacy agent"
+            is_configured = True
+            support_state = "vendor_promised"
+            verification_level = "not_checked"
+            entrypoint = None
+
+        async def _fake_agents():
+            return [_FakeAgent()], "legacy"
+
+        async def _run_test():
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                mock.AsyncMock(return_value=store),
+            )
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents._get_available_agents",
+                _fake_agents,
+            )
+
+            from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
+                get_acp_execution_health_summary,
+            )
+
+            resp = await get_acp_execution_health_summary(range_days=30)
+
+            assert resp.compatibility.by_support_state["documented_unverified"] == 1
+            assert resp.compatibility.documented_unverified_agents == ["legacy"]
+            assert resp.compatibility.live_certification_required is True
+            assert resp.agents[0].support_state == "documented_unverified"
+            assert resp.agents[0].verification_level == "documented_only"
+
+        _run(_run_test())
+
+
+# ===========================================================================
 # 3. PATCH /admin/acp/sessions/{session_id}/budget
 # ===========================================================================
 

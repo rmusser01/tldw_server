@@ -670,6 +670,66 @@ class ACPAgentMetricsListResponse(BaseModel):
     items: list[ACPAgentMetrics] = Field(default_factory=list)
 
 
+class ACPExecutionHealthSessionSummary(BaseModel):
+    """Aggregated ACP session status counts for admin execution-health reporting."""
+    total: int = Field(default=0, description="Total ACP sessions considered in this summary")
+    by_status: dict[str, int] = Field(default_factory=dict, description="Session count by persisted status")
+
+
+class ACPExecutionHealthFailureBuckets(BaseModel):
+    """Normalized ACP execution-health failure buckets for admin reporting."""
+    setup_blockers: int = Field(default=0, description="Agents or sessions blocked by setup/certification gaps")
+    runner_session_failures: int = Field(default=0, description="Sessions or events that indicate runner/session failure")
+    reviewer_rejections: int = Field(default=0, description="Sessions with reviewer rejection outcomes")
+    reviewer_failures: int = Field(default=0, description="Sessions with reviewer execution or decision failures")
+    governance_denials: int = Field(default=0, description="Sessions with governance or permission-denial outcomes")
+
+
+class ACPExecutionHealthAgentSummary(BaseModel):
+    """Compatibility and setup posture for one configured ACP agent."""
+    agent_type: str = Field(..., description="Agent type identifier")
+    name: str = Field(default="", description="Human-readable agent name")
+    is_configured: bool = Field(default=False, description="Whether local prerequisites appear configured")
+    support_state: ACPSupportState = Field(default="documented_unverified")
+    verification_level: ACPVerificationLevel = Field(default="documented_only")
+    setup_blocked: bool = Field(default=False, description="Whether this agent contributes a setup blocker")
+    primary_blocker: str | None = Field(default=None, description="Primary setup or entrypoint blocker, if known")
+
+
+class ACPExecutionHealthCompatibilitySummary(BaseModel):
+    """Downstream-agent compatibility evidence summary for ACP admin reporting."""
+    by_support_state: dict[str, int] = Field(default_factory=dict)
+    documented_unverified_agents: list[str] = Field(default_factory=list)
+    live_certification_required: bool = Field(default=False)
+    docs_url: str = Field(default=ACP_COMPATIBILITY_DOCS_URL)
+
+
+class ACPExecutionHealthRetentionSummary(BaseModel):
+    """Configured ACP retention posture for admin execution-health reporting."""
+    session_retention_days: int = Field(default=30)
+    audit_retention_days: int = Field(default=30)
+    policy: str = Field(default="closed_error_sessions_and_audit_events_purged_after_retention")
+
+
+class ACPExecutionHealthRedactionSummary(BaseModel):
+    """Redaction posture for support-safe ACP drill-through surfaces."""
+    detail_events_artifacts_redacted_views: bool = Field(default=True)
+    diagnostics_sanitized: bool = Field(default=True)
+    audit_metadata_sanitized: bool = Field(default=True)
+
+
+class ACPExecutionHealthSummaryResponse(BaseModel):
+    """Admin ACP execution-health rollup across sessions, agents, and support posture."""
+    timestamp: str = Field(..., description="ISO 8601 timestamp for this summary")
+    range_days: int = Field(..., description="Lookback window used for session aggregation")
+    sessions: ACPExecutionHealthSessionSummary = Field(default_factory=ACPExecutionHealthSessionSummary)
+    failure_buckets: ACPExecutionHealthFailureBuckets = Field(default_factory=ACPExecutionHealthFailureBuckets)
+    agents: list[ACPExecutionHealthAgentSummary] = Field(default_factory=list)
+    compatibility: ACPExecutionHealthCompatibilitySummary = Field(default_factory=ACPExecutionHealthCompatibilitySummary)
+    retention: ACPExecutionHealthRetentionSummary = Field(default_factory=ACPExecutionHealthRetentionSummary)
+    redaction: ACPExecutionHealthRedactionSummary = Field(default_factory=ACPExecutionHealthRedactionSummary)
+
+
 class ACPAgentUsageItem(BaseModel):
     """Aggregated usage statistics for a single agent type."""
     agent_type: str
