@@ -13,7 +13,10 @@ import {
   OPEN_PROMPT_SELECT_EVENT,
   type PromptSelectOpenDetail
 } from "@/utils/prompt-select-events"
-import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import {
+  normalizeFocusSelector,
+  scheduleFocusFirstVisibleElement
+} from "@/utils/focus-return"
 import { IconButton } from "./IconButton"
 import {
   normalizeSystemPromptOverrideValue,
@@ -255,9 +258,9 @@ export const PromptSelect: React.FC<Props> = ({
 
     const handleOpenPromptSelect = (event: Event) => {
       const detail = (event as CustomEvent<PromptSelectOpenDetail>).detail
-      if (detail?.returnFocusSelector) {
-        returnFocusSelectorRef.current = detail.returnFocusSelector
-      }
+      returnFocusSelectorRef.current = normalizeFocusSelector(
+        detail?.returnFocusSelector
+      )
       setDropdownOpen(true)
     }
 

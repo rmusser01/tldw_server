@@ -309,11 +309,14 @@ export const Playground = () => {
         );
         setSelectedSystemPromptStatus(prompt ? "loaded" : "unavailable");
       })
-      .catch(() => {
-        if (!cancelled) {
-          setSelectedSystemPromptRecord(null);
-          setSelectedSystemPromptStatus("unavailable");
-        }
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("[Playground] Failed to resolve selected system prompt", {
+          promptId,
+          error,
+        });
+        setSelectedSystemPromptRecord(null);
+        setSelectedSystemPromptStatus("unavailable");
       });
 
     return () => {

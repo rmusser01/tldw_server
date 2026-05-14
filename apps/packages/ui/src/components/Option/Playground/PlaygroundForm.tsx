@@ -90,7 +90,10 @@ import type { Character } from "@/types/character";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
-import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
+import {
+  normalizeFocusSelector,
+  scheduleFocusFirstVisibleElement,
+} from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
@@ -1142,8 +1145,9 @@ export const PlaygroundForm = ({
     if (typeof window === "undefined") return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<ModelSettingsOpenDetail>).detail;
-      modelSettingsReturnFocusSelectorRef.current =
-        detail?.returnFocusSelector ?? null;
+      modelSettingsReturnFocusSelectorRef.current = normalizeFocusSelector(
+        detail?.returnFocusSelector,
+      );
       setOpenModelSettings(true);
     };
     window.addEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
@@ -1290,8 +1294,9 @@ export const PlaygroundForm = ({
     if (typeof window === "undefined") return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<McpSettingsOpenDetail>).detail;
-      mcpSettingsReturnFocusSelectorRef.current =
-        detail?.returnFocusSelector ?? null;
+      mcpSettingsReturnFocusSelectorRef.current = normalizeFocusSelector(
+        detail?.returnFocusSelector,
+      );
       closeComposerPopoversExcept("mcp");
       setMcpPopoverOpen(false);
       setMcpSettingsOpen(true);
