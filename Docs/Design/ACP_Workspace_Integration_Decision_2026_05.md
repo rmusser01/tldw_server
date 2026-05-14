@@ -193,8 +193,11 @@ ACP detail routes. Support-safe views should prefer the existing `redacted=true`
 ACP route behavior and sanitized diagnostic/audit metadata.
 
 Generated work products promoted into canonical workspace artifacts must follow
-the future artifact contract in #1525. Until that lands, ACP run artifacts stay
-linked as execution outputs, not polished workspace work products.
+the traceable work-product artifact contract in
+[#1525](https://github.com/rmusser01/tldw_server/issues/1525) and
+[`Traceable_Work_Product_Artifact_Contract.md`](../Product/Traceable_Work_Product_Artifact_Contract.md).
+ACP run artifacts stay linked as execution outputs unless they satisfy that
+contract and are explicitly promoted as workspace work products.
 
 ## MCP, Trusted Roots, And Environment Flow
 
@@ -330,7 +333,7 @@ Scope:
   execution workspace distinction.
 - Run Bandit on touched backend paths when implementation code changes.
 - Update #1540 with the bridge decision and implementation issue list.
-- Keep #1538 blocked on #1525 for polished artifact promotion.
+- Keep #1538 aligned with #1525 for polished artifact promotion.
 - Keep #1537 downstream of stable workspace, artifact, retention, redaction,
   compatibility, and admin/deployment signals.
 
@@ -340,7 +343,8 @@ Scope:
 - No ACP-only workspace browser.
 - No public agent marketplace or installer.
 - No new secret-management system for workspace env vars.
-- No promotion of ACP run artifacts into canonical work products before #1525.
+- No promotion of ACP run artifacts into canonical work products unless the
+  promoted output satisfies the traceable work-product artifact contract.
 
 ## Open Questions
 
@@ -349,8 +353,8 @@ Scope:
 - Should WorkspacePlayground create execution workspaces automatically, or
   require explicit user confirmation when a filesystem root/env/MCP config is
   needed?
-- Which artifact states from #1525 are required before ACP-generated outputs can
-  appear as accepted workspace artifacts?
+- Which artifact states from #1525 should be implemented in the first
+  storage/API slice for accepted ACP-generated workspace artifacts?
 
 ## Acceptance Mapping For #1540
 

@@ -301,9 +301,10 @@ The response includes:
 - `agents[]` entries with per-agent setup and compatibility posture, including
   `support_state`, `verification_level`, `setup_blocked`, and
   `primary_blocker`.
-- `compatibility.by_support_state`, `documented_unverified_agents`, and
-  `live_certification_required` so admin reporting can distinguish documented
-  candidates from live-certified agents without overstating support.
+- `compatibility.by_support_state`, `compatibility.documented_unverified_agents`,
+  and `compatibility.live_certification_required` so admin reporting can
+  distinguish documented candidates from live-certified agents without
+  overstating support.
 - `retention` and `redaction` summaries that mirror the configured ACP
   retention policy and the support-safe redaction posture for details, events,
   artifacts, diagnostics, and audit metadata.
@@ -327,6 +328,43 @@ Keep the closeout boundaries separate: #1537 owns the summary contract and
 initial admin display; #1512 owns retention cleanup, #1513 owns support-safe
 redacted views, #1529 owns broader admin/deployment packaging, and #1563/#1564
 own live downstream-agent certification evidence.
+
+### Traceable ACP Output Artifacts
+
+ACP exposes low-level session artifacts today through
+`GET /api/v1/acp/sessions/{session_id}/artifacts`. Those records are execution
+evidence, not automatically accepted workspace work products. The product-level
+promotion contract is
+[`Traceable_Work_Product_Artifact_Contract.md`](../Product/Traceable_Work_Product_Artifact_Contract.md).
+
+When an ACP output is promoted into a generated work-product artifact, the
+artifact record should keep:
+
+- ACP producer metadata: task ID, run ID, session ID, agent type, reviewer run
+  ID when applicable, and normalized completion reason.
+- Source lineage: selected workspace sources, retrieval or MCP/tool evidence,
+  citations, and uncited generated sections.
+- Review metadata: reviewer decision, rejection or revision reason code, retry
+  count, triage state, and accepted/needs-revision/rejected artifact state.
+- Version metadata: root artifact ID, previous version ID, revision reason, and
+  export references tied to the artifact version.
+- Redaction posture: full-fidelity owner/admin views can link back to ACP detail,
+  events, artifacts, diagnostics, and audit; support-safe views must use the
+  existing `?redacted=true` ACP surfaces and sanitized diagnostic/audit metadata.
+
+Do not promote these ACP records as work-product artifacts:
+
+- raw prompts, transcript events, raw payloads, command arguments, local paths,
+  environment values, or diagnostic text
+- low-level session artifacts without owner/workspace placement, source
+  lineage, review state, and version metadata
+- rejected or triaged outputs unless a user explicitly creates a new draft or
+  revision from them
+
+Implementation should stay split across storage/API promotion, UI artifact
+detail, and verification. The first implementation should use one golden-path
+deliverable, such as a source-grounded workspace brief, before broadening to
+template-specific output types.
 
 ### Frontend Setup And Diagnostics Surfaces
 
