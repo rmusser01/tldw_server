@@ -12,6 +12,9 @@ from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_library_service import PersonaVisualLibraryServiceError
+from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
+    DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -180,6 +183,19 @@ def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(
     assert response.json() == {"detail": "Persona disabled"}
 
 
+def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get(
+            f"/api/v1/persona/visual-starter-packs/{DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID}"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
+    assert payload["manifest"]["renderer_type"] == "sprite_frames"
+    assert payload["assets"][0]["mime_type"] == "image/png"
+
+
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     response = client.post(
         f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets",
@@ -332,6 +348,79 @@ def test_duplicate_visual_pack_rejects_other_user_target(persona_db: CharactersR
     assert response.json()["detail"]["code"] == "target_persona_not_found"
 
 
+def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-starter-packs")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [item["id"] for item in payload["starter_packs"]] == [
+        DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
+    ]
+    starter = payload["starter_packs"][0]
+    assert starter["title"] == "Research Buddy Starter"
+    assert starter["renderer_type"] == "sprite_frames"
+    assert starter["asset_count"] == 1
+    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
+        set(starter["states_offered"])
+    )
+
+
+def test_copy_visual_starter_pack_creates_draft_without_activation(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Starter Target")
+        active_pack = _create_visual_pack(client, persona_id, title="Existing active visual")
+        active_asset = _upload_png(client, persona_id, active_pack["id"])
+        manifest_response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{active_pack['id']}/manifest",
+            json={"manifest": _valid_manifest(active_asset["id"]), "expected_version": active_pack["version"]},
+        )
+        assert manifest_response.status_code == 200, manifest_response.text
+        active_pack = manifest_response.json()
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{active_pack['id']}/activate"
+        )
+        assert activated.status_code == 200, activated.text
+
+        response = client.post(
+            f"/api/v1/persona/visual-starter-packs/{DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID}/copy",
+            json={"target_persona_id": persona_id},
+        )
+
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload["title"] == "Research Buddy Starter"
+        assert payload["persona_id"] == persona_id
+        assert payload["status"] == "draft"
+        assert payload["provenance"] == "imported"
+        assert payload["parent_pack_id"] is None
+        assert payload["active_at"] is None
+        assert len(payload["assets"]) == 1
+        assert payload["assets"][0]["provenance"] == "imported"
+        assert "starter_idle" not in str(payload["manifest"])
+        assert persona_db.get_active_persona_visual_pack(
+            persona_id=persona_id,
+            user_id="1",
+        )["id"] == active_pack["id"]
+
+
+def test_copy_visual_starter_pack_rejects_unknown_starter(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Starter Target")
+
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/missing-starter/copy",
+            json={"target_persona_id": persona_id},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "starter_pack_not_found"
+
+
 def test_visual_library_save_list_update_and_delete(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Library Source Persona")
@@ -444,6 +533,22 @@ def test_visual_library_use_creates_target_draft_without_activation(persona_db: 
             persona_id=target_persona_id,
             user_id="1",
         )["id"] == target_pack["id"]
+
+
+def test_copy_persona_visual_starter_pack_rejects_other_user_target(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(2, persona_db) as other_client:
+        other_persona_id = _create_persona(other_client, name="Other Starter Target")
+
+    with _client_for_user(1, persona_db) as client:
+        response = client.post(
+            f"/api/v1/persona/visual-starter-packs/{DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID}/copy",
+            json={"target_persona_id": other_persona_id},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "target_persona_not_found"
 
 
 def test_visual_library_stale_source_returns_409_but_delete_succeeds(
