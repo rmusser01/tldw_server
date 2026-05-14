@@ -803,7 +803,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-error-access-den-15hzb7i",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-error-access-den-15rywwh",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -814,7 +814,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-not-avai-fzf6y",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-not-avai-5zthz",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -825,7 +825,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-system-d-1qxngtg",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-system-d-1ptp21k",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -836,7 +836,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-host-loc-14cd7e9",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-warning-host-loc-181f9nf",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -847,7 +847,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-sandbox-uqls7g",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-sandbox-1vx7onp",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -858,7 +858,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-alert-ru-1esujwv",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-alert-ru-1dow54z",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -869,7 +869,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-recent-a-xv18cq",
+    "id": "antd-product-state-import:src/components/Option/Admin/MonitoringDashboardPage.tsx:Alert#antd-alert-monitoringdashboardpage-type-info-no-recent-a-uj6012",
     "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -5101,28 +5101,6 @@
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/WorkflowEditor/NodePalette.tsx before the guard.",
     "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Ready",
-    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
-    "replacement": "design-system state registry",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/Admin/MonitoringDashboardPage.tsx:Unavailable",
-    "path": "src/components/Option/Admin/MonitoringDashboardPage.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Unavailable",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing canonical-state-label product-state UI in src/components/Option/Admin/MonitoringDashboardPage.tsx before the guard.",
-    "replacement": "design-system state registry",
     "migrationQueue": "shared-product-state"
   },
   {

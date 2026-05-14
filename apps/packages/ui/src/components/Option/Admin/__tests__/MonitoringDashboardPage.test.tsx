@@ -20,6 +20,11 @@ const mocks = vi.hoisted(() => ({
   getCurrentUserProfile: vi.fn()
 }))
 
+const designSystemLabels = vi.hoisted(() => ({
+  ready: "Registry Ready",
+  unavailable: "Registry Unavailable"
+}))
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getSystemStats: (...args: unknown[]) => mocks.getSystemStats(...args),
@@ -37,6 +42,30 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        if (key === "ready") {
+          return { ...state, label: designSystemLabels.ready }
+        }
+
+        if (key === "unavailable") {
+          return { ...state, label: designSystemLabels.unavailable }
+        }
+
+        return state
+      }
+    )
+  }
+})
+
+import { getDesignSystemState } from "@/design-system"
 import MonitoringDashboardPage from "../MonitoringDashboardPage"
 
 describe("MonitoringDashboardPage", () => {
@@ -181,6 +210,34 @@ describe("MonitoringDashboardPage", () => {
     expect(screen.getByText("seatbelt")).toBeTruthy()
     expect(screen.getByText("worktree")).toBeTruthy()
     expect(screen.getByText(/not VM-grade isolation/i)).toBeTruthy()
+  })
+
+  it("uses design-system state labels for sandbox readiness summary counts", async () => {
+    mocks.getSandboxRuntimeDiagnostics.mockResolvedValue({
+      source: "feature_discovery",
+      summary: {
+        total: 3,
+        ready: 2,
+        unavailable: 1,
+        host_gated: 0,
+        scaffold: 0,
+        host_local_warning_runtimes: [],
+        repair_supported_runtimes: []
+      },
+      runtimes: [],
+      startup_warning_summary: null
+    })
+
+    render(<MonitoringDashboardPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText(designSystemLabels.ready)).toBeTruthy()
+    })
+    expect(screen.getByText(designSystemLabels.unavailable)).toBeTruthy()
+    expect(screen.getByText("2")).toBeTruthy()
+    expect(screen.getByText("1")).toBeTruthy()
+    expect(getDesignSystemState).toHaveBeenCalledWith("ready")
+    expect(getDesignSystemState).toHaveBeenCalledWith("unavailable")
   })
 
   it("distinguishes forbidden sandbox diagnostics from unavailable diagnostics", async () => {
