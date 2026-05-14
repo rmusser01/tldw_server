@@ -94,14 +94,19 @@ is still a review-only path: no asset rows or pack rows are committed, no pack i
 activated, no runtime renderer is loaded, and no MCP provider behavior is added.
 
 ### Sprite Atlas Frames
+## Sprite Atlas Packs
 
-Sprite atlases are represented as `sprite_frames` packs. In this slice,
-`sprite_sheet` is an asset role, not a separate `renderer_type`; manifests that
-set `renderer_type: "sprite_sheet"` are still unsupported for activation.
+Sprite atlas support is part of the existing `sprite_frames` renderer. In this
+slice, `sprite_sheet` is an asset role, not a renderer type; manifests with
+`renderer_type: "sprite_sheet"` are still rejected by the V1 renderer capability
+contract.
 
-Atlas-backed animations reference the atlas asset from each frame and include a
-pixel `region` rectangle. The same atlas asset can be reused across multiple
-frames:
+Atlas-backed animations reference one bounded raster asset from each frame and
+crop individual frames with a pixel `frames[].region` rectangle. The same atlas
+asset can be reused across multiple frames. Use `preview_frame` when the preview
+should use a specific atlas crop; it is a zero-based frame index and must satisfy
+`0 <= preview_frame < len(frames)`. `preview_asset_id` is better for
+separate-frame animations with distinct asset IDs.
 
 ```json
 {
@@ -117,6 +122,7 @@ frames:
   "animations": {
     "idle_loop": {
       "frame_rate": 8,
+      "preview_frame": 1,
       "frames": [
         {
           "asset_id": "atlas-main",
@@ -146,11 +152,11 @@ frames:
 The referenced asset row should use `asset_role: "sprite_sheet"` and must still
 be a bounded raster image accepted by the normal visual upload/import path.
 Backend validation rejects non-integer coordinates or dimensions, negative x/y
-coordinates, or non-positive width/height dimensions. It also rejects out-of-bounds
-regions when source dimensions are known. When dimensions are not yet available, draft validation
-can accept integer regions with non-negative x/y coordinates and positive
-width/height dimensions, and the Buddy renderer remains fail-soft at runtime if
-a region cannot be rendered safely.
+coordinates, or non-positive width/height dimensions. It also rejects
+out-of-bounds regions when source dimensions are known. When dimensions are not
+yet available, draft validation can accept integer regions with non-negative x/y
+coordinates and positive width/height dimensions, and the Buddy renderer remains
+fail-soft at runtime if a region cannot be rendered safely.
 
 ## Personal Library
 

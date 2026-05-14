@@ -70,6 +70,86 @@ export interface VNScriptTemplateListResponse {
   items: VNScriptTemplateSummary[];
 }
 
+export interface VNScriptAuthoringOperation {
+  op: string;
+  label: string;
+  category: string;
+  description?: string | null;
+  fields: Array<Record<string, unknown>>;
+  capability_tokens: string[];
+  forbidden_fields: string[];
+  supports_condition: boolean;
+  preview?: Record<string, unknown> | null;
+  output_compatibility: Record<string, unknown>;
+  notes: string[];
+}
+
+export interface VNScriptAuthoringSnippet {
+  id: string;
+  schema_version: 'vn_script_program.v1';
+  label: string;
+  operation_sequence: string[];
+  required_capability_tokens: string[];
+  parameters_schema: Record<string, unknown>;
+  default_parameters: Record<string, unknown>;
+  preview: Array<Record<string, unknown>>;
+}
+
+export interface VNScriptAuthoringCatalogResponse {
+  schema_version: 'vn_script_authoring_catalog.v1';
+  program_schema_version: 'vn_script_program.v1';
+  capability_tokens: string[];
+  generation_output_schemas: string[];
+  operation_categories: Record<string, string[]>;
+  operations: VNScriptAuthoringOperation[];
+  snippets: VNScriptAuthoringSnippet[];
+  limits: Record<string, number>;
+}
+
+export type VNScriptSnippetAnchor =
+  | { label: string; mode?: 'append'; op_index?: number | null }
+  | { label: string; mode: 'before' | 'after'; op_index: number };
+
+export interface VNScriptSnippetPreviewRequest {
+  snippet_id: string;
+  anchor: VNScriptSnippetAnchor;
+  parameters?: Record<string, unknown>;
+  draft?: Record<string, unknown> | null;
+  draft_revision?: number | null;
+}
+
+export interface VNScriptSnippetApplyRequest {
+  if_revision: number;
+  snippet_id: string;
+  anchor: VNScriptSnippetAnchor;
+  parameters?: Record<string, unknown>;
+}
+
+export interface VNScriptSnippetPatchSummary {
+  inserted_ops: number;
+  created_labels: string[];
+  changed_paths: string[];
+}
+
+export interface VNScriptSnippetPreviewResponse {
+  script_id: number;
+  base_revision: number;
+  snippet_id: string;
+  draft: Record<string, unknown>;
+  diagnostics: Record<string, unknown>;
+  patch_summary: VNScriptSnippetPatchSummary;
+  warnings: Array<Record<string, unknown>>;
+}
+
+export interface VNScriptSnippetApplyResponse {
+  script_id: number;
+  revision: number;
+  snippet_id: string;
+  draft: Record<string, unknown>;
+  diagnostics: Record<string, unknown>;
+  patch_summary: VNScriptSnippetPatchSummary;
+}
+
 export type VNScriptCreateFromTemplateRequest = Omit<VNScriptCreate, 'title'> & {
   title?: string | null;
 };

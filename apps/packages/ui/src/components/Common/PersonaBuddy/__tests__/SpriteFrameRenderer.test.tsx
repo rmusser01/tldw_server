@@ -159,6 +159,41 @@ describe("SpriteFrameRenderer", () => {
     expect(currentFrame()).toHaveAttribute("data-visual-state", "idle")
   })
 
+  it("uses preview_frame for atlas animations that share one asset", () => {
+    render(
+      <SpriteFrameRenderer
+        manifest={baseManifest({
+          animations: {
+            idle: {
+              preview_frame: 1,
+              frames: [
+                {
+                  asset_id: "sheet-1",
+                  region: { x: 0, y: 0, width: 16, height: 16 },
+                  duration_ms: 100
+                },
+                {
+                  asset_id: "sheet-1",
+                  region: { x: 16, y: 0, width: 16, height: 16 },
+                  duration_ms: 100
+                }
+              ]
+            }
+          }
+        })}
+        assets={assets}
+        state="idle"
+        fallbackLabel="Buddy"
+      />
+    )
+
+    expect(currentFrame()).toHaveStyle({
+      backgroundPosition: "-16px 0px",
+      width: "16px",
+      height: "16px"
+    })
+  })
+
   it("falls back to idle when the requested state is missing", () => {
     render(
       <SpriteFrameRenderer

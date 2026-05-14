@@ -1,5 +1,5 @@
 import React from "react"
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -25,6 +25,10 @@ const acpMocks = vi.hoisted(() => ({
   getSessionUsage: vi.fn()
 }))
 
+const mediaMocks = vi.hoisted(() => ({
+  isMobile: false
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
@@ -42,7 +46,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => mediaMocks.isMobile
 }))
 
 vi.mock("@/hooks/useACPSession", () => ({
@@ -91,8 +95,16 @@ vi.mock("@/services/acp/client", () => ({
 
 vi.mock("antd", () => ({
   Drawer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  Tabs: ({ items }: { items?: Array<{ children?: React.ReactNode }> }) => (
-    <div>{items?.map((item, index) => <div key={index}>{item.children}</div>)}</div>
+  Tabs: ({
+    activeKey,
+    items
+  }: {
+    activeKey?: string
+    items?: Array<{ children?: React.ReactNode }>
+  }) => (
+    <div data-testid={`acp-tabs-${activeKey ?? "none"}`}>
+      {items?.map((item, index) => <div key={index}>{item.children}</div>)}
+    </div>
   )
 }))
 
@@ -139,6 +151,8 @@ describe("ACPPlayground canonical connection config", () => {
   beforeEach(() => {
     useACPSessionsStore.getState().reset()
     vi.clearAllMocks()
+    mediaMocks.isMobile = false
+    window.history.pushState({}, "", "/acp-playground")
     acpMocks.constructedConfigs.length = 0
 
     storageMocks.useStorage.mockImplementation((key: string, fallback: unknown) => {
@@ -179,5 +193,31 @@ describe("ACPPlayground canonical connection config", () => {
         offset: 0
       })
     })
+  })
+
+  it("activates ACP sessions and session views from history deep links", async () => {
+    mediaMocks.isMobile = true
+    window.history.pushState(
+      {},
+      "",
+      "/acp-playground?session=sess-linked&view=diagnostics"
+    )
+    acpMocks.listSessions.mockResolvedValue({
+      sessions: [
+        {
+          session_id: "sess-linked",
+          name: "Linked Session",
+          status: "active",
+          updated_at: "2026-05-13T14:00:00.000Z"
+        }
+      ]
+    })
+
+    renderPlayground()
+
+    await waitFor(() => {
+      expect(useACPSessionsStore.getState().activeSessionId).toBe("sess-linked")
+    })
+    expect(screen.getByTestId("acp-tabs-sessions")).toBeInTheDocument()
   })
 })

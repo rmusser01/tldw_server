@@ -103,6 +103,138 @@ class VNScriptTemplateListResponse(BaseModel):
     items: list[VNScriptTemplateSummary]
 
 
+class VNScriptAuthoringOperation(BaseModel):
+    """Preview-safe VN script operation metadata."""
+
+    op: str
+    label: str
+    category: str
+    description: str | None = None
+    fields: list[dict[str, Any]] = Field(default_factory=list)
+    capability_tokens: list[str] = Field(default_factory=list)
+    forbidden_fields: list[str] = Field(default_factory=list)
+    supports_condition: bool = False
+    preview: dict[str, Any] | None = None
+    output_compatibility: dict[str, Any] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptAuthoringSnippet(BaseModel):
+    """Preview-safe VN script snippet metadata."""
+
+    id: str
+    schema_version: Literal["vn_script_program.v1"]
+    label: str
+    operation_sequence: list[str] = Field(default_factory=list)
+    required_capability_tokens: list[str] = Field(default_factory=list)
+    parameters_schema: dict[str, Any]
+    default_parameters: dict[str, Any] = Field(default_factory=dict)
+    preview: list[dict[str, Any]]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptAuthoringCatalogResponse(BaseModel):
+    """VN script authoring operation and snippet catalog response."""
+
+    schema_version: Literal["vn_script_authoring_catalog.v1"]
+    program_schema_version: Literal["vn_script_program.v1"]
+    capability_tokens: list[str] = Field(default_factory=list)
+    generation_output_schemas: list[str] = Field(default_factory=list)
+    operation_categories: dict[str, list[str]]
+    operations: list[VNScriptAuthoringOperation]
+    snippets: list[VNScriptAuthoringSnippet]
+    limits: dict[str, int]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptSnippetAnchor(BaseModel):
+    """Snippet insertion anchor."""
+
+    label: str = Field(..., min_length=1)
+    mode: Literal["append", "before", "after"] = "append"
+    op_index: int | None = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "VNScriptSnippetAnchor":
+        if self.mode in {"before", "after"} and self.op_index is None:
+            raise ValueError("op_index_required")
+        if self.mode == "append":
+            self.op_index = None
+        return self
+
+
+class VNScriptSnippetPreviewRequest(BaseModel):
+    """Preview a snippet patch against the stored or supplied draft."""
+
+    snippet_id: str = Field(..., min_length=1, max_length=80)
+    anchor: VNScriptSnippetAnchor
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    draft: dict[str, Any] | None = None
+    draft_revision: int | None = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_draft_revision(self) -> "VNScriptSnippetPreviewRequest":
+        if self.draft is not None and self.draft_revision is None:
+            raise ValueError("draft_revision_required")
+        return self
+
+
+class VNScriptSnippetApplyRequest(BaseModel):
+    """Apply a snippet patch to the stored draft."""
+
+    if_revision: int = Field(..., ge=0)
+    snippet_id: str = Field(..., min_length=1, max_length=80)
+    anchor: VNScriptSnippetAnchor
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptSnippetPatchSummary(BaseModel):
+    """Summary of a snippet patch."""
+
+    inserted_ops: int = Field(..., ge=0)
+    created_labels: list[str] = Field(default_factory=list)
+    changed_paths: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptSnippetPreviewResponse(BaseModel):
+    """Snippet preview response."""
+
+    script_id: int
+    base_revision: int
+    snippet_id: str
+    draft: dict[str, Any]
+    diagnostics: dict[str, Any]
+    patch_summary: VNScriptSnippetPatchSummary
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptSnippetApplyResponse(BaseModel):
+    """Snippet apply response."""
+
+    script_id: int
+    revision: int
+    snippet_id: str
+    draft: dict[str, Any]
+    diagnostics: dict[str, Any]
+    patch_summary: VNScriptSnippetPatchSummary
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class VNScriptCreateFromTemplateRequest(BaseModel):
     """Create request for a VN script starter template."""
 

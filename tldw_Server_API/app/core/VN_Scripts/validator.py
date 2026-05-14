@@ -52,6 +52,21 @@ _KNOWN_OPS = {
 }
 
 
+def known_script_ops() -> tuple[str, ...]:
+    """Return canonical VN script operation identifiers."""
+    return tuple(sorted(_KNOWN_OPS))
+
+
+def supported_generation_output_schemas() -> tuple[str, ...]:
+    """Return generation output schemas accepted by the script validator."""
+    return tuple(sorted(_SUPPORTED_OUTPUT_SCHEMAS))
+
+
+def forbidden_generation_routing_keys() -> tuple[str, ...]:
+    """Return raw generation routing keys that script programs must not contain."""
+    return tuple(sorted(_RAW_GENERATION_ROUTING_KEYS))
+
+
 @dataclass(frozen=True)
 class VNScriptValidationContext:
     """Resolved context used by the pure script validator."""

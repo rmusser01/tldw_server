@@ -3,24 +3,32 @@ import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
 import JsonEditor from '@web/components/ui/JsonEditor';
+import { apiClient } from '@web/lib/api';
 import {
+  applyVNScriptSnippet,
   createVNScriptFromTemplate,
   createVNScript,
   evaluateVNScriptVersionPolicy,
+  getVNScriptAuthoringCatalog,
   getVNScriptDiagnostics,
   getVNScriptDraft,
   getVNScriptManifestSnapshot,
   listVNScriptTemplates,
   listVNScripts,
   listVNScriptVersions,
+  previewVNScriptSnippet,
   publishVNScript,
   putVNScriptDraft,
   validateVNScriptDraft,
 } from '@web/lib/api/vnScripts';
 import type {
+  VNScriptAuthoringCatalogResponse,
+  VNScriptAuthoringSnippet,
   VNScriptContentRating,
   VNScriptDiagnosticsResponse,
   VNScriptDraftResponse,
+  VNScriptSnippetAnchor,
+  VNScriptSnippetPreviewResponse,
   VNScriptResponse,
   VNScriptTemplateSummary,
   VNScriptValidationResponse,
@@ -28,6 +36,17 @@ import type {
 } from '@web/types/vn-scripts';
 
 const contentRatings: VNScriptContentRating[] = ['general', 'teen', 'suggestive', 'mature'];
+const defaultSnippetAnchor: VNScriptSnippetAnchor = { label: 'start', mode: 'append', op_index: null };
+
+interface VNCapabilities {
+  features?: Record<string, boolean>;
+}
+
+interface ParameterField {
+  enum?: unknown[];
+  title?: string;
+  type?: string | string[];
+}
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
@@ -99,6 +118,99 @@ function summaryLines(value: unknown): string[] {
   return (JSON.stringify(summarized ?? null, null, 2) ?? 'null').split('\n');
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function readErrorCode(record: Record<string, unknown> | null): string | undefined {
+  if (!record) return undefined;
+  return (
+    readString(record.reason) ??
+    readString(record.error_code) ??
+    readErrorCode(asRecord(record.detail)) ??
+    readErrorCode(asRecord(record.details)) ??
+    readString(record.message) ??
+    readString(record.code)
+  );
+}
+
+function titleCase(value: string): string {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getParameterProperties(snippet: VNScriptAuthoringSnippet): Record<string, ParameterField> {
+  const properties = snippet.parameters_schema?.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {};
+  return properties as Record<string, ParameterField>;
+}
+
+function parameterType(field: ParameterField): string | null {
+  if (Array.isArray(field.type)) {
+    return field.type.find((type) => type !== 'null') ?? null;
+  }
+  return field.type ?? null;
+}
+
+function enumOptionValue(index: number): string {
+  return `enum-${index}`;
+}
+
+function enumValueFromOption(field: ParameterField, optionValue: unknown): unknown {
+  if (!field.enum?.length || typeof optionValue !== 'string') return optionValue;
+  const match = /^enum-(\d+)$/.exec(optionValue);
+  if (!match) return optionValue;
+  const index = Number(match[1]);
+  return Number.isInteger(index) && index >= 0 && index < field.enum.length
+    ? field.enum[index]
+    : optionValue;
+}
+
+function selectedEnumOptionValue(field: ParameterField, value: unknown): string {
+  const index = field.enum?.findIndex((option) => Object.is(option, value)) ?? -1;
+  return index >= 0 ? enumOptionValue(index) : '';
+}
+
+function coerceParameterValue(field: ParameterField, value: unknown): unknown {
+  const type = parameterType(field);
+  if (field.enum?.length) return enumValueFromOption(field, value);
+  if (type === 'number' || type === 'integer') {
+    if (value === '') return '';
+    const nextNumber = Number(value);
+    return Number.isFinite(nextNumber) ? nextNumber : value;
+  }
+  if (type === 'boolean') return Boolean(value);
+  if (type === 'string') return String(value ?? '');
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function snippetCategory(
+  snippet: VNScriptAuthoringSnippet,
+  catalog: VNScriptAuthoringCatalogResponse
+): string {
+  const firstOperation = snippet.operation_sequence[0];
+  const operationCategory = catalog.operations.find((operation) => operation.op === firstOperation)?.category;
+  if (operationCategory) return operationCategory;
+  const categoryMatch = Object.entries(catalog.operation_categories).find(([, operations]) =>
+    operations.includes(firstOperation)
+  );
+  return categoryMatch?.[0] ?? 'other';
+}
+
 export default function VNScriptsWorkbench() {
   const [scripts, setScripts] = useState<VNScriptResponse[]>([]);
   const [templates, setTemplates] = useState<VNScriptTemplateSummary[]>([]);
@@ -110,8 +222,11 @@ export default function VNScriptsWorkbench() {
   const [diagnostics, setDiagnostics] = useState<VNScriptDiagnosticsResponse | null>(null);
   const [manifestSnapshots, setManifestSnapshots] = useState<Record<number, unknown>>({});
   const [policySummaries, setPolicySummaries] = useState<Record<number, unknown>>({});
+  const [vnCapabilities, setVnCapabilities] = useState<VNCapabilities | null>(null);
+  const [authoringCatalog, setAuthoringCatalog] = useState<VNScriptAuthoringCatalogResponse | null>(null);
   const [isLoadingScripts, setIsLoadingScripts] = useState(true);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -128,9 +243,26 @@ export default function VNScriptsWorkbench() {
   const [contentRating, setContentRating] = useState<VNScriptContentRating>('teen');
   const [selectedTemplateId, setSelectedTemplateId] = useState('blank');
   const [publishLabel, setPublishLabel] = useState('');
+  const [catalogStatus, setCatalogStatus] = useState<string | null>(null);
+  const [selectedSnippetId, setSelectedSnippetId] = useState('');
+  const [snippetParameters, setSnippetParameters] = useState<Record<string, unknown>>({});
+  const [snippetAnchor, setSnippetAnchor] = useState<VNScriptSnippetAnchor>(defaultSnippetAnchor);
+  const [snippetPreview, setSnippetPreview] = useState<VNScriptSnippetPreviewResponse | null>(null);
+  const [snippetPreviewContextKey, setSnippetPreviewContextKey] = useState<string | null>(null);
+  const [isPreviewingSnippet, setIsPreviewingSnippet] = useState(false);
+  const [isApplyingSnippet, setIsApplyingSnippet] = useState(false);
+  const [snippetError, setSnippetError] = useState<string | null>(null);
   const selectedScriptIdRef = useRef<number | null>(null);
   const draftHydrationRef = useRef<VNScriptDraftResponse | null>(null);
   const publishKeyRef = useRef<Record<string, string>>({});
+  const snippetPreviewContextKeyRef = useRef<string | null>(null);
+  const previewRequestIdRef = useRef(0);
+
+  function clearSnippetPreviewState() {
+    setSnippetPreview(null);
+    setSnippetPreviewContextKey(null);
+    snippetPreviewContextKeyRef.current = null;
+  }
 
   useEffect(() => {
     selectedScriptIdRef.current = selectedScript?.id ?? null;
@@ -151,6 +283,65 @@ export default function VNScriptsWorkbench() {
     [selectedTemplateId, templates]
   );
 
+  const catalogCapabilityTokens = useMemo(() => {
+    const tokens = new Set<string>();
+    if (vnCapabilities?.features) {
+      Object.entries(vnCapabilities.features).forEach(([feature, enabled]) => {
+        if (enabled) tokens.add(feature);
+      });
+    }
+    authoringCatalog?.capability_tokens.forEach((token) => tokens.add(token));
+    authoringCatalog?.generation_output_schemas.forEach((schema) => tokens.add(schema));
+    return tokens;
+  }, [authoringCatalog, vnCapabilities]);
+
+  const visibleSnippets = useMemo(() => {
+    if (!authoringCatalog) return [];
+    return authoringCatalog.snippets.filter((snippet) => {
+      if (!vnCapabilities) return true;
+      return snippet.required_capability_tokens.every((token) => catalogCapabilityTokens.has(token));
+    });
+  }, [authoringCatalog, catalogCapabilityTokens, vnCapabilities]);
+
+  const groupedSnippets = useMemo(() => {
+    if (!authoringCatalog) return [];
+    const groups = new Map<string, VNScriptAuthoringSnippet[]>();
+    visibleSnippets.forEach((snippet) => {
+      const category = snippetCategory(snippet, authoringCatalog);
+      groups.set(category, [...(groups.get(category) ?? []), snippet]);
+    });
+    return Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right));
+  }, [authoringCatalog, visibleSnippets]);
+
+  const selectedSnippet = useMemo(
+    () => visibleSnippets.find((snippet) => snippet.id === selectedSnippetId) ?? null,
+    [selectedSnippetId, visibleSnippets]
+  );
+
+  const savedDraftText = useMemo(() => formatJson(draft?.draft), [draft?.draft]);
+  const hasUnsavedDraftText = draftText !== savedDraftText;
+
+  const currentSnippetPreviewContextKey = useMemo(() => {
+    if (!selectedScript || !selectedSnippet || !draft) return null;
+    return JSON.stringify({
+      script_id: selectedScript.id,
+      draft_script_id: draft.script_id,
+      snippet_id: selectedSnippet.id,
+      anchor: snippetAnchor,
+      parameters: snippetParameters,
+      draft_revision: draft.revision,
+      draft_text: draftText,
+    });
+  }, [draft, draftText, selectedScript, selectedSnippet, snippetAnchor, snippetParameters]);
+
+  const hasCurrentSnippetPreview = Boolean(
+    snippetPreview &&
+    snippetPreviewContextKey &&
+    currentSnippetPreviewContextKey &&
+    snippetPreviewContextKey === currentSnippetPreviewContextKey &&
+    !hasUnsavedDraftText
+  );
+
   const handleTemplateChange = useCallback((templateId: string) => {
     setSelectedTemplateId(templateId);
     const nextTemplate = templates.find((template) => template.id === templateId);
@@ -164,6 +355,39 @@ export default function VNScriptsWorkbench() {
     if (selectedScriptIdRef.current === scriptId) {
       setVersions(nextVersions.items ?? []);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAuthoringCatalog() {
+      setIsLoadingCatalog(true);
+      setCatalogStatus(null);
+      try {
+        const capabilities = await apiClient.get('/vn/vn-capabilities') as VNCapabilities;
+        if (cancelled) return;
+        setVnCapabilities(capabilities);
+        if (capabilities.features?.script_authoring_catalog !== true) {
+          setAuthoringCatalog(null);
+          return;
+        }
+        const catalog = await getVNScriptAuthoringCatalog();
+        if (cancelled) return;
+        setAuthoringCatalog(catalog);
+      } catch {
+        if (!cancelled) {
+          setAuthoringCatalog(null);
+          setCatalogStatus('Guided insert catalog unavailable. Raw JSON editing remains available.');
+        }
+      } finally {
+        if (!cancelled) setIsLoadingCatalog(false);
+      }
+    }
+
+    void loadAuthoringCatalog();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -222,6 +446,7 @@ export default function VNScriptsWorkbench() {
       setDiagnostics(null);
       setManifestSnapshots({});
       setPolicySummaries({});
+      clearSnippetPreviewState();
       return;
     }
 
@@ -240,6 +465,7 @@ export default function VNScriptsWorkbench() {
         setDiagnostics(null);
         setManifestSnapshots({});
         setPolicySummaries({});
+        clearSnippetPreviewState();
         try {
           const nextVersions = await listVNScriptVersions(selectedScript.id);
           if (!cancelled) setVersions(nextVersions.items ?? []);
@@ -258,6 +484,7 @@ export default function VNScriptsWorkbench() {
       setDiagnostics(null);
       setManifestSnapshots({});
       setPolicySummaries({});
+      clearSnippetPreviewState();
       try {
         const [nextDraft, nextVersions] = await Promise.all([
           getVNScriptDraft(selectedScript.id),
@@ -299,6 +526,165 @@ export default function VNScriptsWorkbench() {
       return null;
     }
   }, [draftText]);
+
+  const handleSnippetSelect = useCallback((snippet: VNScriptAuthoringSnippet) => {
+    setSelectedSnippetId(snippet.id);
+    setSnippetParameters({ ...snippet.default_parameters });
+    clearSnippetPreviewState();
+    setSnippetError(null);
+  }, []);
+
+  const handleSnippetParameterChange = useCallback((
+    name: string,
+    field: ParameterField,
+    value: unknown
+  ) => {
+    setSnippetParameters((previous) => ({
+      ...previous,
+      [name]: coerceParameterValue(field, value),
+    }));
+    clearSnippetPreviewState();
+  }, []);
+
+  const handleSnippetAnchorChange = useCallback((nextAnchor: VNScriptSnippetAnchor) => {
+    setSnippetAnchor(nextAnchor);
+    clearSnippetPreviewState();
+  }, []);
+
+  const handlePreviewSnippet = useCallback(async () => {
+    if (!selectedScript || !selectedSnippet) return;
+    const previewScriptId = selectedScript.id;
+    const previewContextKey = currentSnippetPreviewContextKey;
+    const requestDraft = parseDraftText();
+    if (!requestDraft) return;
+    if (!previewContextKey) return;
+
+    setIsPreviewingSnippet(true);
+    setSnippetError(null);
+    setSnippetPreview(null);
+    setSnippetPreviewContextKey(null);
+    snippetPreviewContextKeyRef.current = previewContextKey;
+    const previewRequestId = previewRequestIdRef.current + 1;
+    previewRequestIdRef.current = previewRequestId;
+    try {
+      const preview = await previewVNScriptSnippet(previewScriptId, {
+        snippet_id: selectedSnippet.id,
+        anchor: snippetAnchor,
+        parameters: snippetParameters,
+        draft: requestDraft,
+        draft_revision: draft?.revision ?? null,
+      });
+      if (
+        selectedScriptIdRef.current !== previewScriptId ||
+        snippetPreviewContextKeyRef.current !== previewContextKey
+      ) {
+        return;
+      }
+      setSnippetPreview(preview);
+      setSnippetPreviewContextKey(previewContextKey);
+    } catch (previewError) {
+      if (
+        selectedScriptIdRef.current !== previewScriptId ||
+        snippetPreviewContextKeyRef.current !== previewContextKey
+      ) {
+        return;
+      }
+      setSnippetError(errorMessage(previewError, 'Failed to preview snippet'));
+    } finally {
+      if (previewRequestIdRef.current === previewRequestId) {
+        setIsPreviewingSnippet(false);
+      }
+    }
+  }, [
+    currentSnippetPreviewContextKey,
+    draft?.revision,
+    parseDraftText,
+    selectedScript,
+    selectedSnippet,
+    snippetAnchor,
+    snippetParameters,
+  ]);
+
+  const handleApplySnippet = useCallback(async () => {
+    if (!selectedScript || !selectedSnippet || !draft || !hasCurrentSnippetPreview) return;
+    const scriptId = selectedScript.id;
+    const applyContextKey = snippetPreviewContextKeyRef.current;
+    if (!applyContextKey) return;
+    const isApplyContextCurrent = () =>
+      selectedScriptIdRef.current === scriptId && snippetPreviewContextKeyRef.current === applyContextKey;
+
+    setIsApplyingSnippet(true);
+    setSnippetError(null);
+    setStatusMessage(null);
+    try {
+      const applied = await applyVNScriptSnippet(scriptId, {
+        if_revision: draft.revision,
+        snippet_id: selectedSnippet.id,
+        anchor: snippetAnchor,
+        parameters: snippetParameters,
+      });
+      if (!isApplyContextCurrent()) return;
+      const nextDraft = {
+        script_id: applied.script_id,
+        revision: applied.revision,
+        draft: applied.draft,
+        diagnostics: applied.diagnostics,
+      };
+      setDraft(nextDraft);
+      setDraftText(formatJson(applied.draft));
+      setDiagnostics({
+        script_id: applied.script_id,
+        revision: applied.revision,
+        diagnostics: applied.diagnostics,
+      });
+      setValidation(
+        typeof applied.diagnostics.valid === 'boolean'
+          ? {
+              valid: applied.diagnostics.valid,
+              errors: Array.isArray(applied.diagnostics.errors) ? applied.diagnostics.errors : [],
+              warnings: Array.isArray(applied.diagnostics.warnings) ? applied.diagnostics.warnings : [],
+            }
+          : null
+      );
+      setSnippetPreview({
+        script_id: applied.script_id,
+        base_revision: draft.revision,
+        snippet_id: applied.snippet_id,
+        draft: applied.draft,
+        diagnostics: applied.diagnostics,
+        patch_summary: applied.patch_summary,
+        warnings: [],
+      });
+      setSnippetPreviewContextKey(null);
+      snippetPreviewContextKeyRef.current = null;
+      setStatusMessage(`Applied snippet at revision ${applied.revision}.`);
+    } catch (applyError) {
+      if (!isApplyContextCurrent()) return;
+      const message = errorMessage(applyError, 'Failed to apply snippet');
+      const errorCode = readErrorCode(asRecord(applyError));
+      if (message === 'draft_revision_conflict' || errorCode === 'draft_revision_conflict') {
+        try {
+          const latestDraft = await getVNScriptDraft(scriptId);
+          if (!isApplyContextCurrent()) return;
+          setDraft(latestDraft);
+          setDraftText(formatJson(latestDraft.draft));
+          setDiagnostics(null);
+          setValidation(null);
+          clearSnippetPreviewState();
+          setStatusMessage('Draft changed on the server. Reloaded the latest draft; review before applying again.');
+        } catch {
+          if (!isApplyContextCurrent()) return;
+          setSnippetError('Draft changed on the server. Refresh the draft before applying again.');
+        }
+      } else {
+        setSnippetError(message);
+      }
+    } finally {
+      if (selectedScriptIdRef.current === scriptId) {
+        setIsApplyingSnippet(false);
+      }
+    }
+  }, [draft, hasCurrentSnippetPreview, selectedScript, selectedSnippet, snippetAnchor, snippetParameters]);
 
   const handleCreateScript = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -670,8 +1056,217 @@ export default function VNScriptsWorkbench() {
                   </Button>
                 </div>
               </div>
+              {(isLoadingCatalog || authoringCatalog || catalogStatus) && (
+                <section className="mb-3 rounded-md border border-border bg-bg p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold">Guided insert</h2>
+                    {isLoadingCatalog && <span className="text-xs text-text-muted">Loading catalog...</span>}
+                  </div>
+                  {catalogStatus && (
+                    <p className="rounded-md border border-warn/30 bg-warn/10 p-2 text-sm text-warn">
+                      {catalogStatus}
+                    </p>
+                  )}
+                  {authoringCatalog && (
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.9fr)]">
+                      <div className="space-y-3">
+                        {groupedSnippets.length === 0 ? (
+                          <p className="text-sm text-text-muted">No snippets are available for the current backend capabilities.</p>
+                        ) : (
+                          groupedSnippets.map(([category, snippets]) => (
+                            <div key={category}>
+                              <h3 className="mb-1 text-xs font-semibold uppercase text-text-muted">{titleCase(category)}</h3>
+                              <div className="flex flex-wrap gap-2">
+                                {snippets.map((snippet) => (
+                                  <Button
+                                    key={snippet.id}
+                                    type="button"
+                                    size="xs"
+                                    variant={selectedSnippetId === snippet.id ? 'primary' : 'secondary'}
+                                    onClick={() => handleSnippetSelect(snippet)}
+                                  >
+                                    {snippet.label}
+                                  </Button>
+                                ))}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        {selectedSnippet ? (
+                          <>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {Object.entries(getParameterProperties(selectedSnippet)).map(([name, field]) => {
+                                const label = field.title ?? titleCase(name);
+                                const value = snippetParameters[name] ?? '';
+                                const type = parameterType(field);
+                                if (field.enum?.length) {
+                                  return (
+                                    <label key={name} className="block text-sm font-medium text-text">
+                                      <span className="mb-1 block">{label}</span>
+                                      <select
+                                        aria-label={label}
+                                        className="block w-full rounded-md border-border bg-bg shadow-sm focus:border-primary focus:ring-primary"
+                                        value={selectedEnumOptionValue(field, value)}
+                                        onChange={(event) => handleSnippetParameterChange(name, field, event.target.value)}
+                                      >
+                                        {field.enum.map((option, index) => (
+                                          <option key={`${index}:${String(option)}`} value={enumOptionValue(index)}>{String(option)}</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  );
+                                }
+                                if (type === 'boolean') {
+                                  return (
+                                    <label key={name} className="flex items-center gap-2 text-sm font-medium text-text">
+                                      <input
+                                        aria-label={label}
+                                        type="checkbox"
+                                        checked={Boolean(value)}
+                                        onChange={(event) => handleSnippetParameterChange(name, field, event.target.checked)}
+                                      />
+                                      <span>{label}</span>
+                                    </label>
+                                  );
+                                }
+                                if (type === 'string' || type === 'number' || type === 'integer') {
+                                  return (
+                                    <Input
+                                      key={name}
+                                      label={label}
+                                      type={type === 'string' ? 'text' : 'number'}
+                                      value={type === 'string' ? String(value) : (value as number | '')}
+                                      onChange={(event) => handleSnippetParameterChange(name, field, event.target.value)}
+                                    />
+                                  );
+                                }
+                                return (
+                                  <label key={name} className="block text-sm font-medium text-text sm:col-span-2">
+                                    <span className="mb-1 block">{label}</span>
+                                    <textarea
+                                      aria-label={label}
+                                      className="min-h-24 w-full rounded-md border border-border bg-bg p-2 font-mono text-xs"
+                                      value={typeof value === 'string' ? value : formatJson(value)}
+                                      onChange={(event) => handleSnippetParameterChange(name, field, event.target.value)}
+                                    />
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <div
+                              className={
+                                snippetAnchor.mode === 'append'
+                                  ? 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px]'
+                                  : 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px_120px]'
+                              }
+                            >
+                              <Input
+                                label="Anchor label"
+                                value={snippetAnchor.label}
+                                onChange={(event) => handleSnippetAnchorChange({
+                                  ...snippetAnchor,
+                                  label: event.target.value,
+                                })}
+                              />
+                              <label className="block text-sm font-medium text-text">
+                                <span className="mb-1 block">Anchor mode</span>
+                                <select
+                                  className="block w-full rounded-md border-border bg-bg shadow-sm focus:border-primary focus:ring-primary"
+                                  value={snippetAnchor.mode ?? 'append'}
+                                  onChange={(event) => handleSnippetAnchorChange({
+                                    ...snippetAnchor,
+                                    mode: event.target.value as 'append' | 'before' | 'after',
+                                    op_index: event.target.value === 'append' ? null : snippetAnchor.op_index ?? 0,
+                                  })}
+                                >
+                                  <option value="append">append</option>
+                                  <option value="before">before</option>
+                                  <option value="after">after</option>
+                                </select>
+                              </label>
+                              {snippetAnchor.mode !== 'append' && (
+                                <Input
+                                  label="Op index"
+                                  type="number"
+                                  min={0}
+                                  value={String(snippetAnchor.op_index ?? 0)}
+                                  onChange={(event) => {
+                                    const nextIndex = Number(event.target.value);
+                                    handleSnippetAnchorChange({
+                                      ...snippetAnchor,
+                                      op_index: Number.isInteger(nextIndex) && nextIndex >= 0 ? nextIndex : 0,
+                                    });
+                                  }}
+                                />
+                              )}
+                            </div>
+                            {snippetError && (
+                              <p className="rounded-md border border-danger/30 bg-danger/10 p-2 text-sm text-danger">
+                                {snippetError}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                aria-busy={isPreviewingSnippet}
+                                disabled={!selectedScript || !draft}
+                                onClick={handlePreviewSnippet}
+                              >
+                                Preview snippet
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                loading={isApplyingSnippet}
+                                disabled={!selectedScript || !draft || !hasCurrentSnippetPreview || hasUnsavedDraftText}
+                                onClick={handleApplySnippet}
+                              >
+                                Apply snippet
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-sm text-text-muted">Select a snippet to configure parameters.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {snippetPreview && (
+                    <div className="mt-3 grid gap-3 text-sm lg:grid-cols-2">
+                      <div className="rounded-md border border-border bg-surface p-2">
+                        <h3 className="text-xs font-semibold uppercase text-text-muted">Patch summary</h3>
+                        <p className="mt-1">
+                          Preview inserted {snippetPreview.patch_summary.inserted_ops} operations.
+                        </p>
+                        <p className="mt-1 break-words text-xs text-text-muted">
+                          Changed paths: {snippetPreview.patch_summary.changed_paths.join(', ') || 'none'}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-border bg-surface p-2">
+                        <h3 className="text-xs font-semibold uppercase text-text-muted">Preview diagnostics</h3>
+                        <pre className="mt-1 max-h-32 overflow-auto text-xs">
+                          {summaryLines(snippetPreview.diagnostics).join('\n')}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
               <div className="min-h-[420px] flex-1">
-                <JsonEditor value={draftText} onChange={setDraftText} height="100%" readOnly={!selectedScript} />
+                <JsonEditor
+                  value={draftText}
+                  onChange={(nextValue) => {
+                    setDraftText(nextValue);
+                    clearSnippetPreviewState();
+                  }}
+                  height="100%"
+                  readOnly={!selectedScript}
+                />
               </div>
             </div>
           </section>

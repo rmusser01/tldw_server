@@ -15,10 +15,12 @@ vi.mock('@web/lib/api', () => ({
 }));
 
 import {
+  applyVNScriptSnippet,
   createVNScriptFromTemplate,
   createVNScript,
   deleteVNScript,
   evaluateVNScriptVersionPolicy,
+  getVNScriptAuthoringCatalog,
   getVNScript,
   getVNScriptDiagnostics,
   getVNScriptDraft,
@@ -28,6 +30,7 @@ import {
   listVNScripts,
   listVNScriptVersions,
   patchVNScript,
+  previewVNScriptSnippet,
   publishVNScript,
   putVNScriptDraft,
   validateVNScriptDraft,
@@ -213,6 +216,57 @@ describe('vnScripts api client', () => {
 
     expect(mocks.apiClient.post).toHaveBeenCalledWith(
       '/vn/vn-scripts/templates/linear_scene/scripts',
+      request
+    );
+  });
+
+  it('calls the VN script authoring catalog endpoint', async () => {
+    mocks.apiClient.get.mockResolvedValueOnce({
+      schema_version: 'vn_script_authoring_catalog.v1',
+      program_schema_version: 'vn_script_program.v1',
+      capability_tokens: ['script_authoring_catalog'],
+      generation_output_schemas: ['choice_set', 'narrative_dialogue', 'scene_update'],
+      operation_categories: { narration: ['narrate'] },
+      operations: [],
+      snippets: [],
+      limits: { max_operations: 100 },
+    });
+
+    const response = await getVNScriptAuthoringCatalog();
+
+    expect(response.schema_version).toBe('vn_script_authoring_catalog.v1');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-scripts/vn-authoring-catalog');
+  });
+
+  it('calls the VN script snippet preview endpoint with the request payload', async () => {
+    const request = {
+      snippet_id: 'generated_choice_set',
+      anchor: { label: 'start', op_index: 1, mode: 'after' },
+      parameters: { prompt: 'Offer three routes.' },
+      draft: { labels: { start: [] } },
+      draft_revision: 4,
+    };
+
+    await previewVNScriptSnippet(17, request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/scripts/17/draft/snippet-preview',
+      request
+    );
+  });
+
+  it('calls the VN script snippet apply endpoint with the request payload', async () => {
+    const request = {
+      if_revision: 4,
+      snippet_id: 'generated_choice_set',
+      anchor: { label: 'start', op_index: 1, mode: 'after' },
+      parameters: { prompt: 'Offer three routes.' },
+    };
+
+    await applyVNScriptSnippet(17, request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/scripts/17/draft/snippet-apply',
       request
     );
   });
