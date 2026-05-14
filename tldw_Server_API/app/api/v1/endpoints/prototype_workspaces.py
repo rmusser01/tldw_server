@@ -143,6 +143,76 @@ def _epoch_to_iso8601(epoch: int | None) -> str | None:
     return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
 
 
+def _parse_optional_datetime(value: Any) -> datetime | None:
+    """Parse optional timestamps from repo rows without raising on bad data."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_inactive_prototype_record(record: dict[str, Any] | None) -> bool:
+    """Return true for missing, revoked, or expired prototype session records."""
+    if not record:
+        return True
+    if record.get("is_revoked") or record.get("revoked_at"):
+        return True
+    expires_at = _parse_optional_datetime(record.get("expires_at"))
+    return bool(expires_at and expires_at <= datetime.now(timezone.utc))
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    """Coerce integer-ish values without leaking malformed identity details."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _inactive_prototype_session_error() -> HTTPException:
+    """Build the stable response for inactive external collaborator sessions."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Prototype session token is no longer active",
+    )
+
+
+async def _assert_external_promotion_actor_active(
+    repo: Any,
+    *,
+    session: dict[str, Any],
+    token_payload: dict[str, Any],
+) -> None:
+    """Verify a collaborator session token still maps to an active shared actor."""
+    if _is_inactive_prototype_record(session):
+        raise _inactive_prototype_session_error()
+
+    shared_actor_id = str(token_payload.get("shared_actor_id") or "").strip()
+    actor = await repo.get_shared_actor(shared_actor_id)
+    if _is_inactive_prototype_record(actor):
+        raise _inactive_prototype_session_error()
+
+    token_workspace_id = str(token_payload.get("prototype_workspace_id") or "").strip()
+    token_share_link_id = _coerce_optional_int(token_payload.get("share_link_id"))
+    actor_share_link_id = _coerce_optional_int(actor.get("share_link_id"))
+    if (
+        str(actor.get("prototype_workspace_id") or "") != token_workspace_id
+        or token_share_link_id is None
+        or actor_share_link_id != token_share_link_id
+    ):
+        raise _inactive_prototype_session_error()
+
+
 def _branch_session_http_error(exc: ValueError | RuntimeError) -> HTTPException:
     """Map expected branch-session domain failures to stable HTTP responses."""
     detail = str(exc).lower()
@@ -384,6 +454,11 @@ async def create_promotion_request(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Session token does not authorize promotion requests for this branch session",
         )
+    await _assert_external_promotion_actor_active(
+        repo,
+        session=session,
+        token_payload=token_payload,
+    )
 
     candidate_snapshot = await repo.get_snapshot(body.candidate_snapshot_id)
     if not candidate_snapshot:
@@ -404,12 +479,17 @@ async def create_promotion_request(
             detail="Session token does not authorize promotion requests for this snapshot",
         )
 
-    promotion_request = await repo.create_promotion_request(
-        prototype_workspace_id=body.prototype_workspace_id,
-        prototype_session_id=body.prototype_session_id,
-        candidate_snapshot_id=body.candidate_snapshot_id,
-        requested_by_shared_actor_id=str(token_payload["shared_actor_id"]),
-    )
+    try:
+        promotion_request = await repo.create_promotion_request(
+            prototype_workspace_id=body.prototype_workspace_id,
+            prototype_session_id=body.prototype_session_id,
+            candidate_snapshot_id=body.candidate_snapshot_id,
+            requested_by_shared_actor_id=str(token_payload["shared_actor_id"]),
+        )
+    except ValueError as exc:
+        if "requested_by_shared_actor_id" in str(exc):
+            raise _inactive_prototype_session_error() from exc
+        raise
     return PrototypePromotionRequestResponse.model_validate(promotion_request)
 
 

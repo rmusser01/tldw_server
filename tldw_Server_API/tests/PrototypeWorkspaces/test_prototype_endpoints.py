@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -379,6 +379,113 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert resp.status_code == 403
+
+    def test_revoked_shared_actor_cannot_submit_promotion_request(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, _ = _seed_workspace(test_services, title="Revoked promotion actor")
+        access_context = _seed_external_access(
+            test_services,
+            prototype_workspace_id=workspace["id"],
+            share_link_id=83,
+        )
+        session_result = _run(
+            test_services.service.create_or_reuse_branch_session(
+                prototype_workspace_id=workspace["id"],
+                actor_type="external_collaborator",
+                actor_shared_actor_id=access_context.shared_actor_id,
+                request_nonce="req_revoked_promotion_actor",
+                share_link_id=83,
+            )
+        )
+        session = session_result["session"]
+        candidate_snapshot = _run(
+            test_services.repo.create_snapshot(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id="psnap_revoked_actor_candidate",
+                created_by_shared_actor_id=access_context.shared_actor_id,
+                parent_snapshot_id=session["base_snapshot_id"],
+                created_from_session_id=session["id"],
+                storage_ref="prototype://revoked-actor-candidate",
+                prompt_summary="Revoked actor candidate",
+            )
+        )
+        _run(
+            test_services.repo.db_pool.execute(
+                "UPDATE prototype_shared_actors SET revoked_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), access_context.shared_actor_id),
+            )
+        )
+
+        resp = client.post(
+            "/api/v1/prototype-promotions",
+            json={
+                "prototype_workspace_id": workspace["id"],
+                "prototype_session_id": session["id"],
+                "candidate_snapshot_id": candidate_snapshot["snapshot_id"],
+                "session_token": access_context.session_token,
+            },
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Prototype session token is no longer active"
+
+    def test_expired_shared_actor_cannot_submit_promotion_request(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, _ = _seed_workspace(test_services, title="Expired promotion actor")
+        access_context = _seed_external_access(
+            test_services,
+            prototype_workspace_id=workspace["id"],
+            share_link_id=84,
+        )
+        session_result = _run(
+            test_services.service.create_or_reuse_branch_session(
+                prototype_workspace_id=workspace["id"],
+                actor_type="external_collaborator",
+                actor_shared_actor_id=access_context.shared_actor_id,
+                request_nonce="req_expired_promotion_actor",
+                share_link_id=84,
+            )
+        )
+        session = session_result["session"]
+        candidate_snapshot = _run(
+            test_services.repo.create_snapshot(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id="psnap_expired_actor_candidate",
+                created_by_shared_actor_id=access_context.shared_actor_id,
+                parent_snapshot_id=session["base_snapshot_id"],
+                created_from_session_id=session["id"],
+                storage_ref="prototype://expired-actor-candidate",
+                prompt_summary="Expired actor candidate",
+            )
+        )
+        _run(
+            test_services.repo.db_pool.execute(
+                "UPDATE prototype_shared_actors SET expires_at = ? WHERE id = ?",
+                (
+                    (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+                    access_context.shared_actor_id,
+                ),
+            )
+        )
+
+        resp = client.post(
+            "/api/v1/prototype-promotions",
+            json={
+                "prototype_workspace_id": workspace["id"],
+                "prototype_session_id": session["id"],
+                "candidate_snapshot_id": candidate_snapshot["snapshot_id"],
+                "session_token": access_context.session_token,
+            },
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Prototype session token is no longer active"
 
     def test_owner_can_review_promotion_request(
         self,

@@ -194,6 +194,22 @@ Instead, the exchange flow creates or resumes a `Prototype Shared Actor` that is
 
 This preserves auditability and keeps owner-only controls separate from collaborator capabilities.
 
+## Risk Gate 1 Security Contract
+
+The current productionization security model is documented in `Docs/Security/Prototype_Workspaces_Threat_Model.md`.
+
+The short version:
+
+- owner APIs must re-check AuthNZ owner or designated-promoter authority server-side
+- public share exchange must keep invalid, expired, revoked, exhausted, missing, and mismatched link states non-enumerating where possible
+- external shared actors are scoped to one prototype workspace and one share-link id
+- collaborator session tokens must be rechecked against active shared-actor state, not trusted only because their signature is valid
+- resume cookies are signed browser-binding hints and rotate their stored binding secret on successful resume
+- preview grants are short-lived broker-issued grants behind opaque handles
+- promotion submission must bind the token, active shared actor, branch session, candidate snapshot, and workspace before creating a request
+
+Frontend/backend state names, HTTP status expectations, retryability, and Risk Gate 4 open questions live in `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`.
+
 ## Preview Broker Guarantees
 
 Preview access is brokered through `preview_handle` records and signed preview grants.
