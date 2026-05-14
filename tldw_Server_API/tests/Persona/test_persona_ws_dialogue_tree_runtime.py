@@ -444,7 +444,10 @@ def test_runtime_explorer_fallback_notice_is_bounded_and_trace_safe(monkeypatch)
     assert "provider-secret" not in serialized_notice
 
 
-def test_runtime_explorer_circuit_open_notice_has_distinct_reason(monkeypatch) -> None:
+def test_runtime_explorer_circuit_open_notice_has_distinct_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify circuit-open runtime fallback emits a distinct websocket notice."""
     class _FakeExplorer:
         def explore(self, _context: dict) -> RuntimeExplorationResult:
             return RuntimeExplorationResult(
