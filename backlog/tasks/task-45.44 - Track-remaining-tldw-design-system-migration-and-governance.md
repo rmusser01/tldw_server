@@ -1,9 +1,10 @@
 ---
 id: TASK-45.44
 title: Track remaining tldw design-system migration and governance
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:07'
+updated_date: '2026-05-14 03:48'
 labels:
   - design-system
   - webui
@@ -26,10 +27,16 @@ Mirror the GitHub epic for the remaining tldw WebUI and extension design-system 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All product-area and governance GitHub issues are linked from this parent.
-- [ ] #2 Backlog child tasks exist for every GitHub sub-issue.
-- [ ] #3 The parent records the baseline snapshot and source-of-truth rules from the approved spec.
+- [x] #1 All product-area and governance GitHub issues are linked from this parent.
+- [x] #2 Backlog child tasks exist for every GitHub sub-issue.
+- [x] #3 The parent records the baseline snapshot and source-of-truth rules from the approved spec.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Tracker created: GitHub epic https://github.com/rmusser01/tldw_server/issues/1655 plus 13 product-area migration issues and 6 governance issues are linked from the epic. Backlog child tasks TASK-45.44.1 through TASK-45.44.19 mirror the GitHub sub-issues.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
