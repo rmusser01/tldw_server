@@ -5,7 +5,14 @@
  * the /chat cockpit and focus layouts against the live tldw server configured
  * by TLDW_E2E_SERVER_URL/TLDW_E2E_API_KEY.
  */
-import { expect, test, type APIRequestContext, type Page, type Response } from '@playwright/test';
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Response,
+} from '@playwright/test';
 
 const serverUrl = (
   process.env.TLDW_E2E_SERVER_URL ||
@@ -193,6 +200,27 @@ const assertCoreComposerControls = async (
   await expect(page.getByRole('button', { name: /Advanced controls/i })).toBeVisible();
 };
 
+const assertRuntimeMcpRailState = async (runtimeInspector: Locator) => {
+  await expect(runtimeInspector.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
+
+  const autoToolChoice = runtimeInspector.getByRole('button', {
+    name: 'MCP tool choice Auto',
+  });
+
+  if (await autoToolChoice.isVisible().catch(() => false)) {
+    await expect(autoToolChoice).toBeVisible();
+    await expect(
+      runtimeInspector.getByRole('button', { name: 'MCP tool choice Required' })
+    ).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'MCP tool choice None' })).toBeVisible();
+    return;
+  }
+
+  await expect(runtimeInspector.getByRole('region', { name: 'MCP tools' })).toContainText(
+    /No MCP tools available|MCP tools unavailable|MCP tools are offline|Loading MCP tools|Loading tools|MCP unavailable|Not checked yet/i
+  );
+};
+
 const assertNoBlockingServerDialog = async (page: Page) => {
   await expect(
     page.getByRole('dialog').filter({ hasText: /can't reach your tldw server/i })
@@ -335,8 +363,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(runtimeInspector.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
     await expect(runtimeInspector.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
     await expect(runtimeInspector.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'MCP tool choice Auto' })).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
+    await assertRuntimeMcpRailState(runtimeInspector);
     const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
     const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
@@ -386,7 +413,7 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await page.keyboard.press('Escape');
 
-    await contextRail.getByRole('button', { name: 'Select a prompt' }).click();
+    await contextRail.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
     await expect(page.getByText(/Prompt|Search/i).first()).toBeVisible();
     await page.keyboard.press('Escape');
 
@@ -621,16 +648,14 @@ test.describe('/chat cockpit real-server parity', () => {
 
       await expect(runtimeInspector.getByText(characterName)).toBeVisible();
       await expect(composerAssistant).toHaveAccessibleName(characterName);
+      await expect(page.getByText(`Character: ${characterName}`)).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Open Scene Director' })).toBeVisible();
 
       const smokePrompt = `assistant rail proof ${Date.now()}`;
       await page.getByTestId('chat-input').fill(smokePrompt);
-      await page.keyboard.press('Escape');
-      await page.mouse.move(20, 20);
-      await expect(page.getByRole('tooltip')).toBeHidden({ timeout: 5_000 }).catch(() => {});
       const chatCompletionAttempt = waitForChatCompletionAttempt(page);
-      await page.getByRole('button', { name: /send message/i }).click();
+      await page.getByTestId('chat-input').press('Enter');
       const chatCompletionResponse = await chatCompletionAttempt;
       await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
       await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);

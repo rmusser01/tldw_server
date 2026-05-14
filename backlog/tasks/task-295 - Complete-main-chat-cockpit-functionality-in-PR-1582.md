@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 05:18'
+updated_date: '2026-05-14 05:45'
 labels:
   - webui
   - chat
@@ -140,6 +140,8 @@ Task 2 implementation: prompt rail now opens the shared prompt selector with a r
 Task 3 implementation: model and chat rail now marks provider:model setting rows as Inherited or Override, keeps the active route visible, passes return-focus metadata when the cockpit rail opens Model and Chat settings, and restores focus to the rail trigger when that settings surface closes. Added same-model different-provider scoped-store coverage. Task 3 verification: focused Vitest from apps/tldw-frontend passed 7 files / 50 tests covering scoped settings, runtime inspector summaries, model selector utilities, useModelSelector capabilities, cockpit actions, Playground cockpit controls, and locale mirror. git diff --check passed. Real-server health probe to http://127.0.0.1:8000/api/v1/health still fails with curl exit 7, so real-server Playwright proof remains blocked and was not mocked. Bandit not applicable because this slice touched frontend TypeScript/TSX and JSON locale files only.
 
 Task 4 implementation: MCP rail now derives availability from real MCP state, hides dead-end tool-choice controls when MCP is unavailable, keeps recoverable settings access, passes return-focus metadata when the cockpit rail opens MCP settings, and restores focus to the rail trigger when that settings surface closes. Task 4 verification: focused Vitest from apps/tldw-frontend passed 4 files / 35 tests covering useMcpToolsControl, runtime inspector MCP states, Playground cockpit MCP wiring, and cockpit action events. git diff --check passed. Real-server health probe to http://127.0.0.1:8000/api/v1/health still fails with curl exit 7, so real-server MCP proof remains blocked and was not mocked. Bandit not applicable because this slice touched frontend TypeScript/TSX only.
+
+Real server proof refresh completed for chat cockpit spec. The MCP rail assertion now follows the live server state, the prompt rail click matches the rendered accessible name, and the disposable character flow sends through the composer with Enter before clearing the assistant. Full real server Playwright passed with 4 tests against local backend and frontend. git diff check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
