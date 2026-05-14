@@ -539,6 +539,252 @@ def test_snippet_apply_stale_revision_conflicts_before_anchor_validation(
     assert details["current_revision"] == 2
 
 
+def test_draft_graph_endpoint_returns_stored_graph(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+
+    response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "vn_script_authoring_graph.v1"
+    assert payload["graph_semantics_version"] == "vn_script_authoring_graph_edges.v1"
+    assert payload["source"] == "stored_draft"
+    assert payload["script_id"] == script_id
+    assert payload["base_revision"] == 1
+    assert payload["version_id"] is None
+    assert payload["outline"]["entry_label"] == "start"
+    assert payload["outline"]["labels"]
+    assert payload["graph"]["nodes"][0]["id"] == "label:start"
+    assert payload["validation_context_source"] == "current_draft_context"
+
+
+def test_graph_preview_accepts_supplied_draft_without_persisting(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    stored = _program(asset_pack_id)
+    supplied = _program(asset_pack_id)
+    supplied["labels"]["start"][0]["text"] = "Unsaved opening."
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": stored},
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": supplied, "draft_revision": 1},
+    )
+    draft_after = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft").json()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "supplied_draft"
+    assert payload["base_revision"] == 1
+    assert payload["outline"]["labels"][0]["summary"] == "2 operations."
+    assert draft_after["revision"] == 1
+    assert draft_after["draft"] == stored
+
+
+def test_graph_endpoints_use_resolved_authnz_profile_context(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    authnz_pool: DatabasePool,
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    async def seed_profiles() -> None:
+        store = VNPolicyProfileStore(authnz_pool)
+        await store.initialize()
+        await store.create_policy_profile(
+            profile_id="custom_local",
+            display_name="Custom Local",
+            description=None,
+            definition=LOCAL_DEFAULT_POLICY_DEFINITION,
+            created_by_user_id=42,
+        )
+        await store.create_generation_profile(
+            profile_id="custom_story",
+            display_name="Custom Story",
+            description=None,
+            definition=STORY_DEFAULT_GENERATION_DEFINITION,
+            created_by_user_id=42,
+        )
+
+    asyncio.run(seed_profiles())
+    create_response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "custom_local",
+            "generation_profile_id": "custom_story",
+            "content_rating": "general",
+        },
+    )
+    script_id = int(create_response.json()["id"])
+    draft = _program(asset_pack_id)
+    draft["generation_defaults"]["profile_id"] = "custom_story"
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": draft},
+    )
+
+    stored_graph_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph")
+    preview_graph_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": draft, "draft_revision": 1},
+    )
+
+    assert create_response.status_code == 201
+    assert stored_graph_response.status_code == 200
+    assert stored_graph_response.json()["validation_diagnostics"]["valid"] is True
+    assert preview_graph_response.status_code == 200
+    assert preview_graph_response.json()["validation_diagnostics"]["valid"] is True
+
+
+def test_version_graph_endpoint_returns_published_version_graph(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, slot_key = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id, slot_key=slot_key)},
+    )
+    publish_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "v1",
+            "idempotency_key": "publish-graph-v1",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+    version_id = publish_response.json()["version_id"]
+
+    response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/graph")
+
+    assert publish_response.status_code == 201
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "published_version"
+    assert payload["script_id"] == script_id
+    assert payload["version_id"] == version_id
+    assert payload["base_revision"] is None
+    assert payload["validation_context_source"] == "published_version_snapshot"
+    assert payload["validation_diagnostics"]["valid"] is True
+
+
+def test_graph_preview_malformed_supplied_draft_shape_returns_vn_error(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": ["not", "a", "mapping"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["details"]["reason"] == "supplied_draft_invalid_shape"
+
+
+def test_graph_preview_oversized_supplied_draft_returns_vn_error(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    oversized = {"schema_version": "vn_script_program.v1", "blob": "x" * 1_048_576}
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": oversized},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"]["details"]["reason"] == "supplied_draft_too_large"
+
+
+def test_graph_problems_return_success_with_diagnostics(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    supplied = _program(asset_pack_id)
+    supplied["labels"]["start"][1] = {"op": "jump", "target": "missing"}
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": supplied},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["diagnostics"]["errors"][0]["code"] == "graph_target_missing"
+    assert payload["graph"]["edges"][0]["missing_target"] is True
+    assert payload["validation_diagnostics"]["valid"] is False
+
+
+def test_graph_response_does_not_leak_full_op_payloads_or_provider_secrets(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    supplied = _program(asset_pack_id)
+    supplied["labels"]["start"] = [
+        {
+            "op": "generate",
+            "prompt": "secret prompt text",
+            "raw_prompt": "raw secret prompt",
+            "provider": "secret-provider",
+            "model": "secret-model",
+            "api_key": "sk-secret",
+            "provider_config": {"base_url": "https://secret.example"},
+            "output_schema": "choice_set",
+            "on_generated_choice": "after_generation",
+        }
+    ]
+    supplied["labels"]["after_generation"] = [{"op": "end"}]
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": supplied},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    operation_nodes = [node for node in payload["graph"]["nodes"] if node["type"] == "operation"]
+    assert operation_nodes
+    assert all("prompt" not in node for node in operation_nodes)
+    assert all("provider_config" not in node for node in operation_nodes)
+    serialized = response.text
+    for leaked_value in (
+        "secret prompt text",
+        "raw secret prompt",
+        "secret-provider",
+        "secret-model",
+        "sk-secret",
+        "https://secret.example",
+    ):
+        assert leaked_value not in serialized
+
+
 def test_vn_capabilities_include_script_authoring_catalog_when_scripts_routes_registered(
     client: TestClient,
 ) -> None:

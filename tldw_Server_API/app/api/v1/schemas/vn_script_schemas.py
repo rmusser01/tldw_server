@@ -235,6 +235,124 @@ class VNScriptSnippetApplyResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VNScriptGraphPreviewRequest(BaseModel):
+    """Compute an authoring graph for a supplied draft without persistence."""
+
+    draft: Any
+    draft_revision: int | None = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphDiagnostic(BaseModel):
+    """Graph-specific authoring diagnostic."""
+
+    code: str
+    severity: Literal["error", "warning"]
+    message: str
+    path: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphDiagnostics(BaseModel):
+    """Graph diagnostics grouped by severity."""
+
+    errors: list[VNScriptGraphDiagnostic] = Field(default_factory=list)
+    warnings: list[VNScriptGraphDiagnostic] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphOutlineLabel(BaseModel):
+    """Compact label summary for outline-style clients."""
+
+    id: str
+    label: str
+    source_path: str
+    op_count: int = Field(..., ge=0)
+    incoming_edge_count: int = Field(..., ge=0)
+    outgoing_edge_count: int = Field(..., ge=0)
+    reachable: bool
+    terminal: Literal["terminal", "continues", "unknown"]
+    summary: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphOutline(BaseModel):
+    """Authoring graph outline layer."""
+
+    entry_label: str | None = None
+    labels: list[VNScriptGraphOutlineLabel] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphNode(BaseModel):
+    """Authoring graph node."""
+
+    id: str
+    type: Literal["label", "operation"]
+    label: str
+    source_path: str
+    reachable: bool | None = None
+    terminal: Literal["terminal", "continues", "unknown"] | None = None
+    op_index: int | None = Field(default=None, ge=0)
+    op: str | None = None
+    summary: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphEdge(BaseModel):
+    """Authoring graph edge."""
+
+    id: str
+    type: Literal["jump", "choice", "generated_choice_handler", "generation_cancel"]
+    source_id: str
+    target_id: str | None = None
+    source_path: str
+    target_label: str
+    metadata: dict[str, Any] | None = None
+    missing_target: bool = False
+    omitted_target: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptGraphBody(BaseModel):
+    """Detailed authoring graph layer."""
+
+    nodes: list[VNScriptGraphNode] = Field(default_factory=list)
+    edges: list[VNScriptGraphEdge] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptAuthoringGraphResponse(BaseModel):
+    """Computed VN script authoring graph response."""
+
+    schema_version: Literal["vn_script_authoring_graph.v1"]
+    graph_semantics_version: Literal["vn_script_authoring_graph_edges.v1"]
+    program_schema_version: Literal["vn_script_program.v1"]
+    script_id: int | None = None
+    source: Literal["stored_draft", "supplied_draft", "published_version"]
+    base_revision: int | None = None
+    version_id: int | None = None
+    content_hash: str
+    validation_context_source: Literal["current_draft_context", "published_version_snapshot"]
+    truncated: bool
+    limits: dict[str, int]
+    outline: VNScriptGraphOutline
+    graph: VNScriptGraphBody
+    diagnostics: VNScriptGraphDiagnostics
+    validation_diagnostics: dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class VNScriptCreateFromTemplateRequest(BaseModel):
     """Create request for a VN script starter template."""
 

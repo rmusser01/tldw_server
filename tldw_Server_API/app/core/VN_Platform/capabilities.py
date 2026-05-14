@@ -21,6 +21,16 @@ VN_RESOURCE_PATHS = {
     "policy": f"{VN_BASE_PATH}/vn-policy",
     "audio": f"{VN_BASE_PATH}/vn-audio",
 }
+VN_SCRIPT_AUTHORING_GRAPH_PATHS = (
+    f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/draft/graph",
+    f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/draft/graph-preview",
+    f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/versions/{{version_id}}/graph",
+)
+VN_SCRIPT_AUTHORING_GRAPH_ROUTES = (
+    (VN_SCRIPT_AUTHORING_GRAPH_PATHS[0], "GET"),
+    (VN_SCRIPT_AUTHORING_GRAPH_PATHS[1], "POST"),
+    (VN_SCRIPT_AUTHORING_GRAPH_PATHS[2], "GET"),
+)
 VN_SUPPORTED_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"]
 VN_SUPPORTED_AUDIO_MEDIA_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg"]
 
@@ -28,12 +38,17 @@ VN_SUPPORTED_AUDIO_MEDIA_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg"]
 def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
     """Build a route-aware capabilities payload for the current FastAPI app."""
     route_paths = _route_paths(routes)
+    route_methods = _route_methods(routes)
     enabled_modules = {
         key: _has_registered_resource(route_paths, path)
         for key, path in VN_RESOURCE_PATHS.items()
     }
     scripted_generation_enabled = enabled_modules["scripts"] and enabled_modules["play"]
     script_authoring_catalog_enabled = enabled_modules["scripts"]
+    script_authoring_graph_enabled = _has_registered_route_methods(
+        route_methods,
+        VN_SCRIPT_AUTHORING_GRAPH_ROUTES,
+    )
 
     return {
         "schema_version": "vn_capabilities.v1",
@@ -51,6 +66,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "scripted_generation_history": enabled_modules["play"],
             "scripted_generation_debug_detail": enabled_modules["play"],
             "script_authoring_catalog": script_authoring_catalog_enabled,
+            "script_authoring_graph": script_authoring_graph_enabled,
             "story_start": enabled_modules["play"],
             "tts_jobs": enabled_modules["audio"],
             "realtime_image_generation": False,
@@ -102,6 +118,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
 
 
 def _route_paths(routes: Iterable[Any]) -> set[str]:
+    """Return the FastAPI route paths registered in the current app."""
     return {
         path
         for route in routes
@@ -109,6 +126,29 @@ def _route_paths(routes: Iterable[Any]) -> set[str]:
     }
 
 
+def _route_methods(routes: Iterable[Any]) -> set[tuple[str, str]]:
+    """Return registered (path, HTTP method) pairs for FastAPI routes."""
+    pairs: set[tuple[str, str]] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if not isinstance(path, str) or not isinstance(methods, Iterable):
+            continue
+        for method in methods:
+            if isinstance(method, str):
+                pairs.add((path, method.upper()))
+    return pairs
+
+
 def _has_registered_resource(paths: set[str], resource_path: str) -> bool:
+    """Return whether any registered route belongs to a resource prefix."""
     prefix = resource_path.rstrip("/")
     return any(path == prefix or path.startswith(f"{prefix}/") for path in paths)
+
+
+def _has_registered_route_methods(
+    route_methods: set[tuple[str, str]],
+    required_routes: Iterable[tuple[str, str]],
+) -> bool:
+    """Return whether all required route paths exist with their expected methods."""
+    return all((path, method.upper()) in route_methods for path, method in required_routes)

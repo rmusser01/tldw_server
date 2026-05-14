@@ -12,12 +12,14 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptAuthoringCatalogResponse,
+    VNScriptAuthoringGraphResponse,
     VNScriptCreate,
     VNScriptCreateFromTemplateRequest,
     VNScriptCreateFromTemplateResponse,
     VNScriptDiagnosticsResponse,
     VNScriptDraftPutRequest,
     VNScriptDraftResponse,
+    VNScriptGraphPreviewRequest,
     VNScriptListResponse,
     VNScriptManifestSnapshotResponse,
     VNScriptPatch,
@@ -229,6 +231,82 @@ async def get_draft(script_id: int, service: VNScriptService = Depends(_service)
     """Read mutable draft."""
     try:
         return VNScriptDraftResponse.model_validate(service.get_draft(script_id))
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.get(
+    "/scripts/{script_id}/draft/graph",
+    response_model=VNScriptAuthoringGraphResponse,
+)
+async def get_draft_graph(
+    script_id: int,
+    service: VNScriptService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    profile_store: VNPolicyProfileStore = Depends(_profile_store),
+) -> VNScriptAuthoringGraphResponse:
+    """Compute the authoring graph for the stored draft without persistence."""
+    try:
+        script = service.get_script(script_id)
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
+            script,
+            profile_store=profile_store,
+        )
+        draft = service.get_draft(script_id)["draft"]
+        audio_refs = await _resolve_accessible_audio_refs(
+            draft,
+            files_repo=files_repo,
+            owner_user_id=service.owner_user_id,
+        )
+        return VNScriptAuthoringGraphResponse.model_validate(
+            service.get_draft_graph(
+                script_id,
+                audio_refs=audio_refs,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+        )
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.post(
+    "/scripts/{script_id}/draft/graph-preview",
+    response_model=VNScriptAuthoringGraphResponse,
+)
+async def preview_draft_graph(
+    script_id: int,
+    request: VNScriptGraphPreviewRequest,
+    service: VNScriptService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    profile_store: VNPolicyProfileStore = Depends(_profile_store),
+) -> VNScriptAuthoringGraphResponse:
+    """Compute the authoring graph for a supplied draft without persistence."""
+    try:
+        script = service.get_script(script_id)
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
+            script,
+            profile_store=profile_store,
+        )
+        audio_refs = {}
+        if isinstance(request.draft, Mapping):
+            audio_refs = await _resolve_accessible_audio_refs(
+                request.draft,
+                files_repo=files_repo,
+                owner_user_id=service.owner_user_id,
+            )
+        return VNScriptAuthoringGraphResponse.model_validate(
+            service.preview_draft_graph(
+                script_id,
+                request.draft,
+                draft_revision=request.draft_revision,
+                audio_refs=audio_refs,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+        )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -492,6 +570,24 @@ async def get_version(
 
 
 @router.get(
+    "/scripts/{script_id}/versions/{version_id}/graph",
+    response_model=VNScriptAuthoringGraphResponse,
+)
+async def get_version_graph(
+    script_id: int,
+    version_id: int,
+    service: VNScriptService = Depends(_service),
+) -> VNScriptAuthoringGraphResponse:
+    """Compute the authoring graph for an immutable published script version."""
+    try:
+        return VNScriptAuthoringGraphResponse.model_validate(
+            service.get_version_graph(script_id, version_id)
+        )
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.get(
     "/scripts/{script_id}/versions/{version_id}/manifest-snapshot",
     response_model=VNScriptManifestSnapshotResponse,
 )
@@ -699,10 +795,20 @@ def _handle_value_error(
     script_id: int | None = None,
 ) -> HTTPException:
     reason = str(exc) or "invalid_request"
-    if reason in {"script_not_found", "script_version_not_found", "template_not_found"}:
+    if reason in {"script_not_found", "draft_not_found", "script_version_not_found", "template_not_found"}:
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=vn_error_detail(ERROR_NOT_FOUND, reason, details={"reason": reason}),
+        )
+    if reason == "supplied_draft_too_large":
+        return HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=vn_error_detail(ERROR_INVALID_REQUEST, reason, details={"reason": reason}),
+        )
+    if reason == "supplied_draft_invalid_shape":
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=vn_error_detail(ERROR_INVALID_REQUEST, reason, details={"reason": reason}),
         )
     if reason in {"draft_revision_conflict", "idempotency_key_conflict"}:
         details: dict[str, Any] = {"reason": reason}
