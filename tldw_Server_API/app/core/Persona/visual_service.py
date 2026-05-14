@@ -24,6 +24,9 @@ from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
     remap_visual_manifest_assets,
 )
+from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+    get_persona_visual_starter_pack,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
     validate_visual_manifest,
@@ -388,6 +391,154 @@ class PersonaVisualService:
                 except OSError as cleanup_error:  # pragma: no cover - defensive cleanup logging
                     logger.warning(
                         "Failed to unlink partially duplicated persona visual asset {}: {}",
+                        path,
+                        cleanup_error,
+                    )
+            raise
+
+        assets = self._db.list_persona_visual_assets(
+            pack_id=str(target_pack["id"]),
+            persona_id=target_persona_id,
+            user_id=user_id,
+        )
+        finalized["assets"] = assets
+        finalized["assets_by_id"] = {str(asset["id"]): asset for asset in assets}
+        return finalized
+
+    def copy_starter_pack_to_persona(
+        self,
+        *,
+        starter_pack_id: str,
+        user_id: str,
+        target_persona_id: str,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Copy an immutable bundled starter pack into a user-owned draft pack."""
+        starter_pack = get_persona_visual_starter_pack(starter_pack_id)
+        if starter_pack is None:
+            raise PersonaVisualServiceError(
+                "starter_pack_not_found",
+                "Persona visual starter pack not found.",
+                details={"starter_pack_id": starter_pack_id},
+            )
+
+        target_persona = self._db.get_persona_profile(
+            persona_id=target_persona_id,
+            user_id=user_id,
+        )
+        if not target_persona:
+            raise PersonaVisualServiceError(
+                "target_persona_not_found",
+                "Target persona not found for user.",
+                details={"target_persona_id": target_persona_id},
+            )
+
+        source_manifest = starter_pack.manifest if isinstance(starter_pack.manifest, dict) else {}
+        starter_assets_by_id = {str(asset.id): asset for asset in starter_pack.assets}
+        referenced_asset_ids = collect_visual_manifest_asset_ids(source_manifest)
+        missing_asset_ids = sorted(referenced_asset_ids - set(starter_assets_by_id))
+        if missing_asset_ids:
+            raise PersonaVisualServiceError(
+                "invalid_starter_pack",
+                "Persona visual starter manifest references bundled assets that are missing.",
+                details={"starter_pack_id": starter_pack.id, "asset_ids": missing_asset_ids},
+            )
+        if not referenced_asset_ids:
+            raise PersonaVisualServiceError(
+                "invalid_starter_pack",
+                "Persona visual starter manifest does not reference any bundled assets.",
+                details={"starter_pack_id": starter_pack.id},
+            )
+
+        title_value = str(title or "").strip() or starter_pack.title
+        target_pack = self._db.create_persona_visual_pack(
+            persona_id=target_persona_id,
+            user_id=user_id,
+            title=title_value,
+            renderer_type=starter_pack.renderer_type,
+            status="failed",
+            provenance="imported",
+            manifest={
+                "manifest_version": starter_pack.manifest_version,
+                "renderer_type": starter_pack.renderer_type,
+                "states": {},
+                "animations": {},
+            },
+        )
+        copied_file_paths: list[Path] = []
+        try:
+            asset_id_map: dict[str, str] = {}
+            copied_assets: list[dict[str, Any]] = []
+            for source_asset_id in sorted(referenced_asset_ids):
+                source_asset = starter_assets_by_id[source_asset_id]
+                copied = self.create_asset_from_upload(
+                    persona_id=target_persona_id,
+                    user_id=user_id,
+                    pack_id=str(target_pack["id"]),
+                    content=source_asset.content,
+                    mime_type=source_asset.mime_type,
+                    original_filename=source_asset.filename,
+                    asset_role=source_asset.asset_role,
+                    provenance="imported",
+                )
+                if copied.get("storage_path"):
+                    copied_file_paths.append(Path(str(copied["storage_path"])))
+                asset_id_map[source_asset_id] = str(copied["id"])
+                copied_assets.append(copied)
+
+            remapped_manifest = remap_visual_manifest_assets(source_manifest, asset_id_map)
+            asset_ids = {str(asset["id"]) for asset in copied_assets}
+            asset_dimensions = {
+                str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+                for asset in copied_assets
+                if asset.get("width") is not None and asset.get("height") is not None
+            }
+            try:
+                validation = validate_visual_manifest(
+                    remapped_manifest,
+                    available_asset_ids=asset_ids,
+                    available_asset_dimensions=asset_dimensions,
+                    require_activatable=False,
+                )
+            except PersonaVisualManifestError as exc:
+                raise PersonaVisualServiceError(
+                    "invalid_starter_pack",
+                    str(exc),
+                    details={"starter_pack_id": starter_pack.id},
+                ) from exc
+            updated_pack = self._db.update_persona_visual_pack_manifest(
+                pack_id=str(target_pack["id"]),
+                persona_id=target_persona_id,
+                user_id=user_id,
+                manifest=validation.manifest,
+                expected_version=int(target_pack["version"]),
+            )
+            finalized = self._db.update_persona_visual_pack_status(
+                pack_id=str(target_pack["id"]),
+                persona_id=target_persona_id,
+                user_id=user_id,
+                status="draft",
+                expected_version=int(updated_pack["version"]),
+            )
+        except Exception:
+            try:
+                self._db.soft_delete_persona_visual_pack_with_assets(
+                    pack_id=str(target_pack["id"]),
+                    persona_id=target_persona_id,
+                    user_id=user_id,
+                )
+            except Exception as cleanup_error:  # pragma: no cover - defensive cleanup logging
+                logger.warning(
+                    "Failed to soft-delete partially copied persona visual starter pack {}: {}",
+                    target_pack.get("id"),
+                    cleanup_error,
+                )
+            for path in copied_file_paths:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as cleanup_error:  # pragma: no cover - defensive cleanup logging
+                    logger.warning(
+                        "Failed to unlink partially copied persona visual starter asset {}: {}",
                         path,
                         cleanup_error,
                     )

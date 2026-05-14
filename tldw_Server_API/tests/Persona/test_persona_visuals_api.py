@@ -180,6 +180,112 @@ def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(
     assert response.json() == {"detail": "Persona disabled"}
 
 
+def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-starter-packs")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [item["id"] for item in payload["items"]] == ["research-buddy-sprite-frames-v1"]
+    starter = payload["items"][0]
+    assert starter["title"] == "Research Buddy starter"
+    assert starter["renderer_type"] == "sprite_frames"
+    assert starter["manifest_version"] == 1
+    assert starter["asset_count"] == 1
+
+
+def test_use_persona_visual_starter_pack_creates_inactive_user_owned_draft(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Starter Target")
+
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/research-buddy-sprite-frames-v1/use",
+            json={"target_persona_id": persona_id, "title": "My starter draft"},
+        )
+
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload["title"] == "My starter draft"
+        assert payload["persona_id"] == persona_id
+        assert payload["status"] == "draft"
+        assert payload["provenance"] == "imported"
+        assert payload["parent_pack_id"] is None
+        assert len(payload["assets"]) == 1
+        copied_asset_id = payload["assets"][0]["id"]
+        assert payload["manifest"]["animations"]["idle"]["frames"][0]["asset_id"] == copied_asset_id
+        assert persona_db.get_active_persona_visual_pack(persona_id=persona_id, user_id="1") is None
+
+
+def test_use_persona_visual_starter_pack_rejects_other_user_target(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(2, persona_db) as other_client:
+        other_persona_id = _create_persona(other_client, name="Other Starter Target")
+    with _client_for_user(1, persona_db) as client:
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/research-buddy-sprite-frames-v1/use",
+            json={"target_persona_id": other_persona_id},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "target_persona_not_found"
+
+
+def test_use_persona_visual_starter_pack_rejects_malformed_catalog_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Persona import visual_service
+    from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+        PersonaVisualStarterAsset,
+        PersonaVisualStarterPack,
+    )
+
+    malformed_pack = PersonaVisualStarterPack(
+        id="broken-starter",
+        title="Broken starter",
+        description="References an asset that is not bundled.",
+        renderer_type="sprite_frames",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "states": {"idle": {"animation_id": "idle"}},
+            "animations": {
+                "idle": {
+                    "frames": [{"asset_id": "missing-source-asset", "duration_ms": 100}],
+                    "frame_rate": 1,
+                }
+            },
+        },
+        assets=(
+            PersonaVisualStarterAsset(
+                id="actual-source-asset",
+                filename="actual.png",
+                mime_type="image/png",
+                asset_role="frame",
+                content=_png_bytes(),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        visual_service,
+        "get_persona_visual_starter_pack",
+        lambda starter_pack_id: malformed_pack if starter_pack_id == "broken-starter" else None,
+    )
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Broken Starter Target")
+
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/broken-starter/use",
+            json={"target_persona_id": persona_id},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_starter_pack"
+
+
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     response = client.post(
         f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets",

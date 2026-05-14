@@ -105,6 +105,9 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaVisualPortabilityJobResponse,
     PersonaVisualRendererCapabilitiesResponse,
     PersonaVisualRendererCapabilityResponse,
+    PersonaVisualStarterPackListResponse,
+    PersonaVisualStarterPackResponse,
+    PersonaVisualStarterPackUseRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
@@ -178,6 +181,9 @@ from tldw_Server_API.app.core.Persona.visual_service import (
     MAX_VISUAL_UPLOAD_BYTES,
     PersonaVisualService,
     PersonaVisualServiceError,
+)
+from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+    list_persona_visual_starter_packs,
 )
 from tldw_Server_API.app.core.Persona.visual_library_service import (
     PersonaVisualLibraryService,
@@ -1997,6 +2003,17 @@ def _persona_visual_asset_to_response(asset: dict[str, Any]) -> PersonaVisualAss
     )
 
 
+def _persona_visual_starter_pack_to_response(starter_pack: Any) -> PersonaVisualStarterPackResponse:
+    return PersonaVisualStarterPackResponse(
+        id=str(starter_pack.id),
+        title=str(starter_pack.title),
+        description=str(starter_pack.description or "") or None,
+        renderer_type=str(starter_pack.renderer_type or "sprite_frames"),
+        manifest_version=int(starter_pack.manifest_version),
+        asset_count=len(starter_pack.assets),
+    )
+
+
 def get_persona_visual_job_manager() -> JobManager:
     db_url = (os.getenv("JOBS_DB_URL") or "").strip()
     db_path = (os.getenv("JOBS_DB_PATH") or "").strip()
@@ -2223,7 +2240,13 @@ def _persona_visual_generated_assets_for_candidate(
 
 def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTTPException:
     status_code = status.HTTP_400_BAD_REQUEST
-    if exc.code in {"pack_not_found", "asset_not_found", "candidate_not_found", "target_persona_not_found"}:
+    if exc.code in {
+        "pack_not_found",
+        "asset_not_found",
+        "candidate_not_found",
+        "target_persona_not_found",
+        "starter_pack_not_found",
+    }:
         status_code = status.HTTP_404_NOT_FOUND
     elif exc.code in {"forbidden"}:
         status_code = status.HTTP_403_FORBIDDEN
@@ -3798,6 +3821,63 @@ async def list_persona_visual_renderers(
             for capability in list_persona_visual_renderer_capabilities()
         ]
     )
+
+
+@router.get(
+    "/visual-starter-packs",
+    response_model=PersonaVisualStarterPackListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_starter_pack_catalog(
+    _current_user: User = Depends(get_request_user),
+) -> PersonaVisualStarterPackListResponse:
+    """List immutable bundled Persona Visual starter packs available for copying."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    _require_current_user_id(_current_user)
+    return PersonaVisualStarterPackListResponse(
+        items=[
+            _persona_visual_starter_pack_to_response(starter_pack)
+            for starter_pack in list_persona_visual_starter_packs()
+        ]
+    )
+
+
+@router.post(
+    "/visual-starter-packs/{starter_pack_id}/use",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def use_persona_visual_starter_pack(
+    starter_pack_id: str,
+    payload: PersonaVisualStarterPackUseRequest,
+    _current_user: User = Depends(get_request_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualPackResponse:
+    """Copy a bundled starter pack into user-owned draft storage for one persona."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        copied = await _run_persona_db_call(
+            visual_service.copy_starter_pack_to_persona,
+            starter_pack_id=starter_pack_id,
+            user_id=user_id,
+            target_persona_id=payload.target_persona_id,
+            title=payload.title,
+        )
+        return _persona_visual_pack_to_response(
+            copied,
+            assets=list(copied.get("assets") or []),
+        )
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="use persona visual starter pack") from exc
 
 
 @router.get(

@@ -228,6 +228,18 @@ Recommended endpoint shape, adjusted to match existing route naming conventions 
 - `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates/{candidate_id}/accept`
 - `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates/{candidate_id}/reject`
 
+Bundled first-run defaults are exposed as a server-owned starter catalog rather than
+global mutable packs:
+
+- `GET /api/v1/persona/visual-starter-packs`
+- `POST /api/v1/persona/visual-starter-packs/{starter_pack_id}/use`
+
+Using a starter pack copies its bundled manifest-referenced assets through the same
+Persona Visual service validation and storage path used by user uploads and
+same-user duplication. The result is a user-owned draft pack for the target
+persona; it is not activated automatically and must pass the existing explicit
+activation step before Buddy runtime rendering can use it.
+
 Activation should be explicit. A draft pack can be saved while invalid, but activation should require every baseline state to resolve to a valid animation or valid fallback.
 
 ### Jobs Integration
