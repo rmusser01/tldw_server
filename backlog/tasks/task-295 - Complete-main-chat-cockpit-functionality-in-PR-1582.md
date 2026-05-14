@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 01:32'
+updated_date: '2026-05-14 02:07'
 labels:
   - webui
   - chat
@@ -110,6 +110,8 @@ Corrected TASK-295 after issue #1646: the prior checked acceptance criteria and 
 Reviewed and hardened the P-series completion spec before implementation planning. Added explicit state-contract inventory, real populated server proof requirements, per-stage focus expectations, MCP non-hardcoding requirement, degraded-health functional proof before P2 polish, and implementation risks to avoid reachability-only completion.
 
 Created the P-series implementation plan of record at Docs/superpowers/plans/2026-05-14-main-chat-cockpit-p-series-completion-implementation-plan.md. It keeps all work in PR #1582, scopes implementation to the main /chat cockpit rails, requires real-server Playwright proof without route interception, and preserves P0/P1/P2 human approval gates before merge readiness.
+
+Task 0 state contract helper slice: added pure cockpit summary helper guard tests for assistant legacy fallback, persona memory detail, prompt record labels, custom prompt distinction, MCP state contracts, and provider-qualified model routes; wired Playground cockpit assistant, prompt, MCP, and provider-route summaries through the helpers. Verification: helper test passed via bunx vitest; exact paired bunx command was blocked by transient bunx latest/jsdom resolution, then the same two suites passed from apps/tldw-frontend using the repo-installed Vitest with frontend alias config (12 tests). Bandit not applicable because this slice touched TypeScript/TSX and task Markdown only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
