@@ -63,6 +63,20 @@ def _mock_persona_ws_runtime(monkeypatch):
 
 
 def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
+    events = _events_for_text(text, session_id=session_id)
+    for event in reversed(events):
+        if event.get("event") == "tool_plan":
+            return event
+    raise AssertionError("Expected tool_plan event")
+
+
+def _events_for_text(text: str, *, session_id: str = "sess_runtime") -> list[dict]:
+    events: list[dict] = []
+
+    def _capture_until_tool_plan(data: dict) -> bool:
+        events.append(data)
+        return data.get("event") == "tool_plan"
+
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -78,7 +92,8 @@ def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
                     }
                 )
             )
-            return _recv_until(ws, lambda data: data.get("event") == "tool_plan")
+            _recv_until(ws, _capture_until_tool_plan)
+    return events
 
 
 def test_runtime_explorer_provider_reuses_matching_explorer_instances() -> None:
@@ -268,6 +283,57 @@ def test_runtime_explorer_disabled_preserves_existing_plan_without_debug_metadat
     assert plan["steps"][0]["tool"] == "rag_search"
     assert "runtime_explorer" not in plan
     assert "candidate" not in json.dumps(plan).lower()
+
+
+def test_runtime_explorer_disabled_emits_no_runtime_diagnostic_notice(monkeypatch) -> None:
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=False),
+        raising=False,
+    )
+
+    events = _events_for_text("find notes about runtime explorer", session_id="sess_runtime_disabled_notice")
+
+    assert not [
+        event
+        for event in events
+        if event.get("event") == "notice"
+        and str(event.get("reason_code") or "").startswith("RUNTIME_EXPLORER_")
+    ]
+
+
+def test_runtime_explorer_fallback_notice_is_bounded_and_trace_safe(monkeypatch) -> None:
+    def _timeout(_context: dict) -> list[dict]:
+        raise TimeoutError("provider token=provider-secret")
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=True, timeout_ms=1, max_provider_calls=1),
+        raising=False,
+    )
+    monkeypatch.setattr(persona_ep, "_persona_runtime_candidate_generator", _timeout, raising=False)
+
+    events = _events_for_text(
+        "Authorization: Bearer user-secret find runtime notes",
+        session_id="sess_runtime_fallback_notice",
+    )
+
+    notice = next(
+        event
+        for event in events
+        if event.get("event") == "notice"
+        and event.get("reason_code") == "RUNTIME_EXPLORER_FALLBACK"
+    )
+    diagnostics = notice["runtime_explorer"]
+    serialized_notice = json.dumps(notice, sort_keys=True)
+    assert diagnostics["fallback"] == "soft_existing_behavior"
+    assert diagnostics["reason"] == "candidate_generation_timeout"
+    assert diagnostics["error_type"] == "TimeoutError"
+    assert diagnostics["provider_calls"] == 1
+    assert "user-secret" not in serialized_notice
+    assert "provider-secret" not in serialized_notice
 
 
 def test_runtime_explorer_enabled_selects_highest_scoring_safe_plan(monkeypatch) -> None:
