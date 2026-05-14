@@ -2272,6 +2272,14 @@ def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> A
         return default
 
 
+def _persona_visual_import_preview_commit_eligible(preview: dict[str, Any]) -> bool:
+    """Return whether stored preview metadata allows queuing import commit."""
+    proposed_plan = _persona_visual_json_field(preview, "proposed_plan_json", {})
+    if not isinstance(proposed_plan, dict):
+        return True
+    return proposed_plan.get("commit_eligible") is not False
+
+
 def _persona_visual_replaceable_pack_ids(conflicts: Any) -> set[str]:
     """Return target pack ids that preview conflicts allow replacing."""
     if not isinstance(conflicts, list):
@@ -5160,6 +5168,11 @@ async def start_persona_visual_pack_import_commit(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_completed",
+            )
+        if not _persona_visual_import_preview_commit_eligible(preview):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_commit_eligible",
             )
         conflicts = _persona_visual_json_field(preview, "conflicts_json", [])
         replaceable_pack_ids = _persona_visual_replaceable_pack_ids(conflicts)

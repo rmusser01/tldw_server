@@ -90,6 +90,7 @@ class PersonaVisualPackImporter:
         expected_fingerprint = str(preview.get("canonical_payload_fingerprint") or "")
         if expected_fingerprint and revalidated["canonical_payload_fingerprint"] != expected_fingerprint:
             raise ValueError("import_archive_fingerprint_changed")
+        _validate_preview_commit_allowed(revalidated)
         revalidated_conflicts = revalidated.get("conflicts")
         current_conflicts = revalidated_conflicts if isinstance(revalidated_conflicts, list) else []
         if current_conflicts and not conflict_choice_explicit:
@@ -255,8 +256,7 @@ class PersonaVisualPackImporter:
             )
 
     def _validate_preview_ready(self, *, preview: dict[str, Any], archive_path: Path) -> None:
-        if str(preview.get("status") or "") != "completed":
-            raise ValueError("import_preview_not_completed")
+        _validate_preview_commit_allowed(preview)
         if not archive_path.is_file():
             raise ValueError("import_archive_not_found")
         expires_at = _parse_datetime(preview.get("expires_at"))
@@ -282,6 +282,27 @@ def _import_preview_json_field(row: Mapping[str, Any], key: str, default: Any) -
         return json.loads(str(value))
     except json.JSONDecodeError:
         return default
+
+
+def _import_preview_proposed_plan(preview: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return proposed-plan metadata from either a row or fresh preview payload."""
+    proposed_plan = preview.get("proposed_plan")
+    if isinstance(proposed_plan, Mapping):
+        return proposed_plan
+    stored_plan = _import_preview_json_field(preview, "proposed_plan_json", {})
+    if isinstance(stored_plan, Mapping):
+        return stored_plan
+    return {}
+
+
+def _validate_preview_commit_allowed(preview: Mapping[str, Any]) -> None:
+    """Reject previews that are not currently eligible for import commit."""
+    proposed_plan = _import_preview_proposed_plan(preview)
+    status_value = str(preview.get("status") or "").strip()
+    if status_value == "blocked" or proposed_plan.get("commit_eligible") is False:
+        raise ValueError("import_preview_not_commit_eligible")
+    if status_value != "completed":
+        raise ValueError("import_preview_not_completed")
 
 
 def _replaceable_pack_ids_from_conflicts(conflicts: Any) -> set[str]:
