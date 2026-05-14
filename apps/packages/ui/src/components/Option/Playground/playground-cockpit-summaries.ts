@@ -1,4 +1,5 @@
 import type { AssistantSelection } from "@/types/assistant-selection";
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
 import type { PlaygroundPromptSummary } from "./PlaygroundContextRail";
 import type {
   RuntimeAssistantSummary,
@@ -280,16 +281,11 @@ export function buildCockpitProviderRouteSummary(input: {
     };
   }
 
-  const providerSeparator = rawModel.indexOf(":");
-  const providerFromModel =
-    providerSeparator > 0 ? rawModel.slice(0, providerSeparator) : null;
-  const apiModelId =
-    providerFromModel && providerSeparator < rawModel.length - 1
-      ? rawModel.slice(providerSeparator + 1)
-      : rawModel;
-  const selectedProvider = providerFromModel || rawProvider;
+  const providerSelection = parseProviderQualifiedModelSelection(rawModel);
+  const apiModelId = providerSelection.modelId;
+  const selectedProvider = providerSelection.provider || rawProvider;
   const providerRouteLabel =
-    providerFromModel || !selectedProvider
+    providerSelection.isProviderQualified || !selectedProvider
       ? rawModel
       : `${selectedProvider}:${apiModelId}`;
 

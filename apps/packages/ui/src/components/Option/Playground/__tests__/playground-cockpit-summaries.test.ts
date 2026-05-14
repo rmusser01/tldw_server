@@ -301,6 +301,17 @@ describe("playground cockpit summary helpers", () => {
   it("keeps provider-qualified route distinct from the API model id", () => {
     expect(
       buildCockpitProviderRouteSummary({
+        selectedProvider: "ollama",
+        selectedModel: "llama3:latest",
+      }),
+    ).toEqual({
+      selectedProvider: "ollama",
+      selectedModel: "llama3:latest",
+      providerRouteLabel: "ollama:llama3:latest",
+    });
+
+    expect(
+      buildCockpitProviderRouteSummary({
         selectedProvider: "openai",
         selectedModel: "openai:gpt-4.1-mini",
       }),
