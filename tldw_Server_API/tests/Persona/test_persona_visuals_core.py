@@ -343,9 +343,10 @@ def test_activatable_manifest_accepts_sprite_sheet_regions_with_known_dimensions
 
 
 def test_accepts_atlas_regions_without_known_dimensions_for_activation() -> None:
+    """Accept atlas regions during activation before asset dimensions are known."""
     manifest = _activatable_manifest()
     manifest["animations"] = {
-        state: {
+        animation_id: {
             "frames": [
                 {
                     "asset_id": "atlas",
@@ -356,7 +357,9 @@ def test_accepts_atlas_regions_without_known_dimensions_for_activation() -> None
             "frame_rate": 8,
             "preview_frame": 0,
         }
-        for index, state in enumerate(["idle", "listen", "think", "speak", "error"])
+        for index, animation_id in enumerate(
+            ["idle", "listen", "think", "speak", "error"]
+        )
     }
 
     result = validate_visual_manifest(
@@ -440,6 +443,7 @@ def test_accepts_sprite_sheet_regions_without_dimensions_until_asset_metadata_ex
     ],
 )
 def test_rejects_malformed_atlas_region_values(field: str, value: object) -> None:
+    """Reject atlas region coordinates or dimensions with invalid value shapes."""
     region = {"x": 0, "y": 0, "width": 64, "height": 64}
     region[field] = value
     manifest = {

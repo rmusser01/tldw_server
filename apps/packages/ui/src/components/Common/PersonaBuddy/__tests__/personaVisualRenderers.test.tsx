@@ -106,46 +106,48 @@ describe("persona visual renderer registry", () => {
   })
 
   it("reports atlas-backed sprite frame packs as renderable", () => {
+    const basePack = buildPack()
+
     expect(
-      canRenderPersonaVisualPack(
-        buildPack({
-          manifest: {
-            ...buildPack().manifest,
-            animations: {
-              idle: {
-                frames: [
-                  {
-                    asset_id: "idle-1",
-                    region: { x: 0, y: 0, width: 16, height: 16 }
-                  }
-                ]
-              }
+      canRenderPersonaVisualPack({
+        ...basePack,
+        manifest: {
+          ...basePack.manifest,
+          animations: {
+            idle: {
+              frames: [
+                {
+                  asset_id: "idle-1",
+                  region: { x: 0, y: 0, width: 16, height: 16 }
+                }
+              ]
             }
           }
-        })
-      )
+        }
+      })
     ).toBe(true)
   })
 
   it("keeps renderability coarse so atlas region errors can be reported", () => {
+    const basePack = buildPack()
+
     expect(
-      canRenderPersonaVisualPack(
-        buildPack({
-          manifest: {
-            ...buildPack().manifest,
-            animations: {
-              idle: {
-                frames: [
-                  {
-                    asset_id: "idle-1",
-                    region: { x: 0, y: 0, width: 0, height: 16 }
-                  }
-                ]
-              }
+      canRenderPersonaVisualPack({
+        ...basePack,
+        manifest: {
+          ...basePack.manifest,
+          animations: {
+            idle: {
+              frames: [
+                {
+                  asset_id: "idle-1",
+                  region: { x: 0, y: 0, width: 0, height: 16 }
+                }
+              ]
             }
           }
-        })
-      )
+        }
+      })
     ).toBe(true)
   })
 

@@ -93,8 +93,9 @@ contract.
 Atlas-backed animations reference one bounded raster asset from each frame and
 crop individual frames with a pixel `frames[].region` rectangle. The same atlas
 asset can be reused across multiple frames. Use `preview_frame` when the preview
-should use a specific atlas crop. `preview_asset_id` is better for separate-frame
-animations with distinct asset IDs.
+should use a specific atlas crop; it is a zero-based frame index and must satisfy
+`0 <= preview_frame < len(frames)`. `preview_asset_id` is better for
+separate-frame animations with distinct asset IDs.
 
 ```json
 {

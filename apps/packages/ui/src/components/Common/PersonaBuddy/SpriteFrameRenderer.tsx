@@ -101,6 +101,8 @@ const renderFrame = ({
   }
   if (frame.region) {
     const region = frame.region
+    const offsetX = region.x === 0 ? 0 : -region.x
+    const offsetY = region.y === 0 ? 0 : -region.y
     return (
       <div
         {...sharedProps}
@@ -110,7 +112,7 @@ const renderFrame = ({
           width: `${region.width}px`,
           height: `${region.height}px`,
           backgroundImage: `url(${asset.url})`,
-          backgroundPosition: `-${region.x}px -${region.y}px`,
+          backgroundPosition: `${offsetX}px ${offsetY}px`,
           backgroundSize:
             asset.width && asset.height
               ? `${asset.width}px ${asset.height}px`
