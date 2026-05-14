@@ -543,6 +543,34 @@ def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activatio
     ]
 
 
+@pytest.mark.parametrize("manifest_version", [2.0, "+2"])
+def test_import_preview_routes_integer_like_v2_manifest_versions_to_renderer_diagnostics(
+    tmp_path: Path,
+    manifest_version: object,
+) -> None:
+    assets, asset_files = _live2d_preview_assets()
+    visual_manifest = _live2d_v2_manifest()
+    visual_manifest["manifest_version"] = manifest_version
+    archive_path = _renderer_preview_archive(
+        tmp_path,
+        title=f"Live2D Version {manifest_version}",
+        visual_manifest=visual_manifest,
+        assets=assets,
+        asset_files=asset_files,
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    renderer_preview = preview["proposed_plan"]["renderer_import_preview"]
+    assert preview["status"] == "blocked"  # nosec B101
+    assert renderer_preview["manifest_version"] == 2  # nosec B101
+    assert renderer_preview["status"] == "unsupported_renderer"  # nosec B101
+
+
 def test_import_preview_reports_v2_missing_required_role_category(
     tmp_path: Path,
 ) -> None:

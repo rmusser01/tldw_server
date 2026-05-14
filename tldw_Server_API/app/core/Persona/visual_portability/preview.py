@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -27,6 +28,8 @@ from .constants import (
     TRUST_MODE_UNTRUSTED_IMPORT,
 )
 from .fingerprints import canonical_payload_fingerprint, sha256_file, sha256_stream
+
+_INTEGER_TEXT_RE = re.compile(r"^[+-]?[0-9]+$")
 
 
 class PersonaVisualPackImportPreviewer:
@@ -249,9 +252,11 @@ def _coerce_manifest_version(value: Any) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
     if isinstance(value, str):
         stripped = value.strip()
-        return int(stripped) if stripped.isdigit() else None
+        return int(stripped) if _INTEGER_TEXT_RE.fullmatch(stripped) else None
     return None
 
 

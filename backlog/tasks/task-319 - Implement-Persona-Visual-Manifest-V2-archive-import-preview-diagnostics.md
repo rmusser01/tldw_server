@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-13 15:09'
-updated_date: '2026-05-13 15:25'
+updated_date: '2026-05-14 00:29'
 labels:
   - persona
   - buddy
@@ -44,17 +44,27 @@ Implemented Manifest V2 archive preview routing through the existing renderer im
 
 Updated the import-preview worker to persist result.status so renderer-blocked previews remain non-committable through the existing commit status gate.
 
-Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q => 29 passed, 5 warnings.
+Verification: python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q => 29 passed, 5 warnings.
 
-Verification: git diff --check => passed. Bandit: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_jobs_worker.py -f json -o /tmp/bandit_persona_visual_v2_archive_preview.json => 0 findings.
+Verification: git diff --check => passed. Bandit scanned the touched backend files tldw_Server_API/app/core/Persona/visual_portability/preview.py and tldw_Server_API/app/core/Persona/visual_jobs_worker.py with python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_jobs_worker.py -f json -o /tmp/bandit_persona_visual_v2_archive_preview.json => 0 findings.
 
 No runtime activation, MCP provider execution, frontend, or VN/CYOA behavior was added in this slice.
+
+Review follow-up started for PR #1642: verifying Qodo, CodeRabbit, and Gemini comments against current branch before minimal fixes.
+
+Review follow-up: fixed Qodo version-coercion finding by accepting integer-like floats and signed ASCII integer strings for archive preview routing, avoiding isdigit Unicode edge cases. Added regression coverage for manifest_version 2.0 and +2 routing to renderer diagnostics.
+
+Review follow-up: updated Backlog verification notes to use reproducible python -m commands and to clarify Bandit scanned preview.py and visual_jobs_worker.py specifically.
+
+Review verification: python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q => 31 passed, 5 warnings. git diff --check => passed. python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_jobs_worker.py -f json -o /tmp/bandit_persona_visual_v2_archive_preview_review_fix.json => 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented backend-only Persona Visual Manifest V2 archive import-preview diagnostics. V2 renderer metadata now uses the renderer capability import-preview validator, returns structured diagnostics under proposed_plan.renderer_import_preview, marks non-committable renderer previews as blocked, and preserves V1 sprite_frames preview behavior. Added focused previewer and worker regression tests plus documentation for the review-only boundary.
+
+Review follow-up fixed manifest version routing for integer-like floats and signed strings, added regression tests, and normalized task verification wording.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
