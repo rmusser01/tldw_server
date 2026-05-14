@@ -137,6 +137,38 @@ describe("PlaygroundContextRail first-slice controls", () => {
     expect(props.onToggleTemporaryChat).toHaveBeenCalledWith(true);
   });
 
+  it("surfaces server-session loading state without hiding history state", () => {
+    renderRail({
+      sessionLabel: "Server chat",
+      historyLinked: true,
+      sessionTitle: "Research follow-up",
+      sessionStatus: "loading",
+      sessionDetail: "Loading conversation",
+    } as any);
+
+    expect(screen.getByText("Server chat")).toBeInTheDocument();
+    expect(screen.getByText("Research follow-up")).toBeInTheDocument();
+    expect(screen.getAllByText("Loading conversation").length).toBeGreaterThan(0);
+    expect(screen.getByText("History linked")).toBeInTheDocument();
+  });
+
+  it("surfaces recoverable server-session errors", () => {
+    renderRail({
+      sessionLabel: "Server chat",
+      historyLinked: false,
+      sessionTitle: "Archived investigation",
+      sessionStatus: "failed",
+      sessionDetail: "Failed to load conversation",
+      sessionError: "Conversation no longer exists",
+    } as any);
+
+    expect(screen.getByText("Load failed")).toBeInTheDocument();
+    expect(screen.getByText("Archived investigation")).toBeInTheDocument();
+    expect(screen.getByText("Failed to load conversation")).toBeInTheDocument();
+    expect(screen.getByText("Conversation no longer exists")).toBeInTheDocument();
+    expect(screen.getByText("No saved history yet")).toBeInTheDocument();
+  });
+
   it("shows explicit context counts even when no summary strings are supplied", () => {
     renderRail({
       hasContext: true,

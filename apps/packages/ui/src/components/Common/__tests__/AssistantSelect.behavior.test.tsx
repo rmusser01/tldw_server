@@ -221,6 +221,44 @@ describe("AssistantSelect behavior", () => {
     })
   })
 
+  it("closes the menu and restores focus without waiting for selection persistence", async () => {
+    const user = userEvent.setup()
+    let resolveSelection: (() => void) | undefined
+    mocks.setSelectedAssistant.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSelection = resolve
+        })
+    )
+
+    renderAssistantSelect()
+    const railTrigger = screen.getByRole("button", {
+      name: "Runtime rail trigger"
+    })
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "character",
+          source: "playground-cockpit",
+          returnFocusSelector: "#assistant-rail-trigger"
+        }
+      })
+    )
+
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("assistant-select-menu")).toBeNull()
+      expect(document.activeElement).toBe(railTrigger)
+    })
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "character", id: "char-1", name: "Alpha" })
+    )
+
+    resolveSelection?.()
+  })
+
   it("returns focus to the requested rail trigger after Escape closes the menu", async () => {
     renderAssistantSelect()
     const railTrigger = screen.getByRole("button", {

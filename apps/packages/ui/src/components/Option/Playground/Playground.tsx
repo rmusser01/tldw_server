@@ -21,6 +21,7 @@ import {
   buildCockpitMcpSummary,
   buildCockpitPromptSummary,
   buildCockpitProviderRouteSummary,
+  buildCockpitSessionSummary,
 } from "./playground-cockpit-summaries";
 import {
   openActorSettings,
@@ -219,6 +220,12 @@ export const Playground = () => {
     history,
     historyId,
     serverChatId,
+    serverChatTitle,
+    serverChatLoadState,
+    serverChatLoadError,
+    serverChatState,
+    serverChatTopic,
+    serverChatSource,
     isLoading,
     selectedModel,
     setHistoryId,
@@ -1664,6 +1671,48 @@ export const Playground = () => {
       navigate("/settings/characters");
     }
   }, [navigate, selectedAssistant, selectedCharacter]);
+  const cockpitAssistantSummary = buildCockpitAssistantSummary({
+    selectedAssistant,
+    selectedCharacter,
+    personaMemoryMode: serverChatPersonaMemoryMode,
+    copy: {
+      assistantFallbackName: toText(
+        t("playground:cockpit.assistantFallback", "Assistant"),
+      ),
+      characterSelected: toText(
+        t("playground:cockpit.characterSelected", "Character selected"),
+      ),
+      legacyCharacterFallbackName: (id) =>
+        toText(
+          t("playground:cockpit.characterFallbackById", `Character ${id}`, {
+            id,
+          }),
+        ),
+      memoryReadOnly: toText(
+        t("playground:cockpit.personaMemoryReadOnly", "memory read-only"),
+      ),
+      memoryReadWrite: toText(
+        t("playground:cockpit.personaMemoryReadWrite", "memory read/write"),
+      ),
+      noAssistantSelected: toText(
+        t("playground:cockpit.noAssistantSelected", "No assistant selected"),
+      ),
+      personaFallbackName: toText(
+        t("playground:cockpit.personaFallback", "Persona"),
+      ),
+      personaSelected: toText(
+        t("playground:cockpit.personaSelected", "Persona selected"),
+      ),
+      personaSelectedWithMemoryMode: (memoryMode) =>
+        toText(
+          t(
+            "playground:cockpit.personaSelectedWithMemoryMode",
+            `Persona selected - ${memoryMode}`,
+            { memoryMode },
+          ),
+        ),
+    },
+  });
   const canRegenerateLastResponse = messages.some(
     (message) => message.role === "assistant",
   );
@@ -1686,13 +1735,63 @@ export const Playground = () => {
       contextFileCount > 0 ||
       selectedKnowledgeCount > 0 ||
       ragMediaIdCount > 0 ||
-      hasPromptContext,
+      hasPromptContext ||
+      cockpitAssistantSummary.mode !== "none",
   );
-  const sessionLabel = temporaryChat
-    ? toText(t("playground:cockpit.sessionTemporary", "Temporary chat"))
-    : serverChatId
-      ? toText(t("playground:cockpit.sessionServer", "Server chat"))
-      : toText(t("playground:cockpit.sessionLocal", "Local chat"));
+  const sessionSummary = buildCockpitSessionSummary({
+    temporaryChat,
+    serverChatId,
+    historyId,
+    serverChatTitle,
+    serverChatLoadState,
+    serverChatLoadError,
+    serverChatState,
+    serverChatTopic,
+    serverChatSource,
+    copy: {
+      failedDetail: toText(
+        t(
+          "playground:cockpit.sessionLoadFailedDetail",
+          "Failed to load conversation",
+        ),
+      ),
+      failedStatusLabel: toText(
+        t("playground:cockpit.sessionLoadFailed", "Load failed"),
+      ),
+      historyLinkedDetail: toText(
+        t("playground:cockpit.historyLinked", "History linked"),
+      ),
+      idleStatusLabel: toText(t("playground:cockpit.idle", "Idle")),
+      loadingDetail: toText(
+        t("playground:cockpit.sessionLoading", "Loading conversation"),
+      ),
+      loadingStatusLabel: toText(
+        t("playground:cockpit.sessionLoading", "Loading conversation"),
+      ),
+      localChatLabel: toText(t("playground:cockpit.sessionLocal", "Local chat")),
+      localHistoryStatusLabel: toText(
+        t("playground:cockpit.localHistory", "Local history"),
+      ),
+      noSavedHistoryDetail: toText(
+        t("playground:cockpit.noSavedHistory", "No saved history yet"),
+      ),
+      readyDetail: toText(
+        t("playground:cockpit.sessionReadyDetail", "Conversation ready"),
+      ),
+      readyStatusLabel: toText(t("playground:cockpit.sessionReady", "Ready")),
+      serverChatLabel: toText(
+        t("playground:cockpit.sessionServer", "Server chat"),
+      ),
+      temporaryChatLabel: toText(
+        t("playground:cockpit.sessionTemporary", "Temporary chat"),
+      ),
+      temporaryDetail: toText(t("playground:cockpit.notSaved", "Not saved")),
+      temporaryStatusLabel: toText(
+        t("playground:cockpit.localOnly", "Local only"),
+      ),
+    },
+  });
+  const sessionLabel = sessionSummary.label;
   const contextSummary: string[] = [];
   const providerRouteSummary = buildCockpitProviderRouteSummary({
     selectedProvider: apiProvider,
@@ -1718,6 +1817,20 @@ export const Playground = () => {
     },
     [ragMediaItems, setRagMediaIds],
   );
+  const removeSelectedKnowledgeAt = React.useCallback(
+    (index: number) => {
+      const nextItems = selectedKnowledgeItems.filter(
+        (_, itemIndex) => itemIndex !== index,
+      );
+      const nextValue = Array.isArray(selectedKnowledge)
+        ? nextItems.length > 0
+          ? nextItems
+          : null
+        : nextItems[0] || null;
+      (setSelectedKnowledge as (value: unknown) => void)(nextValue);
+    },
+    [selectedKnowledge, selectedKnowledgeItems, setSelectedKnowledge],
+  );
   const contextSources = ([
     webSearch
       ? {
@@ -1735,6 +1848,48 @@ export const Playground = () => {
           onRemove: toggleWebSearchFromCockpit,
           removeLabel: toText(
             t("playground:cockpit.disableWebSearch", "Disable web search"),
+          ),
+        }
+      : null,
+    hasPromptContext
+      ? {
+          id: `prompt-${promptSummary.state}`,
+          kind: "prompt" as const,
+          label: toText(t("playground:cockpit.prompt", "Prompt")),
+          title: promptSummary.label,
+          detail: promptSummary.detail,
+          state: "active" as const,
+          onOpen: openPromptSelectorFromCockpit,
+          onRemove: clearPromptContextFromCockpit,
+          openLabel: toText(
+            t("playground:cockpit.selectPrompt", "Select a prompt"),
+          ),
+          removeLabel: toText(
+            t("playground:cockpit.clearPromptContext", "Clear prompt context"),
+          ),
+        }
+      : null,
+    cockpitAssistantSummary.mode !== "none" && cockpitAssistantSummary.name
+      ? {
+          id: `assistant-${cockpitAssistantSummary.mode}-${cockpitAssistantSummary.name}`,
+          kind: "assistant" as const,
+          label:
+            cockpitAssistantSummary.mode === "persona"
+              ? toText(t("playground:cockpit.persona", "Persona"))
+              : toText(t("playground:cockpit.character", "Character")),
+          title: cockpitAssistantSummary.name,
+          detail: cockpitAssistantSummary.detail,
+          state: "active" as const,
+          onOpen: openAssistantSelectorFromCockpit,
+          onRemove: clearAssistantFromCockpit,
+          openLabel: toText(
+            t(
+              "playground:cockpit.selectCharacterPersona",
+              "Select character or persona",
+            ),
+          ),
+          removeLabel: toText(
+            t("playground:cockpit.clearAssistant", "Clear assistant"),
           ),
         }
       : null,
@@ -1781,6 +1936,9 @@ export const Playground = () => {
         detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
         state: "active" as const,
         onRemove: () => removeContextFileAt(index),
+        removeLabel: toText(
+          t("playground:cockpit.removeFileSource", `Remove ${title}`, { title }),
+        ),
       };
     }),
     ...selectedKnowledgeItems.map((knowledge, index) => {
@@ -1799,7 +1957,15 @@ export const Playground = () => {
         detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
         state: "active" as const,
         onOpen: () => openSearchAndContext({ tab: "context" }),
-        onRemove: () => setSelectedKnowledge(null),
+        onRemove: () => removeSelectedKnowledgeAt(index),
+        openLabel: toText(
+          t("playground:cockpit.openKnowledgeSource", `Open ${title}`, { title }),
+        ),
+        removeLabel: toText(
+          t("playground:cockpit.removeKnowledgeSource", `Remove ${title}`, {
+            title,
+          }),
+        ),
       };
     }),
     ...ragMediaItems.map((mediaId, index) => ({
@@ -1815,6 +1981,12 @@ export const Playground = () => {
       state: "active" as const,
       onOpen: () => openSearchAndContext({ tab: "context" }),
       onRemove: () => removeRagMediaAt(index),
+      openLabel: toText(
+        t("playground:cockpit.openMediaSource", "Open media scope"),
+      ),
+      removeLabel: toText(
+        t("playground:cockpit.removeMediaSource", "Remove media scope"),
+      ),
     })),
   ] satisfies Array<PlaygroundContextSource | null>).filter(
     Boolean,
@@ -1929,6 +2101,11 @@ export const Playground = () => {
       contextSummary={contextSummary}
       contextSources={contextSources}
       sessionLabel={sessionLabel}
+      sessionTitle={sessionSummary.title}
+      sessionStatus={sessionSummary.status}
+      sessionStatusLabel={sessionSummary.statusLabel}
+      sessionDetail={sessionSummary.detail}
+      sessionError={sessionSummary.error}
       historyLinked={Boolean(historyId)}
       webSearch={webSearch}
       onToggleWebSearch={toggleWebSearchFromCockpit}
@@ -1976,51 +2153,7 @@ export const Playground = () => {
       runtimeStatusDetail={runtimeStatusDetail}
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
-      assistantSummary={buildCockpitAssistantSummary({
-        selectedAssistant,
-        selectedCharacter,
-        personaMemoryMode: serverChatPersonaMemoryMode,
-        copy: {
-          assistantFallbackName: toText(
-            t("playground:cockpit.assistantFallback", "Assistant"),
-          ),
-          characterSelected: toText(
-            t("playground:cockpit.characterSelected", "Character selected"),
-          ),
-          legacyCharacterFallbackName: (id) =>
-            toText(
-              t("playground:cockpit.characterFallbackById", `Character ${id}`, {
-                id,
-              }),
-            ),
-          memoryReadOnly: toText(
-            t("playground:cockpit.personaMemoryReadOnly", "memory read-only"),
-          ),
-          memoryReadWrite: toText(
-            t("playground:cockpit.personaMemoryReadWrite", "memory read/write"),
-          ),
-          noAssistantSelected: toText(
-            t(
-              "playground:cockpit.noAssistantSelected",
-              "No assistant selected",
-            ),
-          ),
-          personaFallbackName: toText(
-            t("playground:cockpit.personaFallback", "Persona"),
-          ),
-          personaSelected: toText(
-            t("playground:cockpit.personaSelected", "Persona selected"),
-          ),
-          personaSelectedWithMemoryMode: (memoryMode) =>
-            toText(
-              t(
-                "playground:cockpit.personaSelectedWithMemoryMode",
-                `Persona selected - ${memoryMode}`,
-                { memoryMode },
-              ),
-            ),
-        },
-      })}
+      assistantSummary={cockpitAssistantSummary}
       onOpenModelSettings={openModelSettingsFromCockpit}
       onOpenAssistantSelect={openAssistantSelectorFromCockpit}
       onClearAssistant={clearAssistantFromCockpit}

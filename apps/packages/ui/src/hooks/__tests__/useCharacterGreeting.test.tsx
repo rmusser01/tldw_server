@@ -383,6 +383,10 @@ describe("useCharacterGreeting", () => {
     await Promise.resolve()
     await Promise.resolve()
 
+    rerender({ currentCharacter: { ...selectedCharacter } })
+    await Promise.resolve()
+    await Promise.resolve()
+
     expect(mocks.getCharacter).toHaveBeenCalledTimes(1)
     expect(messageState[0]?.message).toBeTruthy()
     expect(historyState[0]?.content).toBeTruthy()

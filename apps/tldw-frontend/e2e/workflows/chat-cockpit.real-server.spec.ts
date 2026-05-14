@@ -245,6 +245,19 @@ const waitForChatCompletionAttempt = (page: Page) =>
     { timeout: 60_000 }
   );
 
+const waitForCharacterCompletionAttempt = (page: Page) =>
+  page.waitForResponse(
+    (response) => {
+      if (!response.url().startsWith(serverUrl)) return false;
+      const url = new URL(response.url());
+      return (
+        /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) &&
+        response.request().method() === 'POST'
+      );
+    },
+    { timeout: 60_000 }
+  );
+
 const assertChatCompletionRenderedOrRecoverable = async (
   page: Page,
   response: Response
@@ -651,18 +664,26 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(page.getByText(`Character: ${characterName}`)).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Open Scene Director' })).toBeVisible();
+      const contextRail = page.getByTestId('playground-context-rail');
+      const assistantContextSource = contextRail
+        .getByRole('list', { name: 'Context sources' })
+        .getByRole('listitem')
+        .filter({ hasText: characterName });
+      await expect(assistantContextSource).toContainText('Character');
+      await expect(assistantContextSource).toContainText(characterName);
 
       const smokePrompt = `assistant rail proof ${Date.now()}`;
       await page.getByTestId('chat-input').fill(smokePrompt);
-      const chatCompletionAttempt = waitForChatCompletionAttempt(page);
-      await page.getByTestId('chat-input').press('Enter');
+      const chatCompletionAttempt = waitForCharacterCompletionAttempt(page);
+      await page.getByRole('button', { name: /send message/i }).click();
       const chatCompletionResponse = await chatCompletionAttempt;
       await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
       await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
 
-      await runtimeInspector.getByRole('button', { name: 'Clear assistant' }).click();
+      await assistantContextSource.getByRole('button', { name: 'Clear assistant' }).click();
       await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(0);
+      await expect(assistantContextSource).toHaveCount(0);
       await expect(composerAssistant).toHaveAccessibleName(/Select character or persona/i);
     } finally {
       await apiDelete(

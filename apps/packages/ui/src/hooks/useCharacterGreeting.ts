@@ -62,6 +62,7 @@ export const useCharacterGreeting = ({
   const greetingEnabled = settings?.greetingEnabled ?? true
   const greetingInjectedRef = React.useRef<string | null>(null)
   const greetingFetchRef = React.useRef<string | null>(null)
+  const greetingFetchedRef = React.useRef<string | null>(null)
   const greetingTemplateRef = React.useRef<{
     characterId: string
     greeting: string
@@ -133,6 +134,7 @@ export const useCharacterGreeting = ({
 
   React.useEffect(() => {
     greetingFetchRef.current = null
+    greetingFetchedRef.current = null
     greetingTemplateRef.current = null
   }, [selectedCharacter?.id])
 
@@ -357,7 +359,10 @@ export const useCharacterGreeting = ({
     }
 
     const fallbackGreeting = greetingOptions[0]?.text?.trim() || ""
-    if (greetingFetchRef.current !== characterId) {
+    if (
+      greetingFetchRef.current !== characterId &&
+      greetingFetchedRef.current !== characterId
+    ) {
       greetingFetchRef.current = characterId
       void (async () => {
         try {
@@ -369,6 +374,7 @@ export const useCharacterGreeting = ({
             return
           }
           const full = await tldwClient.getCharacter(characterId)
+          greetingFetchedRef.current = characterId
           if (
             !isCurrentSelection() ||
             greetingFetchRef.current !== characterId
@@ -406,6 +412,7 @@ export const useCharacterGreeting = ({
               }
           setSelectedCharacter(mergedCharacter)
         } catch {
+          greetingFetchedRef.current = characterId
           if (fallbackGreeting) {
             resolveAndPersistGreeting(
               buildGreetingOptionsFromEntries([

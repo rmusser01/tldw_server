@@ -14,6 +14,7 @@ type LegacyCharacterSelection = {
 
 type PersonaMemoryMode = "read_only" | "read_write";
 type CockpitMcpHealthState = McpHealthState | "degraded";
+type CockpitSessionLoadState = "idle" | "loading" | "loaded" | "failed";
 
 type AssistantSummaryCopy = Partial<{
   assistantFallbackName: string;
@@ -47,6 +48,24 @@ type McpSummaryCopy = Partial<{
   toolsLabel: string;
   unavailableDetail: string;
   unavailableLabel: string;
+}>;
+
+type SessionSummaryCopy = Partial<{
+  failedDetail: string;
+  failedStatusLabel: string;
+  historyLinkedDetail: string;
+  idleStatusLabel: string;
+  loadingDetail: string;
+  loadingStatusLabel: string;
+  localChatLabel: string;
+  localHistoryStatusLabel: string;
+  noSavedHistoryDetail: string;
+  readyDetail: string;
+  readyStatusLabel: string;
+  serverChatLabel: string;
+  temporaryChatLabel: string;
+  temporaryDetail: string;
+  temporaryStatusLabel: string;
 }>;
 
 const defaultAssistantCopy = {
@@ -92,6 +111,24 @@ const defaultMcpCopy = {
   unavailableDetail: "MCP tools unavailable",
   unavailableLabel: "MCP unavailable",
 } satisfies Required<McpSummaryCopy>;
+
+const defaultSessionCopy = {
+  failedDetail: "Failed to load conversation",
+  failedStatusLabel: "Load failed",
+  historyLinkedDetail: "History linked",
+  idleStatusLabel: "Idle",
+  loadingDetail: "Loading conversation",
+  loadingStatusLabel: "Loading conversation",
+  localChatLabel: "Local chat",
+  localHistoryStatusLabel: "Local history",
+  noSavedHistoryDetail: "No saved history yet",
+  readyDetail: "Conversation ready",
+  readyStatusLabel: "Ready",
+  serverChatLabel: "Server chat",
+  temporaryChatLabel: "Temporary chat",
+  temporaryDetail: "Not saved",
+  temporaryStatusLabel: "Local only",
+} satisfies Required<SessionSummaryCopy>;
 
 const normalizeText = (value: string | null | undefined): string | null => {
   if (typeof value !== "string") return null;
@@ -306,5 +343,93 @@ export function buildCockpitProviderRouteSummary(input: {
     selectedProvider,
     selectedModel: apiModelId,
     providerRouteLabel,
+  };
+}
+
+export function buildCockpitSessionSummary(input: {
+  temporaryChat: boolean;
+  serverChatId: string | null | undefined;
+  historyId: string | null | undefined;
+  serverChatTitle?: string | null;
+  serverChatLoadState?: CockpitSessionLoadState | null;
+  serverChatLoadError?: string | null;
+  serverChatState?: string | null;
+  serverChatTopic?: string | null;
+  serverChatSource?: string | null;
+  copy?: SessionSummaryCopy;
+}): {
+  label: string;
+  title: string | null;
+  detail: string;
+  status: CockpitSessionLoadState;
+  statusLabel: string;
+  error: string | null;
+} {
+  const copy = { ...defaultSessionCopy, ...input.copy };
+  const hasServerChat = Boolean(normalizeText(input.serverChatId));
+
+  if (input.temporaryChat) {
+    return {
+      label: copy.temporaryChatLabel,
+      title: null,
+      detail: copy.temporaryDetail,
+      status: "idle",
+      statusLabel: copy.temporaryStatusLabel,
+      error: null,
+    };
+  }
+
+  if (!hasServerChat) {
+    const hasHistory = Boolean(normalizeText(input.historyId));
+    return {
+      label: copy.localChatLabel,
+      title: null,
+      detail: hasHistory ? copy.historyLinkedDetail : copy.noSavedHistoryDetail,
+      status: hasHistory ? "loaded" : "idle",
+      statusLabel: hasHistory
+        ? copy.localHistoryStatusLabel
+        : copy.idleStatusLabel,
+      error: null,
+    };
+  }
+
+  const status = input.serverChatLoadState || "idle";
+  const error = normalizeText(input.serverChatLoadError);
+  if (status === "loading") {
+    return {
+      label: copy.serverChatLabel,
+      title: normalizeText(input.serverChatTitle),
+      detail: copy.loadingDetail,
+      status,
+      statusLabel: copy.loadingStatusLabel,
+      error: null,
+    };
+  }
+
+  if (status === "failed") {
+    return {
+      label: copy.serverChatLabel,
+      title: normalizeText(input.serverChatTitle),
+      detail: error || copy.failedDetail,
+      status,
+      statusLabel: copy.failedStatusLabel,
+      error,
+    };
+  }
+
+  const detailParts = [
+    normalizeText(input.serverChatTopic),
+    normalizeText(input.serverChatState),
+    normalizeText(input.serverChatSource),
+  ].filter((part): part is string => Boolean(part));
+
+  return {
+    label: copy.serverChatLabel,
+    title: normalizeText(input.serverChatTitle),
+    detail: detailParts.length > 0 ? detailParts.join(" - ") : copy.readyDetail,
+    status: status === "loaded" ? "loaded" : "idle",
+    statusLabel:
+      status === "loaded" ? copy.readyStatusLabel : copy.idleStatusLabel,
+    error: null,
   };
 }

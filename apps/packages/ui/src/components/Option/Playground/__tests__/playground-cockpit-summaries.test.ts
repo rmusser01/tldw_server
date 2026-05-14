@@ -5,6 +5,7 @@ import {
   buildCockpitMcpSummary,
   buildCockpitPromptSummary,
   buildCockpitProviderRouteSummary,
+  buildCockpitSessionSummary,
 } from "../playground-cockpit-summaries";
 import type { AssistantSelection } from "@/types/assistant-selection";
 
@@ -360,6 +361,61 @@ describe("playground cockpit summary helpers", () => {
       selectedProvider: "openai",
       selectedModel: "gpt-4.1-mini",
       providerRouteLabel: "openai:gpt-4.1-mini",
+    });
+  });
+
+  it("summarizes temporary, local, and failed server sessions without stale titles", () => {
+    expect(
+      buildCockpitSessionSummary({
+        temporaryChat: true,
+        serverChatId: "server-chat-1",
+        historyId: "history-1",
+        serverChatTitle: "Should not leak",
+        serverChatLoadState: "loaded",
+      }),
+    ).toEqual({
+      label: "Temporary chat",
+      title: null,
+      detail: "Not saved",
+      status: "idle",
+      statusLabel: "Local only",
+      error: null,
+    });
+
+    expect(
+      buildCockpitSessionSummary({
+        temporaryChat: false,
+        serverChatId: null,
+        historyId: "history-1",
+        serverChatTitle: "Should not leak",
+        serverChatLoadState: "failed",
+        serverChatLoadError: "Should not leak",
+      }),
+    ).toEqual({
+      label: "Local chat",
+      title: null,
+      detail: "History linked",
+      status: "loaded",
+      statusLabel: "Local history",
+      error: null,
+    });
+
+    expect(
+      buildCockpitSessionSummary({
+        temporaryChat: false,
+        serverChatId: "server-chat-1",
+        historyId: null,
+        serverChatTitle: "Archived investigation",
+        serverChatLoadState: "failed",
+        serverChatLoadError: "Conversation no longer exists",
+      }),
+    ).toEqual({
+      label: "Server chat",
+      title: "Archived investigation",
+      detail: "Conversation no longer exists",
+      status: "failed",
+      statusLabel: "Load failed",
+      error: "Conversation no longer exists",
     });
   });
 });

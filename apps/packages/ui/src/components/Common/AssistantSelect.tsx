@@ -332,11 +332,11 @@ export const AssistantSelect: React.FC<Props> = ({
   )
 
   const handleSelect = React.useCallback(
-    async (entry: AssistantSelection) => {
-      await setSelectedAssistant(entry)
+    (entry: AssistantSelection) => {
       setOpen(false)
       setSearchText("")
       restoreReturnFocus()
+      void setSelectedAssistant(entry)
     },
     [restoreReturnFocus, setSelectedAssistant]
   )

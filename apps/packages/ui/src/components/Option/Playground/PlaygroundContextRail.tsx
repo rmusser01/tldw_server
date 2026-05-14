@@ -8,6 +8,7 @@ import {
   Layers3,
   Search,
   Trash2,
+  UserRound,
 } from "lucide-react";
 import { getDesignSystemState } from "@/design-system";
 
@@ -44,7 +45,14 @@ export type PlaygroundContextSourceState =
 
 export type PlaygroundContextSource = {
   id: string;
-  kind: "research" | "file" | "knowledge" | "media" | "web" | "prompt";
+  kind:
+    | "research"
+    | "file"
+    | "knowledge"
+    | "media"
+    | "web"
+    | "prompt"
+    | "assistant";
   label: string;
   title: string;
   detail?: string | null;
@@ -60,6 +68,11 @@ export type PlaygroundContextRailProps = {
   contextSummary: string[];
   contextSources?: PlaygroundContextSource[];
   sessionLabel: string;
+  sessionTitle?: string | null;
+  sessionStatus?: "idle" | "loading" | "loaded" | "failed";
+  sessionStatusLabel?: string | null;
+  sessionDetail?: string | null;
+  sessionError?: string | null;
   historyLinked: boolean;
   webSearch: boolean;
   onToggleWebSearch: () => void;
@@ -87,6 +100,7 @@ const sourceIcon = (kind: PlaygroundContextSource["kind"]) => {
   if (kind === "file") return <FileText className={className} aria-hidden="true" />;
   if (kind === "knowledge") return <BookOpen className={className} aria-hidden="true" />;
   if (kind === "media") return <Database className={className} aria-hidden="true" />;
+  if (kind === "assistant") return <UserRound className={className} aria-hidden="true" />;
   return <Layers3 className={className} aria-hidden="true" />;
 };
 
@@ -97,11 +111,25 @@ const sourceStateClass = (state: PlaygroundContextSourceState = "active") => {
   return "border-success/40 bg-success/10 text-success";
 };
 
+const sessionStatusClass = (
+  status: NonNullable<PlaygroundContextRailProps["sessionStatus"]> = "idle",
+) => {
+  if (status === "failed") return "border-danger/40 bg-danger/10 text-danger";
+  if (status === "loading") return "border-info/40 bg-info/10 text-info";
+  if (status === "loaded") return "border-success/40 bg-success/10 text-success";
+  return "border-border bg-surface2 text-text-muted";
+};
+
 export const PlaygroundContextRail = ({
   hasContext,
   contextSummary,
   contextSources = [],
   sessionLabel,
+  sessionTitle,
+  sessionStatus = "idle",
+  sessionStatusLabel,
+  sessionDetail,
+  sessionError,
   historyLinked,
   webSearch,
   onToggleWebSearch,
@@ -138,6 +166,15 @@ export const PlaygroundContextRail = ({
       ),
     };
   const promptActive = effectivePromptSummary.state !== "none";
+  const effectiveSessionStatusLabel =
+    sessionStatusLabel ||
+    (sessionStatus === "failed"
+      ? t("cockpit.sessionLoadFailed", "Load failed")
+      : sessionStatus === "loading"
+        ? t("cockpit.sessionLoading", "Loading conversation")
+        : sessionStatus === "loaded"
+          ? t("cockpit.sessionReady", "Ready")
+          : t("cockpit.sessionIdle", "Idle"));
   const sourceCountLabel =
     activeSourceCount === 1
       ? t("cockpit.activeSourceCountOne", "1 active source")
@@ -452,7 +489,31 @@ export const PlaygroundContextRail = ({
         aria-label={t("cockpit.conversationSession", "Conversation session")}
       >
         <h2 className={railHeadingClass}>{t("cockpit.session", "Session")}</h2>
-        <p className={railValueClass}>{sessionLabel}</p>
+        <div className="mt-1 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className={railValueClass}>{sessionLabel}</p>
+            {sessionTitle ? (
+              <p className="mt-0.5 truncate text-xs font-medium text-text">
+                {sessionTitle}
+              </p>
+            ) : null}
+          </div>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sessionStatusClass(
+              sessionStatus,
+            )}`}
+          >
+            {effectiveSessionStatusLabel}
+          </span>
+        </div>
+        {sessionDetail ? (
+          <p className={railMutedClass}>{sessionDetail}</p>
+        ) : null}
+        {sessionError && sessionError !== sessionDetail ? (
+          <p className="mt-1 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-xs text-danger">
+            {sessionError}
+          </p>
+        ) : null}
         <p className={railMutedClass}>
           {historyLinked
             ? t("cockpit.historyLinked", "History linked")

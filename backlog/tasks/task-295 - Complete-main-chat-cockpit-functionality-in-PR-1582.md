@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 05:51'
+updated_date: '2026-05-14 07:10'
 labels:
   - webui
   - chat
@@ -146,6 +146,10 @@ Real server proof refresh completed for chat cockpit spec. The MCP rail assertio
 P0 gate evidence recorded after live server became available. Commit range for the P0 cockpit rail work is ff2306b4f through 56a4c2272. Focused P0 Vitest passed from apps/tldw-frontend with 6 files and 55 tests. Full real server Playwright passed with 4 tests against http://127.0.0.1:8000 and http://localhost:8080 with no route interception and real chat completion attempts. The running server had no MCP chat tools available so the MCP rail proof asserted the real unavailable state plus Configure MCP recovery path. Disposable character proof used real create select send clear delete. gh pr view confirms PR 1582 is OPEN and draft on codex/chat-degraded-health into dev. Waiting for maintainer P0 approval before starting P1.
 
 Maintainer approved P0 after reviewing the recorded P0 gate evidence. Proceeding into P1 context session rail work while keeping PR 1582 draft until P1 and P2 are also completed and explicitly approved.
+
+Task 6 P1 context session rail implementation completed. Context rail now treats prompt and assistant as first-class sources, removes individual knowledge media file sources with source-specific labels, surfaces server session title status error state, and clears stale next-send context when switching server chats. Real-server proof exposed a React maximum-update loop in disposable character send from unstable selectedAssistant normalization plus repeated same-id character hydration; fixed by memoizing selected assistant identity and preventing same-id character greeting refetch. Verification: focused Vitest passed 7 files / 66 tests; real-server Playwright passed 4 tests against local frontend/backend with no route interception and real disposable character select send clear through complete-v2; git diff --check passed. Bandit not applicable for frontend TypeScript TSX and Playwright only. PR 1582 remains draft pending P1/P2 approval.
+
+Additional recovery verification: saveMessageOnError now falls back to a local chat title if provider title generation fails during error recovery. Focused Vitest passed 1 file / 2 tests for saveMessageOnError.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

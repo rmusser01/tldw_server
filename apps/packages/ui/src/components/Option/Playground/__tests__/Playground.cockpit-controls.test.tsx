@@ -28,6 +28,12 @@ const messageOptionState = vi.hoisted(() => ({
     history: [],
     historyId: "history-1" as string | null,
     serverChatId: "chat-1" as string | null,
+    serverChatTitle: "Research session" as string | null,
+    serverChatLoadState: "loaded" as "idle" | "loading" | "loaded" | "failed",
+    serverChatLoadError: null as string | null,
+    serverChatState: "active" as string | null,
+    serverChatTopic: "Research" as string | null,
+    serverChatSource: "webui" as string | null,
     isLoading: false,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
@@ -269,6 +275,12 @@ describe("Playground cockpit controls", () => {
     ];
     messageOptionState.value.historyId = "history-1";
     messageOptionState.value.serverChatId = "chat-1";
+    messageOptionState.value.serverChatTitle = "Research session";
+    messageOptionState.value.serverChatLoadState = "loaded";
+    messageOptionState.value.serverChatLoadError = null;
+    messageOptionState.value.serverChatState = "active";
+    messageOptionState.value.serverChatTopic = "Research";
+    messageOptionState.value.serverChatSource = "webui";
     messageOptionState.value.streaming = true;
     messageOptionState.value.selectedSystemPrompt = "";
     messageOptionState.value.setSelectedSystemPrompt = vi.fn();
@@ -338,10 +350,12 @@ describe("Playground cockpit controls", () => {
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(within(contextRail).getByText("Prompts")).toBeInTheDocument();
-      expect(within(contextRail).getByText("Quick prompt")).toBeInTheDocument();
       expect(
-        within(contextRail).getByText("Draft a concise summary"),
-      ).toBeInTheDocument();
+        within(contextRail).getAllByText("Quick prompt").length,
+      ).toBeGreaterThan(0);
+      expect(
+        within(contextRail).getAllByText("Draft a concise summary").length,
+      ).toBeGreaterThan(0);
       fireEvent.click(
         within(contextRail).getByRole("button", { name: "Clear prompt" }),
       );
@@ -352,7 +366,7 @@ describe("Playground cockpit controls", () => {
         "",
       );
       expect(
-        within(contextRail).getByRole("button", { name: "Select a prompt" }),
+        contextRail.querySelector("[data-cockpit-prompt-select-trigger]"),
       ).toHaveFocus();
       expect(messageOptionState.value.setContextFiles).not.toHaveBeenCalled();
       expect(within(contextRail).queryByText("1 file(s)")).toBeNull();
@@ -483,6 +497,95 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }
+  });
+
+  it("lists prompt and assistant as first-class context sources and removes one knowledge item at a time", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedQuickPrompt = "Draft a concise summary";
+    messageOptionState.value.selectedKnowledge = [
+      { id: "knowledge-1", title: "Research notes" },
+      { id: "knowledge-2", title: "Protocol notes" },
+    ];
+
+    render(<Playground />);
+
+    const contextRail = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByTestId("playground-context-rail");
+    const sourceList = within(contextRail).getByRole("list", {
+      name: "Context sources",
+    });
+
+    const promptSource = within(sourceList).getByText("Quick prompt").closest("li");
+    expect(promptSource).not.toBeNull();
+    expect(within(promptSource as HTMLElement).getByText("Prompt")).toBeInTheDocument();
+    expect(
+      within(promptSource as HTMLElement).getByText("Draft a concise summary"),
+    ).toBeInTheDocument();
+
+    const assistantSource = within(sourceList).getByText("Mira Vale").closest("li");
+    expect(assistantSource).not.toBeNull();
+    expect(
+      within(assistantSource as HTMLElement).getByText("Character"),
+    ).toBeInTheDocument();
+
+    const protocolSource = within(sourceList).getByText("Protocol notes").closest("li");
+    expect(protocolSource).not.toBeNull();
+    fireEvent.click(
+      within(protocolSource as HTMLElement).getByRole("button", {
+        name: "Remove Protocol notes",
+      }),
+    );
+    expect(messageOptionState.value.setSelectedKnowledge).toHaveBeenCalledWith([
+      { id: "knowledge-1", title: "Research notes" },
+    ]);
+
+    fireEvent.click(
+      within(promptSource as HTMLElement).getByRole("button", {
+        name: "Clear prompt context",
+      }),
+    );
+    expect(messageOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
+      null,
+    );
+    expect(messageOptionState.value.setSelectedSystemPrompt).toHaveBeenCalledWith(
+      "",
+    );
+    expect(messageOptionState.value.setContextFiles).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(assistantSource as HTMLElement).getByRole("button", {
+        name: "Clear assistant",
+      }),
+    );
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+  });
+
+  it("shows server session title and recoverable load errors in the context rail", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.temporaryChat = false;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = "chat-2";
+    messageOptionState.value.serverChatTitle = "Archived investigation";
+    messageOptionState.value.serverChatLoadState = "failed";
+    messageOptionState.value.serverChatLoadError = "Conversation no longer exists";
+
+    render(<Playground />);
+
+    const contextRail = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByTestId("playground-context-rail");
+
+    expect(within(contextRail).getByText("Server chat")).toBeInTheDocument();
+    expect(
+      within(contextRail).getByText("Archived investigation"),
+    ).toBeInTheDocument();
+    expect(within(contextRail).getByText("Load failed")).toBeInTheDocument();
+    expect(
+      within(contextRail).getByText("Conversation no longer exists"),
+    ).toBeInTheDocument();
+    expect(within(contextRail).getByText("No saved history yet")).toBeInTheDocument();
   });
 
   it("surfaces unavailable MCP without enabling cockpit-only tool choice", async () => {

@@ -205,6 +205,30 @@ describe("useSelectedAssistant", () => {
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
   })
 
+  it("keeps selected assistant identity stable across unchanged rerenders", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "character",
+      id: "char-stable",
+      name: "Stable Guide",
+      greeting: "Ready"
+    })
+
+    const { result, rerender } = renderHook(() => useSelectedAssistant())
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-stable",
+        name: "Stable Guide"
+      })
+    })
+
+    const firstSelection = result.current[0]
+    rerender()
+
+    expect(result.current[0]).toBe(firstSelection)
+  })
+
   it("normalizes and preserves mirrored persona buddy summaries from stored selections", async () => {
     mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
       kind: "persona",

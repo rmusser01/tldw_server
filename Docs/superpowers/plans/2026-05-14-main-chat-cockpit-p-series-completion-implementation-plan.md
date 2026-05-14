@@ -596,7 +596,7 @@ git commit -m "docs(chat): record cockpit p0 verification"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx`
 - Test: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 
-- [ ] **Step 1: Write failing context/session tests**
+- [x] **Step 1: Write failing context/session tests**
 
 Cover:
 
@@ -606,19 +606,19 @@ Cover:
 - Temporary/server/local/history-linked labels match actual state.
 - Loading, empty, disabled, degraded, and error states are visible and recoverable.
 
-- [ ] **Step 2: Implement missing context summaries and stale-state guard**
+- [x] **Step 2: Implement missing context summaries and stale-state guard**
 
 Use helper functions for summary construction. Avoid making `PlaygroundContextRail` responsible for state derivation.
 
-- [ ] **Step 3: Verify session switching**
+- [x] **Step 3: Verify session switching**
 
 Add tests that simulate switching from a context-heavy session to an empty/different session. The rail must not show old context after the switch settles.
 
-- [ ] **Step 4: Extend real-server context proof**
+- [x] **Step 4: Extend real-server context proof**
 
 Real-server proof must cover web search and at least one available real context class. If no real context class is available, record the blocker.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 ```bash
 bunx vitest run apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx --reporter=verbose

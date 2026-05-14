@@ -112,7 +112,13 @@ export const useSelectServerChat = () => {
     setServerChatClusterId,
     setServerChatSource,
     setServerChatExternalRef,
-    setServerChatMetaLoaded
+    setServerChatMetaLoaded,
+    setWebSearch,
+    setSelectedSystemPrompt,
+    setSelectedQuickPrompt,
+    setContextFiles,
+    setSelectedKnowledge,
+    setRagMediaIds
   } = useStoreMessageOption(
     (state) => ({
       setIsSearchingInternet: state.setIsSearchingInternet,
@@ -131,7 +137,13 @@ export const useSelectServerChat = () => {
       setServerChatClusterId: state.setServerChatClusterId,
       setServerChatSource: state.setServerChatSource,
       setServerChatExternalRef: state.setServerChatExternalRef,
-      setServerChatMetaLoaded: state.setServerChatMetaLoaded
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
+      setWebSearch: state.setWebSearch,
+      setSelectedSystemPrompt: state.setSelectedSystemPrompt,
+      setSelectedQuickPrompt: state.setSelectedQuickPrompt,
+      setContextFiles: state.setContextFiles,
+      setSelectedKnowledge: state.setSelectedKnowledge,
+      setRagMediaIds: state.setRagMediaIds
     }),
     shallow
   )
@@ -146,6 +158,12 @@ export const useSelectServerChat = () => {
       setHistoryId(null)
       setHistory([])
       setMessages([])
+      setWebSearch(false)
+      setSelectedSystemPrompt("")
+      setSelectedQuickPrompt(null as unknown as string)
+      setContextFiles([])
+      setSelectedKnowledge(null)
+      setRagMediaIds(null)
       setServerChatId(chat.id)
       setServerChatTitle(chat.title || "")
       const assistantIdentity = resolveServerChatAssistantIdentity(
@@ -242,6 +260,9 @@ export const useSelectServerChat = () => {
       setIsSearchingInternet,
       setMessages,
       setSelectedAssistant,
+      setSelectedKnowledge,
+      setSelectedQuickPrompt,
+      setSelectedSystemPrompt,
       setServerChatAssistantId,
       setServerChatAssistantKind,
       setServerChatCharacterId,
@@ -257,7 +278,10 @@ export const useSelectServerChat = () => {
       setServerChatTitle,
       setServerChatTopic,
       setServerChatVersion,
-      setStreaming
+      setContextFiles,
+      setRagMediaIds,
+      setStreaming,
+      setWebSearch
     ]
   )
 }
