@@ -40,7 +40,7 @@ Every work product artifact needs these fields or direct equivalents:
 
 | Field group | Minimum fields |
 | --- | --- |
-| Identity | `artifact_id`, `artifact_type`, `title`, `created_at`, `updated_at`, `created_by`, `owner_scope`. |
+| Identity | artifact_id, artifact_type, title, created_at, updated_at, created_by, owner_id, owner_scope. |
 | Workspace placement | `workspace_id`, optional `project_id`, optional `task_id`, optional `source_collection_id`, and optional display location. |
 | Generation provenance | `producer_type`, `producer_id`, `run_id`, optional `session_id`, prompt/template IDs, model/provider identifiers when available, and normalized completion reason. |
 | Content envelope | `content_type`, `content_ref` or inline payload pointer, preview text, summary, size metadata, and schema version. |
