@@ -295,7 +295,9 @@ Note: Server-side workspace_tag field support may need to be added to some endpo
 - Research Dossier, Competitive Market Memo, Technical Project Spec: visible
   planned templates for roadmap alignment, not end-to-end flows yet.
 - Generated work-product artifacts retain source lineage and review checklist
-  metadata so review and export affordances can be layered on later.
+  metadata aligned to
+  [Traceable Work Product Artifact Contract](../Traceable_Work_Product_Artifact_Contract.md)
+  so review and export affordances can be layered on later.
 
 #### Output Grid (3x3):
 ```text
