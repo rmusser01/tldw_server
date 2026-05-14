@@ -266,8 +266,9 @@ The current implementation exposes enough state to derive:
 - run duration and failure reasons
 - token usage and run cost aggregates from ACP run history
 - ACP execution-health buckets for setup blockers, runner/session failures,
-  reviewer outcomes, governance denials, retention/redaction posture, and
-  documented-unverified compatibility
+  reviewer outcomes, governance denials, structured completion failures,
+  sandbox/runtime errors, retention/redaction actions, setup-health dimensions,
+  and documented-unverified compatibility
 - schedule queued, skipped, disabled, and error states
 - audit event volume by action and session
 

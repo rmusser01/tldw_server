@@ -6,6 +6,8 @@ using isolated ACPSessionStore instances backed by temporary SQLite files.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -353,7 +355,17 @@ class TestACPExecutionHealthSummary:
             await store.record_prompt(
                 "s-review",
                 [{"role": "user", "content": "review this"}],
-                {"role": "assistant", "content": {"reason_code": "reviewer_rejected"}},
+                {
+                    "role": "assistant",
+                    "content": {
+                        "reason_code": "reviewer_rejected",
+                        "diagnostics": [
+                            {"reason_code": "structured_completion_failed"},
+                            {"error_type": "sandbox_runtime_error"},
+                            {"code": "redaction_applied"},
+                        ],
+                    },
+                },
             )
 
             await _register_session(store, "s-governance", agent_type="codex")
@@ -384,10 +396,101 @@ class TestACPExecutionHealthSummary:
             assert resp.failure_buckets.runner_session_failures == 1
             assert resp.failure_buckets.reviewer_rejections == 1
             assert resp.failure_buckets.governance_denials == 1
+            assert resp.failure_buckets.structured_completion_failures == 1
+            assert resp.failure_buckets.sandbox_runtime_errors == 1
+            assert resp.failure_buckets.retention_redaction_actions == 1
             assert resp.failure_buckets.setup_blockers == 1
+            assert resp.setup_health.agent.status == "blocked"
+            assert resp.setup_health.agent.evidence_count == 1
+            assert resp.setup_health.workspace.status == "unknown"
+            assert resp.setup_health.sandbox_runtime.status == "blocked"
             assert resp.compatibility.by_support_state["documented_unverified"] == 1
             assert resp.compatibility.documented_unverified_agents == ["codex"]
             assert resp.compatibility.live_certification_required is True
+
+        _run(_run_test())
+
+    def test_execution_health_summary_uses_batched_session_loader(self, monkeypatch):
+        """The summary does not perform per-session get_session detail loads."""
+
+        class _FakeStore:
+            called = False
+
+            async def list_sessions_with_messages_since(
+                self,
+                *,
+                since: datetime,
+                page_size: int = 1000,
+            ):
+                self.called = True
+                assert page_size == 1000
+                assert since.tzinfo is not None
+                return [
+                    SimpleNamespace(
+                        session_id="s-batched",
+                        status="error",
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                        last_activity_at=None,
+                        workspace_id="workspace-1",
+                        mcp_servers=[{"name": "filesystem"}],
+                        messages=[],
+                    )
+                ]
+
+            async def get_session(self, session_id: str):  # pragma: no cover - should not be called
+                raise AssertionError(f"unexpected per-session load for {session_id}")
+
+        store = _FakeStore()
+
+        async def _run_test():
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+                mock.AsyncMock(return_value=store),
+            )
+            monkeypatch.setattr(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents._get_available_agents",
+                mock.AsyncMock(return_value=([], None)),
+            )
+
+            from tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents import (
+                get_acp_execution_health_summary,
+            )
+
+            resp = await get_acp_execution_health_summary(range_days=30)
+
+            assert store.called is True
+            assert resp.sessions.total == 1
+            assert resp.failure_buckets.runner_session_failures == 1
+            assert resp.setup_health.workspace.status == "ready"
+            assert resp.setup_health.mcp_injection.status == "ready"
+
+        _run(_run_test())
+
+    def test_execution_health_store_loader_paginates_and_loads_messages(self, tmp_path):
+        """The store loader exhausts all in-range pages and batch-loads messages."""
+        store = _make_store(tmp_path)
+
+        async def _run_test():
+            for index in range(3):
+                session_id = f"s-page-{index}"
+                await _register_session(store, session_id, agent_type="stub")
+                await store.record_prompt(
+                    session_id,
+                    [{"role": "user", "content": "run"}],
+                    {"role": "assistant", "content": {"reason_code": "reviewer_rejected"}},
+                )
+
+            sessions = await store.list_sessions_with_messages_since(
+                since=datetime.now(timezone.utc) - timedelta(days=1),
+                page_size=1,
+            )
+
+            assert {session.session_id for session in sessions} == {
+                "s-page-0",
+                "s-page-1",
+                "s-page-2",
+            }
+            assert all(session.messages for session in sessions)
 
         _run(_run_test())
 
@@ -429,6 +532,41 @@ class TestACPExecutionHealthSummary:
             assert resp.agents[0].verification_level == "documented_only"
 
         _run(_run_test())
+
+    def test_execution_health_helpers_fail_closed_and_iterate_deep_payloads(self):
+        """Timestamp filtering fails closed and reason extraction is stack based."""
+        from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+            collect_reason_codes,
+            session_within_range,
+        )
+
+        since = datetime.now(timezone.utc) - timedelta(days=1)
+        assert session_within_range(
+            SimpleNamespace(created_at=None, last_activity_at=None),
+            since=since,
+        ) is False
+        assert session_within_range(
+            SimpleNamespace(
+                created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                last_activity_at=None,
+            ),
+            since=since,
+        ) is True
+        assert session_within_range(
+            SimpleNamespace(
+                created_at="not-a-date",
+                last_activity_at=datetime.now(timezone.utc).isoformat(),
+            ),
+            since=since,
+        ) is True
+
+        payload: Any = {"reason_code": "structured_completion_failed"}
+        for _ in range(1200):
+            payload = {"nested": [payload]}
+
+        reasons: set[str] = set()
+        collect_reason_codes(payload, reasons)
+        assert "structured_completion_failed" in reasons
 
 
 # ===========================================================================

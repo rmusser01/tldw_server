@@ -862,6 +862,29 @@ class ACPSessionsDB:
 
         return [self._row_to_dict(r) for r in rows], total
 
+    def list_sessions_since(
+        self,
+        *,
+        since_iso: str,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List sessions created or active at or after an ISO timestamp."""
+        conn = self._get_conn()
+        count_row = conn.execute(
+            "SELECT COUNT(*) FROM sessions "
+            "WHERE (created_at >= ? OR COALESCE(last_activity_at, '') >= ?)",
+            (since_iso, since_iso),
+        ).fetchone()
+        total = count_row[0] if count_row else 0
+        rows = conn.execute(
+            "SELECT * FROM sessions "
+            "WHERE (created_at >= ? OR COALESCE(last_activity_at, '') >= ?) "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (since_iso, since_iso, limit, offset),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows], total
+
     def aggregate_metrics_by_agent(self) -> list[dict[str, Any]]:
         """Aggregate session metrics grouped by agent_type.
 
@@ -1212,6 +1235,55 @@ class ACPSessionsDB:
                     pass
             results.append(d)
         return results
+
+    def get_messages_for_sessions(
+        self,
+        session_ids: list[str],
+        *,
+        chunk_size: int = 500,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return ordered messages grouped by session ID for multiple sessions."""
+        if not session_ids:
+            return {}
+
+        conn = self._get_conn()
+        grouped: dict[str, list[dict[str, Any]]] = {
+            session_id: [] for session_id in session_ids
+        }
+        safe_chunk_size = max(1, int(chunk_size))
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS temp_acp_message_session_ids "
+            "(session_id TEXT PRIMARY KEY)"
+        )
+
+        for start in range(0, len(session_ids), safe_chunk_size):
+            chunk = session_ids[start:start + safe_chunk_size]
+            conn.execute("DELETE FROM temp_acp_message_session_ids")
+            conn.executemany(
+                "INSERT INTO temp_acp_message_session_ids(session_id) VALUES (?)",
+                [(session_id,) for session_id in chunk],
+            )
+            rows = conn.execute(
+                """
+                SELECT m.session_id, m.role, m.content, m.timestamp, m.raw_data
+                FROM session_messages AS m
+                JOIN temp_acp_message_session_ids AS ids
+                  ON ids.session_id = m.session_id
+                ORDER BY m.session_id, m.message_index
+                """
+            ).fetchall()
+            for row in rows:
+                d = dict(row)
+                session_id = str(d.pop("session_id"))
+                if d.get("raw_data"):
+                    try:
+                        d["raw_data"] = json.loads(d["raw_data"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                grouped.setdefault(session_id, []).append(d)
+
+        conn.execute("DELETE FROM temp_acp_message_session_ids")
+        return grouped
 
     def update_token_usage(
         self,

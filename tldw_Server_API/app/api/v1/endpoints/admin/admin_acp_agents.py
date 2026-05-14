@@ -6,7 +6,6 @@ configurations, and tool permission policy management.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
@@ -17,19 +16,17 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentConfigCreate,
     ACPAgentConfigListResponse,
     ACPAgentConfigResponse,
+    ACPAgentInfo,
     ACPAgentMetrics,
     ACPAgentMetricsListResponse,
     ACPAgentUsageItem,
     ACPAgentUsageResponse,
-    ACPExecutionHealthAgentSummary,
-    ACPExecutionHealthCompatibilitySummary,
     ACPExecutionHealthFailureBuckets,
     ACPExecutionHealthRedactionSummary,
     ACPExecutionHealthRetentionSummary,
     ACPExecutionHealthSessionSummary,
+    ACPExecutionHealthSetupSummary,
     ACPExecutionHealthSummaryResponse,
-    ACPSupportState,
-    ACPVerificationLevel,
     ACPPermissionPolicyCreate,
     ACPPermissionPolicyListResponse,
     ACPPermissionPolicyResponse,
@@ -39,6 +36,9 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPSessionListResponse,
     ACPSessionUsageResponse,
     ACPTokenUsage,
+)
+from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+    summarize_execution_health,
 )
 from tldw_Server_API.app.core.Usage.pricing_catalog import compute_token_cost
 from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
@@ -56,37 +56,8 @@ _NONCRITICAL = (
     ValueError,
 )
 
-_REVIEW_REJECTION_REASONS = frozenset({
-    "review_rejected",
-    "reviewer_rejected",
-    "review_rejected_retry",
-    "manual_review_rejected_retry",
-    "review_rejected_max_attempts",
-    "manual_review_rejected_max_attempts",
-})
-_REVIEW_FAILURE_REASONS = frozenset({
-    "reviewer_failed",
-    "review_decision_invalid",
-})
-_GOVERNANCE_DENIAL_REASONS = frozenset({
-    "governance_denied",
-    "permission_denied",
-    "policy_denied",
-    "tool_denied",
-    "denied",
-})
-_SETUP_BLOCKER_REASONS = frozenset({
-    "setup_blocked",
-    "runner_missing",
-    "binary_missing",
-    "api_key_missing",
-    "adapter_required",
-})
-_SUPPORT_STATES = frozenset(get_args(ACPSupportState))
-_VERIFICATION_LEVELS = frozenset(get_args(ACPVerificationLevel))
 
-
-async def _get_available_agents():
+async def _get_available_agents() -> tuple[list[ACPAgentInfo], str | None]:
     """Return configured ACP agents through the public ACP endpoint helper."""
     from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
         _get_available_agents as _acp_get_available_agents,
@@ -100,95 +71,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _parse_iso(value: str | None) -> datetime | None:
-    """Parse an ISO timestamp and return None for absent or malformed values."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _session_within_range(record: Any, *, since: datetime) -> bool:
-    """Return whether a session record falls inside the requested lookback."""
-    created = _parse_iso(getattr(record, "created_at", None))
-    if created is None:
-        return True
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    return created >= since
-
-
-def _collect_reason_codes(payload: Any, reasons: set[str]) -> None:
-    """Collect normalized failure/status codes from nested ACP payload data."""
-    if isinstance(payload, dict):
-        for key in ("reason_code", "error_type", "status", "code"):
-            value = payload.get(key)
-            if value is not None:
-                reasons.add(str(value).lower())
-        for value in payload.values():
-            _collect_reason_codes(value, reasons)
-    elif isinstance(payload, (list, tuple)):
-        for item in payload:
-            _collect_reason_codes(item, reasons)
-
-
-def _iter_session_reason_codes(record: Any) -> set[str]:
-    """Extract outcome reason codes from non-user session messages."""
-    reasons: set[str] = set()
-    for message in getattr(record, "messages", []) or []:
-        if not isinstance(message, dict):
-            continue
-        if str(message.get("role") or "").lower() == "user":
-            continue
-        _collect_reason_codes(message.get("content"), reasons)
-        _collect_reason_codes(message.get("raw_result"), reasons)
-    return reasons
-
-
-def _increment_failure_buckets(record: Any, buckets: dict[str, int]) -> None:
-    """Increment normalized execution-health buckets for one ACP session."""
-    status_value = str(getattr(record, "status", "") or "").lower()
-    reasons = _iter_session_reason_codes(record)
-    if status_value == "error" or any("runner" in reason or "session_failed" in reason for reason in reasons):
-        buckets["runner_session_failures"] += 1
-    if reasons & _REVIEW_REJECTION_REASONS:
-        buckets["reviewer_rejections"] += 1
-    if reasons & _REVIEW_FAILURE_REASONS:
-        buckets["reviewer_failures"] += 1
-    if reasons & _GOVERNANCE_DENIAL_REASONS:
-        buckets["governance_denials"] += 1
-    if reasons & _SETUP_BLOCKER_REASONS:
-        buckets["setup_blockers"] += 1
-
-
-def _agent_setup_blocked(agent: Any) -> tuple[bool, str | None]:
-    """Return whether an agent contributes an admin-visible setup blocker."""
-    entrypoint = getattr(agent, "entrypoint", None)
-    primary_blocker = getattr(entrypoint, "primary_blocker", None)
-    probe_state = getattr(entrypoint, "probe_state", None)
-    is_configured = bool(getattr(agent, "is_configured", False))
-    setup_blocked = (not is_configured) or bool(primary_blocker) or str(probe_state) == "blocked"
-    return setup_blocked, str(primary_blocker) if primary_blocker else None
-
-
-def _coerce_support_state(value: Any) -> ACPSupportState:
-    """Validate support state values and fail closed to documented-unverified."""
-    support_state = str(value or "documented_unverified")
-    if support_state in _SUPPORT_STATES:
-        return cast(ACPSupportState, support_state)
-    return "documented_unverified"
-
-
-def _coerce_verification_level(value: Any) -> ACPVerificationLevel:
-    """Validate verification level values and fail closed to documented-only."""
-    verification_level = str(value or "documented_only")
-    if verification_level in _VERIFICATION_LEVELS:
-        return cast(ACPVerificationLevel, verification_level)
-    return "documented_only"
-
-
 def _retention_summary() -> ACPExecutionHealthRetentionSummary:
     """Return the configured ACP retention posture, falling back to defaults."""
     try:
@@ -199,7 +81,11 @@ def _retention_summary() -> ACPExecutionHealthRetentionSummary:
             session_retention_days=int(getattr(config, "session_retention_days", 30)),
             audit_retention_days=int(getattr(config, "audit_retention_days", 30)),
         )
-    except _NONCRITICAL:
+    except _NONCRITICAL as exc:
+        logger.warning(
+            "Unable to load ACP retention config for execution-health summary; using defaults: {}",
+            type(exc).__name__,
+        )
         return ACPExecutionHealthRetentionSummary()
 
 
@@ -380,73 +266,28 @@ async def get_acp_execution_health_summary(
 ) -> ACPExecutionHealthSummaryResponse:
     """Return a compact ACP execution-health rollup for admin reporting."""
     store = await get_acp_session_store()
-    records, _total = await store.list_sessions(limit=1000, offset=0)
     since = datetime.now(timezone.utc) - timedelta(days=range_days)
-
-    session_records = [
-        await store.get_session(record.session_id)
-        for record in records
-        if _session_within_range(record, since=since)
-    ]
-    sessions = [record for record in session_records if record is not None]
-
-    status_counts: dict[str, int] = {}
-    buckets = {
-        "setup_blockers": 0,
-        "runner_session_failures": 0,
-        "reviewer_rejections": 0,
-        "reviewer_failures": 0,
-        "governance_denials": 0,
-    }
-    for record in sessions:
-        status_value = str(getattr(record, "status", "unknown") or "unknown")
-        status_counts[status_value] = status_counts.get(status_value, 0) + 1
-        _increment_failure_buckets(record, buckets)
+    sessions = await store.list_sessions_with_messages_since(since=since, page_size=1000)
 
     try:
         agents, _default_agent = await _get_available_agents()
     except _NONCRITICAL as exc:
-        logger.warning("Unable to include ACP agent compatibility in execution-health summary: {}", exc)
+        logger.warning(
+            "Unable to include ACP agent compatibility in execution-health summary: {}",
+            exc,
+        )
         agents = []
 
-    agent_summaries: list[ACPExecutionHealthAgentSummary] = []
-    support_counts: dict[str, int] = {}
-    documented_unverified: list[str] = []
-    for agent in agents:
-        support_state = _coerce_support_state(getattr(agent, "support_state", "documented_unverified"))
-        verification_level = _coerce_verification_level(getattr(agent, "verification_level", "documented_only"))
-        support_counts[support_state] = support_counts.get(support_state, 0) + 1
-        if support_state == "documented_unverified":
-            documented_unverified.append(str(getattr(agent, "type", "")))
-        setup_blocked, primary_blocker = _agent_setup_blocked(agent)
-        if setup_blocked:
-            buckets["setup_blockers"] += 1
-        agent_summaries.append(
-            ACPExecutionHealthAgentSummary(
-                agent_type=str(getattr(agent, "type", "custom")),
-                name=str(getattr(agent, "name", "")),
-                is_configured=bool(getattr(agent, "is_configured", False)),
-                support_state=support_state,
-                verification_level=verification_level,
-                setup_blocked=setup_blocked,
-                primary_blocker=primary_blocker,
-            )
-        )
+    summary = summarize_execution_health(sessions=sessions, agents=agents)
 
     return ACPExecutionHealthSummaryResponse(
         timestamp=_now_iso(),
         range_days=range_days,
-        sessions=ACPExecutionHealthSessionSummary(
-            total=len(sessions),
-            by_status=status_counts,
-        ),
-        failure_buckets=ACPExecutionHealthFailureBuckets(**buckets),
-        agents=agent_summaries,
-        compatibility=ACPExecutionHealthCompatibilitySummary(
-            by_support_state=support_counts,
-            documented_unverified_agents=documented_unverified,
-            live_certification_required=bool(documented_unverified),
-        ),
+        sessions=ACPExecutionHealthSessionSummary(**summary["sessions"]),
+        failure_buckets=ACPExecutionHealthFailureBuckets(**summary["failure_buckets"]),
+        setup_health=ACPExecutionHealthSetupSummary(**summary["setup_health"]),
+        agents=summary["agents"],
+        compatibility=summary["compatibility"],
         retention=_retention_summary(),
         redaction=ACPExecutionHealthRedactionSummary(),
     )

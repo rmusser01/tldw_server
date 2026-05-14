@@ -44,6 +44,7 @@ ACPEntryPointStrategy = Literal[
     "custom_template",
 ]
 ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+ACPSetupHealthStatus = Literal["unknown", "ready", "blocked", "not_configured", "partial"]
 
 
 class ACPAgentEntrypointStatus(BaseModel):
@@ -678,11 +679,70 @@ class ACPExecutionHealthSessionSummary(BaseModel):
 
 class ACPExecutionHealthFailureBuckets(BaseModel):
     """Normalized ACP execution-health failure buckets for admin reporting."""
-    setup_blockers: int = Field(default=0, description="Agents or sessions blocked by setup/certification gaps")
-    runner_session_failures: int = Field(default=0, description="Sessions or events that indicate runner/session failure")
-    reviewer_rejections: int = Field(default=0, description="Sessions with reviewer rejection outcomes")
-    reviewer_failures: int = Field(default=0, description="Sessions with reviewer execution or decision failures")
-    governance_denials: int = Field(default=0, description="Sessions with governance or permission-denial outcomes")
+    setup_blockers: int = Field(
+        default=0,
+        description="Agents or sessions blocked by setup/certification gaps",
+    )
+    runner_session_failures: int = Field(
+        default=0,
+        description="Sessions or events that indicate runner/session failure",
+    )
+    reviewer_rejections: int = Field(
+        default=0,
+        description="Sessions with reviewer rejection outcomes",
+    )
+    reviewer_failures: int = Field(
+        default=0,
+        description="Sessions with reviewer execution or decision failures",
+    )
+    governance_denials: int = Field(
+        default=0,
+        description="Sessions with governance or permission-denial outcomes",
+    )
+    structured_completion_failures: int = Field(
+        default=0,
+        description="Sessions with invalid or missing structured completion signals",
+    )
+    sandbox_runtime_errors: int = Field(
+        default=0,
+        description="Sessions with sandbox/runtime launch or execution errors",
+    )
+    retention_redaction_actions: int = Field(
+        default=0,
+        description="Sessions with retention or redaction actions observed",
+    )
+
+
+class ACPExecutionHealthSetupDimension(BaseModel):
+    """Setup-health status for one ACP readiness dimension."""
+    status: ACPSetupHealthStatus = Field(default="unknown", description="Dimension status")
+    blockers: list[str] = Field(
+        default_factory=list,
+        description="Normalized blocker codes for this setup dimension",
+    )
+    evidence_count: int = Field(
+        default=0,
+        description="Number of observed records contributing evidence to this dimension",
+    )
+
+
+class ACPExecutionHealthSetupSummary(BaseModel):
+    """ACP setup-health dimensions for admin readiness reporting."""
+    agent: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    workspace: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    sandbox_runtime: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    mcp_injection: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    scheduler_trigger_path: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
 
 
 class ACPExecutionHealthAgentSummary(BaseModel):
@@ -722,8 +782,15 @@ class ACPExecutionHealthSummaryResponse(BaseModel):
     """Admin ACP execution-health rollup across sessions, agents, and support posture."""
     timestamp: str = Field(..., description="ISO 8601 timestamp for this summary")
     range_days: int = Field(..., description="Lookback window used for session aggregation")
-    sessions: ACPExecutionHealthSessionSummary = Field(default_factory=ACPExecutionHealthSessionSummary)
-    failure_buckets: ACPExecutionHealthFailureBuckets = Field(default_factory=ACPExecutionHealthFailureBuckets)
+    sessions: ACPExecutionHealthSessionSummary = Field(
+        default_factory=ACPExecutionHealthSessionSummary,
+    )
+    failure_buckets: ACPExecutionHealthFailureBuckets = Field(
+        default_factory=ACPExecutionHealthFailureBuckets,
+    )
+    setup_health: ACPExecutionHealthSetupSummary = Field(
+        default_factory=ACPExecutionHealthSetupSummary,
+    )
     agents: list[ACPExecutionHealthAgentSummary] = Field(default_factory=list)
     compatibility: ACPExecutionHealthCompatibilitySummary = Field(default_factory=ACPExecutionHealthCompatibilitySummary)
     retention: ACPExecutionHealthRetentionSummary = Field(default_factory=ACPExecutionHealthRetentionSummary)

@@ -288,7 +288,16 @@ The response includes:
 - `failure_buckets.setup_blockers` for unconfigured or blocked agent setup
   state, `runner_session_failures` for errored sessions and runner/session
   failures, `reviewer_rejections` and `reviewer_failures` for review-loop
-  outcomes, and `governance_denials` for policy or permission-denial outcomes.
+  outcomes, `governance_denials` for policy or permission-denial outcomes,
+  `structured_completion_failures` for missing or invalid completion signals,
+  `sandbox_runtime_errors` for sandbox or runtime launch/execution failures,
+  and `retention_redaction_actions` for observed retention or redaction
+  lifecycle actions.
+- `setup_health` dimensions for `agent`, `workspace`, `sandbox_runtime`,
+  `mcp_injection`, and `scheduler_trigger_path`. Each dimension reports a
+  status, normalized blockers, and an evidence count so operators can separate
+  known blockers from dimensions that are simply not observed in the summary
+  window.
 - `agents[]` entries with per-agent setup and compatibility posture, including
   `support_state`, `verification_level`, `setup_blocked`, and
   `primary_blocker`.
