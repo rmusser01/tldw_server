@@ -686,6 +686,111 @@ def test_version_graph_endpoint_returns_published_version_graph(
     assert payload["validation_diagnostics"]["valid"] is True
 
 
+def test_draft_playtest_endpoint_returns_runtime_readiness(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    draft = _program(asset_pack_id)
+    draft["labels"] = {
+        "start": [
+            {
+                "op": "choice",
+                "id": "door",
+                "choices": [{"id": "open", "text": "Open", "target": "open"}],
+            }
+        ],
+        "open": [{"op": "end"}],
+    }
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": draft},
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/playtest",
+        json={"max_steps": 50, "max_paths": 10},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "vn_script_playtest.v1"
+    assert payload["source"] == "stored_draft"
+    assert payload["runtime_ready"] is True
+    assert payload["summary"]["choice_boundary_count"] == 1
+    assert payload["summary"]["ending_count"] == 1
+
+
+def test_draft_playtest_accepts_supplied_draft_without_persisting(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    stored = _program(asset_pack_id)
+    supplied = _program(asset_pack_id)
+    supplied["labels"]["start"] = [
+        {
+            "op": "generate",
+            "id": "intro",
+            "prompt": "Write an intro.",
+            "output_schema": "narrative_dialogue",
+        }
+    ]
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": stored},
+    )
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/playtest",
+        json={"draft": supplied, "draft_revision": 1},
+    )
+    draft_after = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft").json()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "supplied_draft"
+    assert payload["summary"]["generation_boundary_count"] == 1
+    assert draft_after["draft"] == stored
+
+
+def test_version_playtest_endpoint_uses_published_snapshot(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, slot_key = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id, slot_key=slot_key)},
+    )
+    publish_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/publish",
+        json={
+            "draft_revision": 1,
+            "label": "v1",
+            "idempotency_key": "publish-playtest-v1",
+            "acknowledgements": ["character_safety_missing"],
+        },
+    )
+    version_id = publish_response.json()["version_id"]
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/playtest",
+        json={},
+    )
+
+    assert publish_response.status_code == 201
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "published_version"
+    assert payload["version_id"] == version_id
+    assert payload["validation_context_source"] == "published_version_snapshot"
+    assert payload["runtime_ready"] is True
+
+
 def test_graph_preview_malformed_supplied_draft_shape_returns_vn_error(
     client: TestClient,
     chacha_dbs: dict[int, CharactersRAGDB],

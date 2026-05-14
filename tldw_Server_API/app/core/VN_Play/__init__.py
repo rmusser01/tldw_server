@@ -30,17 +30,30 @@ from tldw_Server_API.app.core.VN_Play.parser import (
     coerce_turn_result,
     parse_model_turn,
 )
-from tldw_Server_API.app.core.VN_Play.service import (
-    DeterministicVNPlayTurnAdapter,
+from tldw_Server_API.app.core.VN_Play.errors import (
     VNPlayConflictError,
     VNPlayError,
     VNPlayNotFoundError,
-    VNPlayService,
-    VNPlaySession,
     VNPlayTurnError,
-    VNPlayTurnResponse,
 )
 from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
+
+_SERVICE_EXPORTS = {
+    "DeterministicVNPlayTurnAdapter",
+    "VNPlayService",
+    "VNPlaySession",
+    "VNPlayTurnResponse",
+}
+
+
+def __getattr__(name: str):
+    """Lazy-load service exports so pure helper imports do not initialize service."""
+    if name in _SERVICE_EXPORTS:
+        from tldw_Server_API.app.core.VN_Play import service
+
+        return getattr(service, name)
+    raise AttributeError(name)
+
 
 __all__ = [
     "CharacterSafetyResult",

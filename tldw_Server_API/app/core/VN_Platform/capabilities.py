@@ -31,6 +31,10 @@ VN_SCRIPT_AUTHORING_GRAPH_ROUTES = (
     (VN_SCRIPT_AUTHORING_GRAPH_PATHS[1], "POST"),
     (VN_SCRIPT_AUTHORING_GRAPH_PATHS[2], "GET"),
 )
+VN_SCRIPT_PLAYTEST_ROUTES = (
+    (f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/draft/playtest", "POST"),
+    (f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/versions/{{version_id}}/playtest", "POST"),
+)
 VN_SUPPORTED_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"]
 VN_SUPPORTED_AUDIO_MEDIA_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg"]
 
@@ -49,6 +53,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
         route_methods,
         VN_SCRIPT_AUTHORING_GRAPH_ROUTES,
     )
+    script_playtest_enabled = _has_registered_route_methods(route_methods, VN_SCRIPT_PLAYTEST_ROUTES)
 
     return {
         "schema_version": "vn_capabilities.v1",
@@ -67,6 +72,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
             "scripted_generation_debug_detail": enabled_modules["play"],
             "script_authoring_catalog": script_authoring_catalog_enabled,
             "script_authoring_graph": script_authoring_graph_enabled,
+            "script_playtest": script_playtest_enabled,
             "story_start": enabled_modules["play"],
             "tts_jobs": enabled_modules["audio"],
             "realtime_image_generation": False,

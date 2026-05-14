@@ -128,11 +128,13 @@ VN_SCRIPT_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}"
 VN_SCRIPT_DRAFT_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/draft"
 VN_SCRIPT_DRAFT_VALIDATE_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/draft/validate"
 VN_SCRIPT_DRAFT_DIAGNOSTICS_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/draft/diagnostics"
+VN_SCRIPT_DRAFT_PLAYTEST_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/draft/playtest"
 VN_SCRIPT_PUBLISH_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/publish"
 VN_SCRIPT_VERSIONS_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions"
 VN_SCRIPT_VERSION_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}"
 VN_SCRIPT_MANIFEST_SNAPSHOT_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/manifest-snapshot"
 VN_SCRIPT_VERSION_POLICY_EVALUATE_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/policy/evaluate"
+VN_SCRIPT_VERSION_PLAYTEST_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/playtest"
 SLIDES_EXPORT_PATH = "/api/v1/slides/presentations/{presentation_id}/export"
 SLIDES_EXPORT_CONTENT_TYPES = {
     "application/json",
@@ -1017,21 +1019,25 @@ def test_vn_scripts_openapi_documents_canonical_paths() -> None:
     assert VN_SCRIPT_DRAFT_PATH in paths
     assert VN_SCRIPT_DRAFT_VALIDATE_PATH in paths
     assert VN_SCRIPT_DRAFT_DIAGNOSTICS_PATH in paths
+    assert VN_SCRIPT_DRAFT_PLAYTEST_PATH in paths
     assert VN_SCRIPT_PUBLISH_PATH in paths
     assert VN_SCRIPT_VERSIONS_PATH in paths
     assert VN_SCRIPT_VERSION_PATH in paths
     assert VN_SCRIPT_MANIFEST_SNAPSHOT_PATH in paths
     assert VN_SCRIPT_VERSION_POLICY_EVALUATE_PATH in paths
+    assert VN_SCRIPT_VERSION_PLAYTEST_PATH in paths
     assert {"get", "post"}.issubset(paths[VN_SCRIPTS_PATH])
     assert {"get", "patch", "delete"}.issubset(paths[VN_SCRIPT_PATH])
     assert {"get", "put"}.issubset(paths[VN_SCRIPT_DRAFT_PATH])
     assert "post" in paths[VN_SCRIPT_DRAFT_VALIDATE_PATH]
     assert "get" in paths[VN_SCRIPT_DRAFT_DIAGNOSTICS_PATH]
+    assert "post" in paths[VN_SCRIPT_DRAFT_PLAYTEST_PATH]
     assert "post" in paths[VN_SCRIPT_PUBLISH_PATH]
     assert "get" in paths[VN_SCRIPT_VERSIONS_PATH]
     assert "get" in paths[VN_SCRIPT_VERSION_PATH]
     assert "get" in paths[VN_SCRIPT_MANIFEST_SNAPSHOT_PATH]
     assert "post" in paths[VN_SCRIPT_VERSION_POLICY_EVALUATE_PATH]
+    assert "post" in paths[VN_SCRIPT_VERSION_PLAYTEST_PATH]
 
 
 @pytest.mark.integration

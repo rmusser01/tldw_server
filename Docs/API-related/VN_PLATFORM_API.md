@@ -83,6 +83,8 @@ Custom frontends can build guided script editors from the backend-owned authorin
 - `GET /api/v1/vn/vn-scripts/vn-authoring-catalog`
 - `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview`
 - `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-apply`
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/playtest`
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/playtest`
 
 `GET /vn-authoring-catalog` returns preview-safe metadata:
 

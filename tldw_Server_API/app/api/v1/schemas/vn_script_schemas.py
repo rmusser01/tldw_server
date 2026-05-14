@@ -244,6 +244,23 @@ class VNScriptGraphPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VNScriptPlaytestRequest(BaseModel):
+    """Compute a deterministic script playtest without runtime mutation."""
+
+    draft: dict[str, Any] | None = None
+    draft_revision: int | None = Field(default=None, ge=0)
+    max_steps: int = Field(default=500, ge=1, le=5000)
+    max_paths: int = Field(default=100, ge=1, le=1000)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_draft_revision(self) -> "VNScriptPlaytestRequest":
+        if self.draft is not None and self.draft_revision is None:
+            raise ValueError("draft_revision_required")
+        return self
+
+
 class VNScriptGraphDiagnostic(BaseModel):
     """Graph-specific authoring diagnostic."""
 
@@ -348,6 +365,43 @@ class VNScriptAuthoringGraphResponse(BaseModel):
     outline: VNScriptGraphOutline
     graph: VNScriptGraphBody
     diagnostics: VNScriptGraphDiagnostics
+    validation_diagnostics: dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptPlaytestDiagnostics(BaseModel):
+    """Playtest diagnostics grouped by severity."""
+
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VNScriptPlaytestResponse(BaseModel):
+    """Deterministic VN script playtest response."""
+
+    schema_version: Literal["vn_script_playtest.v1"]
+    playtest_semantics_version: Literal["vn_script_playtest_paths.v1"]
+    program_schema_version: str
+    script_id: int | None = None
+    source: Literal["stored_draft", "supplied_draft", "published_version"]
+    base_revision: int | None = None
+    version_id: int | None = None
+    validation_context_source: Literal["current_draft_context", "published_version_snapshot"]
+    valid: bool
+    runtime_ready: bool
+    truncated: bool
+    limits: dict[str, int]
+    summary: dict[str, int]
+    visited_labels: list[str] = Field(default_factory=list)
+    unvisited_labels: list[str] = Field(default_factory=list)
+    paths: list[dict[str, Any]] = Field(default_factory=list)
+    choice_boundaries: list[dict[str, Any]] = Field(default_factory=list)
+    generation_boundaries: list[dict[str, Any]] = Field(default_factory=list)
+    endings: list[dict[str, Any]] = Field(default_factory=list)
+    diagnostics: VNScriptPlaytestDiagnostics
     validation_diagnostics: dict[str, Any]
 
     model_config = ConfigDict(extra="forbid")

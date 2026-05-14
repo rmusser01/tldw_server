@@ -50,6 +50,7 @@ def test_vn_capabilities_returns_canonical_paths(client: TestClient) -> None:
     assert body["features"]["scripted_generation_history"] is True
     assert body["features"]["scripted_generation_debug_detail"] is True
     assert body["features"]["script_authoring_graph"] is True
+    assert body["features"]["script_playtest"] is True
     assert body["features"]["tts_jobs"] is False
     assert body["features"]["realtime_image_generation"] is False
     assert body["limits"]["max_automatic_generation_batch_count"] == 1
@@ -86,6 +87,7 @@ def test_vn_capabilities_disable_scripted_generation_details_without_scripts() -
     assert body["enabled_modules"]["scripts"] is False
     assert body["features"]["scripted_generation"] is False
     assert body["features"]["script_authoring_graph"] is False
+    assert body["features"]["script_playtest"] is False
     assert body["scripted_generation"]["enabled"] is False
     assert body["scripted_generation"]["confirmation_supported"] is False
     assert body["scripted_generation"]["dynamic_choice_supported"] is False
@@ -110,6 +112,7 @@ def test_vn_capabilities_require_graph_routes_for_script_authoring_graph() -> No
     assert body["enabled_modules"]["scripts"] is True
     assert body["features"]["script_authoring_catalog"] is True
     assert body["features"]["script_authoring_graph"] is False
+    assert body["features"]["script_playtest"] is False
 
 
 def test_vn_capabilities_require_graph_route_methods_for_script_authoring_graph() -> None:

@@ -297,3 +297,67 @@ frontends:
 - Keep graph diagnostics visually separate from validation diagnostics:
   graph diagnostics explain static-analysis limitations or partial structure,
   while validation diagnostics remain the publish/runtime readiness signal.
+
+## Script Playtest Preflight
+
+Custom frontends can dry-run authored script flow when `vn-capabilities`
+returns `features.script_playtest: true`.
+
+### Endpoints
+
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/playtest`
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/playtest`
+
+The draft endpoint accepts the stored draft by default or an unsaved supplied
+draft:
+
+```json
+{
+  "draft_revision": 4,
+  "draft": {"schema_version": "vn_script_program.v1", "labels": {}},
+  "max_steps": 500,
+  "max_paths": 100
+}
+```
+
+The version endpoint ignores mutable draft state and uses the immutable
+published program plus stored validation snapshot.
+
+### Non-Goals
+
+Playtest is read-only. It does not create VN Play sessions, append events,
+create generation rows, call LLMs, persist diagnostics, or make frontend-local
+runtime decisions. Model-backed `generate` opcodes are reported as generation
+boundaries with prompt hashes and profile/output metadata.
+
+### Response Shape
+
+```json
+{
+  "schema_version": "vn_script_playtest.v1",
+  "playtest_semantics_version": "vn_script_playtest_paths.v1",
+  "source": "stored_draft",
+  "runtime_ready": true,
+  "truncated": false,
+  "limits": {"max_steps": 500, "max_paths": 100},
+  "summary": {
+    "path_count": 2,
+    "choice_boundary_count": 1,
+    "generation_boundary_count": 0,
+    "ending_count": 2
+  },
+  "visited_labels": ["start"],
+  "unvisited_labels": [],
+  "choice_boundaries": [],
+  "generation_boundaries": [],
+  "endings": [],
+  "diagnostics": {"errors": [], "warnings": []},
+  "validation_diagnostics": {"valid": true, "errors": [], "warnings": []}
+}
+```
+
+Stable diagnostic codes include `playtest_runtime_error`,
+`playtest_choice_target_error`, `playtest_loop_detected`,
+`playtest_truncated`, and `playtest_preview_revision_stale`. Runtime readiness
+is true only when validation is valid, playtest diagnostics contain no errors,
+and traversal was not truncated.
