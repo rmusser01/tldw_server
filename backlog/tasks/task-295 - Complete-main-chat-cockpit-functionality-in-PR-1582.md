@@ -1,10 +1,10 @@
 ---
 id: TASK-295
 title: Complete main /chat cockpit functionality in PR 1582
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-13 04:47'
+updated_date: '2026-05-14 01:32'
 labels:
   - webui
   - chat
@@ -13,10 +13,13 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/1582'
+  - 'https://github.com/rmusser01/tldw_server/issues/1646'
 documentation:
   - Docs/superpowers/specs/2026-05-12-main-chat-cockpit-controls-gap-design.md
   - >-
-    Docs/superpowers/plans/2026-05-12-main-chat-cockpit-single-pr-completion-plan.md
+    Docs/superpowers/plans/2026-05-12-main-chat-cockpit-first-slice-implementation-plan.md
+  - >-
+    Docs/superpowers/specs/2026-05-13-main-chat-cockpit-p-series-completion-design.md
 priority: high
 ---
 
@@ -28,26 +31,25 @@ Finish the remaining main WebUI /chat cockpit work on the existing draft PR #158
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 PR #1582 remains the single vehicle for main /chat cockpit completion; no second PR or sidepanel/sidebar route work is introduced.
-- [x] #2 Main /chat cockpit and focus modes preserve existing composer workflows: model selection/settings, character/persona controls, Search & Context, web search, MCP/tools, attachments, prompt/tools menus, advanced controls, send/stop behavior, thread search, and artifacts where currently available.
-- [x] #3 Cockpit rails and status strip expose direct controls/status for the highest-value shared chat state without creating rail-local duplicate state: context/session controls, runtime/model/persona controls, degraded/error/streaming state, and independent rail visibility where supported.
-- [x] #4 Focused unit/component tests cover new shared-state controls and layout behavior; real-server Playwright coverage exercises the running backend without mocked API data or route interception.
-- [x] #5 Known baseline blockers are documented separately from this PR's changed behavior, and the draft PR is pushed with verification evidence.
-- [x] #6 Context rail is a mature context work surface with visible source inventory, per-source actions, empty/degraded states, and real shared-state wiring.
-- [x] #7 Runtime rail is a mature operational inspector with provider/model routing state, scoped settings summary, character/persona state, tool availability, and turn recovery controls.
-- [x] #8 Status strip acts as a prioritized diagnostic/action surface instead of a passive pill list, with clear hierarchy for streaming, degraded, error, no-model, unsaved, and context-active states.
-- [x] #9 Mobile cockpit uses a deliberate drawer/sheet/tab interaction that keeps the composer usable and preserves keyboard/touch accessibility.
-- [x] #10 Visual hierarchy, density, copy, iconography, focus behavior, and responsive screenshots pass a full UI/design QA sweep against real /chat states.
+- [ ] #1 All merge-critical real-server proof uses the running server with no mocked payloads and no page route interception
+- [ ] #2 PR #1582 remains draft and is not marked ready or merged until P0 P1 and P2 are all complete and explicitly approved by the human maintainer
+- [ ] #3 P0 workflows from issue #1646 are implemented verified and approved including character persona prompts model chat MCP and real-server state-changing proof
+- [ ] #4 P1 workflows from issue #1646 are implemented verified and approved including context session run controls keyboard focus and mobile workflows
+- [ ] #5 P2 polish from issue #1646 is completed verified and approved including IA copy degraded states duplication decisions visual QA screenshots and final PR closeout notes
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Stage 6: Mature cockpit IA and test targets. Update the design/plan to replace first-slice language with the fully mature cockpit merge bar and identify component-level test expectations.
-Stage 7: Context rail maturity. Add source-oriented context inventory, per-source actions, richer empty/degraded states, and tests for shared-state behavior.
-Stage 8: Runtime rail maturity. Add provider/model route diagnostics, scoped settings summary, character/persona state clarity, tools/MCP availability summary, recovery controls, and tests.
-Stage 9: Status strip and responsive cockpit maturity. Rework the strip into a prioritized diagnostic/action surface and replace mobile details with a cockpit sheet/tab pattern that preserves composer usability.
-Stage 10: Visual QA and verification. Run focused Vitest, real-server Playwright against /chat with no route mocks, screenshot desktop/mobile states, diff check, and document remaining baseline blockers separately.
+Stage 0: Reopen honest tracking. Keep TASK-295 and PR #1582 tied to issue #1646 and mark the PR draft until P0/P1/P2 are explicitly approved.
+Stage 1: Complete Character / Persona rail workflows including clear, correct selector tab, change flows, inspect/details, bootstrap/persona-memory behavior, tests, and real-server proof.
+Stage 2: Complete Prompt rail workflows including select, clear, inline/custom prompt state, isolation, tests, and real-server proof or real empty-state proof.
+Stage 3: Complete Model & Chat rail workflows including scoped provider:model summaries, persist/restore harmless setting, duplicate model-id routing, tests, and real-server proof.
+Stage 4: Complete MCP rail workflows including tool choice, direct settings workflow, unavailable/degraded states, tool state counts, tests, and real-server proof.
+Stage 5: Complete Context and Session rail workflows including next-reply inventory, clear/remove isolation, session status, session switching, tests, and real-server proof.
+Stage 6: Complete Run Controls and Recovery including stop, regenerate, disabled states, recoverable errors, and request-state-machine-safe tests.
+Stage 7: Complete Keyboard, Focus, and Mobile workflows including focus restoration, keyboard operation, mobile workflow parity, and mobile Playwright proof.
+Stage 8: Complete P2 polish and merge readiness including IA/copy/degraded-state cleanup, composer/rail duplication decisions, final visual QA, refreshed real-server screenshots, PR closeout notes, and human approval gates.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -96,22 +98,18 @@ Merge bar changed from first complete slice to fully mature main /chat cockpit. 
 Completed mature main /chat cockpit slice in draft PR #1582. Added actionable context-source inventory, runtime/provider diagnostics, scoped setting summaries, MCP/tool entry points, prioritized status strip actions, controlled mobile cockpit tabs, shared message-count state, and stale i18n count recovery.
 
 Mature cockpit verification: focused cockpit Vitest passed (20 tests); real-server Playwright /chat cockpit passed against http://127.0.0.1:8000 with no route interception (3 tests); screenshot harness returned a 200 chat completion with two rendered messages and status strip text showing 2 messages; git diff --check passed; filtered package-ui tsc output had no changed Playground-file errors; design-state filter showed only the existing allowed PlaygroundForm baseline, while the full command remains blocked by existing Chatbooks/shared-product-state baseline findings. Bandit not applicable because only frontend/docs/e2e files were touched.
+
+Added staged P-series completion spec for issue #1646. Earlier cockpit completion notes are historical only; PR #1582 remains draft and must not be considered merge-ready until P0, P1, and P2 are all fully completed and explicitly approved by the human maintainer.
+
+Corrected TASK-295 after issue #1646: the prior checked acceptance criteria and final summary are superseded. The task is In Progress until the P0 P1 and P2 completion gates are implemented verified and explicitly approved.
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the fully mature main /chat cockpit slice in the existing draft PR #1582, still scoped to the main chat page only. The cockpit now exposes source-level context management, runtime/provider diagnostics, scoped provider:model settings, tool/MCP entry points, turn recovery controls, status-strip actions, mobile cockpit tabs, and real-server coverage without mocked API data.
-
-Verification is recorded with focused Vitest, real-server Playwright, screenshot evidence, diff check, filtered typecheck, and design-state baseline notes.
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
