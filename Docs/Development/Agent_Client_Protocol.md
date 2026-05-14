@@ -340,7 +340,7 @@ promotion contract is
 When an ACP output is promoted into a generated work-product artifact, the
 artifact record should keep:
 
-- ACP producer metadata: task ID, run ID, session ID, agent type, reviewer run
+- ACP producer metadata: task ID, run ID, session ID, agent type (model/provider), reviewer run
   ID when applicable, and normalized completion reason.
 - Source lineage: selected workspace sources, retrieval or MCP/tool evidence,
   citations, and uncited generated sections.
