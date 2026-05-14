@@ -4,13 +4,14 @@ title: Surface Persona runtime explorer diagnostics
 status: Done
 assignee: []
 created_date: '2026-05-14 01:13'
-updated_date: '2026-05-14 01:22'
+updated_date: '2026-05-14 01:25'
 labels:
   - persona
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
   - 'https://github.com/rmusser01/tldw_server/issues/1644'
+  - 'https://github.com/rmusser01/tldw_server/pull/1647'
 priority: medium
 ---
 
