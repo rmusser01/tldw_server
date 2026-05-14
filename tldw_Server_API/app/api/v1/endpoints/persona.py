@@ -2272,11 +2272,34 @@ def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> A
         return default
 
 
+def _persona_visual_import_preview_proposed_plan(preview: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Return stored proposed-plan metadata and whether it decoded as an object."""
+    value = preview.get("proposed_plan_json")
+    if value in (None, ""):
+        return {}, True
+    if isinstance(value, dict):
+        return value, True
+    if isinstance(value, list):
+        return {}, False
+    try:
+        parsed = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}, False
+    if not isinstance(parsed, dict):
+        return {}, False
+    return parsed, True
+
+
 def _persona_visual_import_preview_commit_eligible(preview: dict[str, Any]) -> bool:
     """Return whether stored preview metadata allows queuing import commit."""
-    proposed_plan = _persona_visual_json_field(preview, "proposed_plan_json", {})
-    if not isinstance(proposed_plan, dict):
+    status_value = str(preview.get("status") or "").strip()
+    if status_value == "blocked":
+        return False
+    if status_value != "completed":
         return True
+    proposed_plan, proposed_plan_valid = _persona_visual_import_preview_proposed_plan(preview)
+    if not proposed_plan_valid:
+        return False
     return proposed_plan.get("commit_eligible") is not False
 
 
@@ -5164,15 +5187,15 @@ async def start_persona_visual_pack_import_commit(
         )
         if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
             raise HTTPException(status_code=404, detail="import_preview_not_found")
-        if str(preview.get("status") or "") != "completed":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="import_preview_not_completed",
-            )
         if not _persona_visual_import_preview_commit_eligible(preview):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_commit_eligible",
+            )
+        if str(preview.get("status") or "") != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_completed",
             )
         conflicts = _persona_visual_json_field(preview, "conflicts_json", [])
         replaceable_pack_ids = _persona_visual_replaceable_pack_ids(conflicts)

@@ -284,25 +284,40 @@ def _import_preview_json_field(row: Mapping[str, Any], key: str, default: Any) -
         return default
 
 
-def _import_preview_proposed_plan(preview: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Return proposed-plan metadata from either a row or fresh preview payload."""
+def _import_preview_proposed_plan(preview: Mapping[str, Any]) -> tuple[Mapping[str, Any], bool]:
+    """Return proposed-plan metadata and whether it decoded as an object."""
     proposed_plan = preview.get("proposed_plan")
     if isinstance(proposed_plan, Mapping):
-        return proposed_plan
-    stored_plan = _import_preview_json_field(preview, "proposed_plan_json", {})
-    if isinstance(stored_plan, Mapping):
-        return stored_plan
-    return {}
+        return proposed_plan, True
+    if "proposed_plan" in preview and proposed_plan is not None:
+        return {}, False
+
+    stored_plan_value = preview.get("proposed_plan_json")
+    if stored_plan_value in (None, ""):
+        return {}, True
+    if isinstance(stored_plan_value, Mapping):
+        return stored_plan_value, True
+    if isinstance(stored_plan_value, list):
+        return {}, False
+    try:
+        stored_plan = json.loads(str(stored_plan_value))
+    except json.JSONDecodeError:
+        return {}, False
+    if not isinstance(stored_plan, Mapping):
+        return {}, False
+    return stored_plan, True
 
 
 def _validate_preview_commit_allowed(preview: Mapping[str, Any]) -> None:
     """Reject previews that are not currently eligible for import commit."""
-    proposed_plan = _import_preview_proposed_plan(preview)
     status_value = str(preview.get("status") or "").strip()
-    if status_value == "blocked" or proposed_plan.get("commit_eligible") is False:
+    if status_value == "blocked":
         raise ValueError("import_preview_not_commit_eligible")
     if status_value != "completed":
         raise ValueError("import_preview_not_completed")
+    proposed_plan, proposed_plan_valid = _import_preview_proposed_plan(preview)
+    if not proposed_plan_valid or proposed_plan.get("commit_eligible") is False:
+        raise ValueError("import_preview_not_commit_eligible")
 
 
 def _replaceable_pack_ids_from_conflicts(conflicts: Any) -> set[str]:
