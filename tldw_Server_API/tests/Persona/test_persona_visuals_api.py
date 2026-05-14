@@ -1391,7 +1391,7 @@ def test_start_import_commit_rejects_commit_ineligible_preview(
         )
 
     assert response.status_code == 409, response.text
-    assert response.json()["detail"] == "import_preview_not_committable"
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
     assert manager.created == []
 
 
@@ -1591,6 +1591,48 @@ def test_start_import_commit_rejects_incomplete_preview(
         )
 
     assert response.status_code == 409
+    assert manager.created == []
+
+
+def test_start_import_commit_rejects_ineligible_completed_preview(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Ineligible Import Commit Persona")
+        archive_path = tmp_path / "commit-ineligible.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-ineligible",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={
+                "target_mode": "create_new",
+                "commit_eligible": False,
+                "commit_blockers": ["unsupported_renderer"],
+            },
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
     assert manager.created == []
 
 

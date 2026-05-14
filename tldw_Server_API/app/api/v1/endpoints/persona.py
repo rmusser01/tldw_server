@@ -163,6 +163,7 @@ from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
+    import_preview_plan_from_stored_json,
     is_import_preview_plan_committable,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.constants import (
@@ -2273,6 +2274,16 @@ def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> A
         return json.loads(str(value))
     except json.JSONDecodeError:
         return default
+
+
+def _persona_visual_import_preview_commit_eligible(preview: dict[str, Any]) -> bool:
+    """Return whether stored preview metadata allows queuing import commit."""
+    if str(preview.get("status") or "").strip() == "blocked":
+        return False
+    proposed_plan, proposed_plan_valid = import_preview_plan_from_stored_json(
+        preview.get("proposed_plan_json")
+    )
+    return proposed_plan_valid and is_import_preview_plan_committable(proposed_plan)
 
 
 def _persona_visual_replaceable_pack_ids(conflicts: Any) -> set[str]:
@@ -5159,16 +5170,15 @@ async def start_persona_visual_pack_import_commit(
         )
         if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
             raise HTTPException(status_code=404, detail="import_preview_not_found")
+        if not _persona_visual_import_preview_commit_eligible(preview):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_commit_eligible",
+            )
         if str(preview.get("status") or "") != "completed":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_completed",
-            )
-        proposed_plan = _persona_visual_json_field(preview, "proposed_plan_json", {})
-        if not is_import_preview_plan_committable(proposed_plan):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="import_preview_not_committable",
             )
         conflicts = _persona_visual_json_field(preview, "conflicts_json", [])
         replaceable_pack_ids = _persona_visual_replaceable_pack_ids(conflicts)

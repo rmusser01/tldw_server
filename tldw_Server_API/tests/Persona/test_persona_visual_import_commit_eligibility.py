@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
     import_preview_commit_blockers,
+    import_preview_plan_from_stored_json,
     is_import_preview_plan_committable,
     is_import_preview_result_committable,
 )
@@ -17,6 +18,21 @@ def test_import_preview_plan_rejects_non_mapping_plan() -> None:
 def test_import_preview_result_rejects_missing_plan() -> None:
     assert not is_import_preview_result_committable({"status": "completed"})
     assert not is_import_preview_result_committable({"status": "completed", "proposed_plan": []})
+
+
+def test_import_preview_plan_from_stored_json_allows_empty_legacy_plan() -> None:
+    plan, valid = import_preview_plan_from_stored_json("")
+
+    assert valid is True
+    assert plan == {}
+
+
+def test_import_preview_plan_from_stored_json_rejects_corrupted_or_non_object_plan() -> None:
+    for raw_value in ("{not-json", "[]"):
+        plan, valid = import_preview_plan_from_stored_json(raw_value)
+
+        assert valid is False
+        assert plan == {}
 
 
 def test_renderer_import_preview_without_can_commit_does_not_block_plan() -> None:
