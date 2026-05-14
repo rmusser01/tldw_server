@@ -103,6 +103,7 @@ import {
   resolveComposerBottomOffsetPx,
   type ComposerDockLayoutMetrics,
 } from "./mobile-composer-layout";
+import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -128,6 +129,8 @@ const renderArtifactsPanel = () => (
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
 type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
 const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
+const COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR =
+  "[data-cockpit-assistant-select-trigger]";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -180,6 +183,7 @@ export const Playground = () => {
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const { t } = useTranslation(["playground", "common"]);
+  const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [stickyChatInput] = useStorage(
     "stickyChatInput",
@@ -236,6 +240,7 @@ export const Playground = () => {
     stopStreamingRequest,
     regenerateLastMessage,
     selectedAssistant,
+    setSelectedAssistant,
     serverChatPersonaMemoryMode,
   } = useMessageOption();
   const {
@@ -1589,6 +1594,39 @@ export const Playground = () => {
     setSelectedSystemPrompt("");
     setSystemPrompt("");
   }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
+  const cockpitAssistantSelectTab =
+    selectedAssistant?.kind === "persona" ? "persona" : "character";
+  const openAssistantSelectorFromCockpit = React.useCallback(() => {
+    openAssistantSelector({
+      tab: cockpitAssistantSelectTab,
+      returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
+    });
+  }, [cockpitAssistantSelectTab]);
+  const clearAssistantFromCockpit = React.useCallback(() => {
+    void setSelectedAssistant(null);
+    setSelectedCharacter(null);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR)
+          ?.focus();
+      });
+    }
+  }, [setSelectedAssistant, setSelectedCharacter]);
+  const inspectAssistantFromCockpit = React.useCallback(() => {
+    if (selectedAssistant?.kind === "persona") {
+      navigate(
+        buildPersonaGardenRoute({
+          personaId: selectedAssistant.id,
+          tab: "profiles",
+        }),
+      );
+      return;
+    }
+    if (selectedAssistant?.kind === "character" || selectedCharacter) {
+      navigate("/settings/characters");
+    }
+  }, [navigate, selectedAssistant, selectedCharacter]);
   const canRegenerateLastResponse = messages.some(
     (message) => message.role === "assistant",
   );
@@ -1920,7 +1958,9 @@ export const Playground = () => {
         },
       })}
       onOpenModelSettings={openModelSettings}
-      onOpenAssistantSelect={() => openAssistantSelector({ tab: "character" })}
+      onOpenAssistantSelect={openAssistantSelectorFromCockpit}
+      onClearAssistant={clearAssistantFromCockpit}
+      onInspectAssistant={inspectAssistantFromCockpit}
       onOpenSceneDirector={openActorSettings}
       canStopStreaming={streaming}
       onStopStreaming={() => stopStreamingRequest()}

@@ -48,6 +48,8 @@ export type PlaygroundRuntimeInspectorProps = {
   onOpenModelSettings: () => void;
   onOpenCharacterSettings?: () => void;
   onOpenAssistantSelect?: () => void;
+  onClearAssistant?: () => void;
+  onInspectAssistant?: () => void;
   onOpenSceneDirector?: () => void;
   toolChoice?: RuntimeToolChoice;
   onToolChoiceChange?: (choice: RuntimeToolChoice) => void;
@@ -84,6 +86,8 @@ export const PlaygroundRuntimeInspector = ({
   onOpenModelSettings,
   onOpenCharacterSettings,
   onOpenAssistantSelect,
+  onClearAssistant,
+  onInspectAssistant,
   onOpenSceneDirector,
   toolChoice,
   onToolChoiceChange,
@@ -294,6 +298,7 @@ export const PlaygroundRuntimeInspector = ({
             <button
               type="button"
               onClick={openAssistant}
+              data-cockpit-assistant-select-trigger
               className={`${railActionClass} justify-start gap-1.5`}
               aria-label={t(
                 "cockpit.selectCharacterPersona",
@@ -302,6 +307,28 @@ export const PlaygroundRuntimeInspector = ({
             >
               <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
               {t("cockpit.selectAssistant", "Select assistant")}
+            </button>
+          ) : null}
+          {effectiveAssistantSummary.mode !== "none" && onInspectAssistant ? (
+            <button
+              type="button"
+              onClick={onInspectAssistant}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t("cockpit.manageAssistant", "Manage assistant")}
+            >
+              <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.manageAssistant", "Manage assistant")}
+            </button>
+          ) : null}
+          {effectiveAssistantSummary.mode !== "none" && onClearAssistant ? (
+            <button
+              type="button"
+              onClick={onClearAssistant}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t("cockpit.clearAssistant", "Clear assistant")}
+            >
+              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.clearAssistant", "Clear assistant")}
             </button>
           ) : null}
           {effectiveAssistantSummary.mode === "character" && openSceneDirector ? (

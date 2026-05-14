@@ -30,6 +30,8 @@ const renderInspector = (
     },
     onOpenModelSettings: vi.fn(),
     onOpenAssistantSelect: vi.fn(),
+    onClearAssistant: vi.fn(),
+    onInspectAssistant: vi.fn(),
     onOpenSceneDirector: vi.fn(),
     onOpenMcpSettings: vi.fn(),
     toolChoice: "auto" as const,
@@ -86,6 +88,36 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(props.onOpenSceneDirector).not.toHaveBeenCalled();
   });
 
+  it("shows a clear assistant action when a character is selected", () => {
+    const props = renderInspector();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear assistant" }));
+
+    expect(props.onClearAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a clear assistant action when a persona is selected", () => {
+    const props = renderInspector({
+      assistantSummary: {
+        mode: "persona",
+        name: "Research Persona",
+        detail: "Persona selected",
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear assistant" }));
+
+    expect(props.onClearAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the supplied manage path for selected assistants", () => {
+    const props = renderInspector();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage assistant" }));
+
+    expect(props.onInspectAssistant).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps Scene Director secondary to the primary assistant selector", () => {
     const props = renderInspector();
 
@@ -95,6 +127,23 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
     expect(props.onOpenSceneDirector).toHaveBeenCalledTimes(1);
     expect(props.onOpenAssistantSelect).not.toHaveBeenCalled();
+  });
+
+  it("keeps Scene Director character-only and explains persona mode", () => {
+    renderInspector({
+      assistantSummary: {
+        mode: "persona",
+        name: "Research Persona",
+        detail: "Persona selected",
+      },
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Open Scene Director" }),
+    ).toBeNull();
+    expect(
+      screen.getByText("Scene Director is available for character-backed chats."),
+    ).toBeInTheDocument();
   });
 
   it("changes MCP tool choice and opens MCP settings directly", () => {

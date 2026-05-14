@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
@@ -447,6 +454,168 @@ describe("Playground cockpit controls", () => {
         name: "Open Scene Director",
       }),
     ).toBeNull();
+    expect(
+      within(runtimeInspector).getByText(
+        "Scene Director is available for character-backed chats.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the assistant selector on the character tab for character mode", async () => {
+    const openAssistantSelect = vi.fn();
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+
+    try {
+      render(<Playground />);
+
+      const runtimeInspector = within(
+        await screen.findByTestId("playground-cockpit-right-rail"),
+      ).getByTestId("playground-runtime-inspector");
+
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: /select character or persona/i,
+        }),
+      );
+
+      expect(openAssistantSelect).toHaveBeenCalledTimes(1);
+      expect(
+        (openAssistantSelect.mock.calls[0]?.[0] as CustomEvent).detail,
+      ).toEqual(
+        expect.objectContaining({
+          tab: "character",
+          source: "playground-cockpit",
+          returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
+        }),
+      );
+    } finally {
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+    }
+  });
+
+  it("opens the assistant selector on the persona tab for persona mode", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-1",
+      name: "Research Persona",
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "legacy-character",
+      name: "Legacy Character",
+    };
+    const openAssistantSelect = vi.fn();
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+
+    try {
+      render(<Playground />);
+
+      const runtimeInspector = within(
+        await screen.findByTestId("playground-cockpit-right-rail"),
+      ).getByTestId("playground-runtime-inspector");
+
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: /select character or persona/i,
+        }),
+      );
+
+      expect(openAssistantSelect).toHaveBeenCalledTimes(1);
+      expect(
+        (openAssistantSelect.mock.calls[0]?.[0] as CustomEvent).detail,
+      ).toEqual(
+        expect.objectContaining({
+          tab: "persona",
+          source: "playground-cockpit",
+          returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
+        }),
+      );
+    } finally {
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+    }
+  });
+
+  it("opens the assistant selector on characters when no assistant is selected", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+    const openAssistantSelect = vi.fn();
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+
+    try {
+      render(<Playground />);
+
+      const runtimeInspector = within(
+        await screen.findByTestId("playground-cockpit-right-rail"),
+      ).getByTestId("playground-runtime-inspector");
+
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: /select character or persona/i,
+        }),
+      );
+
+      expect(
+        (openAssistantSelect.mock.calls[0]?.[0] as CustomEvent).detail,
+      ).toEqual(
+        expect.objectContaining({
+          tab: "character",
+          returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
+        }),
+      );
+    } finally {
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, openAssistantSelect);
+    }
+  });
+
+  it("clears canonical assistant state and the legacy character mirror from the runtime rail", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-1",
+      name: "Research Persona",
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "legacy-character",
+      name: "Legacy Character",
+    };
+
+    const { rerender } = render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Research Persona")).toBeInTheDocument();
+    expect(within(runtimeInspector).queryByText("Legacy Character")).toBeNull();
+
+    const clearButton = within(runtimeInspector).getByRole("button", {
+      name: "Clear assistant",
+    });
+    clearButton.focus();
+    fireEvent.click(clearButton);
+
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+    expect(document.activeElement).toBe(clearButton);
+
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+    rerender(<Playground />);
+    const updatedRuntimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(
+      within(updatedRuntimeInspector).getAllByText("No assistant selected")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(within(updatedRuntimeInspector).queryByText("Legacy Character")).toBeNull();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(updatedRuntimeInspector).getByRole("button", {
+          name: /select character or persona/i,
+        }),
+      );
+    });
   });
 
   it("does not render cockpit control rails in focus mode", async () => {

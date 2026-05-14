@@ -118,6 +118,18 @@ export const AssistantSelect: React.FC<Props> = ({
     FavoriteCharacter[]
   >("favoriteCharacters", [])
   const searchInputRef = React.useRef<InputRef | null>(null)
+  const returnFocusSelectorRef = React.useRef<string | null>(null)
+
+  const restoreReturnFocus = React.useCallback(() => {
+    const selector = returnFocusSelectorRef.current
+    returnFocusSelectorRef.current = null
+    if (!selector || typeof window === "undefined") return
+
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(selector)
+      target?.focus()
+    })
+  }, [])
 
   React.useEffect(() => {
     if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
@@ -134,6 +146,11 @@ export const AssistantSelect: React.FC<Props> = ({
       if (requestedTab === "character" || requestedTab === "persona") {
         setActiveTab(requestedTab as AssistantSelectTab)
       }
+      returnFocusSelectorRef.current =
+        typeof detail?.returnFocusSelector === "string" &&
+        detail.returnFocusSelector.trim().length > 0
+          ? detail.returnFocusSelector.trim()
+          : null
       setSearchText("")
       setOpen(true)
     }
@@ -319,20 +336,23 @@ export const AssistantSelect: React.FC<Props> = ({
       await setSelectedAssistant(entry)
       setOpen(false)
       setSearchText("")
+      restoreReturnFocus()
     },
-    [setSelectedAssistant]
+    [restoreReturnFocus, setSelectedAssistant]
   )
 
   const handleOpenChange = React.useCallback((nextOpen: boolean) => {
     setOpen(nextOpen)
     if (!nextOpen) {
       setSearchText("")
+      restoreReturnFocus()
     }
-  }, [])
+  }, [restoreReturnFocus])
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
     setSearchText("")
+    restoreReturnFocus()
     try {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tldw:open-actor-settings"))
@@ -340,7 +360,7 @@ export const AssistantSelect: React.FC<Props> = ({
     } catch {
       // no-op
     }
-  }, [])
+  }, [restoreReturnFocus])
 
   const buttonLabel =
     selectedAssistant?.name ||

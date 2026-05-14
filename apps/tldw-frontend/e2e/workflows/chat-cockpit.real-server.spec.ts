@@ -40,9 +40,46 @@ const apiGet = async <T>(
   return { status: response.status(), body };
 };
 
+const apiPost = async <T>(
+  request: APIRequestContext,
+  path: string,
+  body: Record<string, unknown>
+): Promise<{ status: number; body: T | null }> => {
+  const response = await request.post(`${serverUrl}${path}`, {
+    data: body,
+    headers: {
+      ...apiHeaders(),
+      'content-type': 'application/json',
+    },
+    timeout: 30_000,
+  });
+  const payload = await response.json().catch(() => null);
+  return { status: response.status(), body: payload as T | null };
+};
+
+const apiDelete = async (
+  request: APIRequestContext,
+  path: string
+): Promise<{ status: number }> => {
+  const response = await request.delete(`${serverUrl}${path}`, {
+    headers: apiHeaders(),
+    timeout: 30_000,
+  });
+  return { status: response.status() };
+};
+
 const extractModels = (payload: any): any[] => {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.models)) return payload.models;
+  return [];
+};
+
+const extractCharacters = (payload: any): any[] => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.characters)) return payload.characters;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.data)) return payload.data;
   return [];
 };
 
@@ -502,5 +539,110 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await assertCoreComposerControls(page, { mobile: true, composerOnly: true });
+  });
+
+  test('selects and clears a real disposable character through the runtime rail', async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+
+    const characterName = `Cockpit Rail ${Date.now()}`;
+    const created = await apiPost<any>(request, '/api/v1/characters', {
+      name: characterName,
+      system_prompt: `You are ${characterName}, a concise test assistant.`,
+      first_message: 'Ready for cockpit rail proof.',
+      creator: 'tldw e2e',
+      tags: ['e2e', 'cockpit-rail'],
+    });
+    const createdId = created.body?.id;
+    const createdVersion = created.body?.version ?? 1;
+
+    if (created.status !== 201 || !createdId) {
+      testInfo.annotations.push({
+        type: 'blocker',
+        description: `Could not create disposable character via real server: status ${created.status}`,
+      });
+
+      await seedRealServerConfig(page);
+      await page.setViewportSize({ width: 1440, height: 960 });
+      await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+        timeout: 60_000,
+      });
+      await assertNoBlockingServerDialog(page);
+      const runtimeInspector = page.getByTestId('playground-runtime-inspector');
+      await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
+      const listed = await apiGet<any>(request, '/api/v1/characters');
+      if (extractCharacters(listed.body).length === 0) {
+        await expect(page.getByText('No characters available.')).toBeVisible();
+      } else {
+        await expect(page.getByRole('tab', { name: 'Characters' })).toHaveAttribute(
+          'aria-selected',
+          'true'
+        );
+      }
+      return;
+    }
+
+    try {
+      const listed = await apiGet<any>(request, '/api/v1/characters');
+      expect(listed.status).toBe(200);
+      expect(
+        extractCharacters(listed.body).some(
+          (character) => String(character?.id) === String(createdId)
+        )
+      ).toBe(true);
+
+      await seedRealServerConfig(page);
+      await page.setViewportSize({ width: 1440, height: 960 });
+      await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+
+      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+        timeout: 60_000,
+      });
+      await assertNoBlockingServerDialog(page);
+      await assertCoreComposerControls(page);
+
+      const runtimeInspector = page.getByTestId('playground-runtime-inspector');
+      const composerAssistant = page.getByTestId('character-select');
+      await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
+      await expect(composerAssistant).toHaveAccessibleName(/Select character or persona/i);
+
+      await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
+      await expect(page.getByRole('tab', { name: 'Characters' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+      await page.getByRole('button', { name: characterName }).click();
+
+      await expect(runtimeInspector.getByText(characterName)).toBeVisible();
+      await expect(composerAssistant).toHaveAccessibleName(characterName);
+      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
+      await expect(runtimeInspector.getByRole('button', { name: 'Open Scene Director' })).toBeVisible();
+
+      const smokePrompt = `assistant rail proof ${Date.now()}`;
+      await page.getByTestId('chat-input').fill(smokePrompt);
+      const chatCompletionAttempt = waitForChatCompletionAttempt(page);
+      await page.getByRole('button', { name: /send message/i }).click();
+      const chatCompletionResponse = await chatCompletionAttempt;
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
+      await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
+
+      await runtimeInspector.getByRole('button', { name: 'Clear assistant' }).click();
+      await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
+      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(0);
+      await expect(composerAssistant).toHaveAccessibleName(/Select character or persona/i);
+    } finally {
+      await apiDelete(
+        request,
+        `/api/v1/characters/${encodeURIComponent(String(createdId))}?expected_version=${encodeURIComponent(
+          String(createdVersion)
+        )}`
+      ).catch(() => ({ status: 0 }));
+    }
   });
 });

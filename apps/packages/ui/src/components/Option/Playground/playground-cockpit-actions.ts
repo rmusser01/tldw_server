@@ -60,11 +60,12 @@ export const openActorSettings = () => {
 };
 
 export const openAssistantSelector = (
-  options: { tab?: AssistantSelectTab } = {},
+  options: { tab?: AssistantSelectTab; returnFocusSelector?: string } = {},
 ) => {
   dispatchOpenAssistantSelect({
     tab: options.tab,
     source: "playground-cockpit",
+    returnFocusSelector: options.returnFocusSelector,
   });
 };
 

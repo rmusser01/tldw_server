@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 02:45'
+updated_date: '2026-05-14 03:14'
 labels:
   - webui
   - chat
@@ -120,6 +120,18 @@ Task 0 code-quality follow-up: guarded selected prompt summaries against stale a
 Task 0 final MCP state follow-up: moved unhealthy/degraded MCP health handling ahead of tools-loading in buildCockpitMcpSummary so known health failures remain visible during refetch/loading. Added helper coverage for unhealthy+loading and degraded+loading returning degraded/offline instead of disabled/loading. Verification: focused helper plus cockpit-controls Vitest passed from apps/tldw-frontend with repo-installed Vitest (15 tests); git diff --check passed. Existing non-fatal mocked-server 400 chat-settings logs remain baseline.
 
 Task 0 provider-route follow-up: reused the shared parseProviderQualifiedModelSelection parser for cockpit provider/model summaries so unknown colon model IDs such as llama3:latest stay associated with the selected provider while known provider-qualified model IDs still split correctly. Verification: node_modules/.bin/vitest run ../packages/ui/src/components/Option/Playground/__tests__/playground-cockpit-summaries.test.ts ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx --reporter=verbose passed from apps/tldw-frontend (15 tests); git diff --check passed. Existing non-fatal mocked-server 400 chat-settings logs remain baseline.
+
+Task 1 plan: add failing tests for clear, selector tab, mode, Scene Director, focus restoration, and canonical assistant sync; wire main chat cockpit rail to selectedAssistant with legacy selectedCharacter fallback only; add narrow rail actions and AssistantSelect returnFocusSelector; use existing character/persona manage routes; verify with focused Vitest, real-server e2e if reachable/data-supported, and git diff --check.
+
+Task 1 started in worktree chat-degraded-health on branch codex/chat-degraded-health. Scope remains main chat cockpit rails only.
+
+Task 1 implementation: runtime rail now exposes select, manage, clear, and character-only Scene Director controls from canonical selectedAssistant state; Playground opens the selector on character/persona tab as appropriate, clears selectedAssistant plus legacy selectedCharacter mirror, and routes manage to existing character settings or Persona Garden; AssistantSelect supports returnFocusSelector and restores focus after selection, Escape, outside close, or actor-settings close.
+
+Task 1 verification: focused Vitest fallback from apps/tldw-frontend passed 4 files / 34 tests. Repo-root bunx vitest attempt failed before tests due known bunx latest alias/jsdom resolution, so fallback used repo-installed Vitest. git diff --check passed. Real-server e2e was not run because http://127.0.0.1:8000/api/v1/health was unreachable with curl exit 7; no mocked data used.
+
+Task 1 blocker: real-server disposable assistant rail proof is implemented in chat-cockpit.real-server.spec.ts but remains unexecuted until the required live server is reachable/configured. Bandit not applicable because this slice touched frontend TypeScript/TSX, Playwright, and task Markdown only.
+
+Task 1 verification refresh after focus-restoration tightening: focused Vitest fallback from apps/tldw-frontend passed 4 files / 34 tests; Playwright discovery listed 4 chat-cockpit.real-server.spec.ts tests including the new disposable character rail proof; git diff --check passed again. Real-server execution remains blocked by unreachable http://127.0.0.1:8000/api/v1/health.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
