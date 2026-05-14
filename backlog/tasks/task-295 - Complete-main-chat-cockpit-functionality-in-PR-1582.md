@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 19:18'
+updated_date: '2026-05-14 19:23'
 labels:
   - webui
   - chat
@@ -158,6 +158,8 @@ Task 8 P1 keyboard focus and mobile parity implementation completed. Added share
 Task 9 P2 polish follow-up completed. TldwChatService now logs recoverable stream failures with console.warn string output instead of console.error Error objects so provider credential failures remain recoverable in /chat rather than opening the Next dev runtime overlay. Added regression coverage that stream failures reject with Stream completion failed and do not call console.error.
 
 Verification: focused Vitest from apps/tldw-frontend passed 11 files / 90 tests covering cockpit summaries controls runtime inspector context rail a11y shell status strip locale mirror MCP control scoped settings and TldwChat stream sanitization. Real-server Playwright passed 4 tests against http://127.0.0.1:8000 and http://localhost:8080 with no route interception including desktop cockpit/focus mobile cockpit/focus and real disposable character select/send/clear/delete. Real screenshot evidence remains saved at /private/tmp/chat-cockpit-p2-desktop-cockpit.png /private/tmp/chat-cockpit-p2-desktop-focus.png /private/tmp/chat-cockpit-p2-mobile-cockpit.png and /private/tmp/chat-cockpit-p2-mobile-focus.png from a real server run returning chat completion status 200. git diff --check passed. Bandit not applicable because this follow-up touched frontend TypeScript test/service code only. PR #1582 remains draft pending maintainer P2 approval.
+
+Task 9 plan/status synchronization: updated the implementation plan Task 9 checklist to match the already-committed P2 evidence. Refreshed live PR state: PR 1582 remains open and draft on codex/chat-degraded-health; GraphQL review threads are resolved; CI checks from the latest push are still pending. Fresh local verification after plan sync: focused Vitest passed 11 files and 90 tests from apps/tldw-frontend; real-server Playwright passed 4 tests against http://localhost:8080 and http://127.0.0.1:8000 with no route interception; git diff --check passed. Bandit not applicable because this sync touched Markdown/task tracking only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

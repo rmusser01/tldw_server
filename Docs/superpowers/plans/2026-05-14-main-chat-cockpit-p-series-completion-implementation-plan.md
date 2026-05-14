@@ -749,7 +749,7 @@ git commit -m "feat(chat): complete cockpit keyboard mobile workflows"
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 - Modify: `backlog/tasks/task-295 - Complete-main-chat-cockpit-functionality-in-PR-1582.md`
 
-- [ ] **Step 1: Write visual/copy guard tests where practical**
+- [x] **Step 1: Write visual/copy guard tests where practical**
 
 Cover:
 
@@ -758,7 +758,7 @@ Cover:
 - Composer and rail duplicate controls remain state-consistent.
 - Locale keys exist in both app and extension public locale mirrors.
 
-- [ ] **Step 2: Polish IA and copy**
+- [x] **Step 2: Polish IA and copy**
 
 Keep product UI restrained and dense. Do not add hero treatments, decorative cards, or marketing copy. Each rail section should answer one of:
 
@@ -767,11 +767,11 @@ Keep product UI restrained and dense. Do not add hero treatments, decorative car
 - What can I safely change now?
 - What is unavailable and why?
 
-- [ ] **Step 3: Resolve composer/rail duplication intentionally**
+- [x] **Step 3: Resolve composer/rail duplication intentionally**
 
 Do not remove composer controls unless rail workflow equivalence is proven by P0/P1 tests. De-emphasize duplicates only where it reduces confusion and keeps power-user speed.
 
-- [ ] **Step 4: Capture real-server screenshots**
+- [x] **Step 4: Capture real-server screenshots**
 
 Use terminal Playwright or an approved browser tool, not Computer Use. Capture:
 
@@ -783,7 +783,7 @@ Use terminal Playwright or an approved browser tool, not Computer Use. Capture:
 
 Store temporary screenshots under `/private/tmp` unless the maintainer explicitly wants tracked artifacts.
 
-- [ ] **Step 5: Run final focused verification**
+- [x] **Step 5: Run final focused verification**
 
 ```bash
 bunx vitest run apps/packages/ui/src/components/Option/Playground/__tests__/playground-cockpit-summaries.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx apps/packages/ui/src/hooks/playground/__tests__/useMcpToolsControl.test.tsx apps/packages/ui/src/store/__tests__/model.scoped-settings.test.ts --reporter=verbose
@@ -796,7 +796,7 @@ TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=$TLDW_E2E_API_KEY bun
 git diff --check
 ```
 
-- [ ] **Step 6: Record P2 evidence and ask approval**
+- [x] **Step 6: Record P2 evidence and ask approval**
 
 Add TASK-295 note with:
 
@@ -809,7 +809,7 @@ Add TASK-295 note with:
 
 Ask maintainer to approve P2. Do not mark PR ready or merge.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Playground apps/packages/ui/src/assets/locale/en/playground.json apps/packages/ui/src/public/_locales/en/playground.json apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts "backlog/tasks/task-295 - Complete-main-chat-cockpit-functionality-in-PR-1582.md"
