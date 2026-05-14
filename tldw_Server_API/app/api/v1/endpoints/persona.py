@@ -162,6 +162,9 @@ from tldw_Server_API.app.core.Persona.visual_jobs import (
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
 )
+from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
+    is_import_preview_plan_committable,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     PERSONA_VISUAL_PACK_EXTENSION,
 )
@@ -5160,6 +5163,12 @@ async def start_persona_visual_pack_import_commit(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="import_preview_not_completed",
+            )
+        proposed_plan = _persona_visual_json_field(preview, "proposed_plan_json", {})
+        if not is_import_preview_plan_committable(proposed_plan):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_committable",
             )
         conflicts = _persona_visual_json_field(preview, "conflicts_json", [])
         replaceable_pack_ids = _persona_visual_replaceable_pack_ids(conflicts)

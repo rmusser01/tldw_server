@@ -14,6 +14,10 @@ from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
     PersonaVisualPortabilityRepository,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.archive import normalize_member_name
+from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
+    is_import_preview_plan_committable,
+    is_import_preview_result_committable,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     ASSET_BYTES_STATUS_PRESENT,
     TRUST_MODE_TRUSTED_RESTORE,
@@ -90,6 +94,8 @@ class PersonaVisualPackImporter:
         expected_fingerprint = str(preview.get("canonical_payload_fingerprint") or "")
         if expected_fingerprint and revalidated["canonical_payload_fingerprint"] != expected_fingerprint:
             raise ValueError("import_archive_fingerprint_changed")
+        if not is_import_preview_result_committable(revalidated):
+            raise ValueError("import_preview_not_committable")
         revalidated_conflicts = revalidated.get("conflicts")
         current_conflicts = revalidated_conflicts if isinstance(revalidated_conflicts, list) else []
         if current_conflicts and not conflict_choice_explicit:
@@ -257,6 +263,9 @@ class PersonaVisualPackImporter:
     def _validate_preview_ready(self, *, preview: dict[str, Any], archive_path: Path) -> None:
         if str(preview.get("status") or "") != "completed":
             raise ValueError("import_preview_not_completed")
+        proposed_plan = _import_preview_json_field(preview, "proposed_plan_json", {})
+        if not is_import_preview_plan_committable(proposed_plan):
+            raise ValueError("import_preview_not_committable")
         if not archive_path.is_file():
             raise ValueError("import_archive_not_found")
         expires_at = _parse_datetime(preview.get("expires_at"))
