@@ -35,6 +35,7 @@ _MAX_INPUT_TEXT_LENGTH = 10_000
 _MAX_INT_TEXT_LENGTH = 10
 _MAX_COLLECTION_ITEMS = 64
 _MAX_NESTING_DEPTH = 5
+_ALLOWED_URI_SCHEME_PREFIXES = ("mcp://",)
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,79}$")
 _INTEGER_TEXT_RE = re.compile(r"^[+-]?\d+$")
 _SECRET_VALUE_RE = re.compile(
@@ -252,7 +253,7 @@ def _sanitize_value(value: Any, *, section_name: str, depth: int) -> tuple[Any, 
         return text, False
     if isinstance(value, bool) or value is None:
         return value, False
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         return value, False
     return _safe_text(value, max_length=_MAX_TEXT_LENGTH), False
 
@@ -271,7 +272,10 @@ def _is_unsafe_text(text: str, *, section_name: str) -> bool:
         return True
     if _UNSAFE_PATH_RE.search(text):
         return True
-    if text.startswith(("http://", "https://", "data:")):
+    lowered = text.lower()
+    if "://" in lowered and not lowered.startswith(_ALLOWED_URI_SCHEME_PREFIXES):
+        return True
+    if lowered.startswith("data:"):
         return True
     return False
 

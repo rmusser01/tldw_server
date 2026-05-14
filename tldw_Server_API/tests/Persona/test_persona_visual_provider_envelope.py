@@ -321,6 +321,9 @@ def test_normalize_provider_result_envelope_rejects_non_integer_contract_version
     "resource_uri",
     [
         "https://example.invalid/pack.tldw-persona-vpack",
+        "ftp://example.invalid/pack.tldw-persona-vpack",
+        "s3://bucket/pack.tldw-persona-vpack",
+        "ws://example.invalid/pack.tldw-persona-vpack",
         "data:application/zip;base64,AAAA",
         "file:///Users/alice/private/pack.tldw-persona-vpack",
     ],
