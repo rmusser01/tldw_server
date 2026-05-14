@@ -217,6 +217,7 @@ from tldw_Server_API.app.core.Persona.policy_evaluator import (
 from tldw_Server_API.app.core.Persona.dialogue_tree_context import build_runtime_tree_context
 from tldw_Server_API.app.core.Persona.runtime_explorer import (
     PersonaRuntimeExplorer,
+    RuntimeExplorationResult,
     RuntimeExplorerConfig,
     RuntimeScorer,
 )
@@ -304,7 +305,9 @@ _PERSONA_STATE_FIELD_LABELS = {
     "heartbeat_md": "heartbeat",
 }
 _PERSONA_RUNTIME_EXPLORER_SELECTED_KEY = "_runtime_explorer_selected"
+_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY = "_runtime_explorer_diagnostics"
 _PERSONA_RUNTIME_SAFE_DENIAL_TEXT = RuntimeExplorerConfig().safe_denial_text
+_PERSONA_RUNTIME_EXPLORER_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 
 
 def _bounded_label(value: Any, *, allowed: set[str], fallback: str) -> str:
@@ -343,6 +346,71 @@ def _metric_reason_bucket(reason_code: Any) -> str:
     if candidate in allowed:
         return candidate.lower()
     return "other"
+
+
+def _runtime_explorer_safe_token(value: Any, *, fallback: str = "other") -> str:
+    """Return a bounded identifier token for trace-safe runtime diagnostics."""
+    token = str(value or "").strip()
+    if _PERSONA_RUNTIME_EXPLORER_TOKEN_RE.fullmatch(token):
+        return token
+    return fallback
+
+
+def _runtime_explorer_budget_int(budget: Any, field_name: str) -> int:
+    """Return a non-negative budget diagnostic integer with malformed fields as zero."""
+    raw_value = getattr(budget, field_name, 0) if budget is not None else 0
+    try:
+        return max(0, int(raw_value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _runtime_explorer_safe_denial_text(value: Any) -> str:
+    """Normalize runtime explorer safe-denial sentinels to user-facing text."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return text
+    return _PERSONA_RUNTIME_SAFE_DENIAL_TEXT
+
+
+def _runtime_explorer_diagnostics_payload(result: RuntimeExplorationResult) -> dict[str, Any]:
+    """Build the websocket-safe runtime explorer diagnostics envelope."""
+    diagnostics = dict(result.diagnostics or {})
+    reason_fallback = "selected_candidate" if result.selected_candidate else "none"
+    payload: dict[str, Any] = {
+        "fallback": _runtime_explorer_safe_token(
+            result.fallback.value if result.fallback else "none",
+            fallback="other",
+        ),
+        "reason": _runtime_explorer_safe_token(diagnostics.get("reason"), fallback=reason_fallback),
+        "provider_calls": _runtime_explorer_budget_int(result.budget, "provider_calls"),
+        "candidates_considered": _runtime_explorer_budget_int(result.budget, "candidates_considered"),
+        "hard_prunes": _runtime_explorer_budget_int(result.budget, "hard_prunes"),
+        "soft_prunes": _runtime_explorer_budget_int(result.budget, "soft_prunes"),
+        "elapsed_ms": _runtime_explorer_budget_int(result.budget, "elapsed_ms"),
+        "circuit_open": bool(result.circuit_open),
+        "safe_denial": bool(result.safe_denial),
+    }
+    if diagnostics.get("error_type"):
+        payload["error_type"] = _runtime_explorer_safe_token(diagnostics.get("error_type"), fallback="Exception")
+    return payload
+
+
+def _runtime_explorer_notice_reason_code(diagnostics: dict[str, Any]) -> str | None:
+    fallback = str(diagnostics.get("fallback") or "")
+    if fallback == "hard_safe_denial" or bool(diagnostics.get("safe_denial")):
+        return "RUNTIME_EXPLORER_SAFE_DENIAL"
+    if fallback in {"soft_existing_behavior", "circuit_open"}:
+        return "RUNTIME_EXPLORER_FALLBACK"
+    return None
+
+
+def _runtime_explorer_notice_message(diagnostics: dict[str, Any]) -> str:
+    reason_code = _runtime_explorer_notice_reason_code(diagnostics)
+    if reason_code == "RUNTIME_EXPLORER_SAFE_DENIAL":
+        return "Persona runtime explorer selected a safe denial."
+    return "Persona runtime explorer fell back to existing planning."
 
 
 def _increment_persona_metric(metric_name: str, labels: dict[str, str]) -> None:
@@ -630,6 +698,7 @@ def _apply_persona_runtime_explorer_to_plan(
     companion_usage: dict[str, Any],
     persona_exemplar_selection: dict[str, Any],
     runtime_explorer_provider: PersonaRuntimeExplorerProvider | None = None,
+    include_diagnostics: bool = False,
 ) -> dict[str, Any]:
     config = _get_persona_runtime_explorer_config()
     if not config.enabled:
@@ -669,19 +738,31 @@ def _apply_persona_runtime_explorer_to_plan(
     }
     provider = runtime_explorer_provider or PersonaRuntimeExplorerProvider()
     result = provider.get(config).explore(runtime_context)
+    runtime_diagnostics = _runtime_explorer_diagnostics_payload(result) if include_diagnostics else None
     if result.safe_denial:
-        return _runtime_safe_denial_plan(result.safe_denial)
+        safe_plan = _runtime_safe_denial_plan(_runtime_explorer_safe_denial_text(result.safe_denial))
+        if runtime_diagnostics:
+            safe_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
+        return safe_plan
     if result.selected_candidate:
         candidate_metadata = result.selected_candidate.get("metadata")
         if isinstance(candidate_metadata, dict) and candidate_metadata.get("source") == "existing_persona_planner":
             selected_base_plan = dict(base_plan)
             selected_base_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            if runtime_diagnostics:
+                selected_base_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
             return selected_base_plan
         selected_plan = result.selected_candidate.get("plan")
         sanitized_selected_plan = _sanitize_persona_runtime_plan(selected_plan)
         if sanitized_selected_plan.get("steps"):
             sanitized_selected_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            if runtime_diagnostics:
+                sanitized_selected_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
             return sanitized_selected_plan
+    if runtime_diagnostics:
+        fallback_plan = dict(base_plan)
+        fallback_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
+        return fallback_plan
     return base_plan
 
 
@@ -9064,8 +9145,20 @@ async def persona_stream(
                 companion_usage=companion_usage,
                 persona_exemplar_selection=persona_exemplar_selection,
                 runtime_explorer_provider=runtime_explorer_provider,
+                include_diagnostics=True,
             )
+            runtime_explorer_diagnostics = plan.pop(_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY, None)
             runtime_explorer_selected_plan = bool(plan.pop(_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY, False))
+            if isinstance(runtime_explorer_diagnostics, dict):
+                runtime_notice_reason = _runtime_explorer_notice_reason_code(runtime_explorer_diagnostics)
+                if runtime_notice_reason:
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="warning",
+                        message=_runtime_explorer_notice_message(runtime_explorer_diagnostics),
+                        reason_code=runtime_notice_reason,
+                        runtime_explorer=runtime_explorer_diagnostics,
+                    )
             plan_id = uuid.uuid4().hex
             max_tool_steps = _get_persona_max_tool_steps()
             proposed_steps = list(plan.get("steps", []))
