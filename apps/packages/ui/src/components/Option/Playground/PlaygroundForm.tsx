@@ -89,6 +89,7 @@ import type { Character } from "@/types/character";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
@@ -723,17 +724,10 @@ export const PlaygroundForm = ({
   const { mcpSettingsOpen, setMcpSettingsOpen } = mcpCtrl;
   const restoreMcpSettingsFocus = React.useCallback(() => {
     const returnFocusSelector = mcpSettingsReturnFocusSelectorRef.current;
-    if (!returnFocusSelector || typeof document === "undefined") return;
+    if (!returnFocusSelector) return;
     mcpSettingsReturnFocusSelectorRef.current = null;
 
-    const focusTarget = () => {
-      document.querySelector<HTMLElement>(returnFocusSelector)?.focus();
-    };
-    if (typeof window !== "undefined" && window.requestAnimationFrame) {
-      window.requestAnimationFrame(focusTarget);
-      return;
-    }
-    globalThis.setTimeout(focusTarget, 0);
+    scheduleFocusFirstVisibleElement(returnFocusSelector);
   }, []);
   const setMcpSettingsOpenWithFocusRestore = React.useCallback(
     (nextOpen: boolean) => {
@@ -1118,17 +1112,10 @@ export const PlaygroundForm = ({
 
   const restoreModelSettingsFocus = React.useCallback(() => {
     const returnFocusSelector = modelSettingsReturnFocusSelectorRef.current;
-    if (!returnFocusSelector || typeof document === "undefined") return;
+    if (!returnFocusSelector) return;
     modelSettingsReturnFocusSelectorRef.current = null;
 
-    const focusTarget = () => {
-      document.querySelector<HTMLElement>(returnFocusSelector)?.focus();
-    };
-    if (typeof window !== "undefined" && window.requestAnimationFrame) {
-      window.requestAnimationFrame(focusTarget);
-      return;
-    }
-    globalThis.setTimeout(focusTarget, 0);
+    scheduleFocusFirstVisibleElement(returnFocusSelector);
   }, []);
 
   const setOpenModelSettingsWithFocusRestore = React.useCallback(

@@ -689,7 +689,7 @@ git commit -m "feat(chat): harden cockpit run recovery states"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.responsive-parity.guard.test.ts`
 - Test: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 
-- [ ] **Step 1: Write failing focus/mobile tests**
+- [x] **Step 1: Write failing focus/mobile tests**
 
 Cover:
 
@@ -698,15 +698,15 @@ Cover:
 - Mobile cockpit tabs can complete assistant select/clear, prompt select/clear, model settings, MCP settings, web search, and focus-mode return.
 - Mobile composer is not covered by rail panels or dropdowns.
 
-- [ ] **Step 2: Implement focus-return plumbing**
+- [x] **Step 2: Implement focus-return plumbing**
 
 Prefer event detail `returnFocusSelector` for global rail-launched surfaces. Prefer local refs for direct clear/remove actions.
 
-- [ ] **Step 3: Fix mobile clipping or overlay issues**
+- [x] **Step 3: Fix mobile clipping or overlay issues**
 
 If dropdowns are clipped inside mobile rail panels, adjust portal/container behavior or panel overflow only for the affected shared surface. Do not solve by moving workflows to the app sidebar.
 
-- [ ] **Step 4: Run P1 focused tests**
+- [x] **Step 4: Run P1 focused tests**
 
 ```bash
 bunx vitest run apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.responsive-parity.guard.test.ts --reporter=verbose
@@ -714,7 +714,7 @@ bunx vitest run apps/packages/ui/src/components/Option/Playground/__tests__/Play
 
 Expected: PASS.
 
-- [ ] **Step 5: Run P1 real-server Playwright**
+- [x] **Step 5: Run P1 real-server Playwright**
 
 ```bash
 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=$TLDW_E2E_API_KEY bunx playwright test apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts --reporter=line
@@ -722,11 +722,11 @@ TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=$TLDW_E2E_API_KEY bun
 
 Expected: PASS, including mobile workflow parity.
 
-- [ ] **Step 6: Record P1 evidence and ask approval**
+- [x] **Step 6: Record P1 evidence and ask approval**
 
 Add TASK-295 note with P1 evidence and ask maintainer for P1 approval. Do not mark P1 complete yourself.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Playground apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts "backlog/tasks/task-295 - Complete-main-chat-cockpit-functionality-in-PR-1582.md"

@@ -13,6 +13,7 @@ import {
   OPEN_PROMPT_SELECT_EVENT,
   type PromptSelectOpenDetail
 } from "@/utils/prompt-select-events"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import { IconButton } from "./IconButton"
 import {
   normalizeSystemPromptOverrideValue,
@@ -53,17 +54,10 @@ export const PromptSelect: React.FC<Props> = ({
 
   const restorePromptSelectFocus = React.useCallback(() => {
     const returnFocusSelector = returnFocusSelectorRef.current
-    if (!returnFocusSelector || typeof document === "undefined") return
+    if (!returnFocusSelector) return
     returnFocusSelectorRef.current = null
 
-    const focusTarget = () => {
-      document.querySelector<HTMLElement>(returnFocusSelector)?.focus()
-    }
-    if (typeof window !== "undefined" && window.requestAnimationFrame) {
-      window.requestAnimationFrame(focusTarget)
-      return
-    }
-    globalThis.setTimeout(focusTarget, 0)
+    scheduleFocusFirstVisibleElement(returnFocusSelector)
   }, [])
 
   const { data } = useQuery({

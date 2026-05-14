@@ -17,6 +17,7 @@ import {
   personaToAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 
 type Props = {
   className?: string
@@ -123,12 +124,9 @@ export const AssistantSelect: React.FC<Props> = ({
   const restoreReturnFocus = React.useCallback(() => {
     const selector = returnFocusSelectorRef.current
     returnFocusSelectorRef.current = null
-    if (!selector || typeof window === "undefined") return
+    if (!selector) return
 
-    window.requestAnimationFrame(() => {
-      const target = document.querySelector<HTMLElement>(selector)
-      target?.focus()
-    })
+    scheduleFocusFirstVisibleElement(selector)
   }, [])
 
   React.useEffect(() => {

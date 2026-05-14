@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 07:19'
+updated_date: '2026-05-14 15:03'
 labels:
   - webui
   - chat
@@ -152,6 +152,8 @@ Task 6 P1 context session rail implementation completed. Context rail now treats
 Additional recovery verification: saveMessageOnError now falls back to a local chat title if provider title generation fails during error recovery. Focused Vitest passed 1 file / 2 tests for saveMessageOnError.
 
 Task 7 P1 run controls recovery and degraded-health implementation completed. Runtime rail now keeps Stop and Regenerate visible as explicit run controls, enables them only when the shared request state allows the action, and shows disabled reasons for idle turns, active turns, and missing assistant responses. Status strip now labels degraded non-blocking health as chat-available and exposes a Model and Chat recovery action for error states. New copy is mirrored into the extension locale catalog. Verification: focused Vitest passed 5 files / 39 tests covering runtime inspector, status strip, chat error banner, cockpit wiring, and locale mirror; real-server Playwright first failed inside the sandbox because Chromium could not register a macOS Mach service, then passed outside the sandbox with 4 real-server tests against local frontend/backend and no route interception; git diff --check passed before this note. Bandit not applicable for frontend TypeScript TSX JSON and Playwright only. PR 1582 remains draft pending P1/P2 approval.
+
+Task 8 P1 keyboard focus and mobile parity implementation completed. Added shared visible-focus restoration for duplicate desktop/mobile cockpit rail targets, reused it from assistant prompt model and MCP modal return paths, and expanded real-server mobile proof for Search and Context, prompt selector, assistant selector, MCP settings, web search, and focus mode. Verification: focused Vitest passed 7 files and 42 tests from apps/tldw-frontend; sandboxed Playwright failed only because Chromium could not register the macOS Mach service; escalated real-server Playwright passed 4 tests against http://localhost:8080 and http://127.0.0.1:8000 with no route interception after narrowing a prompt-dropdown assertion and sending the disposable character proof with Enter; git diff --check passed. Bandit not applicable because this slice touched frontend TypeScript TSX Playwright and Markdown only. PR 1582 remains draft pending P1/P2 approval gates.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

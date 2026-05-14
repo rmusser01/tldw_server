@@ -108,6 +108,7 @@ import {
   type ComposerDockLayoutMetrics,
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -1649,13 +1650,7 @@ export const Playground = () => {
   const clearAssistantFromCockpit = React.useCallback(() => {
     void setSelectedAssistant(null);
     setSelectedCharacter(null);
-    if (typeof window !== "undefined") {
-      window.requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR)
-          ?.focus();
-      });
-    }
+    scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
   }, [setSelectedAssistant, setSelectedCharacter]);
   const inspectAssistantFromCockpit = React.useCallback(() => {
     if (selectedAssistant?.kind === "persona") {

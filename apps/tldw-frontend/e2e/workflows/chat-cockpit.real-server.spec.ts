@@ -560,6 +560,12 @@ test.describe('/chat cockpit real-server parity', () => {
       'aria-pressed',
       initialMobileWebSearchState === 'true' ? 'false' : 'true'
     );
+    await contextPanel.getByRole('button', { name: 'Open Search & Context' }).click();
+    await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible();
+    await closeSearchContextIfOpen(page);
+    await contextPanel.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
+    await expect(page.getByPlaceholder('Search prompts...')).toBeVisible();
+    await page.keyboard.press('Escape');
     await expect(page.getByTestId('chat-input')).toBeVisible();
     const runtimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
     await runtimeTab.click();
@@ -571,6 +577,19 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(runtimePanel.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
+    await runtimePanel.getByRole('button', { name: 'Select character or persona' }).click();
+    await expect(page.getByRole('tab', { name: 'Characters' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await runtimePanel.getByRole('button', { name: 'Configure MCP tools' }).click();
+    const mcpSettingsDialog = page.getByRole('dialog', {
+      name: 'MCP tool settings',
+    });
+    await expect(mcpSettingsDialog).toBeVisible();
+    await mcpSettingsDialog
+      .getByTestId('mcp-settings-modal-footer')
+      .getByRole('button', { name: 'Close' })
+      .click();
+    await expect(mcpSettingsDialog).toBeHidden();
 
     await page.getByRole('button', { name: 'Enter focus chat' }).click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
@@ -673,9 +692,11 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(assistantContextSource).toContainText(characterName);
 
       const smokePrompt = `assistant rail proof ${Date.now()}`;
-      await page.getByTestId('chat-input').fill(smokePrompt);
+      const chatInput = page.getByTestId('chat-input');
+      await chatInput.fill(smokePrompt);
+      await expect(chatInput).toHaveValue(smokePrompt);
       const chatCompletionAttempt = waitForCharacterCompletionAttempt(page);
-      await page.getByRole('button', { name: /send message/i }).click();
+      await chatInput.press('Enter');
       const chatCompletionResponse = await chatCompletionAttempt;
       await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(smokePrompt);
       await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
