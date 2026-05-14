@@ -138,6 +138,8 @@ const COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR =
   "[data-cockpit-prompt-select-trigger]";
 const COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR =
   "[data-cockpit-model-settings-trigger]";
+const COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR =
+  "[data-cockpit-mcp-settings-trigger]";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1876,6 +1878,11 @@ export const Playground = () => {
       returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
     });
   }, []);
+  const openMcpSettingsFromCockpit = React.useCallback(() => {
+    openMcpSettings({
+      returnFocusSelector: COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR,
+    });
+  }, []);
   const statusContextSummary = [
     hasPromptContext ? promptSummary.label : null,
     webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
@@ -2026,7 +2033,7 @@ export const Playground = () => {
       settingSummaries={runtimeSettingSummaries}
       toolChoice={toolChoice as RuntimeToolChoice}
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
-      onOpenMcpSettings={openMcpSettings}
+      onOpenMcpSettings={openMcpSettingsFromCockpit}
       toolSummary={buildCockpitMcpSummary({
         hasMcp: mcpHealthState !== "unavailable",
         healthState: mcpHealthState,

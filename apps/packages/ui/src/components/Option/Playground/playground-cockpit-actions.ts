@@ -34,6 +34,10 @@ export type ModelSettingsOpenDetail = {
   returnFocusSelector?: string;
 };
 
+export type McpSettingsOpenDetail = {
+  returnFocusSelector?: string;
+};
+
 const dispatchCockpitEvent = <TDetail>(
   eventName: string,
   detail?: TDetail,
@@ -90,8 +94,12 @@ export const openMcpTools = () => {
   dispatchCockpitEvent(OPEN_MCP_TOOLS_EVENT);
 };
 
-export const openMcpSettings = () => {
-  dispatchCockpitEvent(OPEN_MCP_SETTINGS_EVENT);
+export const openMcpSettings = (
+  options: { returnFocusSelector?: string } = {},
+) => {
+  dispatchCockpitEvent<McpSettingsOpenDetail>(OPEN_MCP_SETTINGS_EVENT, {
+    returnFocusSelector: options.returnFocusSelector,
+  });
 };
 
 export const openTurnTools = () => {

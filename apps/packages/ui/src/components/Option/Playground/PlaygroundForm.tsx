@@ -182,6 +182,7 @@ import {
   OPEN_TURN_TOOLS_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
+  type McpSettingsOpenDetail,
   type ModelSettingsOpenDetail,
 } from "./playground-cockpit-actions";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
@@ -578,6 +579,7 @@ export const PlaygroundForm = ({
   );
   const [openModelSettings, setOpenModelSettings] = React.useState(false);
   const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
@@ -719,6 +721,29 @@ export const PlaygroundForm = ({
   });
   const setMcpPopoverOpen = mcpCtrl.setMcpPopoverOpen;
   const { mcpSettingsOpen, setMcpSettingsOpen } = mcpCtrl;
+  const restoreMcpSettingsFocus = React.useCallback(() => {
+    const returnFocusSelector = mcpSettingsReturnFocusSelectorRef.current;
+    if (!returnFocusSelector || typeof document === "undefined") return;
+    mcpSettingsReturnFocusSelectorRef.current = null;
+
+    const focusTarget = () => {
+      document.querySelector<HTMLElement>(returnFocusSelector)?.focus();
+    };
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(focusTarget);
+      return;
+    }
+    globalThis.setTimeout(focusTarget, 0);
+  }, []);
+  const setMcpSettingsOpenWithFocusRestore = React.useCallback(
+    (nextOpen: boolean) => {
+      setMcpSettingsOpen(nextOpen);
+      if (!nextOpen) {
+        restoreMcpSettingsFocus();
+      }
+    },
+    [restoreMcpSettingsFocus, setMcpSettingsOpen],
+  );
   const handleModuleSelect = React.useCallback(
     (value?: string[]) => {
       setToolModules(Array.isArray(value) ? value : []);
@@ -1275,7 +1300,10 @@ export const PlaygroundForm = ({
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
-    const handler = () => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<McpSettingsOpenDetail>).detail;
+      mcpSettingsReturnFocusSelectorRef.current =
+        detail?.returnFocusSelector ?? null;
       closeComposerPopoversExcept("mcp");
       setMcpPopoverOpen(false);
       setMcpSettingsOpen(true);
@@ -4227,7 +4255,10 @@ export const PlaygroundForm = ({
       mcpDisabledReason={mcpCtrl.mcpDisabledReason}
       mcpPopoverOpen={mcpCtrl.mcpPopoverOpen}
       onMcpPopoverChange={handleMcpPopoverChange}
-      onOpenMcpSettings={() => setMcpSettingsOpen(true)}
+      onOpenMcpSettings={() => {
+        mcpSettingsReturnFocusSelectorRef.current = null;
+        setMcpSettingsOpen(true);
+      }}
       t={t}
     />
   );
@@ -5732,7 +5763,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyPlaygroundMcpSettingsModal
               open={mcpSettingsOpen}
-              onClose={() => setMcpSettingsOpen(false)}
+              onClose={() => setMcpSettingsOpenWithFocusRestore(false)}
               hasMcp={hasMcp}
               mcpStatusLabel={mcpCtrl.mcpStatusLabel}
               catalogsLoading={mcpCatalogsLoading}

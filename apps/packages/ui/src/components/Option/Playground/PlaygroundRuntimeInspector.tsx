@@ -175,6 +175,7 @@ export const PlaygroundRuntimeInspector = ({
     toolSummary?.label === mcpToolsLabel
       ? t("cockpit.chatToolAccess", "Chat tool access")
       : toolSummary?.label;
+  const canChooseMcpTools = toolSummary?.state === "available";
 
   return (
     <div
@@ -436,7 +437,7 @@ export const PlaygroundRuntimeInspector = ({
                 {t("cockpit.openTools", "Open tools")}
               </button>
             ) : null}
-            {toolChoice && onToolChoiceChange ? (
+            {canChooseMcpTools && toolChoice && onToolChoiceChange ? (
               <div
                 className="mt-3 grid grid-cols-3 gap-1"
                 aria-label={t("cockpit.mcpToolChoice", "MCP tool choice")}
@@ -463,6 +464,7 @@ export const PlaygroundRuntimeInspector = ({
                 type="button"
                 className={`${railActionClass} mt-2 gap-1.5`}
                 onClick={onOpenMcpSettings}
+                data-cockpit-mcp-settings-trigger
                 aria-label={t("cockpit.configureMcpTools", "Configure MCP tools")}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />

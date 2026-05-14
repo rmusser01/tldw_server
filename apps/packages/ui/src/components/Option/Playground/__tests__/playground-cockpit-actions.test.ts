@@ -81,11 +81,20 @@ describe("playground cockpit actions", () => {
   });
 
   it("opens MCP settings directly instead of only the composer MCP popover", async () => {
-    const event = nextCustomEvent(OPEN_MCP_SETTINGS_EVENT);
+    const event = nextCustomEvent<{ returnFocusSelector: string }>(
+      OPEN_MCP_SETTINGS_EVENT,
+    );
 
-    openMcpSettings();
+    openMcpSettings({
+      returnFocusSelector: "[data-testid='cockpit-mcp-settings-trigger']",
+    });
 
-    await expect(event).resolves.toMatchObject({ type: OPEN_MCP_SETTINGS_EVENT });
+    await expect(event).resolves.toMatchObject({
+      type: OPEN_MCP_SETTINGS_EVENT,
+      detail: {
+        returnFocusSelector: "[data-testid='cockpit-mcp-settings-trigger']",
+      },
+    });
   });
 
   it("opens the shared prompt selector from the cockpit rail", async () => {

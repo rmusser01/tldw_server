@@ -11,6 +11,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { useMcpToolsStore } from "@/store/mcp-tools";
 import {
   OPEN_ASSISTANT_SELECT_EVENT,
   OPEN_MCP_SETTINGS_EVENT,
@@ -298,6 +299,12 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.setRagMediaIds = vi.fn();
     messageOptionState.value.stopStreamingRequest = vi.fn();
     messageOptionState.value.regenerateLastMessage = vi.fn();
+    useMcpToolsStore.setState({
+      healthState: "healthy",
+      toolsLoading: false,
+      discoveredTools: [{ name: "search" } as never],
+      chatTools: [{ name: "search" } as never],
+    });
   });
 
   it("surfaces existing context and runtime state in cockpit rails", async () => {
@@ -460,6 +467,13 @@ describe("Playground cockpit controls", () => {
         "required",
       );
       expect(openMcpSettings).toHaveBeenCalledTimes(1);
+      expect(
+        (openMcpSettings.mock.calls[0]?.[0] as CustomEvent<{
+          returnFocusSelector: string;
+        }>).detail,
+      ).toEqual({
+        returnFocusSelector: "[data-cockpit-mcp-settings-trigger]",
+      });
     } finally {
       window.removeEventListener("tldw:open-knowledge-panel", openKnowledgePanel);
       window.removeEventListener("tldw:open-model-settings", openModelSettings);
@@ -468,6 +482,48 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
+    }
+  });
+
+  it("surfaces unavailable MCP without enabling cockpit-only tool choice", async () => {
+    useMcpToolsStore.setState({
+      healthState: "unavailable",
+      toolsLoading: false,
+      discoveredTools: [],
+      chatTools: [],
+    });
+    const openMcpSettings = vi.fn();
+    window.addEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
+
+    try {
+      render(<Playground />);
+
+      const runtimeInspector = within(
+        await screen.findByTestId("playground-cockpit-right-rail"),
+      ).getByTestId("playground-runtime-inspector");
+
+      expect(
+        within(runtimeInspector).getByText("MCP unavailable"),
+      ).toBeInTheDocument();
+      expect(
+        within(runtimeInspector).getByText("MCP tools unavailable"),
+      ).toBeInTheDocument();
+      expect(
+        within(runtimeInspector).queryByRole("button", {
+          name: "MCP tool choice Auto",
+        }),
+      ).toBeNull();
+
+      fireEvent.click(
+        within(runtimeInspector).getByRole("button", {
+          name: "Configure MCP tools",
+        }),
+      );
+
+      expect(messageOptionState.value.setToolChoice).not.toHaveBeenCalled();
+      expect(openMcpSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
     }
   });
 

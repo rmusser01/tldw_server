@@ -192,6 +192,28 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps unavailable MCP informational without enabling dead-end tool choice", () => {
+    const props = renderInspector({
+      toolChoice: "auto",
+      toolSummary: {
+        state: "unavailable",
+        label: "MCP unavailable",
+        detail: "MCP tools unavailable",
+      },
+    });
+
+    expect(screen.getByText("MCP unavailable")).toBeInTheDocument();
+    expect(screen.getByText("MCP tools unavailable")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "MCP tool choice Auto" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure MCP tools" }));
+
+    expect(props.onToolChoiceChange).not.toHaveBeenCalled();
+    expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("calls the existing stop handler while streaming", () => {
     const props = renderInspector({
       streaming: true,
