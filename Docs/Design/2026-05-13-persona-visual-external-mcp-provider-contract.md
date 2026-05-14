@@ -112,6 +112,14 @@ supported on the target server.
 Provider results should use one common envelope so Persona Garden and future
 intake adapters can show consistent provenance and diagnostics.
 
+The backend intake boundary for this envelope starts at
+`tldw_Server_API/app/core/Persona/visual_portability/provider_envelope.py`.
+Call `normalize_provider_result_envelope()` before any follow-up resource
+retrieval, asset write, import-preview enqueue, draft creation, or runtime
+activation. The helper is review-only: it returns sanitized metadata and
+machine-readable blockers or warnings, but it does not execute providers or
+persist provider output.
+
 ```json
 {
   "contract_version": 1,
@@ -170,7 +178,8 @@ Rules:
    server validation.
 5. `import_preview_required` must be true for `portable_archive` results.
 6. `mcp_resource_uri` is a retrieval handle for the intake step. It must not be
-   copied into the Persona Visual manifest as a remote asset URL.
+   copied into the Persona Visual manifest as a remote asset URL. Intake should
+   reject URI schemes other than `mcp://` before any resource retrieval.
 7. `provenance` is advisory metadata. It must not override user ownership,
    persona scope, validation results, or library source references.
 8. `portable_archive` media types should use
