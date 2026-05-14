@@ -169,8 +169,13 @@ export const useSelectedAssistant = (
     }
   }, [meta?.isLoading, selectedAssistant, setSelectedAssistantWithBroadcast])
 
+  const normalizedSelectedAssistant = React.useMemo(
+    () => normalizeAssistantSelection(parseSelectedAssistantValue(selectedAssistant)),
+    [selectedAssistant]
+  )
+
   return [
-    normalizeAssistantSelection(parseSelectedAssistantValue(selectedAssistant)),
+    normalizedSelectedAssistant,
     setSelectedAssistantWithBroadcast,
     {
       isLoading: meta?.isLoading ?? false,

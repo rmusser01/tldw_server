@@ -422,6 +422,43 @@ describe("TldwChatService message sanitization", () => {
     })
   })
 
+  it("does not escalate recoverable stream failures through console.error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      mocks.streamChatCompletion.mockImplementation(async function* () {
+        throw new Error("Provider 'openai' requires an API key.")
+      })
+
+      const service = new TldwChatService()
+      const streamRun = (async () => {
+        const tokens: string[] = []
+        for await (const token of service.streamMessage(
+          [{ role: "user", content: "prove recoverable provider failure" }],
+          { model: "gpt-test" }
+        )) {
+          tokens.push(token)
+        }
+        return tokens
+      })()
+
+      await expect(streamRun).rejects.toMatchObject({
+        message: "Stream completion failed",
+        cause: expect.objectContaining({
+          message: "Provider 'openai' requires an API key."
+        })
+      })
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Stream completion failed:",
+        "Provider 'openai' requires an API key."
+      )
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      consoleWarn.mockRestore()
+      consoleError.mockRestore()
+    }
+  })
+
   it("detects nested abort causes during stream cancellation", async () => {
     vi.useFakeTimers()
     mocks.getConfig.mockResolvedValue({

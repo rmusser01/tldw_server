@@ -47,6 +47,9 @@ export interface ModelInfo {
   capabilities?: string[]
   contextLength?: number
   description?: string
+  isConfigured?: boolean
+  providerIsConfigured?: boolean
+  catalogOnly?: boolean
   modalities?: {
     input?: string[]
     output?: string[]
@@ -60,7 +63,7 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 2
+  private readonly CACHE_SCHEMA_VERSION = 3
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
@@ -187,23 +190,23 @@ export class TldwModelsService {
       await this.persistCache()
       
       return this.cachedModels
-    })()
-
-    this.inFlightFetch = fetchPromise
-    try {
-      return await fetchPromise
-    } catch (error) {
+    })().catch((error) => {
       if (!import.meta.env?.DEV) {
         console.error('Failed to fetch models from tldw:', error)
       }
-      
+
       // Return cached models if available, even if expired
       if (this.cachedModels) {
         return this.cachedModels
       }
-      
+
       // Return empty array as fallback
       return []
+    })
+
+    this.inFlightFetch = fetchPromise
+    try {
+      return await fetchPromise
     } finally {
       if (this.inFlightFetch === fetchPromise) {
         this.inFlightFetch = null
@@ -371,6 +374,9 @@ export class TldwModelsService {
       capabilities: caps.length ? Array.from(new Set(caps)) : undefined,
       contextLength: tldwModel.context_length,
       description: tldwModel.description,
+      isConfigured: tldwModel.is_configured,
+      providerIsConfigured: tldwModel.provider_is_configured,
+      catalogOnly: tldwModel.catalog_only,
       modalities: tldwModel.modalities
     }
   }

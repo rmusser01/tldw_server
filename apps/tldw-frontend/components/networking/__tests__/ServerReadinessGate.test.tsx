@@ -40,7 +40,7 @@ describe("ServerReadinessGate", () => {
     )
   })
 
-  it("accepts degraded health as enterable for partial-content responses", async () => {
+  it("accepts degraded health as enterable for partial-content responses when allowed", async () => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -51,7 +51,7 @@ describe("ServerReadinessGate", () => {
     const { ServerReadinessGate } = await import("../ServerReadinessGate")
 
     render(
-      <ServerReadinessGate>
+      <ServerReadinessGate allowDegraded>
         <div>App ready</div>
       </ServerReadinessGate>
     )
@@ -63,7 +63,7 @@ describe("ServerReadinessGate", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it("accepts ok and degraded status envelopes from normal successful responses", async () => {
+  it("accepts ok and allowed degraded status envelopes from normal successful responses", async () => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
     const fetchMock = vi
@@ -92,7 +92,7 @@ describe("ServerReadinessGate", () => {
     unmount()
 
     render(
-      <ServerReadinessGate>
+      <ServerReadinessGate allowDegraded>
         <div>Degraded ready</div>
       </ServerReadinessGate>
     )

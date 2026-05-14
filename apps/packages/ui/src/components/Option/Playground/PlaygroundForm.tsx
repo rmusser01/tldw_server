@@ -17,7 +17,6 @@ import { getAllPrompts } from "@/db/dexie/helpers";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
   type CollapsedRange,
-  type ModelSortMode,
   useActionBarVisibility,
   useComposerTokens,
   useDeferredComposerInput,
@@ -91,6 +90,7 @@ import type { Character } from "@/types/character";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
@@ -165,6 +165,7 @@ import {
 } from "./PlaygroundChatErrorBanner";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
+import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
 import {
   PlaygroundAttachmentButton,
@@ -174,6 +175,18 @@ import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
 import { TokenProgressBar } from "./TokenProgressBar";
 import { VoiceChatIndicator } from "./VoiceChatIndicator";
 import { buildConversationSummaryCheckpointPrompt } from "./conversation-summary-checkpoint";
+import {
+  OPEN_ACTOR_SETTINGS_EVENT,
+  OPEN_KNOWLEDGE_PANEL_EVENT,
+  OPEN_MCP_SETTINGS_EVENT,
+  OPEN_MCP_TOOLS_EVENT,
+  OPEN_MODEL_SETTINGS_EVENT,
+  OPEN_TURN_TOOLS_EVENT,
+  SET_TEMPORARY_CHAT_EVENT,
+  TOGGLE_WEB_SEARCH_EVENT,
+  type McpSettingsOpenDetail,
+  type ModelSettingsOpenDetail,
+} from "./playground-cockpit-actions";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
 // QueuedRequest moved to usePlaygroundQueueManagement
 // WeightedImagePromptContextEntry moved to usePlaygroundImageGen
@@ -243,6 +256,14 @@ type PlaygroundQueuedSourceContext = {
   imageBackendOverride?: string;
   isImageCommand?: boolean;
 };
+
+type ComposerPopoverKey =
+  | "context"
+  | "model"
+  | "mcp"
+  | "tools"
+  | "attachment"
+  | "send";
 
 const FOLLOW_UP_RESEARCH_PROMPT_PREFIX = "Follow up on this research:";
 const CASUAL_COMPOSER_MAX_HEIGHT_PX = 120;
@@ -559,6 +580,8 @@ export const PlaygroundForm = ({
     typeof window === "undefined" ? 0 : window.innerHeight,
   );
   const [openModelSettings, setOpenModelSettings] = React.useState(false);
+  const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
@@ -593,6 +616,9 @@ export const PlaygroundForm = ({
   );
   const updateChatModelSettings = useStoreChatModelSettings(
     (state) => state.updateSettings,
+  );
+  const setActiveChatModelSettingsScope = useStoreChatModelSettings(
+    (state) => state.setActiveSettingsScope,
   );
   const { data: promptLibrary = [] } = useQuery({
     queryKey: ["playgroundStartupPromptLibrary"],
@@ -695,6 +721,24 @@ export const PlaygroundForm = ({
     setToolCatalogId,
     toolChoice,
   });
+  const setMcpPopoverOpen = mcpCtrl.setMcpPopoverOpen;
+  const { mcpSettingsOpen, setMcpSettingsOpen } = mcpCtrl;
+  const restoreMcpSettingsFocus = React.useCallback(() => {
+    const returnFocusSelector = mcpSettingsReturnFocusSelectorRef.current;
+    if (!returnFocusSelector) return;
+    mcpSettingsReturnFocusSelectorRef.current = null;
+
+    scheduleFocusFirstVisibleElement(returnFocusSelector);
+  }, []);
+  const setMcpSettingsOpenWithFocusRestore = React.useCallback(
+    (nextOpen: boolean) => {
+      setMcpSettingsOpen(nextOpen);
+      if (!nextOpen) {
+        restoreMcpSettingsFocus();
+      }
+    },
+    [restoreMcpSettingsFocus, setMcpSettingsOpen],
+  );
   const handleModuleSelect = React.useCallback(
     (value?: string[]) => {
       setToolModules(Array.isArray(value) ? value : []);
@@ -1067,21 +1111,44 @@ export const PlaygroundForm = ({
     storedCharacterId,
   ]);
 
+  const restoreModelSettingsFocus = React.useCallback(() => {
+    const returnFocusSelector = modelSettingsReturnFocusSelectorRef.current;
+    if (!returnFocusSelector) return;
+    modelSettingsReturnFocusSelectorRef.current = null;
+
+    scheduleFocusFirstVisibleElement(returnFocusSelector);
+  }, []);
+
+  const setOpenModelSettingsWithFocusRestore = React.useCallback(
+    (nextOpen: boolean) => {
+      setOpenModelSettings(nextOpen);
+      if (!nextOpen) {
+        restoreModelSettingsFocus();
+      }
+    },
+    [restoreModelSettingsFocus],
+  );
+
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = () => setOpenActorSettings(true);
-    window.addEventListener("tldw:open-actor-settings", handler);
+    window.addEventListener(OPEN_ACTOR_SETTINGS_EVENT, handler);
     return () => {
-      window.removeEventListener("tldw:open-actor-settings", handler);
+      window.removeEventListener(OPEN_ACTOR_SETTINGS_EVENT, handler);
     };
   }, []);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
-    const handler = () => setOpenModelSettings(true);
-    window.addEventListener("tldw:open-model-settings", handler);
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<ModelSettingsOpenDetail>).detail;
+      modelSettingsReturnFocusSelectorRef.current =
+        detail?.returnFocusSelector ?? null;
+      setOpenModelSettings(true);
+    };
+    window.addEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     return () => {
-      window.removeEventListener("tldw:open-model-settings", handler);
+      window.removeEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     };
   }, []);
 
@@ -1147,7 +1214,10 @@ export const PlaygroundForm = ({
     setModelSearchQuery,
     modelSortMode,
     setModelSortMode,
+    modelListScope = "configured",
+    setModelListScope = () => undefined,
     selectedModelMeta,
+    selectedModelKey,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,
@@ -1169,6 +1239,80 @@ export const PlaygroundForm = ({
     setSelectedModel,
     navigate,
   });
+  React.useEffect(() => {
+    setActiveChatModelSettingsScope(selectedModelKey ?? null);
+  }, [selectedModelKey, setActiveChatModelSettingsScope]);
+
+  const closeComposerPopoversExcept = React.useCallback(
+    (activePopover: ComposerPopoverKey) => {
+      if (activePopover !== "context") {
+        setContextToolsOpen(false);
+      }
+      if (activePopover !== "model") {
+        setModelDropdownOpen(false);
+      }
+      if (activePopover !== "mcp") {
+        setMcpPopoverOpen(false);
+      }
+      if (activePopover !== "tools") {
+        setToolsPopoverOpen(false);
+      }
+      if (activePopover !== "attachment") {
+        setAttachmentMenuOpen(false);
+      }
+      if (activePopover !== "send") {
+        setSendMenuOpen(false);
+      }
+    },
+    [
+      setAttachmentMenuOpen,
+      setContextToolsOpen,
+      setMcpPopoverOpen,
+      setModelDropdownOpen,
+      setSendMenuOpen,
+      setToolsPopoverOpen,
+    ],
+  );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      closeComposerPopoversExcept("mcp");
+      setMcpPopoverOpen(true);
+    };
+    window.addEventListener(OPEN_MCP_TOOLS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_MCP_TOOLS_EVENT, handler);
+    };
+  }, [closeComposerPopoversExcept, setMcpPopoverOpen]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<McpSettingsOpenDetail>).detail;
+      mcpSettingsReturnFocusSelectorRef.current =
+        detail?.returnFocusSelector ?? null;
+      closeComposerPopoversExcept("mcp");
+      setMcpPopoverOpen(false);
+      setMcpSettingsOpen(true);
+    };
+    window.addEventListener(OPEN_MCP_SETTINGS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_MCP_SETTINGS_EVENT, handler);
+    };
+  }, [closeComposerPopoversExcept, setMcpPopoverOpen, setMcpSettingsOpen]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      closeComposerPopoversExcept("tools");
+      setToolsPopoverOpen(true);
+    };
+    window.addEventListener(OPEN_TURN_TOOLS_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_TURN_TOOLS_EVENT, handler);
+    };
+  }, [closeComposerPopoversExcept, setToolsPopoverOpen]);
 
   React.useEffect(() => {
     setOptionalPanelVisible("model-catalog", modelDropdownOpen);
@@ -1727,8 +1871,9 @@ export const PlaygroundForm = ({
     ],
   );
   const openModelApiSelector = React.useCallback(() => {
+    closeComposerPopoversExcept("model");
     setModelDropdownOpen(true);
-  }, [setModelDropdownOpen]);
+  }, [closeComposerPopoversExcept, setModelDropdownOpen]);
   const getModelRecommendationActionLabel = React.useCallback(
     (action: ModelRecommendationAction) => {
       if (action === "enable_json_mode") {
@@ -1815,6 +1960,9 @@ export const PlaygroundForm = ({
     <Dropdown
       open={modelDropdownOpen}
       onOpenChange={(open) => {
+        if (open) {
+          closeComposerPopoversExcept("model");
+        }
         setModelDropdownOpen(open);
         if (!open) {
           setModelSearchQuery("");
@@ -1823,49 +1971,19 @@ export const PlaygroundForm = ({
       menu={{
         items: modelDropdownMenuItems,
         className: "no-scrollbar",
-        activeKey: selectedModel ?? undefined,
+        activeKey: selectedModelKey ?? selectedModel ?? undefined,
       }}
       popupRender={(menu) => (
         <div className="bg-surface rounded-lg shadow-lg border border-border">
-          <div className="p-2 border-b border-border flex items-center gap-2">
-            <Input
-              size="small"
-              placeholder={t(
-                "playground:composer.modelSearchPlaceholder",
-                "Search models",
-              )}
-              value={modelSearchQuery}
-              allowClear
-              className="flex-1"
-              onChange={(event) => setModelSearchQuery(event.target.value)}
-              onKeyDown={(event) => event.stopPropagation()}
-            />
-            <Select
-              size="small"
-              value={modelSortMode}
-              onChange={(value) => setModelSortMode(value as ModelSortMode)}
-              options={[
-                {
-                  value: "favorites",
-                  label: t("playground:composer.sort.favorites", "Favorites"),
-                },
-                { value: "az", label: t("playground:composer.sort.az", "A-Z") },
-                {
-                  value: "provider",
-                  label: t("playground:composer.sort.provider", "Provider"),
-                },
-                {
-                  value: "localFirst",
-                  label: t(
-                    "playground:composer.sort.localFirst",
-                    "Local-first",
-                  ),
-                },
-              ]}
-              className="min-w-[120px]"
-              onKeyDown={(event) => event.stopPropagation()}
-            />
-          </div>
+          <PlaygroundModelCatalogControls
+            t={t}
+            modelListScope={modelListScope}
+            setModelListScope={setModelListScope}
+            modelSearchQuery={modelSearchQuery}
+            setModelSearchQuery={setModelSearchQuery}
+            modelSortMode={modelSortMode}
+            setModelSortMode={setModelSortMode}
+          />
           <div className="max-h-[400px] overflow-y-auto no-scrollbar">
             {menu}
           </div>
@@ -2408,9 +2526,12 @@ export const PlaygroundForm = ({
   );
   const handleKnowledgePanelOpenChange = React.useCallback(
     (nextOpen: boolean) => {
+      if (nextOpen) {
+        closeComposerPopoversExcept("context");
+      }
       setContextToolsOpen(nextOpen);
     },
-    [],
+    [closeComposerPopoversExcept, setContextToolsOpen],
   );
   const handleKnowledgeRemoveImage = React.useCallback(() => {
     form.setFieldValue("image", "");
@@ -2719,8 +2840,10 @@ export const PlaygroundForm = ({
     setWebSearch(!webSearch);
   }, [setWebSearch, webSearch]);
   const handleOpenModelSettings = React.useCallback(() => {
+    modelSettingsReturnFocusSelectorRef.current = null;
+    closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
-  }, [setOpenModelSettings]);
+  }, [closeComposerPopoversExcept, setOpenModelSettings]);
   const {
     showSlashMenu,
     slashActiveIndex,
@@ -2834,6 +2957,28 @@ export const PlaygroundForm = ({
     handleDismissServerPersistenceHint,
   } = persistence;
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => handleToggleWebSearch();
+    window.addEventListener(TOGGLE_WEB_SEARCH_EVENT, handler);
+    return () => {
+      window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, handler);
+    };
+  }, [handleToggleWebSearch]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const next = (event as CustomEvent<{ next?: unknown }>).detail?.next;
+      if (typeof next !== "boolean") return;
+      handleToggleTemporaryChat(next);
+    };
+    window.addEventListener(SET_TEMPORARY_CHAT_EVENT, handler);
+    return () => {
+      window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, handler);
+    };
+  }, [handleToggleTemporaryChat]);
+
   const handleClearContext = React.useCallback(() => {
     // Only show confirmation if there's history to clear
     if (history.length === 0) {
@@ -2873,9 +3018,10 @@ export const PlaygroundForm = ({
   const openKnowledgePanel = React.useCallback(
     (tab: KnowledgeTab) => {
       requestKnowledgePanelTab(tab);
+      closeComposerPopoversExcept("context");
       setContextToolsOpen(true);
     },
-    [requestKnowledgePanelTab, setContextToolsOpen],
+    [closeComposerPopoversExcept, requestKnowledgePanelTab, setContextToolsOpen],
   );
 
   const toggleKnowledgePanel = React.useCallback(
@@ -2883,10 +3029,16 @@ export const PlaygroundForm = ({
       const nextOpen = !contextToolsOpen;
       if (nextOpen) {
         requestKnowledgePanelTab(tab);
+        closeComposerPopoversExcept("context");
       }
       setContextToolsOpen(nextOpen);
     },
-    [contextToolsOpen, requestKnowledgePanelTab, setContextToolsOpen],
+    [
+      closeComposerPopoversExcept,
+      contextToolsOpen,
+      requestKnowledgePanelTab,
+      setContextToolsOpen,
+    ],
   );
 
   React.useEffect(() => {
@@ -2903,12 +3055,12 @@ export const PlaygroundForm = ({
       );
     };
     window.addEventListener(
-      "tldw:open-knowledge-panel",
+      OPEN_KNOWLEDGE_PANEL_EVENT,
       handler as EventListener,
     );
     return () => {
       window.removeEventListener(
-        "tldw:open-knowledge-panel",
+        OPEN_KNOWLEDGE_PANEL_EVENT,
         handler as EventListener,
       );
     };
@@ -3211,7 +3363,6 @@ export const PlaygroundForm = ({
     normalizeImageGenerationEventSyncMode: normalizeImageGenSyncMode,
     normalizeImageGenerationEventSyncPolicy: normalizeImageGenSyncPolicy,
   } = imageGen;
-  const { mcpSettingsOpen, setMcpSettingsOpen } = mcpCtrl;
   React.useEffect(() => {
     setOptionalPanelVisible("mcp-tools", mcpSettingsOpen);
     if (mcpSettingsOpen || toolChoice !== "none") {
@@ -4043,6 +4194,43 @@ export const PlaygroundForm = ({
     return t("playground:composer.toolRunIdle", "Idle");
   }, [chatLoopState, t]);
 
+  const handleMcpPopoverChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("mcp");
+      }
+      setMcpPopoverOpen(open);
+    },
+    [closeComposerPopoversExcept, setMcpPopoverOpen],
+  );
+  const handleToolsPopoverChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("tools");
+      }
+      setToolsPopoverOpen(open);
+    },
+    [closeComposerPopoversExcept],
+  );
+  const handleAttachmentMenuChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("attachment");
+      }
+      setAttachmentMenuOpen(open);
+    },
+    [closeComposerPopoversExcept],
+  );
+  const handleSendMenuChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        closeComposerPopoversExcept("send");
+      }
+      setSendMenuOpen(open);
+    },
+    [closeComposerPopoversExcept],
+  );
+
   const mcpControl = (
     <PlaygroundMcpControl
       hasMcp={hasMcp}
@@ -4057,8 +4245,11 @@ export const PlaygroundForm = ({
       mcpChoiceLabel={mcpCtrl.mcpChoiceLabel}
       mcpDisabledReason={mcpCtrl.mcpDisabledReason}
       mcpPopoverOpen={mcpCtrl.mcpPopoverOpen}
-      onMcpPopoverChange={mcpCtrl.setMcpPopoverOpen}
-      onOpenMcpSettings={() => setMcpSettingsOpen(true)}
+      onMcpPopoverChange={handleMcpPopoverChange}
+      onOpenMcpSettings={() => {
+        mcpSettingsReturnFocusSelectorRef.current = null;
+        setMcpSettingsOpen(true);
+      }}
       t={t}
     />
   );
@@ -4096,7 +4287,7 @@ export const PlaygroundForm = ({
   const toolsButton = (
     <PlaygroundToolsPopover
       toolsPopoverOpen={toolsPopoverOpen}
-      onToolsPopoverChange={setToolsPopoverOpen}
+      onToolsPopoverChange={handleToolsPopoverChange}
       isProMode={isProMode}
       onOpenImageGenerate={openImageGenerateModal}
       onOpenKnowledgePanel={openKnowledgePanel}
@@ -4143,7 +4334,7 @@ export const PlaygroundForm = ({
       onDocumentUpload={handleDocumentUpload}
       onOpenKnowledgePanel={openKnowledgePanel}
       attachmentMenuOpen={attachmentMenuOpen}
-      onAttachmentMenuChange={setAttachmentMenuOpen}
+      onAttachmentMenuChange={handleAttachmentMenuChange}
       t={t}
     />
   );
@@ -4161,7 +4352,7 @@ export const PlaygroundForm = ({
       onStopListening={stopListening}
       onSubmitForm={submitForm}
       sendMenuOpen={sendMenuOpen}
-      onSendMenuChange={setSendMenuOpen}
+      onSendMenuChange={handleSendMenuChange}
       t={t}
     />
   );
@@ -5308,9 +5499,9 @@ export const PlaygroundForm = ({
                         return (
                           <>
                             {composerTextareaNode}
+                            {composerToolbarNode}
                             {composerInlineMessagesNode}
                             {composerNoticesNode}
-                            {composerToolbarNode}
                           </>
                         );
                       })()}
@@ -5563,7 +5754,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyPlaygroundMcpSettingsModal
               open={mcpSettingsOpen}
-              onClose={() => setMcpSettingsOpen(false)}
+              onClose={() => setMcpSettingsOpenWithFocusRestore(false)}
               hasMcp={hasMcp}
               mcpStatusLabel={mcpCtrl.mcpStatusLabel}
               catalogsLoading={mcpCatalogsLoading}
@@ -5595,7 +5786,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyCurrentChatModelSettings
               open={openModelSettings}
-              setOpen={setOpenModelSettings}
+              setOpen={setOpenModelSettingsWithFocusRestore}
               isOCREnabled={useOCR}
             />
           </React.Suspense>

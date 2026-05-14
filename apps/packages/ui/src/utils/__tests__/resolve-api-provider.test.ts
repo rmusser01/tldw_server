@@ -3,6 +3,7 @@ import { tldwModels } from "@/services/tldw"
 import { inferProviderFromModel } from "@/utils/provider-registry"
 import {
   isAutoModelId,
+  parseProviderQualifiedModelSelection,
   resolveApiProviderForModel,
   resolveExplicitProviderForSelectedModel
 } from "../resolve-api-provider"
@@ -109,6 +110,41 @@ describe("resolveApiProviderForModel", () => {
     expect(isAutoModelId(" tldw:Auto ")).toBe(true)
     expect(isAutoModelId("gpt-4.1")).toBe(false)
   })
+
+  it("uses provider-qualified model selections before stale explicit providers", async () => {
+    await expect(
+      resolveApiProviderForModel({
+        modelId: "anthropic:claude-3-5-sonnet",
+        explicitProvider: "openai"
+      })
+    ).resolves.toBe("anthropic")
+  })
+})
+
+describe("parseProviderQualifiedModelSelection", () => {
+  it("splits known provider:model selections without changing model ids", () => {
+    expect(parseProviderQualifiedModelSelection("OpenAI:gpt-4o")).toEqual({
+      raw: "OpenAI:gpt-4o",
+      modelId: "gpt-4o",
+      provider: "openai",
+      isProviderQualified: true
+    })
+    expect(parseProviderQualifiedModelSelection("anthropic:claude:3")).toEqual({
+      raw: "anthropic:claude:3",
+      modelId: "claude:3",
+      provider: "anthropic",
+      isProviderQualified: true
+    })
+  })
+
+  it("leaves unknown colon-delimited model ids intact", () => {
+    expect(parseProviderQualifiedModelSelection("family:model")).toEqual({
+      raw: "family:model",
+      modelId: "family:model",
+      provider: undefined,
+      isProviderQualified: false
+    })
+  })
 })
 
 describe("resolveExplicitProviderForSelectedModel", () => {
@@ -140,5 +176,33 @@ describe("resolveExplicitProviderForSelectedModel", () => {
         explicitProvider: "openrouter"
       })
     ).toBeUndefined()
+  })
+
+  it("prefers the provider from provider-qualified selected models", () => {
+    expect(
+      resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: "openai:gpt-4o",
+        requestedSelectedModel: "gpt-4o",
+        explicitProvider: "anthropic"
+      })
+    ).toBe("openai")
+
+    expect(
+      resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: "openai:gpt-4o",
+        requestedSelectedModel: "anthropic:gpt-4o",
+        explicitProvider: "openai"
+      })
+    ).toBe("anthropic")
+  })
+
+  it("keeps the current provider-qualified provider when a tldw override matches the same model", () => {
+    expect(
+      resolveExplicitProviderForSelectedModel({
+        currentSelectedModel: "openrouter:anthropic/claude-3.5-sonnet",
+        requestedSelectedModel: "tldw:anthropic/claude-3.5-sonnet",
+        explicitProvider: undefined
+      })
+    ).toBe("openrouter")
   })
 })

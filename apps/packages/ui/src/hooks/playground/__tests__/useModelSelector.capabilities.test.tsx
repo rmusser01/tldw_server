@@ -1,12 +1,16 @@
 import React from "react"
-import { render, renderHook, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { act, render, renderHook, screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useModelSelector } from "../useModelSelector"
 
 const chatModelSettingsState = vi.hoisted(() => ({
   apiProvider: null as string | null,
   numCtx: null as number | null
+}))
+
+const storageSeed = vi.hoisted(() => ({
+  values: new Map<string, unknown>()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -41,11 +45,13 @@ vi.mock("react-i18next", () => ({
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: string, defaultValue: unknown) => {
     const initialValue =
-      key === "favoriteChatModels"
-        ? []
-        : key === "modelSelectSortMode"
-          ? "provider"
-          : defaultValue
+      storageSeed.values.has(key)
+        ? storageSeed.values.get(key)
+        : key === "favoriteChatModels"
+          ? []
+          : key === "modelSelectSortMode"
+            ? "provider"
+            : defaultValue
     const [value, setValue] = React.useState(initialValue)
     return [value, setValue, { isLoading: false }] as const
   }
@@ -89,6 +95,12 @@ const unwrapFirstMenuItem = (items: any[]) => {
 }
 
 describe("useModelSelector capability rendering", () => {
+  beforeEach(() => {
+    storageSeed.values.clear()
+    chatModelSettingsState.apiProvider = null
+    chatModelSettingsState.numCtx = null
+  })
+
   it("includes vision/tools/streaming/context and price badges in dropdown items", () => {
     const { result } = renderHook(() =>
       useModelSelector({
@@ -121,5 +133,81 @@ describe("useModelSelector capability rendering", () => {
     expect(screen.getByText("8k ctx")).toBeInTheDocument()
     expect(screen.getByText("$0.15/$0.60")).toBeInTheDocument()
   })
-})
 
+  it("defaults to configured models and exposes catalog models only in catalog scope", () => {
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [
+          {
+            model: "configured-model",
+            nickname: "Configured Model",
+            provider: "openai",
+            is_configured: true
+          },
+          {
+            model: "catalog-model",
+            nickname: "Catalog Model",
+            provider: "openrouter",
+            catalog_only: true
+          }
+        ],
+        selectedModel: "configured-model",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn()
+      })
+    )
+
+    expect(result.current.modelListScope).toBe("configured")
+    expect(result.current.filteredModels.map((model: any) => model.model)).toEqual([
+      "configured-model"
+    ])
+
+    act(() => {
+      result.current.setModelListScope("catalog")
+    })
+
+    expect(result.current.filteredModels.map((model: any) => model.model)).toEqual([
+      "configured-model",
+      "catalog-model"
+    ])
+  })
+
+  it("uses provider-qualified menu keys and selected metadata when model ids collide", () => {
+    chatModelSettingsState.apiProvider = "anthropic"
+    const setSelectedModel = vi.fn()
+
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [
+          {
+            model: "shared-model",
+            nickname: "OpenAI shared",
+            provider: "openai",
+            is_configured: true
+          },
+          {
+            model: "shared-model",
+            nickname: "Anthropic shared",
+            provider: "anthropic",
+            is_configured: true
+          }
+        ],
+        selectedModel: "shared-model",
+        setSelectedModel,
+        navigate: vi.fn()
+      })
+    )
+
+    const firstItem = unwrapFirstMenuItem(result.current.modelDropdownMenuItems)
+
+    expect(result.current.selectedModelMeta?.provider).toBe("anthropic")
+    expect(result.current.selectedModelKey).toBe("anthropic:shared-model")
+    expect(firstItem?.key).toBe("anthropic:shared-model")
+
+    act(() => {
+      firstItem?.onClick?.()
+    })
+
+    expect(setSelectedModel).toHaveBeenCalledWith("anthropic:shared-model")
+  })
+})

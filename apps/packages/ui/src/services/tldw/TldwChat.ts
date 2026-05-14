@@ -604,7 +604,7 @@ export class TldwChatService {
         clearStartupTimer()
       }
     } catch (error) {
-      console.error('Stream completion failed:', error)
+      console.warn('Stream completion failed:', readErrorMessage(error))
       if (isAbortLikeError(error)) {
         throw createAbortError(readErrorMessage(error))
       }

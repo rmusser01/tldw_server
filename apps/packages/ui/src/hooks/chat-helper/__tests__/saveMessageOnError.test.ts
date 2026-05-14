@@ -100,4 +100,35 @@ describe("saveMessageOnError", () => {
       }
     ])
   })
+
+  it("uses a local fallback title when provider title generation fails during error recovery", async () => {
+    const setHistory = vi.fn()
+    const setHistoryId = vi.fn()
+    mocks.generateTitle.mockRejectedValueOnce(new Error("missing provider key"))
+
+    await expect(
+      saveMessageOnError({
+        e: new Error("provider failed"),
+        history: [],
+        setHistory,
+        image: "",
+        userMessage: "Please summarize this cockpit error recovery path",
+        botMessage: "",
+        historyId: null,
+        selectedModel: "openai/gpt-4o",
+        setHistoryId,
+        isRegenerating: false
+      })
+    ).resolves.toBe("new-history-id")
+
+    expect(mocks.saveHistory).toHaveBeenCalledWith(
+      "Please summarize this cockpit error recovery path",
+      false,
+      "web-ui"
+    )
+    expect(mocks.updatePageTitle).toHaveBeenCalledWith(
+      "Please summarize this cockpit error recovery path"
+    )
+    expect(setHistoryId).toHaveBeenCalledWith("new-history-id")
+  })
 })

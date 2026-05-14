@@ -1,6 +1,39 @@
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
+import {
+  PlaygroundCockpitShell,
+  type PlaygroundCockpitMode,
+} from "./PlaygroundCockpitShell";
+import {
+  PlaygroundContextRail,
+  type PlaygroundContextSource,
+  type PlaygroundPromptSummary,
+} from "./PlaygroundContextRail";
+import {
+  PlaygroundRuntimeInspector,
+  type RuntimeSettingSummary,
+  type RuntimeToolChoice,
+} from "./PlaygroundRuntimeInspector";
+import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
+import {
+  buildCockpitAssistantSummary,
+  buildCockpitMcpSummary,
+  buildCockpitPromptSummary,
+  buildCockpitProviderRouteSummary,
+  buildCockpitSessionSummary,
+} from "./playground-cockpit-summaries";
+import {
+  openActorSettings,
+  openAssistantSelector,
+  openMcpSettings,
+  openModelSettings,
+  openPromptSelector,
+  openSearchAndContext,
+  setTemporaryChatFromCockpit,
+  toggleWebSearchFromCockpit,
+} from "./playground-cockpit-actions";
+import { getCockpitMessageCount } from "./playground-cockpit-state";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
@@ -13,7 +46,10 @@ import {
   getPromptById,
   getRecentChatFromWebUI,
 } from "@/db/dexie/helpers";
-import { useStoreChatModelSettings } from "@/store/model";
+import {
+  type ChatModelSettings,
+  useStoreChatModelSettings,
+} from "@/store/model";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import { ChevronDown, Keyboard, Search, X } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
@@ -21,9 +57,11 @@ import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption } from "@/store/option";
 import { useArtifactsStore } from "@/store/artifacts";
+import { getDesignSystemState } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
 import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
+import { useMcpToolsStore } from "@/store/mcp-tools";
 import { useMobile } from "@/hooks/useMediaQuery";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
@@ -69,6 +107,8 @@ import {
   resolveComposerBottomOffsetPx,
   type ComposerDockLayoutMetrics,
 } from "./mobile-composer-layout";
+import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -91,6 +131,41 @@ const renderArtifactsPanel = () => (
   </React.Suspense>
 );
 
+const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
+type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
+const COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR =
+  "[data-cockpit-assistant-select-trigger]";
+const COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR =
+  "[data-cockpit-prompt-select-trigger]";
+const COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR =
+  "[data-cockpit-model-settings-trigger]";
+const COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR =
+  "[data-cockpit-mcp-settings-trigger]";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const getRecordString = (
+  value: unknown,
+  keys: string[],
+): string | null => {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const fieldValue = value[key];
+    if (typeof fieldValue === "string" && fieldValue.trim().length > 0) {
+      return fieldValue.trim();
+    }
+    if (
+      (typeof fieldValue === "number" || typeof fieldValue === "bigint") &&
+      String(fieldValue).trim().length > 0
+    ) {
+      return String(fieldValue);
+    }
+  }
+  return null;
+};
+
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -111,27 +186,59 @@ export const Playground = () => {
     React.useState<string | null>(null);
   const [dismissedReturnedResearchRunId, setDismissedReturnedResearchRunId] =
     React.useState<string | null>(null);
+  const [serverDegradedChecks, setServerDegradedChecks] = React.useState<
+    string[]
+  >([]);
+  const [serverReadinessState, setServerReadinessState] =
+    React.useState<ServerReadinessState>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const { t } = useTranslation(["playground", "common"]);
+  const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [stickyChatInput] = useStorage(
     "stickyChatInput",
     DEFAULT_CHAT_SETTINGS.stickyChatInput,
   );
   const isMobileViewport = useMobile();
+  const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
+    ? "focus"
+    : "cockpit";
+  const [chatLayoutMode, setChatLayoutMode] =
+    useStorage<PlaygroundCockpitMode>(
+      "playgroundChatLayoutMode",
+      defaultChatLayoutMode,
+    );
+  const [cockpitContextRailVisible, setCockpitContextRailVisible] =
+    useStorage<boolean>("playgroundChatContextRailVisible", true);
+  const [cockpitRuntimeRailVisible, setCockpitRuntimeRailVisible] =
+    useStorage<boolean>("playgroundChatRuntimeRailVisible", true);
+  const [mobileCockpitPanel, setMobileCockpitPanel] = useStorage<
+    "context" | "runtime" | null
+  >("playgroundChatMobileCockpitPanel", "context");
   const {
     messages,
     history,
     historyId,
     serverChatId,
+    serverChatTitle,
+    serverChatLoadState,
+    serverChatLoadError,
+    serverChatState,
+    serverChatTopic,
+    serverChatSource,
     isLoading,
+    selectedModel,
     setHistoryId,
     setHistory,
     setMessages,
+    selectedQuickPrompt,
+    setSelectedQuickPrompt,
+    selectedSystemPrompt,
     setSelectedSystemPrompt,
     setSelectedModel,
     setServerChatId,
+    contextFiles,
     setContextFiles,
     createChatBranch,
     streaming,
@@ -139,8 +246,80 @@ export const Playground = () => {
     setSelectedCharacter,
     compareMode,
     compareFeatureEnabled,
+    temporaryChat,
+    webSearch,
+    toolChoice,
+    setToolChoice,
+    selectedKnowledge,
+    setSelectedKnowledge,
+    ragMediaIds,
+    setRagMediaIds,
+    stopStreamingRequest,
+    regenerateLastMessage,
+    selectedAssistant,
+    setSelectedAssistant,
+    serverChatPersonaMemoryMode,
   } = useMessageOption();
-  const { setSystemPrompt } = useStoreChatModelSettings();
+  const {
+    systemPrompt,
+    setSystemPrompt,
+    temperature,
+    topP,
+    topK,
+    numCtx,
+    numPredict,
+    reasoningEffort,
+    apiProvider,
+    activeSettingsScope,
+    scopedSettingsByModelKey,
+  } = useStoreChatModelSettings();
+  const [selectedSystemPromptRecord, setSelectedSystemPromptRecord] =
+    React.useState<{ id?: string; title?: string; name?: string } | null>(null);
+  const [selectedSystemPromptStatus, setSelectedSystemPromptStatus] =
+    React.useState<"idle" | "loading" | "loaded" | "unavailable">("idle");
+  const mcpHealthState = useMcpToolsStore((state) => state.healthState);
+  const mcpToolsLoading = useMcpToolsStore((state) => state.toolsLoading);
+  const discoveredMcpToolCount = useMcpToolsStore(
+    (state) => state.discoveredTools.length,
+  );
+  const chatMcpToolCount = useMcpToolsStore((state) => state.chatTools.length);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const promptId = String(selectedSystemPrompt || "").trim();
+    if (!promptId) {
+      setSelectedSystemPromptRecord(null);
+      setSelectedSystemPromptStatus("idle");
+      return;
+    }
+
+    setSelectedSystemPromptStatus("loading");
+    void getPromptById(promptId)
+      .then((prompt) => {
+        if (cancelled) return;
+        setSelectedSystemPromptRecord(
+          prompt
+            ? {
+                id: String(prompt.id || promptId),
+                title:
+                  typeof prompt.title === "string" ? prompt.title : undefined,
+                name: typeof prompt.name === "string" ? prompt.name : undefined,
+              }
+            : null,
+        );
+        setSelectedSystemPromptStatus(prompt ? "loaded" : "unavailable");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedSystemPromptRecord(null);
+          setSelectedSystemPromptStatus("unavailable");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSystemPrompt]);
   const composerBottomOffsetPx = stickyChatInput
     ? resolveComposerBottomOffsetPx(composerDockMetrics)
     : 0;
@@ -165,6 +344,7 @@ export const Playground = () => {
     useSmartScroll(messages, streaming, 120, {
       bottomOffsetPx: composerBottomOffsetPx,
     });
+
   const [dropState, setDropState] = React.useState<
     "idle" | "dragging" | "error"
   >("idle");
@@ -191,13 +371,72 @@ export const Playground = () => {
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
-  const setSelectedQuickPrompt = useStoreMessageOption(
-    (state) => state.setSelectedQuickPrompt,
+  const normalizedChatLayoutMode: PlaygroundCockpitMode =
+    chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
+      ? chatLayoutMode
+      : defaultChatLayoutMode;
+  const normalizedCockpitContextRailVisible =
+    cockpitContextRailVisible !== false;
+  const normalizedCockpitRuntimeRailVisible =
+    cockpitRuntimeRailVisible !== false;
+  const handleChatLayoutModeChange = React.useCallback(
+    (mode: PlaygroundCockpitMode) => {
+      if (
+        mode === "cockpit" &&
+        !normalizedCockpitContextRailVisible &&
+        !normalizedCockpitRuntimeRailVisible
+      ) {
+        void setCockpitContextRailVisible(true);
+        void setCockpitRuntimeRailVisible(true);
+      }
+      void setChatLayoutMode(mode);
+    },
+    [
+      normalizedCockpitContextRailVisible,
+      normalizedCockpitRuntimeRailVisible,
+      setChatLayoutMode,
+      setCockpitContextRailVisible,
+      setCockpitRuntimeRailVisible,
+    ],
   );
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
   }, [setRouteContext]);
+
+  React.useEffect(() => {
+    const handleReadinessState = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        state?: string;
+        degradedChecks?: unknown;
+      }>).detail;
+      const nextState =
+        detail?.state === "ready" ||
+        detail?.state === "degraded" ||
+        detail?.state === "blocked"
+          ? detail.state
+          : null;
+      setServerReadinessState(nextState);
+      if (nextState !== "degraded") {
+        setServerDegradedChecks([]);
+        return;
+      }
+      const checks = Array.isArray(detail.degradedChecks)
+        ? detail.degradedChecks
+            .map((check) => (typeof check === "string" ? check.trim() : ""))
+            .filter((check) => check.length > 0)
+        : [];
+      setServerDegradedChecks(checks);
+    };
+
+    window.addEventListener(SERVER_READINESS_STATE_EVENT, handleReadinessState);
+    return () => {
+      window.removeEventListener(
+        SERVER_READINESS_STATE_EVENT,
+        handleReadinessState,
+      );
+    };
+  }, []);
 
   // Debounce search query to avoid running collectThreadSearchMatches on every keystroke
   React.useEffect(() => {
@@ -1327,6 +1566,678 @@ export const Playground = () => {
     [scrollToMessageIndex, threadSearchMatches],
   );
 
+  const contextFileCount = Array.isArray(contextFiles)
+    ? contextFiles.length
+    : 0;
+  const selectedKnowledgeCount = Array.isArray(selectedKnowledge)
+    ? selectedKnowledge.length
+    : selectedKnowledge
+      ? 1
+      : 0;
+  const ragMediaIdCount = Array.isArray(ragMediaIds)
+    ? ragMediaIds.length
+    : 0;
+  const trimmedSystemPrompt = String(systemPrompt || "").trim();
+  const hasPromptContext = Boolean(
+    selectedSystemPrompt || selectedQuickPrompt || trimmedSystemPrompt.length > 0,
+  );
+  const promptSummary: PlaygroundPromptSummary = buildCockpitPromptSummary({
+    selectedSystemPrompt,
+    selectedSystemPromptRecord,
+    selectedSystemPromptStatus,
+    selectedQuickPrompt,
+    systemPrompt,
+    copy: {
+      customPromptLabel: toText(
+        t("playground:cockpit.customPrompt", "Custom prompt"),
+      ),
+      inlineSystemPromptActiveDetail: toText(
+        t(
+          "playground:cockpit.inlineSystemPromptActive",
+          "Inline system prompt active",
+        ),
+      ),
+      loadingPromptDetail: toText(
+        t(
+          "playground:cockpit.loadingPromptDetails",
+          "Loading prompt details...",
+        ),
+      ),
+      noPromptContextDetail: toText(
+        t(
+          "playground:cockpit.noPromptContext",
+          "No prompt context will be added.",
+        ),
+      ),
+      noPromptSelectedLabel: toText(
+        t("playground:cockpit.noPromptSelected", "No prompt selected"),
+      ),
+      selectedPromptUnavailableDetail: toText(
+        t(
+          "playground:cockpit.promptDetailsUnavailable",
+          "Prompt details unavailable",
+        ),
+      ),
+      quickPromptLabel: toText(
+        t("playground:cockpit.quickPrompt", "Quick prompt"),
+      ),
+      selectedPromptDetail: toText(
+        t("playground:cockpit.systemPrompt", "System prompt"),
+      ),
+      systemPromptLabel: toText(
+        t("playground:cockpit.systemPrompt", "System prompt"),
+      ),
+    },
+  });
+  const clearPromptContextFromCockpit = React.useCallback(() => {
+    setSelectedQuickPrompt(null);
+    setSelectedSystemPrompt("");
+    setSystemPrompt("");
+  }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
+  const openPromptSelectorFromCockpit = React.useCallback(() => {
+    openPromptSelector({
+      returnFocusSelector: COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR,
+    });
+  }, []);
+  const cockpitAssistantSelectTab =
+    selectedAssistant?.kind === "persona" ? "persona" : "character";
+  const openAssistantSelectorFromCockpit = React.useCallback(() => {
+    openAssistantSelector({
+      tab: cockpitAssistantSelectTab,
+      returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
+    });
+  }, [cockpitAssistantSelectTab]);
+  const clearAssistantFromCockpit = React.useCallback(() => {
+    void setSelectedAssistant(null);
+    setSelectedCharacter(null);
+    scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
+  }, [setSelectedAssistant, setSelectedCharacter]);
+  const inspectAssistantFromCockpit = React.useCallback(() => {
+    if (selectedAssistant?.kind === "persona") {
+      navigate(
+        buildPersonaGardenRoute({
+          personaId: selectedAssistant.id,
+          tab: "profiles",
+        }),
+      );
+      return;
+    }
+    if (selectedAssistant?.kind === "character" || selectedCharacter) {
+      navigate("/settings/characters");
+    }
+  }, [navigate, selectedAssistant, selectedCharacter]);
+  const cockpitAssistantSummary = buildCockpitAssistantSummary({
+    selectedAssistant,
+    selectedCharacter,
+    personaMemoryMode: serverChatPersonaMemoryMode,
+    copy: {
+      assistantFallbackName: toText(
+        t("playground:cockpit.assistantFallback", "Assistant"),
+      ),
+      characterSelected: toText(
+        t("playground:cockpit.characterSelected", "Character selected"),
+      ),
+      legacyCharacterFallbackName: (id) =>
+        toText(
+          t("playground:cockpit.characterFallbackById", `Character ${id}`, {
+            id,
+          }),
+        ),
+      memoryReadOnly: toText(
+        t("playground:cockpit.personaMemoryReadOnly", "memory read-only"),
+      ),
+      memoryReadWrite: toText(
+        t("playground:cockpit.personaMemoryReadWrite", "memory read/write"),
+      ),
+      noAssistantSelected: toText(
+        t("playground:cockpit.noAssistantSelected", "No assistant selected"),
+      ),
+      personaFallbackName: toText(
+        t("playground:cockpit.personaFallback", "Persona"),
+      ),
+      personaSelected: toText(
+        t("playground:cockpit.personaSelected", "Persona selected"),
+      ),
+      personaSelectedWithMemoryMode: (memoryMode) =>
+        toText(
+          t(
+            "playground:cockpit.personaSelectedWithMemoryMode",
+            `Persona selected - ${memoryMode}`,
+            { memoryMode },
+          ),
+        ),
+    },
+  });
+  const canRegenerateLastResponse = messages.some(
+    (message) => message.role === "assistant",
+  );
+  const runtimeStatusDetail =
+    serverReadinessState === "degraded"
+      ? serverDegradedChecks.length > 0
+        ? `${toText(
+            t("playground:cockpit.degraded", DEGRADED_STATE_LABEL),
+          )}: ${serverDegradedChecks.join(", ")}`
+        : toText(
+            t(
+              "playground:cockpit.degradedServerHealth",
+              "Server health is degraded",
+            ),
+          )
+      : null;
+  const hasChatContext = Boolean(
+    attachedResearchContext ||
+      webSearch ||
+      contextFileCount > 0 ||
+      selectedKnowledgeCount > 0 ||
+      ragMediaIdCount > 0 ||
+      hasPromptContext ||
+      cockpitAssistantSummary.mode !== "none",
+  );
+  const sessionSummary = buildCockpitSessionSummary({
+    temporaryChat,
+    serverChatId,
+    historyId,
+    serverChatTitle,
+    serverChatLoadState,
+    serverChatLoadError,
+    serverChatState,
+    serverChatTopic,
+    serverChatSource,
+    copy: {
+      failedDetail: toText(
+        t(
+          "playground:cockpit.sessionLoadFailedDetail",
+          "Failed to load conversation",
+        ),
+      ),
+      failedStatusLabel: toText(
+        t("playground:cockpit.sessionLoadFailed", "Load failed"),
+      ),
+      historyLinkedDetail: toText(
+        t("playground:cockpit.historyLinked", "History linked"),
+      ),
+      idleStatusLabel: toText(t("playground:cockpit.idle", "Idle")),
+      loadingDetail: toText(
+        t("playground:cockpit.sessionLoading", "Loading conversation"),
+      ),
+      loadingStatusLabel: toText(
+        t("playground:cockpit.sessionLoading", "Loading conversation"),
+      ),
+      localChatLabel: toText(t("playground:cockpit.sessionLocal", "Local chat")),
+      localHistoryStatusLabel: toText(
+        t("playground:cockpit.localHistory", "Local history"),
+      ),
+      noSavedHistoryDetail: toText(
+        t("playground:cockpit.noSavedHistory", "No saved history yet"),
+      ),
+      readyDetail: toText(
+        t("playground:cockpit.sessionReadyDetail", "Conversation ready"),
+      ),
+      readyStatusLabel: toText(t("playground:cockpit.sessionReady", "Ready")),
+      serverChatLabel: toText(
+        t("playground:cockpit.sessionServer", "Server chat"),
+      ),
+      temporaryChatLabel: toText(
+        t("playground:cockpit.sessionTemporary", "Temporary chat"),
+      ),
+      temporaryDetail: toText(t("playground:cockpit.notSaved", "Not saved")),
+      temporaryStatusLabel: toText(
+        t("playground:cockpit.localOnly", "Local only"),
+      ),
+    },
+  });
+  const sessionLabel = sessionSummary.label;
+  const contextSummary: string[] = [];
+  const providerRouteSummary = buildCockpitProviderRouteSummary({
+    selectedProvider: apiProvider,
+    selectedModel,
+  });
+  const contextFileItems = Array.isArray(contextFiles) ? contextFiles : [];
+  const selectedKnowledgeItems = Array.isArray(selectedKnowledge)
+    ? selectedKnowledge
+    : selectedKnowledge
+      ? [selectedKnowledge]
+      : [];
+  const ragMediaItems = Array.isArray(ragMediaIds) ? ragMediaIds : [];
+  const removeContextFileAt = React.useCallback(
+    (index: number) => {
+      setContextFiles(contextFileItems.filter((_, itemIndex) => itemIndex !== index));
+    },
+    [contextFileItems, setContextFiles],
+  );
+  const removeRagMediaAt = React.useCallback(
+    (index: number) => {
+      const nextIds = ragMediaItems.filter((_, itemIndex) => itemIndex !== index);
+      setRagMediaIds(nextIds.length > 0 ? nextIds : null);
+    },
+    [ragMediaItems, setRagMediaIds],
+  );
+  const removeSelectedKnowledgeAt = React.useCallback(
+    (index: number) => {
+      const nextItems = selectedKnowledgeItems.filter(
+        (_, itemIndex) => itemIndex !== index,
+      );
+      const nextValue = Array.isArray(selectedKnowledge)
+        ? nextItems.length > 0
+          ? nextItems
+          : null
+        : nextItems[0] || null;
+      (setSelectedKnowledge as (value: unknown) => void)(nextValue);
+    },
+    [selectedKnowledge, selectedKnowledgeItems, setSelectedKnowledge],
+  );
+  const contextSources = ([
+    webSearch
+      ? {
+          id: "web-search",
+          kind: "web" as const,
+          label: toText(t("playground:cockpit.web", "Web")),
+          title: toText(t("playground:cockpit.webSearch", "Web search")),
+          detail: toText(
+            t(
+              "playground:cockpit.webSearchDetail",
+              "Enabled for the next reply.",
+            ),
+          ),
+          state: "active" as const,
+          onRemove: toggleWebSearchFromCockpit,
+          removeLabel: toText(
+            t("playground:cockpit.disableWebSearch", "Disable web search"),
+          ),
+        }
+      : null,
+    hasPromptContext
+      ? {
+          id: `prompt-${promptSummary.state}`,
+          kind: "prompt" as const,
+          label: toText(t("playground:cockpit.prompt", "Prompt")),
+          title: promptSummary.label,
+          detail: promptSummary.detail,
+          state: "active" as const,
+          onOpen: openPromptSelectorFromCockpit,
+          onRemove: clearPromptContextFromCockpit,
+          openLabel: toText(
+            t("playground:cockpit.selectPrompt", "Select a prompt"),
+          ),
+          removeLabel: toText(
+            t("playground:cockpit.clearPromptContext", "Clear prompt context"),
+          ),
+        }
+      : null,
+    cockpitAssistantSummary.mode !== "none" && cockpitAssistantSummary.name
+      ? {
+          id: `assistant-${cockpitAssistantSummary.mode}-${cockpitAssistantSummary.name}`,
+          kind: "assistant" as const,
+          label:
+            cockpitAssistantSummary.mode === "persona"
+              ? toText(t("playground:cockpit.persona", "Persona"))
+              : toText(t("playground:cockpit.character", "Character")),
+          title: cockpitAssistantSummary.name,
+          detail: cockpitAssistantSummary.detail,
+          state: "active" as const,
+          onOpen: openAssistantSelectorFromCockpit,
+          onRemove: clearAssistantFromCockpit,
+          openLabel: toText(
+            t(
+              "playground:cockpit.selectCharacterPersona",
+              "Select character or persona",
+            ),
+          ),
+          removeLabel: toText(
+            t("playground:cockpit.clearAssistant", "Clear assistant"),
+          ),
+        }
+      : null,
+    attachedResearchContext
+      ? {
+          id: `research-${attachedResearchContext.run_id || "active"}`,
+          kind: "research" as const,
+          label: toText(t("playground:cockpit.research", "Research")),
+          title:
+            attachedResearchContext.query ||
+            attachedResearchContext.question ||
+            toText(t("playground:cockpit.researchContext", "Research context")),
+          detail: attachedResearchContext.run_id
+            ? toText(
+                t("playground:cockpit.researchRun", "Run {{runId}}", {
+                  runId: attachedResearchContext.run_id,
+                }),
+              )
+            : null,
+          state: "active" as const,
+          onOpen: () => openSearchAndContext({ tab: "context" }),
+          onRemove: handleRemoveAttachedResearchContext,
+          removeLabel: toText(
+            t(
+              "playground:cockpit.clearResearchContext",
+              "Clear research context",
+            ),
+          ),
+        }
+      : null,
+    ...contextFileItems.map((file, index) => {
+      const title =
+        getRecordString(file, ["name", "filename", "title", "id"]) ||
+        toText(
+          t("playground:cockpit.fileFallback", "File {{index}}", {
+            index: index + 1,
+          }),
+        );
+      return {
+        id: `file-${getRecordString(file, ["id"]) || index}`,
+        kind: "file" as const,
+        label: toText(t("playground:cockpit.file", "File")),
+        title,
+        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+        state: "active" as const,
+        onRemove: () => removeContextFileAt(index),
+        removeLabel: toText(
+          t("playground:cockpit.removeFileSource", `Remove ${title}`, { title }),
+        ),
+      };
+    }),
+    ...selectedKnowledgeItems.map((knowledge, index) => {
+      const title =
+        getRecordString(knowledge, ["title", "name", "id"]) ||
+        toText(
+          t("playground:cockpit.knowledgeFallback", "Knowledge {{index}}", {
+            index: index + 1,
+          }),
+        );
+      return {
+        id: `knowledge-${getRecordString(knowledge, ["id"]) || index}`,
+        kind: "knowledge" as const,
+        label: toText(t("playground:cockpit.knowledge", "Knowledge")),
+        title,
+        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+        state: "active" as const,
+        onOpen: () => openSearchAndContext({ tab: "context" }),
+        onRemove: () => removeSelectedKnowledgeAt(index),
+        openLabel: toText(
+          t("playground:cockpit.openKnowledgeSource", `Open ${title}`, { title }),
+        ),
+        removeLabel: toText(
+          t("playground:cockpit.removeKnowledgeSource", `Remove ${title}`, {
+            title,
+          }),
+        ),
+      };
+    }),
+    ...ragMediaItems.map((mediaId, index) => ({
+      id: `media-${mediaId}`,
+      kind: "media" as const,
+      label: toText(t("playground:cockpit.media", "Media")),
+      title: toText(
+        t("playground:cockpit.mediaScopeLabel", "Media scope {{id}}", {
+          id: mediaId,
+        }),
+      ),
+      detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+      state: "active" as const,
+      onOpen: () => openSearchAndContext({ tab: "context" }),
+      onRemove: () => removeRagMediaAt(index),
+      openLabel: toText(
+        t("playground:cockpit.openMediaSource", "Open media scope"),
+      ),
+      removeLabel: toText(
+        t("playground:cockpit.removeMediaSource", "Remove media scope"),
+      ),
+    })),
+  ] satisfies Array<PlaygroundContextSource | null>).filter(
+    Boolean,
+  ) as PlaygroundContextSource[];
+  const activeScopedModelSettings =
+    activeSettingsScope && scopedSettingsByModelKey
+      ? scopedSettingsByModelKey[activeSettingsScope]
+      : undefined;
+  const getRuntimeSettingSource = (key: keyof ChatModelSettings) =>
+    activeSettingsScope
+      ? Object.prototype.hasOwnProperty.call(activeScopedModelSettings || {}, key)
+        ? "override"
+        : "default"
+      : undefined;
+  const runtimeSettingSummaries: RuntimeSettingSummary[] = [
+    typeof temperature === "number"
+      ? {
+          label: toText(t("playground:cockpit.temperature", "Temperature")),
+          value: String(temperature),
+          source: getRuntimeSettingSource("temperature"),
+        }
+      : null,
+    typeof topP === "number"
+      ? {
+          label: toText(t("playground:cockpit.topP", "Top P")),
+          value: String(topP),
+          source: getRuntimeSettingSource("topP"),
+        }
+      : null,
+    typeof topK === "number"
+      ? {
+          label: toText(t("playground:cockpit.topK", "Top K")),
+          value: String(topK),
+          source: getRuntimeSettingSource("topK"),
+        }
+      : null,
+    typeof numCtx === "number"
+      ? {
+          label: toText(t("playground:cockpit.contextWindow", "Context")),
+          value: String(numCtx),
+          source: getRuntimeSettingSource("numCtx"),
+        }
+      : null,
+    typeof numPredict === "number"
+      ? {
+          label: toText(t("playground:cockpit.maxTokens", "Max tokens")),
+          value: String(numPredict),
+          source: getRuntimeSettingSource("numPredict"),
+        }
+      : null,
+    typeof reasoningEffort === "string" && reasoningEffort.length > 0
+      ? {
+          label: toText(t("playground:cockpit.reasoning", "Reasoning")),
+          value: reasoningEffort,
+          source: getRuntimeSettingSource("reasoningEffort"),
+        }
+      : null,
+  ].filter((item): item is RuntimeSettingSummary => Boolean(item));
+  const openModelSettingsFromCockpit = React.useCallback(() => {
+    openModelSettings({
+      returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
+    });
+  }, []);
+  const openMcpSettingsFromCockpit = React.useCallback(() => {
+    openMcpSettings({
+      returnFocusSelector: COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR,
+    });
+  }, []);
+  const statusContextSummary = [
+    hasPromptContext ? promptSummary.label : null,
+    webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
+    contextFileCount > 0
+      ? contextFileCount === 1
+        ? toText(t("playground:cockpit.contextFilesCountOne", "1 file"))
+        : toText(
+            t(
+              "playground:cockpit.contextFilesCountMany",
+              `${contextFileCount} files`,
+              { count: contextFileCount },
+            ),
+          )
+      : null,
+    selectedKnowledgeCount > 0
+      ? selectedKnowledgeCount === 1
+        ? toText(
+            t("playground:cockpit.contextKnowledgeCountOne", "1 knowledge item"),
+          )
+        : toText(
+            t(
+              "playground:cockpit.contextKnowledgeCountMany",
+              `${selectedKnowledgeCount} knowledge items`,
+              { count: selectedKnowledgeCount },
+            ),
+          )
+      : null,
+    ragMediaIdCount > 0
+      ? ragMediaIdCount === 1
+        ? toText(t("playground:cockpit.contextMediaCountOne", "1 media scope"))
+        : toText(
+            t(
+              "playground:cockpit.contextMediaCountMany",
+              `${ragMediaIdCount} media scopes`,
+              { count: ragMediaIdCount },
+            ),
+          )
+      : null,
+  ].filter((item): item is string => Boolean(item));
+  const cockpitMessageCount = getCockpitMessageCount(messages, history);
+  const cockpitLeftRail = (
+    <PlaygroundContextRail
+      hasContext={hasChatContext}
+      contextSummary={contextSummary}
+      contextSources={contextSources}
+      sessionLabel={sessionLabel}
+      sessionTitle={sessionSummary.title}
+      sessionStatus={sessionSummary.status}
+      sessionStatusLabel={sessionSummary.statusLabel}
+      sessionDetail={sessionSummary.detail}
+      sessionError={sessionSummary.error}
+      historyLinked={Boolean(historyId)}
+      webSearch={webSearch}
+      onToggleWebSearch={toggleWebSearchFromCockpit}
+      temporaryChat={temporaryChat}
+      onToggleTemporaryChat={setTemporaryChatFromCockpit}
+      contextCounts={{
+        files: contextFileCount,
+        knowledge: selectedKnowledgeCount,
+        media: ragMediaIdCount,
+        research: attachedResearchContext ? 1 : 0,
+      }}
+      promptSummary={promptSummary}
+      promptSelectControl={
+        <button
+          type="button"
+          className="inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          data-cockpit-prompt-select-trigger
+          aria-label={toText(t("playground:cockpit.selectPrompt", "Select a prompt"))}
+          onClick={openPromptSelectorFromCockpit}
+        >
+          {toText(t("playground:cockpit.selectPrompt", "Select prompt"))}
+        </button>
+      }
+      onClearPrompt={clearPromptContextFromCockpit}
+      onOpenSearchContext={() => openSearchAndContext({ tab: "search" })}
+      onClearFiles={() => setContextFiles([])}
+      onClearKnowledge={() => setSelectedKnowledge(null)}
+      onClearMedia={() => setRagMediaIds(null)}
+      onClearResearch={handleRemoveAttachedResearchContext}
+    />
+  );
+  const cockpitRightRail = (
+    <PlaygroundRuntimeInspector
+      streaming={streaming}
+      selectedProvider={providerRouteSummary.selectedProvider}
+      selectedModel={providerRouteSummary.selectedModel}
+      providerRouteLabel={providerRouteSummary.providerRouteLabel}
+      runtimeStatus={
+        streaming
+          ? "streaming"
+          : serverReadinessState === "degraded"
+            ? "degraded"
+            : "ready"
+      }
+      runtimeStatusDetail={runtimeStatusDetail}
+      messageCount={cockpitMessageCount}
+      threadSearchOpen={threadSearchOpen}
+      assistantSummary={cockpitAssistantSummary}
+      onOpenModelSettings={openModelSettingsFromCockpit}
+      onOpenAssistantSelect={openAssistantSelectorFromCockpit}
+      onClearAssistant={clearAssistantFromCockpit}
+      onInspectAssistant={inspectAssistantFromCockpit}
+      onOpenSceneDirector={openActorSettings}
+      canStopStreaming={streaming}
+      onStopStreaming={() => stopStreamingRequest()}
+      canRegenerate={canRegenerateLastResponse}
+      onRegenerate={() => regenerateLastMessage()}
+      settingSummaries={runtimeSettingSummaries}
+      toolChoice={toolChoice as RuntimeToolChoice}
+      onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
+      onOpenMcpSettings={openMcpSettingsFromCockpit}
+      toolSummary={buildCockpitMcpSummary({
+        hasMcp: mcpHealthState !== "unavailable",
+        healthState: mcpHealthState,
+        toolsLoading: mcpToolsLoading,
+        discoveredCount: discoveredMcpToolCount,
+        chatToolCount: chatMcpToolCount,
+        copy: {
+          availableDetail: (chatToolCount, discoveredCount) => {
+            const chatToolsLabel =
+              chatToolCount === 1
+                ? toText(
+                    t(
+                      "playground:cockpit.mcpChatToolsAvailableOne",
+                      "1 chat tool available",
+                    ),
+                  )
+                : toText(
+                    t(
+                      "playground:cockpit.mcpChatToolsAvailableMany",
+                      `${chatToolCount} chat tools available`,
+                      { count: chatToolCount },
+                    ),
+                  );
+            if (discoveredCount <= chatToolCount) return chatToolsLabel;
+            const discoveredSuffix = toText(
+              t(
+                "playground:cockpit.mcpDiscoveredSuffix",
+                ` (${discoveredCount} discovered)`,
+                { count: discoveredCount },
+              ),
+            );
+            return `${chatToolsLabel}${discoveredSuffix}`;
+          },
+          emptyDetail: toText(
+            t("playground:composer.mcpToolsEmpty", "No MCP tools available"),
+          ),
+          loadingDetail: toText(
+            t("playground:composer.mcpToolsLoading", "Loading tools..."),
+          ),
+          offlineDetail: toText(
+            t("playground:composer.mcpToolsUnhealthy", "MCP tools are offline"),
+          ),
+          toolsLabel: toText(t("playground:cockpit.mcpTools", "MCP tools")),
+          unavailableDetail: toText(
+            t(
+              "playground:composer.mcpToolsUnavailable",
+              "MCP tools unavailable",
+            ),
+          ),
+          unavailableLabel: toText(
+            t("playground:composer.mcpUnavailable", "MCP unavailable"),
+          ),
+        },
+      })}
+    />
+  );
+  const cockpitStatusStrip = (
+    <PlaygroundStatusStrip
+      mode={normalizedChatLayoutMode}
+      streaming={streaming}
+      selectedProvider={providerRouteSummary.selectedProvider}
+      selectedModel={providerRouteSummary.selectedModel}
+      messageCount={cockpitMessageCount}
+      sessionLabel={sessionLabel}
+      hasContext={hasChatContext}
+      contextSummary={statusContextSummary}
+      temporaryChat={temporaryChat}
+      degraded={serverReadinessState === "degraded"}
+      degradedChecks={serverDegradedChecks}
+      errorMessage={null}
+      onStopStreaming={() => stopStreamingRequest()}
+      onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
+      onOpenModelSettings={openModelSettings}
+    />
+  );
+
   return (
     <div
       ref={drop}
@@ -1381,7 +2292,20 @@ export const Playground = () => {
       )}
 
       <div className="relative z-10 flex h-full min-h-0 w-full">
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <PlaygroundCockpitShell
+          mode={normalizedChatLayoutMode}
+          onModeChange={handleChatLayoutModeChange}
+          leftRailVisible={normalizedCockpitContextRailVisible}
+          rightRailVisible={normalizedCockpitRuntimeRailVisible}
+          onLeftRailVisibleChange={setCockpitContextRailVisible}
+          onRightRailVisibleChange={setCockpitRuntimeRailVisible}
+          mobilePanel={mobileCockpitPanel}
+          onMobilePanelChange={setMobileCockpitPanel}
+          leftRail={cockpitLeftRail}
+          rightRail={cockpitRightRail}
+          statusStrip={cockpitStatusStrip}
+        >
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           {parentMeta?.parentHistoryId && (
             <div className="flex w-full justify-center px-5 pt-2">
               <div className="inline-flex flex-wrap items-center justify-center gap-2">
@@ -1809,7 +2733,8 @@ export const Playground = () => {
               }
             />
           </div>
-        </div>
+          </div>
+        </PlaygroundCockpitShell>
         {artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">
