@@ -384,7 +384,7 @@ class PersonaVisualPortabilityWorker:
         self._repo.update_import_preview(
             preview_id,
             {
-                "status": "completed",
+                "status": str(result.get("status") or "completed"),
                 "stage": "completed",
                 "archive_sha256": result["archive_sha256"],
                 "canonical_payload_fingerprint": result["canonical_payload_fingerprint"],
