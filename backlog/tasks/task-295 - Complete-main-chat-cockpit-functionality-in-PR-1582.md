@@ -20,6 +20,8 @@ documentation:
     Docs/superpowers/plans/2026-05-12-main-chat-cockpit-first-slice-implementation-plan.md
   - >-
     Docs/superpowers/specs/2026-05-13-main-chat-cockpit-p-series-completion-design.md
+  - >-
+    Docs/superpowers/plans/2026-05-14-main-chat-cockpit-p-series-completion-implementation-plan.md
 priority: high
 ---
 
@@ -50,6 +52,8 @@ Stage 5: Complete Context and Session rail workflows including next-reply invent
 Stage 6: Complete Run Controls and Recovery including stop, regenerate, disabled states, recoverable errors, and request-state-machine-safe tests.
 Stage 7: Complete Keyboard, Focus, and Mobile workflows including focus restoration, keyboard operation, mobile workflow parity, and mobile Playwright proof.
 Stage 8: Complete P2 polish and merge readiness including IA/copy/degraded-state cleanup, composer/rail duplication decisions, final visual QA, refreshed real-server screenshots, PR closeout notes, and human approval gates.
+
+Detailed plan of record: Docs/superpowers/plans/2026-05-14-main-chat-cockpit-p-series-completion-implementation-plan.md. Use that file for exact files, tests, real-server proof commands, and P0/P1/P2 approval checkpoints before editing implementation code.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -104,6 +108,8 @@ Added staged P-series completion spec for issue #1646. Earlier cockpit completio
 Corrected TASK-295 after issue #1646: the prior checked acceptance criteria and final summary are superseded. The task is In Progress until the P0 P1 and P2 completion gates are implemented verified and explicitly approved.
 
 Reviewed and hardened the P-series completion spec before implementation planning. Added explicit state-contract inventory, real populated server proof requirements, per-stage focus expectations, MCP non-hardcoding requirement, degraded-health functional proof before P2 polish, and implementation risks to avoid reachability-only completion.
+
+Created the P-series implementation plan of record at Docs/superpowers/plans/2026-05-14-main-chat-cockpit-p-series-completion-implementation-plan.md. It keeps all work in PR #1582, scopes implementation to the main /chat cockpit rails, requires real-server Playwright proof without route interception, and preserves P0/P1/P2 human approval gates before merge readiness.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
