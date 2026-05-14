@@ -138,7 +138,10 @@ intake adapters can show consistent provenance and diagnostics.
     "status": "ready_for_import_preview",
     "blockers": [],
     "warnings": [
-      "listening falls back to idle"
+      {
+        "code": "state_fallback",
+        "message": "listening falls back to idle"
+      }
     ]
   },
   "provenance": {
@@ -151,7 +154,7 @@ intake adapters can show consistent provenance and diagnostics.
     "archive": {
       "mcp_resource_uri": "mcp://local-sprite-pose-maker/resources/expr-pack-2026-05-13.tldw-persona-vpack",
       "sha256": "2f3a6c2c4b0b0c7f9f7ad3e2c0f9f95543e3013d6a45b69822ad0f01f54415be",
-      "media_type": "application/vnd.tldw.persona-visual-pack"
+      "media_type": "application/vnd.tldw.persona.visual-pack+zip"
     }
   }
 }
@@ -170,6 +173,11 @@ Rules:
    copied into the Persona Visual manifest as a remote asset URL.
 7. `provenance` is advisory metadata. It must not override user ownership,
    persona scope, validation results, or library source references.
+8. `portable_archive` media types should use
+   `application/vnd.tldw.persona.visual-pack+zip` for Persona Visual archives.
+   Existing exports may still be served as `application/zip`, so intake
+   implementations should treat both as zip archive payloads and rely on
+   archive validation rather than media type alone.
 
 ## Allowed Result Types
 
@@ -332,6 +340,9 @@ Provider intake must reject or block:
    status, or ownership by assertion.
 10. unsupported renderer claims that contradict the server renderer capability
     registry.
+11. secrets, API keys, bearer tokens, session cookies, local filesystem paths,
+    host identifiers, or other sensitive material in provider-supplied
+    metadata, diagnostics, provenance, manifests, or archive member names.
 
 Provider intake should require:
 
@@ -340,7 +351,8 @@ Provider intake should require:
 2. renderer capability resolution before import preview or candidate review.
 3. static fallback for non-sprite renderer proposals.
 4. stable diagnostics with machine-readable blocker and warning codes.
-5. provenance that is stored as pack/asset metadata only after server review.
+5. sanitized provenance that is bounded, free of secrets and host-local
+   identifiers, and stored as pack/asset metadata only after server review.
 
 ## Relationship To Existing MCP Tools
 

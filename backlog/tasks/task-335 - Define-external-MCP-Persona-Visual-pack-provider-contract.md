@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-14 04:37'
-updated_date: '2026-05-13 21:58'
+updated_date: '2026-05-14 05:46'
 labels:
   - persona
   - buddy
@@ -51,12 +51,14 @@ Updated the Persona Live Visual Packs PRD and Persona Visual Packs code document
 Verification: git diff --check passed. Targeted scans found no activation_allowed=true, runtime_supported_by_provider=true, snapshot-field reintroduction, or provider-output activation claims. Positive scans confirmed review-required, activation_allowed=false, import-preview-required, review-input, reference-backed, and no-snapshot boundary language.
 
 Bandit was not run because this slice touched only Markdown documentation and Backlog task text.
+
+PR #1685 review sweep addressed still-valid Qodo, Gemini, and CodeRabbit findings: provider diagnostics examples now use machine-readable warning objects, portable archive examples use the existing Persona Visual vendor zip media type while documenting `application/zip` compatibility, safety rules explicitly reject secrets and require sanitized provenance, and TASK-335 timestamp metadata now satisfies updated_date >= created_date.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Defined the external MCP-compatible Persona Visual pack-provider contract for review-first provider output. The docs now describe provider discovery, result envelopes, examples for archive/candidate/patch/draft request flows, blocked diagnostics, safety rules, and PRD/code-doc alignment while preserving user-owned reference-backed packs and explicit activation.
+Defined the external MCP-compatible Persona Visual pack-provider contract for review-first provider output. The docs now describe provider discovery, result envelopes, examples for archive/candidate/patch/draft request flows, blocked diagnostics, safety rules, sanitized provenance/no-secret requirements, canonical archive media-type guidance, and PRD/code-doc alignment while preserving user-owned reference-backed packs and explicit activation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

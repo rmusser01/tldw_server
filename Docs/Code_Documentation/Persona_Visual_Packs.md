@@ -249,8 +249,10 @@ assigns real asset ids.
 
 Provider provenance is metadata only. It must not override user ownership,
 persona scope, activation state, or personal-library source references. The
-personal library remains reference-backed and must not gain source display
-snapshots from provider metadata.
+server must sanitize provenance before storage and reject secrets, API keys,
+tokens, host-local identifiers, or local filesystem paths in provider-supplied
+metadata. The personal library remains reference-backed and must not gain source
+display snapshots from provider metadata.
 
 ## Import Preview And Commit
 
