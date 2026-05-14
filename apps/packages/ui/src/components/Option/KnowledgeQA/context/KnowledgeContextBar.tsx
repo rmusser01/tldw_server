@@ -32,7 +32,7 @@ import { AnswerModelMenu } from "./AnswerModelMenu"
 // ---------------------------------------------------------------------------
 
 const PROFILES_STORAGE_KEY = "tldw:knowledge-qa:saved-profiles"
-const MAX_SAVED_PROFILES = 5
+const MAX_SAVED_PROFILES = 12
 const READY_STATE_LABEL = getDesignSystemState("ready").label
 const ERROR_STATE_LABEL = getDesignSystemState("error").label
 const UNAVAILABLE_STATE_LABEL = getDesignSystemState("unavailable").label
@@ -95,6 +95,31 @@ function persistProfiles(profiles: SearchProfile[]): void {
     localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles.slice(0, MAX_SAVED_PROFILES)))
   } catch {
     // localStorage full or unavailable -- silently ignore
+  }
+}
+
+function dedupeProfilesByName(profiles: SearchProfile[]): SearchProfile[] {
+  const profilesByName = new Map<string, SearchProfile>()
+  profiles.forEach((profile) => {
+    const name = profile.name.trim()
+    if (name.length > 0) {
+      profilesByName.set(name, { ...profile, name })
+    }
+  })
+  return Array.from(profilesByName.values())
+}
+
+function parseProfileImport(rawValue: string): SearchProfile[] {
+  try {
+    const parsed = JSON.parse(rawValue)
+    const records = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.profiles)
+        ? parsed.profiles
+        : []
+    return dedupeProfilesByName(records.filter(isSearchProfile)).slice(0, MAX_SAVED_PROFILES)
+  } catch {
+    return []
   }
 }
 
@@ -450,9 +475,13 @@ export function KnowledgeContextBar({
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileSaveMode, setProfileSaveMode] = useState(false)
   const [profileNameInput, setProfileNameInput] = useState("")
+  const [profileTransferMode, setProfileTransferMode] = useState<"none" | "export" | "import">("none")
+  const [profileImportInput, setProfileImportInput] = useState("")
+  const [profileImportError, setProfileImportError] = useState<string | null>(null)
 
   const sourceMenuRef = useRef<HTMLDivElement | null>(null)
   const granularMenuRef = useRef<HTMLDivElement | null>(null)
+  const granularSearchInputRef = useRef<HTMLInputElement | null>(null)
   const granularLoadRequestIdRef = useRef(0)
 
   const normalizedSources = useMemo(
@@ -498,6 +527,7 @@ export function KnowledgeContextBar({
 
   const selectedMediaSet = useMemo(() => new Set(normalizedMediaIds), [normalizedMediaIds])
   const selectedNoteSet = useMemo(() => new Set(normalizedNoteIds), [normalizedNoteIds])
+  const exportedProfilesJson = useMemo(() => JSON.stringify(savedProfiles, null, 2), [savedProfiles])
 
   const presetDetail = preset === "custom" ? null : PRESET_DETAILS[preset]
   const presetDescription =
@@ -611,6 +641,14 @@ export function KnowledgeContextBar({
     if (!granularMenuOpen || granularLoaded || granularLoading) return
     void loadGranularOptions()
   }, [granularMenuOpen, granularLoaded, granularLoading, loadGranularOptions])
+
+  useEffect(() => {
+    if (!granularMenuOpen) return
+    const focusTimer = window.setTimeout(() => {
+      granularSearchInputRef.current?.focus()
+    }, 0)
+    return () => window.clearTimeout(focusTimer)
+  }, [granularMenuOpen, granularTab])
 
   const toggleSource = (sourceKey: RagSource) => {
     const exists = normalizedSources.includes(sourceKey)
@@ -729,6 +767,28 @@ export function KnowledgeContextBar({
     onIncludeNoteIdsChange(recentIds)
   }
 
+  const handleGranularMenuKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target
+    const targetElement = target instanceof HTMLElement ? target : null
+    const isFormControl =
+      targetElement instanceof HTMLInputElement ||
+      targetElement instanceof HTMLTextAreaElement ||
+      targetElement instanceof HTMLSelectElement
+
+    if (isFormControl) return
+
+    if (event.key === "]") {
+      event.preventDefault()
+      setGranularTab("notes")
+    } else if (event.key === "[") {
+      event.preventDefault()
+      setGranularTab("media")
+    } else if (event.key === "/") {
+      event.preventDefault()
+      granularSearchInputRef.current?.focus()
+    }
+  }, [])
+
   // ---- Saved search profile handlers ----
 
   const saveCurrentProfile = useCallback(() => {
@@ -784,6 +844,25 @@ export function KnowledgeContextBar({
     },
     [savedProfiles]
   )
+
+  const importProfiles = useCallback(() => {
+    const imported = parseProfileImport(profileImportInput)
+    if (imported.length === 0) {
+      setProfileImportError("Paste a valid profile export.")
+      return
+    }
+
+    const importedNames = new Set(imported.map((profile) => profile.name))
+    const updated = [
+      ...imported,
+      ...savedProfiles.filter((profile) => !importedNames.has(profile.name)),
+    ].slice(0, MAX_SAVED_PROFILES)
+    setSavedProfiles(updated)
+    persistProfiles(updated)
+    setProfileImportInput("")
+    setProfileImportError(null)
+    setProfileTransferMode("none")
+  }, [profileImportInput, savedProfiles])
 
   const activeGranularOptions = granularTab === "media" ? filteredMediaOptions : filteredNoteOptions
 
@@ -904,6 +983,8 @@ export function KnowledgeContextBar({
                   id="knowledge-granular-source-menu"
                   role="dialog"
                   aria-label="Specific source selector"
+                  aria-keyshortcuts="[ ] /"
+                  onKeyDown={handleGranularMenuKeyDown}
                 className="absolute left-0 z-30 mt-2 w-[28rem] max-w-[85vw] rounded-lg border border-border/80 bg-surface p-3 shadow-lg"
               >
                   <div className="mb-2 flex items-start justify-between gap-3">
@@ -967,6 +1048,7 @@ export function KnowledgeContextBar({
                   <label className="mb-2 flex h-9 items-center gap-2 rounded-md border border-border bg-surface2/70 px-2">
                     <Search className="h-3.5 w-3.5 text-text-muted" />
                     <input
+                      ref={granularSearchInputRef}
                       type="text"
                       value={granularQuery}
                       onChange={(event) => setGranularQuery(event.target.value)}
@@ -1258,6 +1340,9 @@ export function KnowledgeContextBar({
             if (!open) {
               setProfileSaveMode(false)
               setProfileNameInput("")
+              setProfileTransferMode("none")
+              setProfileImportInput("")
+              setProfileImportError(null)
             }
           }}
           placement="topLeft"
@@ -1266,11 +1351,14 @@ export function KnowledgeContextBar({
               id="knowledge-profile-menu"
               role="menu"
               aria-label="Saved search profiles"
-              className="w-60"
+              className="w-72"
             >
               <div className="mb-1.5 px-1 text-xs font-semibold text-text-muted">
                 Saved Profiles
               </div>
+              <p className="mb-2 rounded-md border border-border/70 bg-surface2/60 px-2 py-1.5 text-[11px] leading-snug text-text-muted">
+                Saved locally in this browser. Export includes selected source IDs and web fallback state; copied exports cannot be revoked.
+              </p>
               {savedProfiles.length === 0 && !profileSaveMode ? (
                 <p className="px-2 py-3 text-center text-[11px] text-text-muted">
                   No saved profiles yet.
@@ -1309,7 +1397,87 @@ export function KnowledgeContextBar({
                   </button>
                 </div>
               ))}
+              {profileTransferMode === "export" ? (
+                <div className="mt-1.5 rounded-md border border-border/80 bg-surface2/40 p-2">
+                  <p className="mb-1 text-[11px] leading-snug text-text-muted">
+                    Export includes selected source IDs and web fallback state, not source contents or credentials. Copied exports cannot be revoked.
+                  </p>
+                  <textarea
+                    aria-label="Exported profile JSON"
+                    readOnly
+                    value={exportedProfilesJson}
+                    className="h-24 w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-text outline-none"
+                  />
+                </div>
+              ) : null}
+              {profileTransferMode === "import" ? (
+                <div className="mt-1.5 rounded-md border border-border/80 bg-surface2/40 p-2">
+                  <label className="block text-[11px] font-medium text-text-muted">
+                    Profile import JSON
+                    <span className="block font-normal leading-snug">
+                      Importing stores the profile locally. Server access rules still control whether selected sources can be used.
+                    </span>
+                    <textarea
+                      aria-label="Profile import JSON"
+                      value={profileImportInput}
+                      onChange={(event) => {
+                        setProfileImportInput(event.target.value)
+                        setProfileImportError(null)
+                      }}
+                      className="mt-1 h-24 w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-text outline-none focus:border-primary"
+                    />
+                  </label>
+                  {profileImportError ? (
+                    <p className="mt-1 text-[11px] text-danger">{profileImportError}</p>
+                  ) : null}
+                  <div className="mt-1.5 flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileTransferMode("none")
+                        setProfileImportInput("")
+                        setProfileImportError(null)
+                      }}
+                      className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={importProfiles}
+                      disabled={!profileImportInput.trim()}
+                      className="inline-flex h-7 items-center rounded-md bg-primary px-2 text-[11px] font-medium text-white disabled:opacity-50 hover:bg-primary/90 transition-colors"
+                    >
+                      Import
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="mt-1 border-t border-border/60 pt-1.5">
+                <div className="mb-1.5 grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileSaveMode(false)
+                      setProfileTransferMode("export")
+                    }}
+                    disabled={savedProfiles.length === 0}
+                    className="rounded-md border border-border px-2 py-1.5 text-left text-xs text-text-muted hover:bg-surface2 hover:text-text disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+                  >
+                    Export profiles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileSaveMode(false)
+                      setProfileImportError(null)
+                      setProfileTransferMode("import")
+                    }}
+                    className="rounded-md border border-border px-2 py-1.5 text-left text-xs text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                  >
+                    Import profiles
+                  </button>
+                </div>
                 {profileSaveMode ? (
                   <div className="flex items-center gap-1.5 px-1">
                     <input
@@ -1342,6 +1510,7 @@ export function KnowledgeContextBar({
                     type="button"
                     onClick={() => {
                       if (savedProfiles.length >= MAX_SAVED_PROFILES) return
+                      setProfileTransferMode("none")
                       setProfileSaveMode(true)
                     }}
                     disabled={savedProfiles.length >= MAX_SAVED_PROFILES}

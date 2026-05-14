@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Sequence
@@ -33,6 +34,38 @@ def _append_case_insensitive_like(
     else:
         clauses.append(f"{column} LIKE ? COLLATE NOCASE")
     params.append(pattern)
+
+
+def _parse_safe_metadata(raw_value: Any) -> dict[str, Any] | None:
+    """Normalize latest-version safe_metadata JSON for media search results."""
+    if isinstance(raw_value, dict):
+        return raw_value
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+LATEST_SOURCE_METADATA_JOIN = """
+LEFT JOIN (
+    SELECT media_id, safe_metadata
+    FROM (
+        SELECT
+            dv.media_id,
+            dv.safe_metadata,
+            ROW_NUMBER() OVER (
+                PARTITION BY dv.media_id
+                ORDER BY dv.version_number DESC, dv.id DESC
+            ) AS row_number
+        FROM DocumentVersions dv
+        WHERE dv.deleted = 0
+    ) latest_document_versions
+    WHERE row_number = 1
+) latest_source_metadata ON latest_source_metadata.media_id = m.id
+"""
 
 
 class MediaSearchRepository:
@@ -146,6 +179,7 @@ class MediaSearchRepository:
             "m.version",
             "m.client_id",
             "m.deleted",
+            "latest_source_metadata.safe_metadata AS safe_metadata",
         ]
         count_select = "COUNT(DISTINCT m.id)"
         base_from = "FROM Media m"
@@ -517,8 +551,11 @@ class MediaSearchRepository:
 
             results_list: list[dict[str, Any]] = []
             if total_matches > 0 and offset < total_matches:
+                results_join_clause = " ".join(
+                    part for part in (join_clause, LATEST_SOURCE_METADATA_JOIN.strip()) if part
+                )
                 results_sql = (
-                    f"{final_select_stmt} {base_from} {join_clause} {where_clause} "
+                    f"{final_select_stmt} {base_from} {results_join_clause} {where_clause} "
                     f"{order_by_clause_str} LIMIT ? OFFSET ?"
                 )
                 if backend_type == BackendType.POSTGRESQL:
@@ -535,7 +572,11 @@ class MediaSearchRepository:
 
                 try:
                     results_cursor = db.execute_query(results_sql, paginated_params)
-                    results_list = [dict(row) for row in results_cursor.fetchall()]
+                    results_list = []
+                    for row in results_cursor.fetchall():
+                        item = dict(row)
+                        item["safe_metadata"] = _parse_safe_metadata(item.get("safe_metadata"))
+                        results_list.append(item)
                 except (sqlite3.OperationalError, DatabaseError) as exc:
                     if not _is_sqlite_fts_query_error(exc):
                         raise
@@ -565,17 +606,24 @@ class MediaSearchRepository:
                     fts_param_index = None
 
                     join_clause = " ".join(list(dict.fromkeys(joins)))
+                    results_join_clause = " ".join(
+                        part for part in (join_clause, LATEST_SOURCE_METADATA_JOIN.strip()) if part
+                    )
                     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
                     final_select_stmt = f"SELECT DISTINCT {', '.join(base_select_parts)}"
                     results_sql = (
-                        f"{final_select_stmt} {base_from} {join_clause} {where_clause} "
+                        f"{final_select_stmt} {base_from} {results_join_clause} {where_clause} "
                         f"{order_by_clause_str} LIMIT ? OFFSET ?"
                     )
                     paginated_params = tuple(list(params) + [results_per_page, offset])
                     logger.debug(f"Fallback Results SQL ({db.db_path_str}): {results_sql}")
                     logger.debug(f"Fallback Results Params: {paginated_params}")
                     results_cursor = db.execute_query(results_sql, paginated_params)
-                    results_list = [dict(row) for row in results_cursor.fetchall()]
+                    results_list = []
+                    for row in results_cursor.fetchall():
+                        item = dict(row)
+                        item["safe_metadata"] = _parse_safe_metadata(item.get("safe_metadata"))
+                        results_list.append(item)
 
                 titles = [row.get("title", "Untitled") for row in results_list]
                 logger.info(f"Search results for '{search_query}' (page {page}): {titles}")

@@ -300,6 +300,110 @@ def test_list_media_invalid_row_id_log_is_sanitized(monkeypatch):
     _assert_sanitized_error_log(logger_stub, "Skipping media row with invalid id")
 
 
+def test_list_media_exposes_source_picker_metadata(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
+
+    def _fake_paginated_files(*_args, **_kwargs):
+        return (
+            [
+                {
+                    "id": 7,
+                    "title": "Workspace QA Draft",
+                    "type": "document",
+                    "ingestion_date": "2026-05-14T10:00:00",
+                    "last_modified": "2026-05-14T10:05:00",
+                    "chunking_status": "processed",
+                    "safe_metadata": (
+                        '{"workspace_id":"workspace-qa",'
+                        '"workspace_name":"QA Workspace",'
+                        '"workspace_artifact":true,'
+                        '"is_generated":true,'
+                        '"test_artifact":true,'
+                        '"artifact_kind":"workspace_artifact",'
+                        '"private_notes":"do not leak"}'
+                    ),
+                },
+            ],
+            1,
+            1,
+            1,
+        )
+
+    monkeypatch.setattr(listing_endpoints, "get_paginated_files", _fake_paginated_files)
+
+    with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
+        response = client.get("/api/v1/media/")
+
+    assert response.status_code == 200, response.text  # nosec B101
+    item = response.json()["items"][0]
+    assert item == {
+        "id": 7,
+        "title": "Workspace QA Draft",
+        "type": "document",
+        "url": "/api/v1/media/7",
+        "status": "processed",
+        "created_at": "2026-05-14T10:00:00",
+        "updated_at": "2026-05-14T10:05:00",
+        "workspace_id": "workspace-qa",
+        "workspace_name": "QA Workspace",
+        "workspace_artifact": True,
+        "is_generated": True,
+        "test_artifact": True,
+        "artifact_kind": "workspace_artifact",
+    }  # nosec B101
+
+
+def test_search_media_exposes_source_picker_metadata(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
+
+    def _fake_search_media(*_args, **_kwargs):
+        return (
+            [
+                {
+                    "id": 11,
+                    "title": "Generated Search Result",
+                    "type": "document",
+                    "ingestion_date": "2026-05-14T11:00:00",
+                    "last_modified": "2026-05-14T11:05:00",
+                    "chunking_status": "processed",
+                    "safe_metadata": {
+                        "workspace_id": "workspace-search",
+                        "workspace_name": "Search Workspace",
+                        "workspace_artifact": True,
+                        "is_generated": True,
+                        "test_artifact": True,
+                        "artifact_kind": "workspace_artifact",
+                        "private_notes": "do not leak",
+                    },
+                },
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(listing_endpoints, "search_media", _fake_search_media)
+
+    with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
+        response = client.post("/api/v1/media/search", json={"query": "generated", "fields": ["title"]})
+
+    assert response.status_code == 200, response.text  # nosec B101
+    item = response.json()["items"][0]
+    assert item == {
+        "id": 11,
+        "title": "Generated Search Result",
+        "type": "document",
+        "url": "/api/v1/media/11",
+        "status": "processed",
+        "created_at": "2026-05-14T11:00:00",
+        "updated_at": "2026-05-14T11:05:00",
+        "workspace_id": "workspace-search",
+        "workspace_name": "Search Workspace",
+        "workspace_artifact": True,
+        "is_generated": True,
+        "test_artifact": True,
+        "artifact_kind": "workspace_artifact",
+    }  # nosec B101
+
+
 def test_list_media_trash_sanitizes_outer_failure_log(monkeypatch):
     logger_stub = _patch_listing_logger(monkeypatch)
     from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
