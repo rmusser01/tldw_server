@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from tldw_Server_API.app.core.VN_Scripts.validator import (
+    forbidden_generation_routing_keys,
     known_script_ops,
     supported_generation_output_schemas,
 )
@@ -51,6 +52,143 @@ _OP_METADATA: dict[str, dict[str, Any]] = {
     "show_sprite": {"label": "Show sprite", "capability_tokens": ()},
     "stop_bgm": {"label": "Stop BGM", "capability_tokens": ()},
     "voice_cue": {"label": "Voice cue", "capability_tokens": ()},
+}
+
+_CONDITION_FIELD: dict[str, Any] = {
+    "name": "if",
+    "type": "condition",
+    "required": False,
+    "description": "Optional variable condition evaluated by the runtime.",
+}
+
+_OP_FIELDS: dict[str, tuple[dict[str, Any], ...]] = {
+    "choice": (
+        {
+            "name": "id",
+            "type": "string",
+            "required": False,
+            "description": "Optional stable choice block identifier.",
+        },
+        {
+            "name": "choices",
+            "type": "array",
+            "required": True,
+            "items": {
+                "type": "object",
+                "required": ["target"],
+                "properties": {
+                    "id": {"type": "string", "required": False},
+                    "text": {"type": "string", "required": False},
+                    "target": {"type": "label", "required": True},
+                },
+            },
+        },
+    ),
+    "clear_visuals": (),
+    "end": (),
+    "generate": (
+        {"name": "profile_key", "type": "string", "required": False, "default": "default"},
+        {"name": "scope", "type": "enum", "required": False, "values": ["turn", "scene", "session"]},
+        {
+            "name": "output_schema",
+            "type": "enum",
+            "required": False,
+            "values": list(supported_generation_output_schemas()),
+        },
+        {"name": "max_choices", "type": "integer", "required": False, "minimum": 1},
+        {"name": "requires_user_confirm", "type": "boolean", "required": False},
+        {"name": "on_generated_choice", "type": "label", "required": False},
+        {"name": "on_cancel", "type": "label", "required": False},
+        {"name": "narrative_text", "type": "string", "required": False, "multiline": True},
+        {"name": "regeneration_text", "type": "string", "required": False, "multiline": True},
+    ),
+    "hide_sprite": ({"name": "slot_key", "type": "asset_slot", "required": False},),
+    "increment": (
+        {"name": "var", "type": "variable", "required": True},
+        {"name": "amount", "type": "number", "required": False, "default": 1},
+    ),
+    "jump": ({"name": "target", "type": "label", "required": True},),
+    "label": ({"name": "name", "type": "label", "required": True},),
+    "narrate": ({"name": "text", "type": "string", "required": True, "multiline": True},),
+    "play_bgm": ({"name": "media_ref", "type": "audio_ref", "required": True},),
+    "play_sfx": ({"name": "media_ref", "type": "audio_ref", "required": True},),
+    "random": (
+        {"name": "id", "type": "string", "required": False},
+        {"name": "var", "type": "variable", "required": False},
+        {"name": "min", "type": "integer", "required": False},
+        {"name": "max", "type": "integer", "required": False},
+    ),
+    "return": (),
+    "say": (
+        {"name": "speaker", "type": "string", "required": True},
+        {"name": "text", "type": "string", "required": True, "multiline": True},
+    ),
+    "set": (
+        {"name": "var", "type": "variable", "required": True},
+        {"name": "value", "type": "json", "required": True},
+    ),
+    "set_background": ({"name": "slot_key", "type": "asset_slot", "required": True},),
+    "show_cg": ({"name": "slot_key", "type": "asset_slot", "required": True},),
+    "show_sprite": ({"name": "slot_key", "type": "asset_slot", "required": True},),
+    "stop_bgm": (),
+    "voice_cue": ({"name": "media_ref", "type": "audio_ref", "required": True},),
+}
+
+_OP_PREVIEWS: dict[str, dict[str, Any]] = {
+    "choice": {"op": "choice", "choices": [{"text": "Open the door.", "target": "open_door"}]},
+    "clear_visuals": {"op": "clear_visuals"},
+    "end": {"op": "end"},
+    "generate": {"op": "generate", "scope": "turn", "output_schema": "choice_set", "on_generated_choice": "generated_choice"},
+    "hide_sprite": {"op": "hide_sprite", "slot_key": "sprite.character.neutral"},
+    "increment": {"op": "increment", "var": "trust", "amount": 1},
+    "jump": {"op": "jump", "target": "next_scene"},
+    "label": {"op": "label", "name": "next_scene"},
+    "narrate": {"op": "narrate", "text": "The scene opens."},
+    "play_bgm": {"op": "play_bgm", "media_ref": "bgm_theme"},
+    "play_sfx": {"op": "play_sfx", "media_ref": "door_knock"},
+    "random": {"op": "random", "var": "roll", "min": 1, "max": 6},
+    "return": {"op": "return"},
+    "say": {"op": "say", "speaker": "Mira", "text": "Which way?"},
+    "set": {"op": "set", "var": "has_key", "value": True},
+    "set_background": {"op": "set_background", "slot_key": "background.archive.default"},
+    "show_cg": {"op": "show_cg", "slot_key": "cg.reveal.default"},
+    "show_sprite": {"op": "show_sprite", "slot_key": "sprite.mira.neutral"},
+    "stop_bgm": {"op": "stop_bgm"},
+    "voice_cue": {"op": "voice_cue", "media_ref": "voice_mira_line_001"},
+}
+
+_SUPPORTS_CONDITION = {
+    "choice",
+    "clear_visuals",
+    "end",
+    "generate",
+    "hide_sprite",
+    "increment",
+    "jump",
+    "narrate",
+    "play_bgm",
+    "play_sfx",
+    "random",
+    "return",
+    "say",
+    "set",
+    "set_background",
+    "show_cg",
+    "show_sprite",
+    "stop_bgm",
+    "voice_cue",
+}
+
+_OP_NOTES: dict[str, tuple[str, ...]] = {
+    "generate": (
+        "Generation profiles, output-schema support, moderation, and limits are resolved by backend preview/apply/validate.",
+    ),
+    "set_background": ("slot_key must resolve to an approved visual asset pack slot.",),
+    "show_cg": ("slot_key must resolve to an approved visual asset pack slot.",),
+    "show_sprite": ("slot_key must resolve to an approved visual asset pack slot.",),
+    "play_bgm": ("media_ref must resolve to accessible audio metadata.",),
+    "play_sfx": ("media_ref must resolve to accessible audio metadata.",),
+    "voice_cue": ("media_ref must resolve to accessible audio metadata.",),
 }
 
 _SNIPPETS: tuple[dict[str, Any], ...] = (
@@ -112,7 +250,7 @@ _SNIPPETS: tuple[dict[str, Any], ...] = (
                 },
             },
         },
-        "preview": [{"op": "choice", "choice_id": "{choice_id}", "choices": [{"target_label": "{target_label}"}]}],
+        "preview": [{"op": "choice", "id": "{choice_id}", "choices": [{"target": "{target_label}"}]}],
     },
     {
         "id": "generated_choice_set",
@@ -142,7 +280,7 @@ _SNIPPETS: tuple[dict[str, Any], ...] = (
                 "op": "generate",
                 "scope": "turn",
                 "output_schema": "choice_set",
-                "handler_label": "{handler_label}",
+                "on_generated_choice": "{handler_label}",
             }
         ],
     },
@@ -311,7 +449,34 @@ def _operations_payload() -> list[dict[str, Any]]:
                 "op": op,
                 "label": metadata["label"],
                 "category": categories_by_op.get(op, "other"),
+                "description": metadata.get("description", f"Author {metadata['label'].lower()} operations."),
+                "fields": _operation_fields(op),
                 "capability_tokens": list(metadata.get("capability_tokens", ())),
+                "forbidden_fields": _forbidden_generation_fields() if op == "generate" else [],
+                "supports_condition": op in _SUPPORTS_CONDITION,
+                "preview": deepcopy(_OP_PREVIEWS.get(op)),
+                "output_compatibility": _operation_output_compatibility(op),
+                "notes": list(_OP_NOTES.get(op, ("Backend diagnostics remain authoritative.",))),
             }
         )
     return operations
+
+
+def _operation_fields(op: str) -> list[dict[str, Any]]:
+    fields = [deepcopy(field) for field in _OP_FIELDS.get(op, ())]
+    if op in _SUPPORTS_CONDITION:
+        fields.append(deepcopy(_CONDITION_FIELD))
+    return fields
+
+
+def _forbidden_generation_fields() -> list[str]:
+    return list(forbidden_generation_routing_keys())
+
+
+def _operation_output_compatibility(op: str) -> dict[str, Any]:
+    if op != "generate":
+        return {}
+    return {
+        "supported_output_schemas": list(supported_generation_output_schemas()),
+        "choice_set_requires": ["on_generated_choice"],
+    }

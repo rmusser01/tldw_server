@@ -133,9 +133,10 @@ function readErrorCode(record: Record<string, unknown> | null): string | undefin
   return (
     readString(record.reason) ??
     readString(record.error_code) ??
-    readString(record.code) ??
     readErrorCode(asRecord(record.detail)) ??
-    readErrorCode(asRecord(record.details))
+    readErrorCode(asRecord(record.details)) ??
+    readString(record.message) ??
+    readString(record.code)
   );
 }
 
@@ -255,6 +256,7 @@ export default function VNScriptsWorkbench() {
   const draftHydrationRef = useRef<VNScriptDraftResponse | null>(null);
   const publishKeyRef = useRef<Record<string, string>>({});
   const snippetPreviewContextKeyRef = useRef<string | null>(null);
+  const previewRequestIdRef = useRef(0);
 
   function clearSnippetPreviewState() {
     setSnippetPreview(null);
@@ -562,6 +564,8 @@ export default function VNScriptsWorkbench() {
     setSnippetPreview(null);
     setSnippetPreviewContextKey(null);
     snippetPreviewContextKeyRef.current = previewContextKey;
+    const previewRequestId = previewRequestIdRef.current + 1;
+    previewRequestIdRef.current = previewRequestId;
     try {
       const preview = await previewVNScriptSnippet(previewScriptId, {
         snippet_id: selectedSnippet.id,
@@ -587,7 +591,9 @@ export default function VNScriptsWorkbench() {
       }
       setSnippetError(errorMessage(previewError, 'Failed to preview snippet'));
     } finally {
-      setIsPreviewingSnippet(false);
+      if (previewRequestIdRef.current === previewRequestId) {
+        setIsPreviewingSnippet(false);
+      }
     }
   }, [
     currentSnippetPreviewContextKey,
@@ -602,6 +608,10 @@ export default function VNScriptsWorkbench() {
   const handleApplySnippet = useCallback(async () => {
     if (!selectedScript || !selectedSnippet || !draft || !hasCurrentSnippetPreview) return;
     const scriptId = selectedScript.id;
+    const applyContextKey = snippetPreviewContextKeyRef.current;
+    if (!applyContextKey) return;
+    const isApplyContextCurrent = () =>
+      selectedScriptIdRef.current === scriptId && snippetPreviewContextKeyRef.current === applyContextKey;
 
     setIsApplyingSnippet(true);
     setSnippetError(null);
@@ -613,7 +623,7 @@ export default function VNScriptsWorkbench() {
         anchor: snippetAnchor,
         parameters: snippetParameters,
       });
-      if (selectedScriptIdRef.current !== scriptId) return;
+      if (!isApplyContextCurrent()) return;
       const nextDraft = {
         script_id: applied.script_id,
         revision: applied.revision,
@@ -649,13 +659,13 @@ export default function VNScriptsWorkbench() {
       snippetPreviewContextKeyRef.current = null;
       setStatusMessage(`Applied snippet at revision ${applied.revision}.`);
     } catch (applyError) {
-      if (selectedScriptIdRef.current !== scriptId) return;
+      if (!isApplyContextCurrent()) return;
       const message = errorMessage(applyError, 'Failed to apply snippet');
       const errorCode = readErrorCode(asRecord(applyError));
       if (message === 'draft_revision_conflict' || errorCode === 'draft_revision_conflict') {
         try {
           const latestDraft = await getVNScriptDraft(scriptId);
-          if (selectedScriptIdRef.current !== scriptId) return;
+          if (!isApplyContextCurrent()) return;
           setDraft(latestDraft);
           setDraftText(formatJson(latestDraft.draft));
           setDiagnostics(null);
@@ -663,14 +673,16 @@ export default function VNScriptsWorkbench() {
           clearSnippetPreviewState();
           setStatusMessage('Draft changed on the server. Reloaded the latest draft; review before applying again.');
         } catch {
-          if (selectedScriptIdRef.current !== scriptId) return;
+          if (!isApplyContextCurrent()) return;
           setSnippetError('Draft changed on the server. Refresh the draft before applying again.');
         }
       } else {
         setSnippetError(message);
       }
     } finally {
-      setIsApplyingSnippet(false);
+      if (selectedScriptIdRef.current === scriptId) {
+        setIsApplyingSnippet(false);
+      }
     }
   }, [draft, hasCurrentSnippetPreview, selectedScript, selectedSnippet, snippetAnchor, snippetParameters]);
 
@@ -1144,7 +1156,13 @@ export default function VNScriptsWorkbench() {
                                 );
                               })}
                             </div>
-                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px]">
+                            <div
+                              className={
+                                snippetAnchor.mode === 'append'
+                                  ? 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px]'
+                                  : 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px_120px]'
+                              }
+                            >
                               <Input
                                 label="Anchor label"
                                 value={snippetAnchor.label}
@@ -1169,6 +1187,21 @@ export default function VNScriptsWorkbench() {
                                   <option value="after">after</option>
                                 </select>
                               </label>
+                              {snippetAnchor.mode !== 'append' && (
+                                <Input
+                                  label="Op index"
+                                  type="number"
+                                  min={0}
+                                  value={String(snippetAnchor.op_index ?? 0)}
+                                  onChange={(event) => {
+                                    const nextIndex = Number(event.target.value);
+                                    handleSnippetAnchorChange({
+                                      ...snippetAnchor,
+                                      op_index: Number.isInteger(nextIndex) && nextIndex >= 0 ? nextIndex : 0,
+                                    });
+                                  }}
+                                />
+                              )}
                             </div>
                             {snippetError && (
                               <p className="rounded-md border border-danger/30 bg-danger/10 p-2 text-sm text-danger">

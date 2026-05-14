@@ -585,12 +585,15 @@ describe('VNScriptsWorkbench', () => {
     render(<VNScriptsWorkbench />);
 
     await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.selectOptions(screen.getByLabelText('Anchor mode'), 'before');
+    await user.clear(screen.getByLabelText('Op index'));
+    await user.type(screen.getByLabelText('Op index'), '2');
     await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
 
     await waitFor(() => {
       expect(mocks.previewVNScriptSnippet).toHaveBeenCalledWith(1, {
         snippet_id: 'generated_choice_set',
-        anchor: { label: 'start', mode: 'append', op_index: null },
+        anchor: { label: 'start', mode: 'before', op_index: 2 },
         parameters: {
           prompt: 'Offer three routes.',
           count: 3,
@@ -786,6 +789,64 @@ describe('VNScriptsWorkbench', () => {
     expect(screen.getByText(/current_preview/)).toBeInTheDocument();
   });
 
+  it('keeps preview loading active when an older preview resolves before the current one', async () => {
+    const user = userEvent.setup();
+    const firstPreview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    const secondPreview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    mocks.previewVNScriptSnippet
+      .mockReturnValueOnce(firstPreview.promise)
+      .mockReturnValueOnce(secondPreview.promise);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: JSON.stringify({ scenes: [{ id: 'changed', text: 'Changed before preview B.' }] }) },
+    });
+    await waitFor(() => expect(screen.getByDisplayValue(/Changed before preview B/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(2));
+
+    firstPreview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'start' }], choices: [{ prompt: 'stale preview' }] },
+      diagnostics: { valid: true },
+      patch_summary: { inserted_ops: 1, created_labels: ['stale_preview'], changed_paths: [] },
+      warnings: [],
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview snippet' })).toHaveAttribute('aria-busy', 'true'));
+    secondPreview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'changed' }], choices: [{ prompt: 'current preview' }] },
+      diagnostics: { valid: true },
+      patch_summary: { inserted_ops: 1, created_labels: ['current_preview'], changed_paths: ['labels.current_preview[1]'] },
+      warnings: [],
+    });
+    expect(await screen.findByText(/current_preview/)).toBeInTheDocument();
+  });
+
   it('ignores stale snippet apply responses after switching scripts', async () => {
     const user = userEvent.setup();
     const apply = createDeferred<{
@@ -840,16 +901,56 @@ describe('VNScriptsWorkbench', () => {
     expect(screen.queryByText('Applied snippet at revision 4.')).not.toBeInTheDocument();
   });
 
+  it('ignores apply responses after same-script raw JSON edits invalidate the preview context', async () => {
+    const user = userEvent.setup();
+    const apply = createDeferred<{
+      script_id: number;
+      revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+    }>();
+    mocks.applyVNScriptSnippet.mockReturnValueOnce(apply.promise);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    await waitFor(() => expect(mocks.applyVNScriptSnippet).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: JSON.stringify({ scenes: [{ id: 'local', text: 'Keep local edit.' }] }) },
+    });
+    apply.resolve({
+      script_id: 1,
+      revision: 4,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'server' }], choices: [{ prompt: 'server response' }] },
+      diagnostics: { valid: true },
+      patch_summary: { inserted_ops: 1, created_labels: [], changed_paths: [] },
+    });
+
+    await waitFor(() => expect(screen.getByDisplayValue(/Keep local edit/)).toBeInTheDocument());
+    expect(screen.queryByDisplayValue(/server response/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Applied snippet at revision 4.')).not.toBeInTheDocument();
+  });
+
   it('ignores stale conflict reload responses after switching scripts', async () => {
     const user = userEvent.setup();
     const conflict = new Error('[object Object]') as Error & {
-      detail?: { details?: { reason?: string } };
+      detail?: { code?: string; message?: string; details?: { reason?: string } };
       status?: number;
     };
     const conflictReload = createDeferred<typeof draftResponse>();
     let openingDraftCalls = 0;
     conflict.status = 409;
-    conflict.detail = { details: { reason: 'draft_revision_conflict' } };
+    conflict.detail = {
+      code: 'invalid_request',
+      message: 'draft_revision_conflict',
+      details: { reason: 'draft_revision_conflict' },
+    };
     mocks.applyVNScriptSnippet.mockRejectedValueOnce(conflict);
     mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) => {
       if (scriptId === 2) {
@@ -894,13 +995,17 @@ describe('VNScriptsWorkbench', () => {
   it('ignores stale conflict reload errors after switching scripts', async () => {
     const user = userEvent.setup();
     const conflict = new Error('[object Object]') as Error & {
-      detail?: { details?: { reason?: string } };
+      detail?: { code?: string; message?: string; details?: { reason?: string } };
       status?: number;
     };
     const conflictReload = createDeferred<typeof draftResponse>();
     let openingDraftCalls = 0;
     conflict.status = 409;
-    conflict.detail = { details: { reason: 'draft_revision_conflict' } };
+    conflict.detail = {
+      code: 'invalid_request',
+      message: 'draft_revision_conflict',
+      details: { reason: 'draft_revision_conflict' },
+    };
     mocks.applyVNScriptSnippet.mockRejectedValueOnce(conflict);
     mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) => {
       if (scriptId === 2) {
@@ -982,11 +1087,15 @@ describe('VNScriptsWorkbench', () => {
   it('handles draft revision conflicts without duplicating snippet content', async () => {
     const user = userEvent.setup();
     const conflict = new Error('[object Object]') as Error & {
-      detail?: { details?: { reason?: string } };
+      detail?: { code?: string; message?: string; details?: { reason?: string } };
       status?: number;
     };
     conflict.status = 409;
-    conflict.detail = { details: { reason: 'draft_revision_conflict' } };
+    conflict.detail = {
+      code: 'invalid_request',
+      message: 'draft_revision_conflict',
+      details: { reason: 'draft_revision_conflict' },
+    };
     mocks.applyVNScriptSnippet.mockRejectedValueOnce(conflict);
     render(<VNScriptsWorkbench />);
 

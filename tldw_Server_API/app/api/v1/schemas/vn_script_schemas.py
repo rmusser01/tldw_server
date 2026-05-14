@@ -109,7 +109,14 @@ class VNScriptAuthoringOperation(BaseModel):
     op: str
     label: str
     category: str
+    description: str | None = None
+    fields: list[dict[str, Any]] = Field(default_factory=list)
     capability_tokens: list[str] = Field(default_factory=list)
+    forbidden_fields: list[str] = Field(default_factory=list)
+    supports_condition: bool = False
+    preview: dict[str, Any] | None = None
+    output_compatibility: dict[str, Any] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -148,10 +155,18 @@ class VNScriptSnippetAnchor(BaseModel):
     """Snippet insertion anchor."""
 
     label: str = Field(..., min_length=1)
-    mode: str = Field(default="append", min_length=1)
+    mode: Literal["append", "before", "after"] = "append"
     op_index: int | None = Field(default=None, ge=0)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "VNScriptSnippetAnchor":
+        if self.mode in {"before", "after"} and self.op_index is None:
+            raise ValueError("op_index_required")
+        if self.mode == "append":
+            self.op_index = None
+        return self
 
 
 class VNScriptSnippetPreviewRequest(BaseModel):
@@ -164,6 +179,12 @@ class VNScriptSnippetPreviewRequest(BaseModel):
     draft_revision: int | None = Field(default=None, ge=0)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_draft_revision(self) -> "VNScriptSnippetPreviewRequest":
+        if self.draft is not None and self.draft_revision is None:
+            raise ValueError("draft_revision_required")
+        return self
 
 
 class VNScriptSnippetApplyRequest(BaseModel):

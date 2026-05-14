@@ -24,6 +24,11 @@ class SnippetPatchResult:
     patch_summary: dict[str, Any]
 
 
+def _json_path_key(key: str) -> str:
+    escaped = key.replace("\\", "\\\\").replace("'", "\\'")
+    return f"['{escaped}']"
+
+
 def apply_snippet_patch(
     draft: Mapping[str, Any],
     snippet_id: str,
@@ -51,8 +56,11 @@ def apply_snippet_patch(
         created_labels.append(created_label)
 
     inserted_count = len(snippet["ops"])
-    changed_paths = [f"$.labels.{label}[{index}]" for index in range(insert_at, insert_at + inserted_count)]
-    changed_paths.extend(f"$.labels.{created_label}" for created_label in created_labels)
+    changed_paths = [
+        f"$.labels{_json_path_key(label)}[{index}]"
+        for index in range(insert_at, insert_at + inserted_count)
+    ]
+    changed_paths.extend(f"$.labels{_json_path_key(created_label)}" for created_label in created_labels)
     return SnippetPatchResult(
         draft=patched,
         patch_summary={

@@ -74,7 +74,14 @@ export interface VNScriptAuthoringOperation {
   op: string;
   label: string;
   category: string;
+  description?: string | null;
+  fields: Array<Record<string, unknown>>;
   capability_tokens: string[];
+  forbidden_fields: string[];
+  supports_condition: boolean;
+  preview?: Record<string, unknown> | null;
+  output_compatibility: Record<string, unknown>;
+  notes: string[];
 }
 
 export interface VNScriptAuthoringSnippet {

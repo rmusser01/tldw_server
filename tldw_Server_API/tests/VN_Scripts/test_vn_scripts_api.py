@@ -405,7 +405,6 @@ def test_snippet_preview_anchor_errors_return_anchor_details(
         json={"if_revision": 0, "draft": _program(asset_pack_id)},
     )
     cases = [
-        ({"label": "start", "mode": "beside"}, "snippet_anchor_invalid"),
         ({"label": "missing", "mode": "append"}, "snippet_anchor_not_found"),
     ]
 
@@ -422,6 +421,58 @@ def test_snippet_preview_anchor_errors_return_anchor_details(
         details = response.json()["detail"]["details"]
         assert details["reason"] == expected_reason
         assert details["anchor"] == anchor
+
+
+def test_snippet_preview_schema_rejects_invalid_anchor_shape(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": _program(asset_pack_id)},
+    )
+
+    invalid_mode = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "beside"},
+            "parameters": {"text": "Line."},
+        },
+    )
+    missing_index = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "before"},
+            "parameters": {"text": "Line."},
+        },
+    )
+
+    assert invalid_mode.status_code == 422
+    assert missing_index.status_code == 422
+
+
+def test_snippet_preview_schema_requires_revision_for_supplied_draft(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+    script_id = _create_script(client, asset_pack_id=asset_pack_id)
+
+    response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview",
+        json={
+            "snippet_id": "narration",
+            "anchor": {"label": "start", "mode": "append"},
+            "parameters": {"text": "Line."},
+            "draft": _program(asset_pack_id),
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_snippet_apply_stale_revision_returns_current_revision(

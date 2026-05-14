@@ -457,8 +457,24 @@ def test_generated_choice_set_patch_inserts_generate_and_handler_without_mutatin
     assert result.patch_summary == {
         "inserted_ops": 1,
         "created_labels": ["generated_choice"],
-        "changed_paths": ["$.labels.start[1]", "$.labels.generated_choice"],
+        "changed_paths": ["$.labels['start'][1]", "$.labels['generated_choice']"],
     }
+
+
+def test_patch_changed_paths_escape_special_label_names() -> None:
+    result = apply_snippet_patch(
+        {
+            "schema_version": "vn_script_program.v1",
+            "primary_asset_pack_id": 7,
+            "entry_label": "chapter.one",
+            "labels": {"chapter.one": [{"op": "end"}]},
+        },
+        "narration",
+        {"label": "chapter.one", "mode": "before", "op_index": 0},
+        {"text": "Inserted."},
+    )
+
+    assert result.patch_summary["changed_paths"] == ["$.labels['chapter.one'][0]"]
 
 
 def test_patch_rejects_nested_raw_generation_routing_keys() -> None:
@@ -711,6 +727,22 @@ def test_catalog_is_preview_safe_and_includes_canonical_capability_tokens() -> N
     assert _forbidden_keys_present(catalog) == set()
 
 
+def test_catalog_operations_include_advisory_fields_and_examples() -> None:
+    catalog = list_authoring_catalog()
+    operations = {operation["op"]: operation for operation in catalog["operations"]}
+
+    narrate = operations["narrate"]
+    assert narrate["fields"][0]["name"] == "text"
+    assert narrate["fields"][0]["required"] is True
+    assert narrate["preview"] == {"op": "narrate", "text": "The scene opens."}
+    assert narrate["supports_condition"] is True
+
+    generate = operations["generate"]
+    assert "output_schema" in {field["name"] for field in generate["fields"]}
+    assert generate["output_compatibility"]["supported_output_schemas"]
+    assert "api_key" in generate["forbidden_fields"]
+
+
 def test_catalog_includes_required_v1_snippets_with_parameters_schema() -> None:
     catalog = list_authoring_catalog()
 
@@ -746,8 +778,8 @@ def test_generated_choice_snippet_exposes_handler_label_not_opcode_target() -> N
     assert "on_generated_choice" not in schema["properties"]
     assert "handler_label" in default_parameters
     assert "on_generated_choice" not in default_parameters
-    assert "handler_label" in str(snippet["preview"])
-    assert "on_generated_choice" not in str(snippet["preview"])
+    assert snippet["preview"][0]["on_generated_choice"] == "{handler_label}"
+    assert "handler_label" not in snippet["preview"][0]
 
 
 def test_authored_choice_snippet_exposes_public_choice_fields_not_opcode_fields() -> None:
@@ -763,8 +795,10 @@ def test_authored_choice_snippet_exposes_public_choice_fields_not_opcode_fields(
     assert choice_schema["required"] == ["id", "text", "target_label"]
     assert "target_label" in choice_schema["properties"]
     assert "target" not in choice_schema["properties"]
-    assert "choice_id" in str(snippet["preview"])
-    assert "target_label" in str(snippet["preview"])
+    assert snippet["preview"][0]["id"] == "{choice_id}"
+    assert snippet["preview"][0]["choices"][0]["target"] == "{target_label}"
+    assert "choice_id" not in snippet["preview"][0]
+    assert "target_label" not in snippet["preview"][0]["choices"][0]
 
 
 def test_catalog_json_contains_no_validation_codes_or_routing_secrets() -> None:
@@ -772,8 +806,6 @@ def test_catalog_json_contains_no_validation_codes_or_routing_secrets() -> None:
 
     serialized = str(catalog).lower()
     assert "validation_codes" not in serialized
-    assert "api_key" not in serialized
-    assert "provider_config" not in serialized
     assert "raw prompt" not in serialized
     assert "raw_prompt" not in serialized
     for key in forbidden_generation_routing_keys():

@@ -109,6 +109,22 @@ class APIValidationError(HTTPException):
         super().__init__(status_code=resolved_status, detail=detail)
 
 
+class VNScriptAuthoringError(ValueError):
+    """Raised when VN script authoring preview/apply input cannot be patched."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int = 400,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.details = details or {}
+
+
 class SyncCallInEventLoopError(BadRequestError):
     """Raised when a sync chat call is made inside a running event loop."""
 
