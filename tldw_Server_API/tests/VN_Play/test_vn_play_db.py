@@ -301,6 +301,110 @@ def test_session_action_idempotency_key_is_unique_per_session_and_decodes_json(
     )["id"] == first["id"]
 
 
+def test_recover_expired_active_turn_lock_abandons_request_and_clears_lock(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="freeform",
+        title="Library night",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-1",
+        settings={},
+    )
+    turn = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="stale-turn",
+        request_payload_hash="hash-a",
+        base_scene_version=0,
+        status="model_calling",
+    )
+    repo.update_turn_request(
+        turn["id"],
+        {"locked_until": "2000-01-01 00:00:00", "lease_owner": "worker-1"},
+        owner_user_id=42,
+    )
+    repo.update_session(
+        session["id"],
+        {"active_turn_request_id": int(turn["id"])},
+        owner_user_id=42,
+    )
+
+    recovered = repo.recover_expired_active_turn_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        error_code="turn_lock_abandoned",
+    )
+
+    assert recovered is not None
+    assert recovered["id"] == turn["id"]
+    assert recovered["status"] == "abandoned"
+    assert recovered["error"] == {"code": "turn_lock_abandoned"}
+    assert recovered["locked_until"] is None
+    assert recovered["lease_owner"] is None
+    assert repo.get_session(session["id"], owner_user_id=42)["active_turn_request_id"] is None
+
+
+def test_recover_expired_active_turn_lock_preserves_fresh_and_terminal_turns(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="freeform",
+        title="Library night",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-1",
+        settings={},
+    )
+    fresh = repo.create_turn_request(
+        session_id=session["id"],
+        owner_user_id=42,
+        idempotency_key="fresh-turn",
+        request_payload_hash="hash-a",
+        base_scene_version=0,
+        status="model_calling",
+    )
+    repo.update_turn_request(
+        fresh["id"],
+        {"locked_until": "2999-01-01 00:00:00", "lease_owner": "worker-1"},
+        owner_user_id=42,
+    )
+    repo.update_session(
+        session["id"],
+        {"active_turn_request_id": int(fresh["id"])},
+        owner_user_id=42,
+    )
+
+    assert repo.recover_expired_active_turn_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        error_code="turn_lock_abandoned",
+    ) is None
+    assert repo.get_session(session["id"], owner_user_id=42)["active_turn_request_id"] == fresh["id"]
+    assert repo.get_turn_request(fresh["id"])["status"] == "model_calling"
+
+    completed = repo.update_turn_request(
+        fresh["id"],
+        {"status": "completed", "locked_until": "2000-01-01 00:00:00"},
+        owner_user_id=42,
+    )
+
+    assert repo.recover_expired_active_turn_lock(
+        session_id=session["id"],
+        owner_user_id=42,
+        error_code="turn_lock_abandoned",
+    ) is None
+    assert repo.get_session(session["id"], owner_user_id=42)["active_turn_request_id"] == fresh["id"]
+    assert repo.get_turn_request(fresh["id"])["status"] == completed["status"]
+
+
 def test_generation_point_is_unique_per_owner_session_and_key(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -1120,6 +1224,51 @@ def test_turn_and_session_action_locks_share_session_mutation_gate(
     ) is True
     repo.clear_session_action_lock(session_id=session["id"], owner_user_id=42)
     assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
+
+
+def test_try_acquire_turn_lock_rolls_back_when_request_lease_update_misses(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="freeform",
+        title="Library night",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-1",
+        settings={},
+    )
+    other_session = repo.create_session(
+        owner_user_id=42,
+        mode="freeform",
+        title="Other room",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-2",
+        settings={},
+    )
+    foreign_turn = repo.create_turn_request(
+        session_id=other_session["id"],
+        owner_user_id=42,
+        idempotency_key="foreign-turn",
+        request_payload_hash="foreign-turn",
+        base_scene_version=0,
+    )
+
+    with pytest.raises(RuntimeError, match="turn_request_lease_update_failed"):
+        repo.try_acquire_turn_lock(
+            session_id=session["id"],
+            owner_user_id=42,
+            turn_request_id=foreign_turn["id"],
+            expected_scene_version=0,
+            lease_owner="worker-1",
+            locked_until="2999-01-01 00:00:00",
+        )
+
+    assert repo.get_session(session["id"], owner_user_id=42)["active_turn_request_id"] is None
 
 
 def test_session_action_terminal_update_clears_only_matching_lock(

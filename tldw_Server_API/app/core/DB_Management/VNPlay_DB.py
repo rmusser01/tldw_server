@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -570,6 +571,8 @@ class VNPlayRepository:
         owner_user_id: int,
         turn_request_id: int,
         expected_scene_version: int,
+        lease_owner: str | None = None,
+        locked_until: str | None = None,
     ) -> bool:
         """Attach an active turn to a session if its scene version is still current."""
         self._ensure_schema_initialized()
@@ -592,7 +595,30 @@ class VNPlayRepository:
                     expected_scene_version,
                 ),
             )
-            return cursor.rowcount == 1
+            if cursor.rowcount != 1:
+                return False
+            if lease_owner is not None or locked_until is not None:
+                lease_cursor = conn.execute(
+                    """
+                    UPDATE vn_play_turn_requests
+                    SET lease_owner = ?,
+                        locked_until = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND session_id = ?
+                      AND owner_user_id = ?
+                    """,
+                    (
+                        lease_owner,
+                        locked_until,
+                        turn_request_id,
+                        session_id,
+                        owner_user_id,
+                    ),
+                )
+                if lease_cursor.rowcount != 1:
+                    raise RuntimeError("turn_request_lease_update_failed")
+            return True
 
     def try_acquire_session_action_lock(
         self,
@@ -1494,6 +1520,76 @@ class VNPlayRepository:
                     statement,
                     (value, turn_request_id, owner_user_id, owner_user_id),
                 )
+        return self.get_turn_request(turn_request_id)
+
+    def recover_expired_active_turn_lock(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        error_code: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Abandon an expired active turn request and clear its session lock."""
+        self._ensure_schema_initialized()
+        current_time = now or datetime.now(timezone.utc)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                SELECT turn.*
+                FROM vn_play_sessions AS session
+                JOIN vn_play_turn_requests AS turn
+                  ON turn.id = session.active_turn_request_id
+                 AND turn.session_id = session.id
+                 AND turn.owner_user_id = session.owner_user_id
+                WHERE session.id = ?
+                  AND session.owner_user_id = ?
+                  AND session.deleted = 0
+                """,
+                (session_id, owner_user_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            turn_request = _decode_turn_request(row)
+            if turn_request["status"] not in {"pending", "model_calling"}:
+                return None
+            locked_until = _parse_datetime_utc(turn_request.get("locked_until"))
+            if locked_until is None or locked_until > current_time:
+                return None
+
+            turn_request_id = int(turn_request["id"])
+            update_cursor = conn.execute(
+                """
+                UPDATE vn_play_turn_requests
+                SET status = 'abandoned',
+                    error_json = ?,
+                    lease_owner = NULL,
+                    locked_until = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND status IN ('pending', 'model_calling')
+                """,
+                (_json_dump({"code": error_code}), turn_request_id, owner_user_id),
+            )
+            if update_cursor.rowcount != 1:
+                return None
+            conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET active_turn_request_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND active_turn_request_id = ?
+                """,
+                (session_id, owner_user_id, turn_request_id),
+            )
+
         return self.get_turn_request(turn_request_id)
 
     def get_or_create_generation(
@@ -3764,6 +3860,28 @@ def _json_loads(value: Any, default: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+def _parse_datetime_utc(value: Any) -> datetime | None:
+    """Parse a stored timestamp value and normalize it to UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _choice_id_is_visible(choices: Any, choice_id: Any) -> bool:

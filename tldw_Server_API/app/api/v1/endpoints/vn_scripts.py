@@ -23,6 +23,8 @@ from tldw_Server_API.app.api.v1.schemas.vn_script_schemas import (
     VNScriptListResponse,
     VNScriptManifestSnapshotResponse,
     VNScriptPatch,
+    VNScriptPlaytestRequest,
+    VNScriptPlaytestResponse,
     VNScriptPublishRequest,
     VNScriptPublishResponse,
     VNScriptResponse,
@@ -311,6 +313,61 @@ async def preview_draft_graph(
         raise _handle_value_error(exc) from exc
 
 
+@router.post(
+    "/scripts/{script_id}/draft/playtest",
+    response_model=VNScriptPlaytestResponse,
+)
+async def playtest_draft(
+    script_id: int,
+    request: VNScriptPlaytestRequest,
+    service: VNScriptService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    profile_store: VNPolicyProfileStore = Depends(_profile_store),
+) -> VNScriptPlaytestResponse:
+    """Dry-run the stored or supplied draft without creating a VN Play session."""
+    try:
+        script = service.get_script(script_id)
+        policy_profile, generation_profile, generation_profiles = await _resolve_script_profiles(
+            script,
+            profile_store=profile_store,
+        )
+        draft_row = None if request.draft is not None else service.get_draft(script_id)
+        draft = request.draft if request.draft is not None else draft_row["draft"]
+        if not isinstance(draft, Mapping):
+            raise ValueError("supplied_draft_invalid_shape")
+        audio_refs = await _resolve_accessible_audio_refs(
+            draft,
+            files_repo=files_repo,
+            owner_user_id=service.owner_user_id,
+        )
+        if request.draft is not None:
+            result = service.preview_draft_playtest(
+                script_id,
+                request.draft,
+                draft_revision=request.draft_revision,
+                max_steps=request.max_steps,
+                max_paths=request.max_paths,
+                audio_refs=audio_refs,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+        else:
+            result = service.playtest_draft(
+                script_id,
+                max_steps=request.max_steps,
+                max_paths=request.max_paths,
+                audio_refs=audio_refs,
+                draft_row=draft_row,
+                policy_profile=policy_profile,
+                generation_profile=generation_profile,
+                generation_profiles=generation_profiles,
+            )
+        return VNScriptPlaytestResponse.model_validate(result)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
 @router.put("/scripts/{script_id}/draft", response_model=VNScriptDraftResponse)
 async def put_draft(
     script_id: int,
@@ -582,6 +639,32 @@ async def get_version_graph(
     try:
         return VNScriptAuthoringGraphResponse.model_validate(
             service.get_version_graph(script_id, version_id)
+        )
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.post(
+    "/scripts/{script_id}/versions/{version_id}/playtest",
+    response_model=VNScriptPlaytestResponse,
+)
+async def playtest_version(
+    script_id: int,
+    version_id: int,
+    request: VNScriptPlaytestRequest,
+    service: VNScriptService = Depends(_service),
+) -> VNScriptPlaytestResponse:
+    """Dry-run an immutable published script version without creating runtime state."""
+    if request.draft is not None:
+        raise _handle_value_error(ValueError("version_playtest_draft_not_allowed"))
+    try:
+        return VNScriptPlaytestResponse.model_validate(
+            service.playtest_version(
+                script_id,
+                version_id,
+                max_steps=request.max_steps,
+                max_paths=request.max_paths,
+            )
         )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
