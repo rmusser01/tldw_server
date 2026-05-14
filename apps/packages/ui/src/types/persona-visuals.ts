@@ -342,6 +342,31 @@ export interface PersonaVisualImportRequiredChoice {
   replaceable_pack_ids?: string[]
 }
 
+export interface PersonaVisualRendererImportPreview {
+  status?: string | null
+  renderer_type?: string | null
+  manifest_version?: number | null
+  renderer_contract_version?: number | null
+  can_commit?: boolean | null
+  activation_eligible?: boolean | null
+  blockers?: string[]
+  warnings?: string[]
+  normalized_role_categories?: Record<string, string[]>
+  setup_status?: string | null
+  setup_blockers?: string[]
+  disabled_reason?: string | null
+}
+
+export interface PersonaVisualImportProposedPlan extends Record<string, unknown> {
+  target_mode?: PersonaVisualImportTargetMode | string
+  target_modes?: Array<PersonaVisualImportTargetMode | string>
+  default_target_mode?: PersonaVisualImportTargetMode | string
+  commit_eligible?: boolean
+  activation_eligible?: boolean
+  commit_blockers?: string[]
+  renderer_import_preview?: PersonaVisualRendererImportPreview
+}
+
 export interface PersonaVisualImportPreviewResponse {
   preview_id: string
   job_id: string
@@ -357,7 +382,7 @@ export interface PersonaVisualImportPreviewResponse {
   bundle_summary: Record<string, unknown>
   validation_warnings: unknown[]
   conflicts: PersonaVisualImportConflict[]
-  proposed_plan: Record<string, unknown>
+  proposed_plan: PersonaVisualImportProposedPlan
   quota_estimate: Record<string, unknown>
   required_choices: PersonaVisualImportRequiredChoice[]
   target_warnings: unknown[]

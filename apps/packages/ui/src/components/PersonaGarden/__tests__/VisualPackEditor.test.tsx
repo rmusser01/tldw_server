@@ -1941,6 +1941,7 @@ describe("VisualPackEditor", () => {
       version: 1
     }
     let importCommitted = false
+    let importCommitStarts = 0
 
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
       const method = init?.method || "GET"
@@ -2004,6 +2005,7 @@ describe("VisualPackEditor", () => {
           "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
         method === "POST"
       ) {
+        importCommitStarts += 1
         expect(parseJsonBody(init?.body)).toMatchObject({
           trust_mode: "untrusted_import",
           target_mode: "create_new"
@@ -2092,13 +2094,16 @@ describe("VisualPackEditor", () => {
       "create_new"
     )
 
-    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeEnabled()
-    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    const commitButton = screen.getByTestId("persona-visual-import-commit-button")
+    expect(commitButton).toBeEnabled()
+    fireEvent.click(commitButton)
+    fireEvent.click(commitButton)
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
         "queued"
       )
     )
+    expect(importCommitStarts).toBe(1)
     expect(screen.getByTestId("persona-visual-import-commit-stage")).toHaveTextContent(
       "queued"
     )
@@ -2121,6 +2126,192 @@ describe("VisualPackEditor", () => {
     )
     expect(
       calls.some((call) => call.includes("/activate") || call.includes("/manifest"))
+    ).toBe(false)
+  })
+
+  it("surfaces blocked renderer import diagnostics and disables commit", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-live2d",
+          job_id: "preview-job-live2d",
+          portability_job_id: "portability-preview-live2d",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-live2d" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-live2d",
+          job_id: "preview-job-live2d",
+          portability_job_id: "portability-preview-live2d",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "blocked",
+          stage: "blocked",
+          archive_sha256: "sha-live2d-preview",
+          canonical_payload_fingerprint: "fingerprint-live2d-preview",
+          schema_version: "persona_visual_pack.v2",
+          bundle_summary: {
+            pack_title: "Imported Live2D Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: {
+            target_mode: "create_new",
+            commit_eligible: false,
+            activation_eligible: false,
+            commit_blockers: ["runtime_adapter_not_implemented"],
+            renderer_import_preview: {
+              status: "feature_gated",
+              renderer_type: "live2d",
+              manifest_version: 2,
+              renderer_contract_version: 1,
+              can_commit: false,
+              activation_eligible: false,
+              blockers: ["runtime_adapter_not_implemented"],
+              warnings: ["requires_license_ack"],
+              normalized_role_categories: {
+                model: ["source-model"],
+                texture: ["source-texture"]
+              },
+              setup_status: "feature_gated",
+              setup_blockers: [],
+              disabled_reason: "runtime_adapter_not_implemented"
+            }
+          },
+          quota_estimate: { asset_bytes: 2048 },
+          required_choices: [],
+          target_warnings: []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+
+    const diagnostics = screen.getByTestId(
+      "persona-visual-import-renderer-diagnostics"
+    )
+    expect(diagnostics).toHaveTextContent("live2d")
+    expect(diagnostics).toHaveTextContent("feature_gated")
+    expect(diagnostics).toHaveTextContent("runtime_adapter_not_implemented")
+    expect(diagnostics).toHaveTextContent("requires_license_ack")
+    expect(diagnostics).toHaveTextContent("source-model")
+    expect(diagnostics).toHaveTextContent("Activation unavailable")
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.rendererDiagnosticsTitle",
+      { defaultValue: "Renderer diagnostics" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith("common:unknown", {
+      defaultValue: "unknown"
+    })
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.manifestVersion",
+      { defaultValue: "Manifest v" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.contractVersion",
+      { defaultValue: "Contract v" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.activationUnavailable",
+      { defaultValue: "Activation unavailable" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.commitBlockers",
+      { defaultValue: "Commit blockers" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.rendererWarnings",
+      { defaultValue: "Warnings" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.assetRoles",
+      { defaultValue: "Asset roles" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.importCommitBlocked",
+      {
+        defaultValue: "Commit unavailable until preview blockers are resolved"
+      }
+    )
+
+    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    expect(
+      calls.some((call) => call.includes("/commit"))
     ).toBe(false)
   })
 
