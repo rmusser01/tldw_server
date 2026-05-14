@@ -12,10 +12,13 @@ import {
   getVNScriptAuthoringCatalog,
   getVNScriptDiagnostics,
   getVNScriptDraft,
+  getVNScriptDraftGraph,
   getVNScriptManifestSnapshot,
+  getVNScriptVersionGraph,
   listVNScriptTemplates,
   listVNScripts,
   listVNScriptVersions,
+  previewVNScriptDraftGraph,
   previewVNScriptSnippet,
   publishVNScript,
   putVNScriptDraft,
@@ -23,6 +26,7 @@ import {
 } from '@web/lib/api/vnScripts';
 import type {
   VNScriptAuthoringCatalogResponse,
+  VNScriptAuthoringGraphResponse,
   VNScriptAuthoringSnippet,
   VNScriptContentRating,
   VNScriptDiagnosticsResponse,
@@ -211,6 +215,120 @@ function snippetCategory(
   return categoryMatch?.[0] ?? 'other';
 }
 
+function diagnosticCodes(items: Array<{ code?: unknown; message?: unknown }> | undefined): string {
+  if (!items?.length) return 'none';
+  return items
+    .map((item) => readString(item.code) ?? readString(item.message) ?? 'diagnostic')
+    .join(', ');
+}
+
+function GraphSummary({
+  graph,
+  onSourcePathSelect,
+}: {
+  graph: VNScriptAuthoringGraphResponse;
+  onSourcePathSelect?: (sourcePath: string) => void;
+}) {
+  const validationErrors = graph.validation_diagnostics.errors;
+  const validationWarnings = graph.validation_diagnostics.warnings;
+  const limits = Object.entries(graph.limits ?? {});
+
+  return (
+    <div className="space-y-3 text-sm">
+      {graph.truncated && (
+        <p className="rounded-md border border-warn/30 bg-warn/10 p-2 text-warn">
+          Graph output is truncated. Use diagnostics to see which limit was reached.
+        </p>
+      )}
+      <dl className="grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Source</dt>
+          <dd className="break-words font-medium">{graph.source}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Content hash</dt>
+          <dd className="break-words font-medium">{graph.content_hash}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Schema</dt>
+          <dd className="break-words font-medium">{graph.schema_version}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Program schema</dt>
+          <dd className="break-words font-medium">{graph.program_schema_version}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Base revision</dt>
+          <dd>{graph.base_revision ?? 'n/a'}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Validation context</dt>
+          <dd className="break-words">{graph.validation_context_source}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Graph semantics</dt>
+          <dd className="break-words">{graph.graph_semantics_version}</dd>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <dt className="text-text-muted">Nodes / edges</dt>
+          <dd>{graph.graph.nodes.length} / {graph.graph.edges.length}</dd>
+        </div>
+      </dl>
+      {limits.length > 0 && (
+        <p className="text-xs text-text-muted">
+          Limits: {limits.map(([key, value]) => `${key} ${value}`).join(', ')}
+        </p>
+      )}
+      <div>
+        <h3 className="mb-1 text-xs font-semibold uppercase text-text-muted">Outline</h3>
+        {graph.outline.labels.length === 0 ? (
+          <p className="text-text-muted">No outline labels returned.</p>
+        ) : (
+          <ul className="space-y-2">
+            {graph.outline.labels.map((label) => (
+              <li key={label.id} className="rounded-md border border-border bg-bg p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{label.label}</span>
+                  <span className="text-xs text-text-muted">{label.id}</span>
+                </div>
+                <p className="mt-1 text-xs">{label.summary}</p>
+                <p className="mt-1 text-xs text-text-muted">
+                  {label.op_count} ops, {label.incoming_edge_count} in, {label.outgoing_edge_count} out,
+                  {' '}{label.reachable ? 'reachable' : 'unreachable'}, {label.terminal}
+                </p>
+                {label.source_path ? (
+                  <button
+                    type="button"
+                    aria-label={`Select source path for ${label.label}`}
+                    className="mt-1 block break-all rounded-sm font-mono text-[11px] text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    onClick={() => onSourcePathSelect?.(label.source_path)}
+                  >
+                    {label.source_path}
+                  </button>
+                ) : (
+                  <p className="mt-1 break-words font-mono text-[11px] text-text-muted">No source path.</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="grid gap-2 lg:grid-cols-2">
+        <div className="rounded-md border border-border bg-bg p-2">
+          <h3 className="text-xs font-semibold uppercase text-text-muted">Graph diagnostics</h3>
+          <p className="mt-1 text-xs text-danger">Errors: {diagnosticCodes(graph.diagnostics.errors)}</p>
+          <p className="mt-1 text-xs text-warn">Warnings: {diagnosticCodes(graph.diagnostics.warnings)}</p>
+        </div>
+        <div className="rounded-md border border-border bg-bg p-2">
+          <h3 className="text-xs font-semibold uppercase text-text-muted">Validation diagnostics</h3>
+          <p className="mt-1 text-xs text-danger">Errors: {diagnosticCodes(validationErrors)}</p>
+          <p className="mt-1 text-xs text-warn">Warnings: {diagnosticCodes(validationWarnings)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VNScriptsWorkbench() {
   const [scripts, setScripts] = useState<VNScriptResponse[]>([]);
   const [templates, setTemplates] = useState<VNScriptTemplateSummary[]>([]);
@@ -252,8 +370,17 @@ export default function VNScriptsWorkbench() {
   const [isPreviewingSnippet, setIsPreviewingSnippet] = useState(false);
   const [isApplyingSnippet, setIsApplyingSnippet] = useState(false);
   const [snippetError, setSnippetError] = useState<string | null>(null);
+  const [scriptGraph, setScriptGraph] = useState<VNScriptAuthoringGraphResponse | null>(null);
+  const [versionGraphs, setVersionGraphs] = useState<Record<number, VNScriptAuthoringGraphResponse>>({});
+  const [loadingGraphAction, setLoadingGraphAction] = useState<'saved' | 'preview' | null>(null);
+  const [loadingVersionGraphId, setLoadingVersionGraphId] = useState<number | null>(null);
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const [selectedGraphSourcePath, setSelectedGraphSourcePath] = useState<string | null>(null);
   const selectedScriptIdRef = useRef<number | null>(null);
   const draftHydrationRef = useRef<VNScriptDraftResponse | null>(null);
+  const draftEditorRegionRef = useRef<HTMLDivElement | null>(null);
+  const graphRequestIdRef = useRef(0);
+  const versionGraphRequestIdRef = useRef(0);
   const publishKeyRef = useRef<Record<string, string>>({});
   const snippetPreviewContextKeyRef = useRef<string | null>(null);
   const previewRequestIdRef = useRef(0);
@@ -262,6 +389,17 @@ export default function VNScriptsWorkbench() {
     setSnippetPreview(null);
     setSnippetPreviewContextKey(null);
     snippetPreviewContextKeyRef.current = null;
+  }
+
+  function clearGraphState() {
+    graphRequestIdRef.current += 1;
+    versionGraphRequestIdRef.current += 1;
+    setScriptGraph(null);
+    setVersionGraphs({});
+    setGraphError(null);
+    setLoadingGraphAction(null);
+    setLoadingVersionGraphId(null);
+    setSelectedGraphSourcePath(null);
   }
 
   useEffect(() => {
@@ -320,6 +458,7 @@ export default function VNScriptsWorkbench() {
 
   const savedDraftText = useMemo(() => formatJson(draft?.draft), [draft?.draft]);
   const hasUnsavedDraftText = draftText !== savedDraftText;
+  const graphCapabilityEnabled = vnCapabilities?.features?.script_authoring_graph === true;
 
   const currentSnippetPreviewContextKey = useMemo(() => {
     if (!selectedScript || !selectedSnippet || !draft) return null;
@@ -447,6 +586,7 @@ export default function VNScriptsWorkbench() {
       setManifestSnapshots({});
       setPolicySummaries({});
       clearSnippetPreviewState();
+      clearGraphState();
       return;
     }
 
@@ -466,6 +606,7 @@ export default function VNScriptsWorkbench() {
         setManifestSnapshots({});
         setPolicySummaries({});
         clearSnippetPreviewState();
+        clearGraphState();
         try {
           const nextVersions = await listVNScriptVersions(selectedScript.id);
           if (!cancelled) setVersions(nextVersions.items ?? []);
@@ -485,6 +626,7 @@ export default function VNScriptsWorkbench() {
       setManifestSnapshots({});
       setPolicySummaries({});
       clearSnippetPreviewState();
+      clearGraphState();
       try {
         const [nextDraft, nextVersions] = await Promise.all([
           getVNScriptDraft(selectedScript.id),
@@ -759,6 +901,7 @@ export default function VNScriptsWorkbench() {
       });
       setDraft(updated);
       setDraftText(formatJson(updated.draft));
+      clearGraphState();
       setStatusMessage(`Draft saved at revision ${updated.revision}.`);
     } catch (saveError) {
       setError(errorMessage(saveError, 'Failed to save draft'));
@@ -800,6 +943,76 @@ export default function VNScriptsWorkbench() {
       setIsLoadingDiagnostics(false);
     }
   }, [selectedScript]);
+
+  const handleLoadDraftGraph = useCallback(async () => {
+    if (!selectedScript) return;
+    const scriptId = selectedScript.id;
+    const requestId = graphRequestIdRef.current + 1;
+    graphRequestIdRef.current = requestId;
+    setLoadingGraphAction('saved');
+    setGraphError(null);
+    try {
+      const graph = await getVNScriptDraftGraph(scriptId);
+      if (selectedScriptIdRef.current !== scriptId || graphRequestIdRef.current !== requestId) return;
+      setScriptGraph(graph);
+    } catch (graphLoadError) {
+      if (selectedScriptIdRef.current === scriptId && graphRequestIdRef.current === requestId) {
+        setGraphError(errorMessage(graphLoadError, 'Failed to load script graph'));
+      }
+    } finally {
+      if (graphRequestIdRef.current === requestId) setLoadingGraphAction(null);
+    }
+  }, [selectedScript]);
+
+  const handlePreviewDraftGraph = useCallback(async () => {
+    if (!selectedScript) return;
+    const requestDraft = parseDraftText();
+    if (!requestDraft) return;
+    const scriptId = selectedScript.id;
+    const requestId = graphRequestIdRef.current + 1;
+    graphRequestIdRef.current = requestId;
+    setLoadingGraphAction('preview');
+    setGraphError(null);
+    try {
+      const graph = await previewVNScriptDraftGraph(scriptId, {
+        draft: requestDraft,
+        draft_revision: draft?.revision ?? null,
+      });
+      if (selectedScriptIdRef.current !== scriptId || graphRequestIdRef.current !== requestId) return;
+      setScriptGraph(graph);
+    } catch (graphPreviewError) {
+      if (selectedScriptIdRef.current === scriptId && graphRequestIdRef.current === requestId) {
+        setGraphError(errorMessage(graphPreviewError, 'Failed to preview script graph'));
+      }
+    } finally {
+      if (graphRequestIdRef.current === requestId) setLoadingGraphAction(null);
+    }
+  }, [draft?.revision, parseDraftText, selectedScript]);
+
+  const handleVersionGraph = useCallback(async (version: VNScriptVersionResponse) => {
+    if (!selectedScript) return;
+    const scriptId = selectedScript.id;
+    const requestId = versionGraphRequestIdRef.current + 1;
+    versionGraphRequestIdRef.current = requestId;
+    setLoadingVersionGraphId(version.id);
+    setGraphError(null);
+    try {
+      const graph = await getVNScriptVersionGraph(scriptId, version.id);
+      if (selectedScriptIdRef.current !== scriptId || versionGraphRequestIdRef.current !== requestId) return;
+      setVersionGraphs((previous) => ({ ...previous, [version.id]: graph }));
+    } catch (versionGraphError) {
+      if (selectedScriptIdRef.current === scriptId && versionGraphRequestIdRef.current === requestId) {
+        setGraphError(errorMessage(versionGraphError, 'Failed to load version graph'));
+      }
+    } finally {
+      if (versionGraphRequestIdRef.current === requestId) setLoadingVersionGraphId(null);
+    }
+  }, [selectedScript]);
+
+  const handleGraphSourcePathSelect = useCallback((sourcePath: string) => {
+    setSelectedGraphSourcePath(sourcePath);
+    draftEditorRegionRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, []);
 
   const handlePublish = useCallback(async () => {
     if (!selectedScript || !draft) return;
@@ -1046,6 +1259,12 @@ export default function VNScriptsWorkbench() {
                   <p className="text-xs text-text-muted">
                     Revision {draft?.revision ?? 'n/a'}; JSON parsing only, opcode semantics stay on the API server.
                   </p>
+                  {selectedGraphSourcePath && (
+                    <div className="mt-2 rounded-md border border-primary/30 bg-primary/10 p-2 text-xs text-primary">
+                      <span className="font-semibold">Selected graph path</span>
+                      <code className="ml-2 break-all font-mono">{selectedGraphSourcePath}</code>
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button type="button" size="sm" variant="secondary" loading={isValidating} disabled={!selectedScript} onClick={handleValidate}>
@@ -1257,12 +1476,13 @@ export default function VNScriptsWorkbench() {
                   )}
                 </section>
               )}
-              <div className="min-h-[420px] flex-1">
+              <div ref={draftEditorRegionRef} className="min-h-[420px] flex-1">
                 <JsonEditor
                   value={draftText}
                   onChange={(nextValue) => {
                     setDraftText(nextValue);
                     clearSnippetPreviewState();
+                    clearGraphState();
                   }}
                   height="100%"
                   readOnly={!selectedScript}
@@ -1329,6 +1549,51 @@ export default function VNScriptsWorkbench() {
               )}
             </section>
 
+            {graphCapabilityEnabled && (
+              <section className="rounded-md border border-border bg-surface p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-semibold">Script graph</h2>
+                    <p className="text-xs text-text-muted">Read-only outline from the backend graph API.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="secondary"
+                      loading={loadingGraphAction === 'saved'}
+                      disabled={!selectedScript || loadingGraphAction !== null}
+                      onClick={handleLoadDraftGraph}
+                    >
+                      Load saved graph
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="secondary"
+                      loading={loadingGraphAction === 'preview'}
+                      disabled={!selectedScript || loadingGraphAction !== null}
+                      onClick={handlePreviewDraftGraph}
+                    >
+                      Preview current JSON graph
+                    </Button>
+                  </div>
+                </div>
+                {graphError && (
+                  <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 p-2 text-sm text-danger">
+                    {graphError}
+                  </p>
+                )}
+                {scriptGraph ? (
+                  <GraphSummary graph={scriptGraph} onSourcePathSelect={handleGraphSourcePathSelect} />
+                ) : (
+                  <p className="text-sm text-text-muted">
+                    Load the saved draft graph or preview the current editor JSON without saving.
+                  </p>
+                )}
+              </section>
+            )}
+
             <section className="rounded-md border border-border bg-surface p-3">
               <h2 className="mb-3 text-sm font-semibold">Publish</h2>
               <div className="space-y-3">
@@ -1389,6 +1654,19 @@ export default function VNScriptsWorkbench() {
                       >
                         Policy
                       </Button>
+                      {graphCapabilityEnabled && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="secondary"
+                          loading={loadingVersionGraphId === version.id}
+                          disabled={loadingVersionGraphId !== null}
+                          aria-label={`Graph for version ${version.version_number}`}
+                          onClick={() => void handleVersionGraph(version)}
+                        >
+                          Graph
+                        </Button>
+                      )}
                     </div>
                     {manifestSnapshots[version.id] && (
                       <div className="mt-3">
@@ -1404,6 +1682,12 @@ export default function VNScriptsWorkbench() {
                         <pre className="max-h-48 overflow-auto rounded-md bg-surface2 p-2 text-xs">
                           {summaryLines(policySummaries[version.id]).join('\n')}
                         </pre>
+                      </div>
+                    )}
+                    {versionGraphs[version.id] && (
+                      <div className="mt-3">
+                        <h4 className="mb-1 text-xs font-semibold uppercase text-text-muted">Version graph</h4>
+                        <GraphSummary graph={versionGraphs[version.id]} onSourcePathSelect={handleGraphSourcePathSelect} />
                       </div>
                     )}
                   </article>

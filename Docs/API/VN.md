@@ -278,3 +278,22 @@ supplied drafts are rejected before graph construction.
    `validation_diagnostics` as validation status.
 6. Use existing draft update and publish endpoints for mutations; graph
    endpoints never save or execute script content.
+
+### WebUI Graph Inspector Flow
+
+The WebUI script authoring surface consumes the same contract as custom
+frontends:
+
+- Show the graph inspector only when `features.script_authoring_graph` is true.
+- Use the saved draft graph for the last persisted draft revision.
+- Use graph preview for unsaved editor JSON so authors can inspect structure
+  before saving.
+- Use version graph from each published-version card for immutable release
+  structure.
+- Treat `content_hash`, `graph_semantics_version`, `base_revision`, and
+  `version_id` as cache/staleness keys for rendered outline state.
+- Render `outline` as the primary authoring aid and keep detailed `graph`
+  nodes/edges available for richer custom clients.
+- Keep graph diagnostics visually separate from validation diagnostics:
+  graph diagnostics explain static-analysis limitations or partial structure,
+  while validation diagnostics remain the publish/runtime readiness signal.
