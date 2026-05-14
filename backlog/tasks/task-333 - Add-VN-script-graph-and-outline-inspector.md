@@ -41,7 +41,7 @@ Implement GitHub issue #1680: add a WebUI consumer for the backend-owned VN scri
 - The panel renders backend source/hash/revision/semantics metadata, outline rows, limits, graph diagnostics, and validation diagnostics as separate UI concepts.
 - Added version-card Graph actions for published version graph inspection.
 - Frontend only renders server-shaped graph data; it does not compute graph edges or validate script op semantics.
-- PR #1681 review fixes added graph schema metadata rendering, source path selection, stale response guards, and loading reset on script switch.
+- PR #1681 review fixes added graph schema metadata rendering, source path selection, stale response guards, loading reset on script switch, duplicate graph-action disabling, and stricter validation diagnostics typing.
 <!-- SECTION:NOTES:END -->
 
 ## Verification
@@ -52,7 +52,7 @@ Implement GitHub issue #1680: add a WebUI consumer for the backend-owned VN scri
 - `bun run lint -- components/vn-scripts/VNScriptsWorkbench.tsx lib/api/vnScripts.ts types/vn-scripts.ts __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend`: exited 0; repo-wide baseline warnings remain because the package lint script prepends `eslint .`.
 - `./node_modules/.bin/tsc --noEmit` from `apps/tldw-frontend`: failed on pre-existing shared UI type errors in `../packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx` and `../packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx`; no errors were reported in the touched VN script files before the baseline failures stopped the run.
 - Bandit skipped: frontend/docs/backlog-only change, no Python touched.
-- PR #1681 review-fix verification: `bun run test:run __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` passed 43 tests; `bun run test:run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` passed 57 tests; `git diff --check` passed; `bun run lint -- components/vn-scripts/VNScriptsWorkbench.tsx __tests__/vn-scripts/VNScriptsWorkbench.test.tsx __tests__/vn-scripts/vnScriptsApi.test.ts` exited 0 with the repo-wide warning baseline; `bun run tsc --noEmit` still fails on the known shared UI baseline files listed above.
+- PR #1681 review-fix verification: `bun run test:run __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` passed 43 tests; `bun run test:run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` passed 57 tests; `git diff --check` passed; `bun run lint -- components/vn-scripts/VNScriptsWorkbench.tsx __tests__/vn-scripts/VNScriptsWorkbench.test.tsx __tests__/vn-scripts/vnScriptsApi.test.ts` exited 0 with the repo-wide warning baseline; `bun run tsc --noEmit` still fails on the known shared UI baseline files listed above. A follow-up review sweep also addressed duplicate graph-action disabling and stricter validation diagnostics typing.
 <!-- SECTION:VERIFICATION:END -->
 
 ## Final Summary

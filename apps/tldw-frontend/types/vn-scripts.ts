@@ -242,7 +242,7 @@ export interface VNScriptAuthoringGraphResponse {
   outline: VNScriptGraphOutline;
   graph: VNScriptGraphBody;
   diagnostics: VNScriptGraphDiagnostics;
-  validation_diagnostics: Record<string, unknown>;
+  validation_diagnostics: VNScriptValidationResponse;
 }
 
 export type VNScriptCreateFromTemplateRequest = Omit<VNScriptCreate, 'title'> & {

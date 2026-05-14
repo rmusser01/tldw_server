@@ -222,12 +222,6 @@ function diagnosticCodes(items: Array<{ code?: unknown; message?: unknown }> | u
     .join(', ');
 }
 
-function validationDiagnosticItems(value: unknown, key: 'errors' | 'warnings'): Array<Record<string, unknown>> {
-  const record = asRecord(value);
-  const items = record?.[key];
-  return Array.isArray(items) ? items.filter((item): item is Record<string, unknown> => Boolean(asRecord(item))) : [];
-}
-
 function GraphSummary({
   graph,
   onSourcePathSelect,
@@ -235,8 +229,8 @@ function GraphSummary({
   graph: VNScriptAuthoringGraphResponse;
   onSourcePathSelect?: (sourcePath: string) => void;
 }) {
-  const validationErrors = validationDiagnosticItems(graph.validation_diagnostics, 'errors');
-  const validationWarnings = validationDiagnosticItems(graph.validation_diagnostics, 'warnings');
+  const validationErrors = graph.validation_diagnostics.errors;
+  const validationWarnings = graph.validation_diagnostics.warnings;
   const limits = Object.entries(graph.limits ?? {});
 
   return (
@@ -1568,7 +1562,7 @@ export default function VNScriptsWorkbench() {
                       size="xs"
                       variant="secondary"
                       loading={loadingGraphAction === 'saved'}
-                      disabled={!selectedScript}
+                      disabled={!selectedScript || loadingGraphAction !== null}
                       onClick={handleLoadDraftGraph}
                     >
                       Load saved graph
@@ -1578,7 +1572,7 @@ export default function VNScriptsWorkbench() {
                       size="xs"
                       variant="secondary"
                       loading={loadingGraphAction === 'preview'}
-                      disabled={!selectedScript}
+                      disabled={!selectedScript || loadingGraphAction !== null}
                       onClick={handlePreviewDraftGraph}
                     >
                       Preview current JSON graph
@@ -1666,6 +1660,7 @@ export default function VNScriptsWorkbench() {
                           size="xs"
                           variant="secondary"
                           loading={loadingVersionGraphId === version.id}
+                          disabled={loadingVersionGraphId !== null}
                           aria-label={`Graph for version ${version.version_number}`}
                           onClick={() => void handleVersionGraph(version)}
                         >
