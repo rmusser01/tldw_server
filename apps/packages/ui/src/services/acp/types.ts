@@ -23,6 +23,8 @@ export type ACPVerificationLevel =
   | "sandbox_tested"
   | "production_supported"
 
+export type ACPSetupHealthStatus = "ok" | "degraded" | "blocked" | "unknown"
+
 export interface ACPAgentInfo {
   type: ACPAgentType
   name: string
@@ -38,6 +40,77 @@ export interface ACPAgentInfo {
 export interface ACPAgentListResponse {
   agents: ACPAgentInfo[]
   default_agent: ACPAgentType
+}
+
+export interface ACPExecutionHealthSessionSummary {
+  total: number
+  by_status: Record<string, number>
+}
+
+export interface ACPExecutionHealthFailureBuckets {
+  setup_blockers: number
+  runner_session_failures: number
+  reviewer_rejections: number
+  reviewer_failures: number
+  governance_denials: number
+  structured_completion_failures: number
+  sandbox_runtime_errors: number
+  retention_redaction_actions: number
+}
+
+export interface ACPExecutionHealthSetupDimension {
+  status: ACPSetupHealthStatus
+  blockers: string[]
+  evidence_count: number
+}
+
+export interface ACPExecutionHealthSetupSummary {
+  agent: ACPExecutionHealthSetupDimension
+  workspace: ACPExecutionHealthSetupDimension
+  sandbox_runtime: ACPExecutionHealthSetupDimension
+  mcp_injection: ACPExecutionHealthSetupDimension
+  scheduler_trigger_path: ACPExecutionHealthSetupDimension
+}
+
+export interface ACPExecutionHealthAgentSummary {
+  agent_type: string
+  name: string
+  is_configured: boolean
+  support_state: ACPSupportState
+  verification_level: ACPVerificationLevel
+  setup_blocked: boolean
+  primary_blocker?: string | null
+}
+
+export interface ACPExecutionHealthCompatibilitySummary {
+  by_support_state: Record<string, number>
+  documented_unverified_agents: string[]
+  live_certification_required: boolean
+  docs_url: string
+}
+
+export interface ACPExecutionHealthRetentionSummary {
+  session_retention_days: number
+  audit_retention_days: number
+  policy: string
+}
+
+export interface ACPExecutionHealthRedactionSummary {
+  detail_events_artifacts_redacted_views: boolean
+  diagnostics_sanitized: boolean
+  audit_metadata_sanitized: boolean
+}
+
+export interface ACPExecutionHealthSummaryResponse {
+  timestamp: string
+  range_days: number
+  sessions: ACPExecutionHealthSessionSummary
+  failure_buckets: ACPExecutionHealthFailureBuckets
+  setup_health: ACPExecutionHealthSetupSummary
+  agents: ACPExecutionHealthAgentSummary[]
+  compatibility: ACPExecutionHealthCompatibilitySummary
+  retention: ACPExecutionHealthRetentionSummary
+  redaction: ACPExecutionHealthRedactionSummary
 }
 
 // -----------------------------------------------------------------------------

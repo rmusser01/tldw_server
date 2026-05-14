@@ -4,6 +4,86 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AgentRegistryPage } from "../index"
 
+const baseACPHealthPayload = {
+  runner: "ok",
+  agent: "ok",
+  api_keys: "ok"
+}
+
+const baseExecutionHealthSummaryPayload = {
+  timestamp: "2026-05-14T09:00:00Z",
+  range_days: 30,
+  sessions: {
+    total: 0,
+    by_status: {}
+  },
+  failure_buckets: {
+    setup_blockers: 0,
+    runner_session_failures: 0,
+    reviewer_rejections: 0,
+    reviewer_failures: 0,
+    governance_denials: 0,
+    structured_completion_failures: 0,
+    sandbox_runtime_errors: 0,
+    retention_redaction_actions: 0
+  },
+  setup_health: {
+    agent: { status: "unknown", blockers: [], evidence_count: 0 },
+    workspace: { status: "unknown", blockers: [], evidence_count: 0 },
+    sandbox_runtime: { status: "unknown", blockers: [], evidence_count: 0 },
+    mcp_injection: { status: "unknown", blockers: [], evidence_count: 0 },
+    scheduler_trigger_path: { status: "unknown", blockers: [], evidence_count: 0 }
+  },
+  agents: [],
+  compatibility: {
+    by_support_state: {},
+    documented_unverified_agents: [],
+    live_certification_required: false,
+    docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+  },
+  retention: {
+    session_retention_days: 30,
+    audit_retention_days: 30,
+    policy: "closed_error_sessions_and_audit_events_purged_after_retention"
+  },
+  redaction: {
+    detail_events_artifacts_redacted_views: true,
+    diagnostics_sanitized: true,
+    audit_metadata_sanitized: true
+  }
+}
+
+const installACPFetchMock = ({
+  healthPayload = baseACPHealthPayload,
+  summaryPayload = baseExecutionHealthSummaryPayload,
+  summaryOk = true,
+  summaryStatus = summaryOk ? 200 : 403
+}: {
+  healthPayload?: Record<string, unknown>
+  summaryPayload?: Record<string, unknown>
+  summaryOk?: boolean
+  summaryStatus?: number
+} = {}) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/api/v1/admin/acp/execution-health/summary")) {
+        return {
+          ok: summaryOk,
+          status: summaryStatus,
+          json: async () => summaryPayload
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => healthPayload
+      }
+    })
+  )
+}
+
 const storageMocks = vi.hoisted(() => ({
   useStorage: vi.fn()
 }))
@@ -162,17 +242,7 @@ describe("AgentRegistryPage connection config", () => {
       ]
     })
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          runner: "ok",
-          agent: "ok",
-          api_keys: "ok"
-        })
-      }))
-    )
+    installACPFetchMock()
   })
 
   afterEach(() => {
@@ -198,6 +268,14 @@ describe("AgentRegistryPage connection config", () => {
           })
         })
       )
+      expect(global.fetch).toHaveBeenCalledWith(
+        "http://127.0.0.1:8000/api/v1/admin/acp/execution-health/summary?range_days=30",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "X-API-KEY": "real-key"
+          })
+        })
+      )
       const authHeaders = await acpMocks.constructedConfigs[0]?.getAuthHeaders()
       expect(authHeaders).toEqual(
         expect.objectContaining({
@@ -217,6 +295,14 @@ describe("AgentRegistryPage connection config", () => {
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
         "/api/v1/acp/health",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "X-API-KEY": "real-key"
+          })
+        })
+      )
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/v1/admin/acp/execution-health/summary?range_days=30",
         expect.objectContaining({
           headers: expect.objectContaining({
             "X-API-KEY": "real-key"
@@ -253,28 +339,24 @@ describe("AgentRegistryPage connection config", () => {
   })
 
   it("normalizes structured ACP health payloads without trying to render raw objects", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          runner: {
-            status: "ok",
-            path: "/opt/homebrew/bin/go",
-            source: "PATH"
-          },
-          agents: [
-            {
-              agent_type: "planner",
-              status: "available",
-              api_key_set: true
-            }
-          ],
-          overall: "ok",
-          message: null
-        })
-      }))
-    )
+    installACPFetchMock({
+      healthPayload: {
+        runner: {
+          status: "ok",
+          path: "/opt/homebrew/bin/go",
+          source: "PATH"
+        },
+        agents: [
+          {
+            agent_type: "planner",
+            status: "available",
+            api_key_set: true
+          }
+        ],
+        overall: "ok",
+        message: null
+      }
+    })
 
     render(<AgentRegistryPage />)
 
@@ -319,5 +401,76 @@ describe("AgentRegistryPage connection config", () => {
       "href",
       "/docs-static/Development/ACP_Compatibility_Matrix.md"
     )
+  })
+
+  it("renders the admin execution-health summary without overstating agent certification", async () => {
+    installACPFetchMock({
+      summaryPayload: {
+        ...baseExecutionHealthSummaryPayload,
+        range_days: 30,
+        sessions: {
+          total: 3,
+          by_status: {
+            active: 2,
+            error: 1
+          }
+        },
+        failure_buckets: {
+          setup_blockers: 1,
+          runner_session_failures: 1,
+          reviewer_rejections: 1,
+          reviewer_failures: 0,
+          governance_denials: 1,
+          structured_completion_failures: 1,
+          sandbox_runtime_errors: 1,
+          retention_redaction_actions: 1
+        },
+        setup_health: {
+          agent: { status: "blocked", blockers: ["adapter_required"], evidence_count: 1 },
+          workspace: { status: "unknown", blockers: [], evidence_count: 0 },
+          sandbox_runtime: { status: "blocked", blockers: ["sandbox_runtime_error"], evidence_count: 1 },
+          mcp_injection: { status: "unknown", blockers: [], evidence_count: 0 },
+          scheduler_trigger_path: { status: "ok", blockers: [], evidence_count: 2 }
+        },
+        compatibility: {
+          by_support_state: {
+            documented_unverified: 1,
+            supported_with_caveats: 1
+          },
+          documented_unverified_agents: ["codex"],
+          live_certification_required: true,
+          docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+        },
+        retention: {
+          session_retention_days: 30,
+          audit_retention_days: 45,
+          policy: "closed_error_sessions_and_audit_events_purged_after_retention"
+        }
+      }
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("ACP Execution Health")).toBeInTheDocument()
+    expect(await screen.findByText("3 sessions in 30d")).toBeInTheDocument()
+    expect(screen.getByText("2 active")).toBeInTheDocument()
+    expect(screen.getByText("1 error")).toBeInTheDocument()
+    expect(screen.getByText("Runner/session failures")).toBeInTheDocument()
+    expect(screen.getByText("Setup blockers")).toBeInTheDocument()
+    expect(screen.getByText("Unverified agents: codex")).toBeInTheDocument()
+    expect(screen.getByText("Live certification required")).toBeInTheDocument()
+    expect(screen.getByText("Agent blocked: adapter_required")).toBeInTheDocument()
+    expect(screen.getByText("Retention 30d sessions / 45d audit")).toBeInTheDocument()
+    expect(screen.getByText("Redacted drill-through enabled")).toBeInTheDocument()
+  })
+
+  it("keeps the registry usable when the admin execution-health summary is unavailable", async () => {
+    installACPFetchMock({ summaryOk: false, summaryStatus: 403 })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    expect(screen.getByText("Execution health summary unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Runner Binary")).toBeInTheDocument()
   })
 })
