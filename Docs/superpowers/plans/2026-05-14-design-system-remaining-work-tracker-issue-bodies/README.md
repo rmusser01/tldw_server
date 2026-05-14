@@ -1,12 +1,12 @@
 # Design-System Remaining Work Tracker Issue Bodies
 
-These are local draft GitHub issue bodies generated from:
+These are local mirrors of the public GitHub issue bodies generated from:
 
 - `Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md`
 - `Docs/superpowers/plans/2026-05-14-design-system-remaining-work-tracker-implementation-plan.md`
 - `apps/packages/ui/scripts/design-system-product-state-baseline.json`
 
-Human review and approval are required before creating or updating public GitHub issues, labels, PRs, or other public GitHub state from these drafts.
+The public tracker has been created and cross-linked. Use these files as the local record of the current GitHub issue bodies; future edits should update GitHub first when they change mutable tracker state, then refresh these mirrors.
 
 ## Baseline Snapshot
 
@@ -17,7 +17,7 @@ Baseline source: `apps/packages/ui/scripts/design-system-product-state-baseline.
 - `antd-product-state-import`: 481
 - `canonical-state-label`: 19
 
-This fresh baseline matches the spec snapshot, so no count drift was observed while generating these drafts.
+This fresh baseline matches the spec snapshot, so no count drift was observed while generating the tracker.
 
 ## Source-of-Truth Model
 
@@ -27,14 +27,14 @@ Backlog.md owns execution notes, verification evidence, and PR-specific before/a
 
 The live verifier remains the ground truth when tracker records disagree.
 
-## Creation Order
+## Creation Record
 
-1. Get human review and approval for these local drafts.
-2. Search for existing design-system or product-state tracker issues to avoid duplicates.
-3. Check for required labels and create missing labels only if approved.
-4. Create the epic from `github-epic.md`.
-5. Create the Backlog parent.
-6. Create migration and governance issues.
-7. Create Backlog child tasks.
-8. Update all GitHub issue bodies with Backlog links.
-9. Update the epic dashboard with issue links and Backlog links.
+1. Human approval was received before public GitHub issue creation.
+2. Existing design-system or product-state tracker issues were searched to avoid duplicates.
+3. Required tracker labels were checked and missing labels were created.
+4. Epic #1655 was created from `github-epic.md`.
+5. Backlog parent `TASK-45.44` was created.
+6. Migration and governance issues #1658 through #1676 were created.
+7. Backlog child tasks `TASK-45.44.1` through `TASK-45.44.19` were created.
+8. GitHub issue bodies were updated with Backlog links.
+9. The epic dashboard was updated with issue links and Backlog links.

@@ -219,8 +219,8 @@ Snapshot date: YYYY-MM-DD
 
 ## Tracking
 
-- Parent epic: TBD
-- Backlog task: TBD
+- Parent epic: <epic-url>
+- Backlog task: <task-id> (`<task-file>`)
 - PRs:
 
 ## Notes
@@ -255,8 +255,8 @@ What this track explicitly does not migrate.
 
 ## Tracking
 
-- Parent epic: TBD
-- Backlog task: TBD
+- Parent epic: <epic-url>
+- Backlog task: <task-id> (`<task-file>`)
 - PRs:
 ```
 
@@ -515,8 +515,8 @@ Expected: one commit containing Backlog parent/child task files and the updated 
 
 Edit every issue body file:
 
-- Replace `Parent epic: TBD` with the epic URL.
-- Replace `Backlog task: TBD` with the task ID and task path.
+- Replace the parent epic placeholder with the epic URL.
+- Replace the Backlog task placeholder with the task ID and task path.
 - Add PR table placeholders where needed.
 - Update `github-epic.md` dashboard rows with issue URLs, current counts, and Backlog task IDs.
 
