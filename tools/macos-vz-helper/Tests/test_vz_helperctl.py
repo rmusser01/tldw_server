@@ -646,6 +646,76 @@ def test_launchd_bootstrap_write_plist_creates_private_dirs_and_runs(tmp_path: P
     CASE.assertEqual((log_dir / "serial").stat().st_mode & 0o777, 0o700)
 
 
+def test_launchd_bootstrap_write_plist_without_create_dirs_requires_existing_dirs(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    helper = private_root / "macos-vz-helper"
+    socket_path = private_root / "runtime" / "helper.sock"
+    log_dir = private_root / "logs"
+    plist_dir = private_root / "LaunchAgents"
+    plist_path = plist_dir / "org.tldw.macos-vz-helper.plist"
+    commands: list[list[str]] = []
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    plist_dir.mkdir(mode=0o700)
+
+    result = helperctl.run_launchd_action(
+        "bootstrap",
+        label="org.tldw.macos-vz-helper",
+        plist_path=plist_path,
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        write_plist=True,
+        create_dirs=False,
+        uid=501,
+        command_runner=lambda argv, **kwargs: commands.append(argv) or 0,
+    )
+
+    CASE.assertEqual(
+        result,
+        helperctl.CheckResult(ok=False, reason="helper_directory_missing", message=str(socket_path.parent)),
+    )
+    CASE.assertEqual(commands, [])
+    CASE.assertFalse(plist_path.exists())
+
+
+def test_launchd_bootstrap_launchctl_unavailable_does_not_mutate_filesystem(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    helper = private_root / "macos-vz-helper"
+    socket_path = private_root / "runtime" / "helper.sock"
+    log_dir = private_root / "logs"
+    plist_path = private_root / "LaunchAgents" / "org.tldw.macos-vz-helper.plist"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    monkeypatch.setattr(helperctl.shutil, "which", lambda executable: None)
+
+    result = helperctl.run_launchd_action(
+        "bootstrap",
+        label="org.tldw.macos-vz-helper",
+        plist_path=plist_path,
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        write_plist=True,
+        create_dirs=True,
+        uid=501,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="launchd_launchctl_unavailable"))
+    CASE.assertFalse(socket_path.parent.exists())
+    CASE.assertFalse(log_dir.exists())
+    CASE.assertFalse(plist_path.exists())
+
+
 def test_launchd_cli_dry_run_prints_command(capsys: pytest.CaptureFixture[str]) -> None:
     helperctl = load_helperctl()
 
@@ -669,6 +739,7 @@ def test_launchd_cli_dry_run_prints_command(capsys: pytest.CaptureFixture[str]) 
 def test_launchd_cli_json_result(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     helperctl = load_helperctl()
 
+    monkeypatch.setattr(helperctl.shutil, "which", lambda executable: None)
     monkeypatch.setattr(helperctl, "run_command", lambda argv, **kwargs: 0)
 
     code = helperctl.main(
@@ -686,6 +757,42 @@ def test_launchd_cli_json_result(monkeypatch: pytest.MonkeyPatch, capsys: pytest
     output = json.loads(capsys.readouterr().out)
     CASE.assertEqual(code, 0)
     CASE.assertEqual(output, [{"name": "launchd", "ok": True, "reason": "ok", "message": ""}])
+
+
+def test_status_results_accept_custom_launchd_label(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    helper = private_root / "macos-vz-helper"
+    socket_path = private_root / "runtime" / "helper.sock"
+    pid_file = private_root / "runtime" / "helper.pid"
+    log_dir = private_root / "logs"
+    plist_path = private_root / "LaunchAgents" / "org.tldw.custom-helper.plist"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    socket_path.parent.mkdir(mode=0o700)
+    log_dir.mkdir(mode=0o700)
+    (log_dir / "serial").mkdir(mode=0o700)
+    plist_path.parent.mkdir(mode=0o700)
+    plist_path.write_text(
+        helperctl.render_launchd_plist(helper, socket_path, log_dir, label="org.tldw.custom-helper"),
+        encoding="utf-8",
+    )
+
+    results = dict(
+        helperctl.collect_status_results(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            plist_path=plist_path,
+            label="org.tldw.custom-helper",
+            entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(True),
+        )
+    )
+
+    CASE.assertEqual(results["launchd_plist"].reason, "launchd_plist_match")
 
 
 def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsys):

@@ -4,7 +4,7 @@ title: Add explicit VZ helper launchd operator commands
 status: Done
 assignee: []
 created_date: '2026-05-13 14:42'
-updated_date: '2026-05-13 14:52'
+updated_date: '2026-05-14 01:25'
 labels:
   - sandbox
   - vz-linux
@@ -41,12 +41,16 @@ Add explicit operator-owned launchd scaffolding for the macOS VZ helper lifecycl
 Plan: Docs/superpowers/plans/2026-05-13-vz-helper-launchd-operator.md
 
 Verification: python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k 'launchd' -q -> 6 passed, 93 deselected; python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q -> 98 passed, 1 skipped; git diff --check -> clean; Bandit script/tests -> empty errors/results.
+
+PR review pass: reopened to address live PR #1636 review findings from CodeRabbit/Qodo/Gemini.
+
+Review-fix verification: red tests confirmed the directory existence, launchctl availability, CLI portability, and custom-label status issues; after fixes, python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k 'launchd or custom_launchd_label' -q -> 9 passed, 93 deselected; python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q -> 101 passed, 1 skipped; git diff --check -> clean; Bandit script/tests -> empty errors/results.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added explicit vz-helperctl launchd operator commands for status/bootstrap/kickstart/bootout with dry-run support, explicit write-plist/create-dirs gates, private directory validation reuse, portable unit coverage, and operator documentation that keeps launchd and host reboot validation manual.
+Added explicit vz-helperctl launchd operator commands and addressed PR review findings by requiring existing runtime/log/serial/plist directories when --write-plist is used without --create-dirs, prechecking real launchctl availability before filesystem mutation, preserving test portability for monkeypatched runners, and threading custom launchd labels through status plist validation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

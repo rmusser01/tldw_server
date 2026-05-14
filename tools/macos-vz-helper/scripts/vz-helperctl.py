@@ -317,13 +317,16 @@ def _prepare_launchd_plist(
     if not socket_result.ok:
         return socket_result
 
+    required_dirs = (socket_path.parent, log_dir, log_dir / "serial", plist_path.parent)
     directory_dry_run = dry_run or not create_dirs
-    for directory in (socket_path.parent, log_dir, log_dir / "serial", plist_path.parent):
+    for directory in required_dirs:
         directory_result = ensure_private_dir(directory, dry_run=directory_dry_run)
         if not directory_result.ok:
             return directory_result
-    if not create_dirs and not dry_run and not plist_path.parent.exists():
-        return CheckResult(ok=False, reason="helper_directory_missing", message=str(plist_path.parent))
+    if not create_dirs and not dry_run:
+        for directory in required_dirs:
+            if not directory.exists():
+                return CheckResult(ok=False, reason="helper_directory_missing", message=str(directory))
 
     if dry_run:
         return CheckResult(ok=True, reason="dry_run")
@@ -355,6 +358,14 @@ def run_launchd_action(
     resolved_socket_path = socket_path or paths.socket_path
     resolved_log_dir = log_dir or paths.log_dir
 
+    try:
+        argv = launchd_argv(action, label=label, plist_path=resolved_plist_path, uid=uid)
+    except ValueError as exc:
+        return CheckResult(ok=False, reason="launchd_action_invalid", message=str(exc))
+
+    if not dry_run and _is_default_run_command(runner) and shutil.which("launchctl") is None:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+
     if action == "bootstrap":
         plist_result = _prepare_launchd_plist(
             plist_path=resolved_plist_path,
@@ -369,13 +380,6 @@ def run_launchd_action(
         if not plist_result.ok:
             return plist_result
 
-    if not dry_run and runner is run_command and shutil.which("launchctl") is None:
-        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
-
-    try:
-        argv = launchd_argv(action, label=label, plist_path=resolved_plist_path, uid=uid)
-    except ValueError as exc:
-        return CheckResult(ok=False, reason="launchd_action_invalid", message=str(exc))
     code = runner(argv, dry_run=dry_run)
     if code == 0:
         return CheckResult(ok=True, reason="dry_run" if dry_run else "ok")
@@ -398,6 +402,10 @@ def run_command(argv: list[str], *, dry_run: bool = False, env: dict[str, str] |
     except FileNotFoundError:
         return 127
     return int(completed.returncode)
+
+
+def _is_default_run_command(runner: Callable[..., int]) -> bool:
+    return getattr(runner, "__module__", None) == __name__ and getattr(runner, "__name__", None) == "run_command"
 
 
 def build_helper(*, dry_run: bool = False, configuration: str = "debug") -> CheckResult:
@@ -1132,6 +1140,7 @@ def collect_status_results(
     *,
     plist_path: Path | None = None,
     entitlements_path: Path | None = None,
+    label: str = DEFAULT_LAUNCHD_LABEL,
     entitlement_checker: Callable[[Path, Path | None], CheckResult] = compare_entitlements,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
@@ -1188,7 +1197,7 @@ def collect_status_results(
     )
 
     if plist_path is not None:
-        results.append(("launchd_plist", validate_plist_match(plist_path, helper_path, socket_path, log_dir)))
+        results.append(("launchd_plist", validate_plist_match(plist_path, helper_path, socket_path, log_dir, label=label)))
 
     entitlement_result = entitlement_checker(helper_path, entitlements_path)
     results.append(("entitlements", entitlement_result))
@@ -1264,6 +1273,7 @@ def status_helper(
     log_dir: Path | None = None,
     plist_path: Path | None = None,
     entitlements_path: Path | None = None,
+    label: str = DEFAULT_LAUNCHD_LABEL,
     entitlement_checker: Callable[[Path, Path | None], CheckResult] = compare_entitlements,
     ping_checker: Callable[[Path], CheckResult] = _ping_helper,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
@@ -1276,6 +1286,7 @@ def status_helper(
         log_dir or paths.log_dir,
         plist_path=plist_path,
         entitlements_path=entitlements_path,
+        label=label,
         entitlement_checker=entitlement_checker,
         ping_checker=ping_checker,
         process_lookup=process_lookup,
@@ -1577,6 +1588,7 @@ def _status_command(args: argparse.Namespace) -> int:
         Path(args.log_dir) if args.log_dir else paths.log_dir,
         plist_path=Path(args.plist_output) if args.plist_output else paths.plist_path,
         entitlements_path=Path(args.entitlements) if args.entitlements else None,
+        label=args.label,
     )
     _print_results(results, as_json=args.json)
     return 0 if all(result.ok for _, result in results) else 1
@@ -1700,6 +1712,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--pid-file")
     status.add_argument("--log-dir")
     status.add_argument("--plist-output")
+    status.add_argument("--label", default=DEFAULT_LAUNCHD_LABEL)
     status.add_argument("--entitlements")
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=_status_command)
