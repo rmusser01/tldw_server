@@ -285,7 +285,7 @@ diagnostics, and audit endpoints.
 | Sessions | `sessions.total` and `sessions.by_status` count ACP sessions in the requested `range_days` window. |
 | Failure buckets | `setup_blockers`, `runner_session_failures`, `reviewer_rejections`, `reviewer_failures`, `governance_denials`, `structured_completion_failures`, `sandbox_runtime_errors`, and `retention_redaction_actions` normalize common operator failure modes. |
 | Setup health | `agent`, `workspace`, `sandbox_runtime`, `mcp_injection`, and `scheduler_trigger_path` each report `status`, blocker codes, and evidence count. |
-| Compatibility | `agents[]`, `compatibility.by_support_state`, `documented_unverified_agents`, `live_certification_required`, and `docs_url` prevent UI and release notes from overstating downstream-agent support. |
+| Compatibility | `agents[]`, `compatibility.by_support_state`, `compatibility.documented_unverified_agents`, `compatibility.live_certification_required`, and `compatibility.docs_url` prevent UI and release notes from overstating downstream-agent support. |
 | Retention and redaction | `retention` mirrors configured session/audit retention; `redaction` declares whether support-safe detail/events/artifacts, diagnostics, and audit metadata views are available. |
 
 | Surface | Status | Role |
