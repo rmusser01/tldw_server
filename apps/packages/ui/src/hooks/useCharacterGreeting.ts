@@ -65,6 +65,8 @@ export const useCharacterGreeting = ({
   const greetingTemplateRef = React.useRef<{
     characterId: string
     greeting: string
+    rendered: string
+    avatarUrl: string | null
     selectionId: string | null
     checksum: string | null
   } | null>(null)
@@ -179,6 +181,21 @@ export const useCharacterGreeting = ({
       )
       const trimmed = rendered.trim()
       if (!trimmed) return
+      const selectionId = meta?.selectionId ?? null
+      const checksum = meta?.checksum ?? null
+      const normalizedAvatarUrl = avatarUrl ?? null
+      const cached = greetingTemplateRef.current
+      if (
+        greetingInjectedRef.current === characterId &&
+        cached?.characterId === characterId &&
+        cached.greeting === greetingValue &&
+        cached.rendered === trimmed &&
+        cached.avatarUrl === normalizedAvatarUrl &&
+        cached.selectionId === selectionId &&
+        cached.checksum === checksum
+      ) {
+        return
+      }
 
       const createdAt = Date.now()
       const messageId = generateID()
@@ -234,8 +251,10 @@ export const useCharacterGreeting = ({
       greetingTemplateRef.current = {
         characterId,
         greeting: greetingValue,
-        selectionId: meta?.selectionId ?? null,
-        checksum: meta?.checksum ?? null
+        rendered: trimmed,
+        avatarUrl: normalizedAvatarUrl,
+        selectionId,
+        checksum
       }
 
       if (greetingSettingsRef.current.greetingEnabled) {

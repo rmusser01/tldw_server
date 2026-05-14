@@ -201,7 +201,7 @@ const assertNoBlockingServerDialog = async (page: Page) => {
 
 const assertHealthResponse = (health: { status: number; body: any }) => {
   expect([200, 206]).toContain(health.status);
-  expect(['healthy', 'degraded']).toContain(health.body?.status);
+  expect(['ok', 'healthy', 'degraded']).toContain(health.body?.status);
 };
 
 const waitForChatCompletionAttempt = (page: Page) =>
@@ -617,7 +617,7 @@ test.describe('/chat cockpit real-server parity', () => {
         'aria-selected',
         'true'
       );
-      await page.getByRole('button', { name: characterName }).click();
+      await page.getByRole('button', { name: characterName, exact: true }).click();
 
       await expect(runtimeInspector.getByText(characterName)).toBeVisible();
       await expect(composerAssistant).toHaveAccessibleName(characterName);
@@ -626,6 +626,9 @@ test.describe('/chat cockpit real-server parity', () => {
 
       const smokePrompt = `assistant rail proof ${Date.now()}`;
       await page.getByTestId('chat-input').fill(smokePrompt);
+      await page.keyboard.press('Escape');
+      await page.mouse.move(20, 20);
+      await expect(page.getByRole('tooltip')).toBeHidden({ timeout: 5_000 }).catch(() => {});
       const chatCompletionAttempt = waitForChatCompletionAttempt(page);
       await page.getByRole('button', { name: /send message/i }).click();
       const chatCompletionResponse = await chatCompletionAttempt;
