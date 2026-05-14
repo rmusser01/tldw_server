@@ -1,9 +1,10 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
-import { Alert, Button, Empty, Modal, Spin, Tag } from "antd"
+import { Button, Empty, Modal, Spin, Tag } from "antd"
 import { ExternalLink } from "lucide-react"
 
+import { Alert as DSAlert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
 import {
@@ -408,15 +409,15 @@ export const WorkspaceACPHistoryModal: React.FC<
         )}
 
         {!loading && error && (
-          <Alert
-            type="error"
-            showIcon
+          <DSAlert
+            variant="error"
             title={t(
               "playground:workspace.acpRunHistoryLoadFailed",
               "Could not load ACP run history"
             )}
-            description={errorDescription}
-          />
+          >
+            {errorDescription}
+          </DSAlert>
         )}
 
         {!loading && !error && entries.length === 0 && (

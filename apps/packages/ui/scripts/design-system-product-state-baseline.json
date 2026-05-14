@@ -1100,28 +1100,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/AgentRegistry/index.tsx:Alert#antd-alert-agentregistrypage-type-warning-health-check-u-9wmva4",
-    "path": "src/components/Option/AgentRegistry/index.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/AgentRegistry/index.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/AgentRegistry/index.tsx:Alert#antd-alert-agentregistrypage-type-error-line-211-1w95fyt",
-    "path": "src/components/Option/AgentRegistry/index.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/AgentRegistry/index.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-warning-line-744-ocj46l",
     "path": "src/components/Option/AgentTasks/index.tsx",
     "rule": "antd-product-state-import",
