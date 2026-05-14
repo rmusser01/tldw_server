@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
@@ -91,3 +91,22 @@ def test_vn_capabilities_disable_scripted_generation_details_without_scripts() -
     assert body["scripted_generation"]["dynamic_choice_supported"] is False
     assert body["scripted_generation"]["scene_update_supported"] is False
     assert body["scripted_generation"]["moderation_blocked_raw_reveal_supported"] is False
+
+
+def test_vn_capabilities_require_graph_routes_for_script_authoring_graph() -> None:
+    partial_scripts_router = APIRouter(prefix="/vn-scripts")
+
+    @partial_scripts_router.get("/vn-authoring-catalog")
+    async def authoring_catalog_stub() -> dict[str, str]:
+        return {"schema_version": "vn_script_authoring_catalog.v1"}
+
+    app = FastAPI()
+    app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
+    app.include_router(partial_scripts_router, prefix="/api/v1/vn")
+    response = TestClient(app).get("/api/v1/vn/vn-capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled_modules"]["scripts"] is True
+    assert body["features"]["script_authoring_catalog"] is True
+    assert body["features"]["script_authoring_graph"] is False

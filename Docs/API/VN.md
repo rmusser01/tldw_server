@@ -205,7 +205,14 @@ operation nodes, and static edges. Node IDs are deterministic:
 
 - Labels: `label:<percent-encoded-label>`.
 - Operations: `op:<percent-encoded-label>:<zero-based-index>`.
-- Edges: `edge:<source-id>:<edge-type>:<target-id-or-missing-key>`.
+
+Edge IDs are deterministic but opaque API identifiers. They usually include
+the source node, edge type, and target or missing-target key, and they may also
+include disambiguators such as a choice index when multiple static edges share
+the same operation and target. Example:
+`edge:op:start:0:choice:choice:1:label:end`. Clients must use the explicit
+edge fields (`type`, `source_id`, `target_id`, `target_label`,
+`missing_target`, and `metadata`) instead of parsing the edge ID.
 
 Labels are percent-encoded in IDs because raw labels can contain separators
 such as `.`, `:`, `/`, or spaces. Use the `label` field for display. Source

@@ -21,6 +21,11 @@ VN_RESOURCE_PATHS = {
     "policy": f"{VN_BASE_PATH}/vn-policy",
     "audio": f"{VN_BASE_PATH}/vn-audio",
 }
+VN_SCRIPT_AUTHORING_GRAPH_PATHS = (
+    f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/draft/graph",
+    f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/draft/graph-preview",
+    f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/versions/{{version_id}}/graph",
+)
 VN_SUPPORTED_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"]
 VN_SUPPORTED_AUDIO_MEDIA_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg"]
 
@@ -34,7 +39,10 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
     }
     scripted_generation_enabled = enabled_modules["scripts"] and enabled_modules["play"]
     script_authoring_catalog_enabled = enabled_modules["scripts"]
-    script_authoring_graph_enabled = enabled_modules["scripts"]
+    script_authoring_graph_enabled = _has_registered_paths(
+        route_paths,
+        VN_SCRIPT_AUTHORING_GRAPH_PATHS,
+    )
 
     return {
         "schema_version": "vn_capabilities.v1",
@@ -114,3 +122,7 @@ def _route_paths(routes: Iterable[Any]) -> set[str]:
 def _has_registered_resource(paths: set[str], resource_path: str) -> bool:
     prefix = resource_path.rstrip("/")
     return any(path == prefix or path.startswith(f"{prefix}/") for path in paths)
+
+
+def _has_registered_paths(paths: set[str], required_paths: Iterable[str]) -> bool:
+    return all(path in paths for path in required_paths)
