@@ -63,8 +63,11 @@ def _mock_persona_ws_runtime(monkeypatch):
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    fastapi_app.dependency_overrides.clear()
     if hasattr(fastapi_app.state, "persona_runtime_explorer_provider"):
         delattr(fastapi_app.state, "persona_runtime_explorer_provider")
+    yield
+    fastapi_app.dependency_overrides.clear()
 
 
 def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
@@ -439,6 +442,49 @@ def test_runtime_explorer_fallback_notice_is_bounded_and_trace_safe(monkeypatch)
     assert diagnostics["provider_calls"] == 1
     assert "user-secret" not in serialized_notice
     assert "provider-secret" not in serialized_notice
+
+
+def test_runtime_explorer_circuit_open_notice_has_distinct_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify circuit-open runtime fallback emits a distinct websocket notice."""
+    class _FakeExplorer:
+        def explore(self, _context: dict) -> RuntimeExplorationResult:
+            return RuntimeExplorationResult(
+                selected_candidate=None,
+                fallback=ExplorationFallback.CIRCUIT_OPEN,
+                safe_denial=None,
+                budget=RuntimeBudgetUsage(),
+                diagnostics={"reason": "runtime_explorer_circuit_open"},
+                circuit_open=True,
+            )
+
+    class _FakeProvider:
+        def get(self, _config: RuntimeExplorerConfig) -> _FakeExplorer:
+            return _FakeExplorer()
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=True),
+        raising=False,
+    )
+    fastapi_app.dependency_overrides[persona_ep.get_persona_runtime_explorer_provider] = (
+        lambda: _FakeProvider()
+    )
+
+    notice = _notice_for_text(
+        "find runtime notes while circuit is open",
+        reason_code="RUNTIME_EXPLORER_CIRCUIT_OPEN",
+        session_id="sess_runtime_circuit_open_notice",
+    )
+
+    diagnostics = notice["runtime_explorer"]
+    assert diagnostics["fallback"] == "circuit_open"
+    assert diagnostics["reason"] == "runtime_explorer_circuit_open"
+    assert diagnostics["provider_calls"] == 0
+    assert diagnostics["circuit_open"] is True
+    assert "temporarily" in str(notice.get("message", "")).lower()
 
 
 def test_runtime_explorer_enabled_selects_highest_scoring_safe_plan(monkeypatch) -> None:
