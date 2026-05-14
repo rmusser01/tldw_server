@@ -1,5 +1,6 @@
 import { apiClient } from '@web/lib/api';
 import type {
+  VNScriptAuthoringCatalogResponse,
   VNScriptCreate,
   VNScriptCreateFromTemplateRequest,
   VNScriptCreateFromTemplateResponse,
@@ -13,6 +14,10 @@ import type {
   VNScriptPublishRequest,
   VNScriptPublishResponse,
   VNScriptResponse,
+  VNScriptSnippetApplyRequest,
+  VNScriptSnippetApplyResponse,
+  VNScriptSnippetPreviewRequest,
+  VNScriptSnippetPreviewResponse,
   VNScriptTemplateListResponse,
   VNScriptValidateRequest,
   VNScriptValidationResponse,
@@ -39,6 +44,10 @@ export function createVNScript(request: VNScriptCreate): Promise<VNScriptRespons
 
 export function listVNScriptTemplates(): Promise<VNScriptTemplateListResponse> {
   return apiClient.get(`${VN_SCRIPTS_BASE}/templates`);
+}
+
+export function getVNScriptAuthoringCatalog(): Promise<VNScriptAuthoringCatalogResponse> {
+  return apiClient.get(`${VN_SCRIPTS_BASE}/vn-authoring-catalog`);
 }
 
 export function createVNScriptFromTemplate(
@@ -87,6 +96,20 @@ export function validateVNScriptDraft(
 
 export function getVNScriptDiagnostics(scriptId: number): Promise<VNScriptDiagnosticsResponse> {
   return apiClient.get(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/draft/diagnostics`);
+}
+
+export function previewVNScriptSnippet(
+  scriptId: number,
+  request: VNScriptSnippetPreviewRequest
+): Promise<VNScriptSnippetPreviewResponse> {
+  return apiClient.post(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/draft/snippet-preview`, request);
+}
+
+export function applyVNScriptSnippet(
+  scriptId: number,
+  request: VNScriptSnippetApplyRequest
+): Promise<VNScriptSnippetApplyResponse> {
+  return apiClient.post(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/draft/snippet-apply`, request);
 }
 
 export function publishVNScript(

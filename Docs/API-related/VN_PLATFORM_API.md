@@ -38,6 +38,7 @@ Example:
     "asset_generation": true,
     "asset_portability": true,
     "scripted_story": true,
+    "script_authoring_catalog": true,
     "story_start": true,
     "tts_jobs": false,
     "realtime_image_generation": false,
@@ -74,6 +75,144 @@ Create-from-template accepts the same script metadata as normal script creation,
 ```
 
 After creation, the script is a normal authored script. Clients should use the standard draft, validation, diagnostics, and publish endpoints for further editing.
+
+## VN Script Authoring Catalog
+
+Custom frontends can build guided script editors from the backend-owned authoring catalog instead of hard-coding VN opcodes or generation policy details.
+
+- `GET /api/v1/vn/vn-scripts/vn-authoring-catalog`
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-preview`
+- `POST /api/v1/vn/vn-scripts/scripts/{script_id}/draft/snippet-apply`
+
+`GET /vn-authoring-catalog` returns preview-safe metadata:
+
+```json
+{
+  "schema_version": "vn_script_authoring_catalog.v1",
+  "program_schema_version": "vn_script_program.v1",
+  "capability_tokens": ["script_authoring_catalog", "scripted_generation"],
+  "operations": [
+    {
+      "op": "narrate",
+      "label": "Narrate",
+      "category": "story",
+      "capability_tokens": []
+    }
+  ],
+  "snippets": [
+    {
+      "id": "narration",
+      "schema_version": "vn_script_program.v1",
+      "label": "Narration",
+      "operation_sequence": ["narrate"],
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"]
+      },
+      "default_parameters": {},
+      "preview": [{ "op": "narrate", "text": "{text}" }]
+    }
+  ]
+}
+```
+
+The catalog intentionally omits API keys, raw prompts, provider/model routing, and publish policy decisions. Frontends should first check `GET /api/v1/vn/vn-capabilities`; when `features.script_authoring_catalog` is `true`, they can list snippets, render controls from each snippet `parameters_schema`, and send snippet preview/apply requests to the backend.
+
+Preview is non-mutating. It builds a patch against either the stored draft or a supplied draft, resolves validation resources for the patched draft, and returns the patched draft plus diagnostics without storing the draft or diagnostics.
+
+Stored-draft preview:
+
+```json
+{
+  "snippet_id": "narration",
+  "anchor": { "label": "start", "op_index": 0, "mode": "after" },
+  "parameters": { "text": "The archive door opens." }
+}
+```
+
+Supplied-draft preview must include `draft_revision`, which must match the current stored draft revision:
+
+```json
+{
+  "snippet_id": "narration",
+  "anchor": { "label": "start", "mode": "append" },
+  "parameters": { "text": "A new line from the editor buffer." },
+  "draft_revision": 3,
+  "draft": { "schema_version": "vn_script_program.v1", "labels": { "start": [] } }
+}
+```
+
+Preview response:
+
+```json
+{
+  "script_id": 12,
+  "base_revision": 3,
+  "snippet_id": "narration",
+  "draft": { "schema_version": "vn_script_program.v1" },
+  "diagnostics": { "valid": true, "errors": [], "warnings": [] },
+  "patch_summary": {
+    "inserted_ops": 1,
+    "created_labels": [],
+    "changed_paths": ["$.labels.start[1]"]
+  },
+  "warnings": []
+}
+```
+
+Apply persists a patch and requires optimistic concurrency via `if_revision`:
+
+```json
+{
+  "if_revision": 3,
+  "snippet_id": "generated_choice_set",
+  "anchor": { "label": "start", "mode": "append" },
+  "parameters": {
+    "handler_label": "generated_choice",
+    "scope": "turn",
+    "max_choices": 3
+  }
+}
+```
+
+Apply response:
+
+```json
+{
+  "script_id": 12,
+  "revision": 4,
+  "snippet_id": "generated_choice_set",
+  "draft": { "schema_version": "vn_script_program.v1" },
+  "diagnostics": { "valid": true, "errors": [], "warnings": [] },
+  "patch_summary": {
+    "inserted_ops": 1,
+    "created_labels": ["generated_choice"],
+    "changed_paths": ["$.labels.start[2]", "$.labels.generated_choice"]
+  }
+}
+```
+
+Snippet endpoints delegate manifest, policy, generation-profile, and draft validation decisions to the script service. Endpoint code only authenticates the caller, deserializes request models, resolves validation resources such as accessible audio refs for the patched draft, and maps service/patcher errors into the VN error envelope.
+
+### Authoring Error Responses
+
+| HTTP | `detail.details.reason` | Meaning |
+| --- | --- | --- |
+| 400 | `snippet_parameter_invalid` | Snippet parameters are malformed, unsupported, too deep, too large, or contain raw generation routing keys. Includes `field_path`. |
+| 400 | `snippet_anchor_invalid` | The supplied anchor shape or operation index is invalid. Includes `anchor`. |
+| 400 | `snippet_anchor_not_found` | The target label or operation was not found. Includes `anchor`. |
+| 400 | `draft_revision_required` | A supplied draft preview omitted `draft_revision`. |
+| 404 | `snippet_not_found` | The snippet ID is not in the backend catalog. Includes `snippet_id`. |
+| 409 | `draft_revision_conflict` | The supplied `draft_revision` or `if_revision` is stale. Includes `current_revision` when the current draft is readable. |
+
+Custom frontend flow:
+
+1. Call `GET /api/v1/vn/vn-capabilities` and enable guided authoring only when `features.script_authoring_catalog` is `true`.
+2. Call `GET /api/v1/vn/vn-scripts/vn-authoring-catalog` and render snippet-specific controls from `parameters_schema`.
+3. Use `snippet-preview` while the user is editing. For unsaved editor buffers, include both `draft` and `draft_revision`.
+4. Use `snippet-apply` with `if_revision` to persist the patch. On `draft_revision_conflict`, refetch the draft and ask the user to reapply or merge their edit.
+5. Use the existing draft validation, diagnostics, and publish endpoints for whole-draft workflows and publishing.
 
 ## Policy Profiles
 

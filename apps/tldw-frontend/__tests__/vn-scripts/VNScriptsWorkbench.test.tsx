@@ -3,30 +3,43 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
+  apiClient: {
+    get: vi.fn(),
+  },
+  applyVNScriptSnippet: vi.fn(),
   createVNScriptFromTemplate: vi.fn(),
   createVNScript: vi.fn(),
   evaluateVNScriptVersionPolicy: vi.fn(),
+  getVNScriptAuthoringCatalog: vi.fn(),
   getVNScriptDiagnostics: vi.fn(),
   getVNScriptDraft: vi.fn(),
   getVNScriptManifestSnapshot: vi.fn(),
   listVNScriptTemplates: vi.fn(),
   listVNScripts: vi.fn(),
   listVNScriptVersions: vi.fn(),
+  previewVNScriptSnippet: vi.fn(),
   publishVNScript: vi.fn(),
   putVNScriptDraft: vi.fn(),
   validateVNScriptDraft: vi.fn(),
 }));
 
+vi.mock('@web/lib/api', () => ({
+  apiClient: mocks.apiClient,
+}));
+
 vi.mock('@web/lib/api/vnScripts', () => ({
+  applyVNScriptSnippet: (...args: unknown[]) => mocks.applyVNScriptSnippet(...args),
   createVNScriptFromTemplate: (...args: unknown[]) => mocks.createVNScriptFromTemplate(...args),
   createVNScript: (...args: unknown[]) => mocks.createVNScript(...args),
   evaluateVNScriptVersionPolicy: (...args: unknown[]) => mocks.evaluateVNScriptVersionPolicy(...args),
+  getVNScriptAuthoringCatalog: (...args: unknown[]) => mocks.getVNScriptAuthoringCatalog(...args),
   getVNScriptDiagnostics: (...args: unknown[]) => mocks.getVNScriptDiagnostics(...args),
   getVNScriptDraft: (...args: unknown[]) => mocks.getVNScriptDraft(...args),
   getVNScriptManifestSnapshot: (...args: unknown[]) => mocks.getVNScriptManifestSnapshot(...args),
   listVNScriptTemplates: (...args: unknown[]) => mocks.listVNScriptTemplates(...args),
   listVNScripts: (...args: unknown[]) => mocks.listVNScripts(...args),
   listVNScriptVersions: (...args: unknown[]) => mocks.listVNScriptVersions(...args),
+  previewVNScriptSnippet: (...args: unknown[]) => mocks.previewVNScriptSnippet(...args),
   publishVNScript: (...args: unknown[]) => mocks.publishVNScript(...args),
   putVNScriptDraft: (...args: unknown[]) => mocks.putVNScriptDraft(...args),
   validateVNScriptDraft: (...args: unknown[]) => mocks.validateVNScriptDraft(...args),
@@ -174,6 +187,111 @@ const templateDraftResponse = {
   diagnostics: { valid: true },
 };
 
+const vnCapabilitiesResponse = {
+  schema_version: 'vn_capabilities.v1',
+  generated_at: '2026-05-12T10:00:00Z',
+  base_path: '/api/v1/vn',
+  resources: {},
+  enabled_modules: { scripts: true, play: true },
+  features: {
+    script_authoring_catalog: true,
+    scripted_generation: true,
+  },
+  limits: {},
+  supported_content_ratings: ['general', 'teen', 'suggestive', 'mature'],
+  visible_policy_profiles: [],
+  visible_generation_profiles: [],
+  supported_media_types: { image: [], audio: [] },
+  scripted_generation: {
+    enabled: true,
+    output_schemas: ['choice_set'],
+    confirmation_supported: true,
+    revision_activation_supported: true,
+    history_supported: true,
+    debug_detail_supported: true,
+    dynamic_choice_supported: true,
+    scene_update_supported: true,
+    max_automatic_generation_batch_count: 1,
+    moderation_blocked_raw_reveal_supported: true,
+  },
+  route_migration: { canonical: '/api/v1/vn/vn-*', supersedes: [] },
+  docs: {},
+  openapi: '/openapi.json',
+};
+
+const choiceSnippet = {
+  id: 'generated_choice_set',
+  schema_version: 'vn_script_program.v1',
+  label: 'Generated choice set',
+  operation_sequence: ['insert_choice_set'],
+  required_capability_tokens: ['script_authoring_catalog', 'choice_set'],
+  parameters_schema: {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string', title: 'Prompt' },
+      count: { type: 'number', title: 'Choice count' },
+      shuffle: { type: 'boolean', title: 'Shuffle choices' },
+      tone: { type: 'string', title: 'Tone', enum: ['dramatic', 'quiet'] },
+    },
+  },
+  default_parameters: {
+    prompt: 'Offer three routes.',
+    count: 3,
+    shuffle: false,
+    tone: 'dramatic',
+  },
+  preview: [{ op: 'choice_set' }],
+};
+
+const unsupportedSnippet = {
+  ...choiceSnippet,
+  id: 'live_asset_generation',
+  label: 'Live asset generation',
+  operation_sequence: ['generate_asset'],
+  required_capability_tokens: ['realtime_image_generation'],
+};
+
+const typedEnumSnippet = {
+  ...choiceSnippet,
+  id: 'typed_enum_snippet',
+  label: 'Typed enum snippet',
+  parameters_schema: {
+    type: 'object',
+    properties: {
+      difficulty: { type: 'number', title: 'Difficulty', enum: [1, 2, 3] },
+      includeRecap: { type: 'boolean', title: 'Include recap', enum: [true, false] },
+    },
+  },
+  default_parameters: {
+    difficulty: 2,
+    includeRecap: true,
+  },
+};
+
+const authoringCatalogResponse = {
+  schema_version: 'vn_script_authoring_catalog.v1',
+  program_schema_version: 'vn_script_program.v1',
+  capability_tokens: ['script_authoring_catalog', 'choice_set'],
+  generation_output_schemas: ['choice_set'],
+  operation_categories: { choices: ['insert_choice_set'], assets: ['generate_asset'] },
+  operations: [
+    {
+      op: 'insert_choice_set',
+      label: 'Insert choice set',
+      category: 'choices',
+      capability_tokens: ['choice_set'],
+    },
+    {
+      op: 'generate_asset',
+      label: 'Generate asset',
+      category: 'assets',
+      capability_tokens: ['realtime_image_generation'],
+    },
+  ],
+  snippets: [choiceSnippet, typedEnumSnippet, unsupportedSnippet],
+  limits: { max_operations: 100 },
+};
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -202,8 +320,41 @@ function mockTemplates(items = [linearTemplate, choiceTemplate]) {
 describe('VNScriptsWorkbench', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.apiClient.get.mockResolvedValue(vnCapabilitiesResponse);
     mockList();
     mockTemplates();
+    mocks.getVNScriptAuthoringCatalog.mockResolvedValue(authoringCatalogResponse);
+    mocks.previewVNScriptSnippet.mockResolvedValue({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: {
+        scenes: [{ id: 'start', text: 'Wake up.' }],
+        choices: [{ prompt: 'Offer three routes.' }],
+      },
+      diagnostics: { valid: true, preview_nodes: 2 },
+      patch_summary: {
+        inserted_ops: 2,
+        created_labels: ['choice_intro'],
+        changed_paths: ['labels.start[1]', 'labels.choice_intro'],
+      },
+      warnings: [{ code: 'preview_only', message: 'Preview only.' }],
+    });
+    mocks.applyVNScriptSnippet.mockResolvedValue({
+      script_id: 1,
+      revision: 4,
+      snippet_id: 'generated_choice_set',
+      draft: {
+        scenes: [{ id: 'start', text: 'Wake up.' }],
+        choices: [{ prompt: 'Offer three routes.' }],
+      },
+      diagnostics: { valid: true, applied_nodes: 2 },
+      patch_summary: {
+        inserted_ops: 2,
+        created_labels: ['choice_intro'],
+        changed_paths: ['labels.start[1]', 'labels.choice_intro'],
+      },
+    });
     mocks.createVNScript.mockResolvedValue({
       ...secondScript,
       id: 9,
@@ -337,6 +488,626 @@ describe('VNScriptsWorkbench', () => {
     expect(screen.getByRole('option', { name: 'Authored choices' })).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('Starter template'), 'linear_scene');
     expect(screen.getByText('Start with one authored scene.')).toBeInTheDocument();
+  });
+
+  it('loads the authoring catalog alongside script data when VN capabilities enables it', async () => {
+    render(<VNScriptsWorkbench />);
+
+    expect(await screen.findByRole('button', { name: /Opening Route/ })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-capabilities'));
+    await waitFor(() => expect(mocks.getVNScriptAuthoringCatalog).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('heading', { name: 'Guided insert' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Generated choice set/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Live asset generation/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Draft JSON')).toBeInTheDocument();
+  });
+
+  it('keeps guided insert hidden when capabilities disable the authoring catalog while raw JSON remains available', async () => {
+    mocks.apiClient.get.mockResolvedValueOnce({
+      ...vnCapabilitiesResponse,
+      features: { ...vnCapabilitiesResponse.features, script_authoring_catalog: false },
+    });
+    render(<VNScriptsWorkbench />);
+
+    expect(await screen.findByLabelText('Draft JSON')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-capabilities'));
+    expect(mocks.getVNScriptAuthoringCatalog).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: 'Guided insert' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+  });
+
+  it('keeps raw JSON usable and shows non-blocking status when catalog loading fails', async () => {
+    mocks.getVNScriptAuthoringCatalog.mockRejectedValueOnce(new Error('catalog offline'));
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    const editor = await screen.findByLabelText('Draft JSON');
+    expect(await screen.findByText('Guided insert catalog unavailable. Raw JSON editing remains available.')).toBeInTheDocument();
+    fireEvent.change(editor, { target: { value: JSON.stringify({ scenes: [{ id: 'manual' }] }) } });
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    await waitFor(() => {
+      expect(mocks.putVNScriptDraft).toHaveBeenCalledWith(1, {
+        if_revision: 3,
+        draft: { scenes: [{ id: 'manual' }] },
+      });
+    });
+  });
+
+  it('renders simple snippet parameter inputs from schema and defaults after selecting a snippet', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+
+    expect(screen.getByLabelText('Prompt')).toHaveValue('Offer three routes.');
+    expect(screen.getByLabelText('Choice count')).toHaveValue(3);
+    expect(screen.getByLabelText('Shuffle choices')).not.toBeChecked();
+    expect((screen.getByRole('option', { name: 'dramatic' }) as HTMLOptionElement).selected).toBe(true);
+
+    await user.clear(screen.getByLabelText('Prompt'));
+    await user.type(screen.getByLabelText('Prompt'), 'Offer two clues.');
+    await user.clear(screen.getByLabelText('Choice count'));
+    await user.type(screen.getByLabelText('Choice count'), '2');
+    await user.click(screen.getByLabelText('Shuffle choices'));
+    await user.selectOptions(screen.getByLabelText('Tone'), screen.getByRole('option', { name: 'quiet' }));
+    expect(screen.getByLabelText('Prompt')).toHaveValue('Offer two clues.');
+    expect(screen.getByLabelText('Choice count')).toHaveValue(2);
+    expect(screen.getByLabelText('Shuffle choices')).toBeChecked();
+    expect((screen.getByRole('option', { name: 'quiet' }) as HTMLOptionElement).selected).toBe(true);
+  });
+
+  it('preserves numeric and boolean enum parameter values when previewing', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Typed enum snippet/ }));
+    expect((screen.getByRole('option', { name: '2' }) as HTMLOptionElement).selected).toBe(true);
+    expect((screen.getByRole('option', { name: 'true' }) as HTMLOptionElement).selected).toBe(true);
+
+    await user.selectOptions(screen.getByLabelText('Difficulty'), screen.getByRole('option', { name: '3' }));
+    await user.selectOptions(screen.getByLabelText('Include recap'), screen.getByRole('option', { name: 'false' }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+
+    await waitFor(() => {
+      expect(mocks.previewVNScriptSnippet).toHaveBeenCalledWith(1, expect.objectContaining({
+        snippet_id: 'typed_enum_snippet',
+        parameters: {
+          difficulty: 3,
+          includeRecap: false,
+        },
+      }));
+    });
+  });
+
+  it('previews a selected snippet without updating the stored draft revision', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.selectOptions(screen.getByLabelText('Anchor mode'), 'before');
+    await user.clear(screen.getByLabelText('Op index'));
+    await user.type(screen.getByLabelText('Op index'), '2');
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+
+    await waitFor(() => {
+      expect(mocks.previewVNScriptSnippet).toHaveBeenCalledWith(1, {
+        snippet_id: 'generated_choice_set',
+        anchor: { label: 'start', mode: 'before', op_index: 2 },
+        parameters: {
+          prompt: 'Offer three routes.',
+          count: 3,
+          shuffle: false,
+          tone: 'dramatic',
+        },
+        draft: { scenes: [{ id: 'start', text: 'Wake up.' }] },
+        draft_revision: 3,
+      });
+    });
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    expect(screen.getByText(/labels.start\[1\]/)).toBeInTheDocument();
+    expect(screen.getByText(/preview_nodes/)).toBeInTheDocument();
+    expect(screen.getByText(/Revision 3/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/choices/)).not.toBeInTheDocument();
+  });
+
+  it('applies a selected snippet with current draft revision and updates the draft from the backend response', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+
+    await waitFor(() => {
+      expect(mocks.applyVNScriptSnippet).toHaveBeenCalledWith(1, {
+        if_revision: 3,
+        snippet_id: 'generated_choice_set',
+        anchor: { label: 'start', mode: 'append', op_index: null },
+        parameters: {
+          prompt: 'Offer three routes.',
+          count: 3,
+          shuffle: false,
+          tone: 'dramatic',
+        },
+      });
+    });
+    expect(await screen.findByText('Applied snippet at revision 4.')).toBeInTheDocument();
+    expect(screen.getByText(/labels.choice_intro/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/choices/)).toBeInTheDocument();
+    expect(screen.getByText(/Revision 4/)).toBeInTheDocument();
+    expect(screen.getAllByText(/applied_nodes/).length).toBeGreaterThan(0);
+  });
+
+  it('invalidates snippet preview before apply when parameters change after preview', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeEnabled();
+
+    await user.clear(screen.getByLabelText('Prompt'));
+    await user.type(screen.getByLabelText('Prompt'), 'Offer a revised route.');
+
+    expect(screen.queryByText(/Preview inserted 2 operations/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    expect(mocks.applyVNScriptSnippet).not.toHaveBeenCalled();
+  });
+
+  it('keeps apply disabled after previewing unsaved raw JSON edits', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    const editor = screen.getByLabelText('Draft JSON');
+    fireEvent.change(editor, {
+      target: { value: JSON.stringify({ scenes: [{ id: 'unsaved', text: 'Unsaved buffer.' }] }) },
+    });
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+
+    await waitFor(() => {
+      expect(mocks.previewVNScriptSnippet).toHaveBeenCalledWith(1, expect.objectContaining({
+        draft: { scenes: [{ id: 'unsaved', text: 'Unsaved buffer.' }] },
+      }));
+    });
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    expect(mocks.applyVNScriptSnippet).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale snippet preview responses after raw JSON changes while preview is in flight', async () => {
+    const user = userEvent.setup();
+    const preview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    mocks.previewVNScriptSnippet.mockReturnValueOnce(preview.promise);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: JSON.stringify({ scenes: [{ id: 'changed', text: 'Changed while previewing.' }] }) },
+    });
+    preview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'start' }], choices: [{ prompt: 'stale preview' }] },
+      diagnostics: { valid: true, preview_nodes: 2 },
+      patch_summary: {
+        inserted_ops: 2,
+        created_labels: ['stale_preview'],
+        changed_paths: ['labels.start[1]'],
+      },
+      warnings: [],
+    });
+
+    await waitFor(() => expect(screen.queryByText(/stale_preview/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Preview inserted 2 operations/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeDisabled();
+  });
+
+  it('ignores older snippet preview responses when raw JSON changed and a newer preview is current', async () => {
+    const user = userEvent.setup();
+    const firstPreview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    const secondPreview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    mocks.previewVNScriptSnippet
+      .mockReturnValueOnce(firstPreview.promise)
+      .mockReturnValueOnce(secondPreview.promise);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: JSON.stringify({ scenes: [{ id: 'changed', text: 'Changed before preview B.' }] }) },
+    });
+    await waitFor(() => expect(screen.getByDisplayValue(/Changed before preview B/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(2));
+
+    secondPreview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'changed' }], choices: [{ prompt: 'current preview' }] },
+      diagnostics: { valid: true, preview_nodes: 2 },
+      patch_summary: {
+        inserted_ops: 2,
+        created_labels: ['current_preview'],
+        changed_paths: ['labels.current_preview[1]'],
+      },
+      warnings: [],
+    });
+    expect(await screen.findByText(/current_preview/)).toBeInTheDocument();
+
+    firstPreview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'start' }], choices: [{ prompt: 'stale preview' }] },
+      diagnostics: { valid: true, preview_nodes: 2 },
+      patch_summary: {
+        inserted_ops: 1,
+        created_labels: ['stale_preview_a'],
+        changed_paths: ['labels.stale_preview_a[1]'],
+      },
+      warnings: [],
+    });
+
+    await waitFor(() => expect(screen.queryByText(/stale_preview_a/)).not.toBeInTheDocument());
+    expect(screen.getByText(/current_preview/)).toBeInTheDocument();
+  });
+
+  it('keeps preview loading active when an older preview resolves before the current one', async () => {
+    const user = userEvent.setup();
+    const firstPreview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    const secondPreview = createDeferred<{
+      script_id: number;
+      base_revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+      warnings: Array<Record<string, unknown>>;
+    }>();
+    mocks.previewVNScriptSnippet
+      .mockReturnValueOnce(firstPreview.promise)
+      .mockReturnValueOnce(secondPreview.promise);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: JSON.stringify({ scenes: [{ id: 'changed', text: 'Changed before preview B.' }] }) },
+    });
+    await waitFor(() => expect(screen.getByDisplayValue(/Changed before preview B/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => expect(mocks.previewVNScriptSnippet).toHaveBeenCalledTimes(2));
+
+    firstPreview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'start' }], choices: [{ prompt: 'stale preview' }] },
+      diagnostics: { valid: true },
+      patch_summary: { inserted_ops: 1, created_labels: ['stale_preview'], changed_paths: [] },
+      warnings: [],
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview snippet' })).toHaveAttribute('aria-busy', 'true'));
+    secondPreview.resolve({
+      script_id: 1,
+      base_revision: 3,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'changed' }], choices: [{ prompt: 'current preview' }] },
+      diagnostics: { valid: true },
+      patch_summary: { inserted_ops: 1, created_labels: ['current_preview'], changed_paths: ['labels.current_preview[1]'] },
+      warnings: [],
+    });
+    expect(await screen.findByText(/current_preview/)).toBeInTheDocument();
+  });
+
+  it('ignores stale snippet apply responses after switching scripts', async () => {
+    const user = userEvent.setup();
+    const apply = createDeferred<{
+      script_id: number;
+      revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+    }>();
+    mocks.applyVNScriptSnippet.mockReturnValueOnce(apply.promise);
+    mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) =>
+      scriptId === 2
+        ? { ...draftResponse, script_id: 2, draft: { scenes: [{ id: 'second', text: 'Look around.' }] } }
+        : draftResponse
+    );
+    mocks.listVNScriptVersions.mockImplementation((scriptId: number) =>
+      Promise.resolve({
+        items: scriptId === 2 ? [secondVersionResponse] : [versionResponse],
+        limit: 25,
+        offset: 0,
+        total: 1,
+        has_more: false,
+        pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+      })
+    );
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    await waitFor(() => expect(mocks.applyVNScriptSnippet).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: /Second Route/ }));
+    await screen.findByText('Script #2');
+    apply.resolve({
+      script_id: 1,
+      revision: 4,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'start' }], choices: [{ prompt: 'stale' }] },
+      diagnostics: { valid: true, stale_nodes: 2 },
+      patch_summary: {
+        inserted_ops: 2,
+        created_labels: ['stale_choice'],
+        changed_paths: ['labels.start[1]'],
+      },
+    });
+
+    await waitFor(() => expect(screen.getByDisplayValue(/Look around/)).toBeInTheDocument());
+    expect(screen.queryByDisplayValue(/stale/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Applied snippet at revision 4.')).not.toBeInTheDocument();
+  });
+
+  it('ignores apply responses after same-script raw JSON edits invalidate the preview context', async () => {
+    const user = userEvent.setup();
+    const apply = createDeferred<{
+      script_id: number;
+      revision: number;
+      snippet_id: string;
+      draft: Record<string, unknown>;
+      diagnostics: Record<string, unknown>;
+      patch_summary: { inserted_ops: number; created_labels: string[]; changed_paths: string[] };
+    }>();
+    mocks.applyVNScriptSnippet.mockReturnValueOnce(apply.promise);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    await waitFor(() => expect(mocks.applyVNScriptSnippet).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: JSON.stringify({ scenes: [{ id: 'local', text: 'Keep local edit.' }] }) },
+    });
+    apply.resolve({
+      script_id: 1,
+      revision: 4,
+      snippet_id: 'generated_choice_set',
+      draft: { scenes: [{ id: 'server' }], choices: [{ prompt: 'server response' }] },
+      diagnostics: { valid: true },
+      patch_summary: { inserted_ops: 1, created_labels: [], changed_paths: [] },
+    });
+
+    await waitFor(() => expect(screen.getByDisplayValue(/Keep local edit/)).toBeInTheDocument());
+    expect(screen.queryByDisplayValue(/server response/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Applied snippet at revision 4.')).not.toBeInTheDocument();
+  });
+
+  it('ignores stale conflict reload responses after switching scripts', async () => {
+    const user = userEvent.setup();
+    const conflict = new Error('[object Object]') as Error & {
+      detail?: { code?: string; message?: string; details?: { reason?: string } };
+      status?: number;
+    };
+    const conflictReload = createDeferred<typeof draftResponse>();
+    let openingDraftCalls = 0;
+    conflict.status = 409;
+    conflict.detail = {
+      code: 'invalid_request',
+      message: 'draft_revision_conflict',
+      details: { reason: 'draft_revision_conflict' },
+    };
+    mocks.applyVNScriptSnippet.mockRejectedValueOnce(conflict);
+    mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) => {
+      if (scriptId === 2) {
+        return { ...draftResponse, script_id: 2, draft: { scenes: [{ id: 'second', text: 'Look around.' }] } };
+      }
+      openingDraftCalls += 1;
+      return openingDraftCalls === 1
+        ? draftResponse
+        : conflictReload.promise;
+    });
+    mocks.listVNScriptVersions.mockImplementation((scriptId: number) =>
+      Promise.resolve({
+        items: scriptId === 2 ? [secondVersionResponse] : [versionResponse],
+        limit: 25,
+        offset: 0,
+        total: 1,
+        has_more: false,
+        pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+      })
+    );
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    await waitFor(() => expect(mocks.getVNScriptDraft).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole('button', { name: /Second Route/ }));
+    await screen.findByText('Script #2');
+    conflictReload.resolve({
+      ...draftResponse,
+      revision: 5,
+      draft: { scenes: [{ id: 'conflict_reload', text: 'Old script reload.' }] },
+    });
+
+    await waitFor(() => expect(screen.getByDisplayValue(/Look around/)).toBeInTheDocument());
+    expect(screen.queryByDisplayValue(/conflict_reload/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Draft changed on the server. Reloaded the latest draft; review before applying again.')).not.toBeInTheDocument();
+  });
+
+  it('ignores stale conflict reload errors after switching scripts', async () => {
+    const user = userEvent.setup();
+    const conflict = new Error('[object Object]') as Error & {
+      detail?: { code?: string; message?: string; details?: { reason?: string } };
+      status?: number;
+    };
+    const conflictReload = createDeferred<typeof draftResponse>();
+    let openingDraftCalls = 0;
+    conflict.status = 409;
+    conflict.detail = {
+      code: 'invalid_request',
+      message: 'draft_revision_conflict',
+      details: { reason: 'draft_revision_conflict' },
+    };
+    mocks.applyVNScriptSnippet.mockRejectedValueOnce(conflict);
+    mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) => {
+      if (scriptId === 2) {
+        return { ...draftResponse, script_id: 2, draft: { scenes: [{ id: 'second', text: 'Look around.' }] } };
+      }
+      openingDraftCalls += 1;
+      return openingDraftCalls === 1
+        ? draftResponse
+        : conflictReload.promise;
+    });
+    mocks.listVNScriptVersions.mockImplementation((scriptId: number) =>
+      Promise.resolve({
+        items: scriptId === 2 ? [secondVersionResponse] : [versionResponse],
+        limit: 25,
+        offset: 0,
+        total: 1,
+        has_more: false,
+        pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+      })
+    );
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    await waitFor(() => expect(mocks.getVNScriptDraft).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole('button', { name: /Second Route/ }));
+    await screen.findByText('Script #2');
+    conflictReload.reject(new Error('reload_failed'));
+
+    await waitFor(() => expect(screen.getByDisplayValue(/Look around/)).toBeInTheDocument());
+    expect(screen.queryByText('Draft changed on the server. Refresh the draft before applying again.')).not.toBeInTheDocument();
+  });
+
+  it('invalidates snippet preview before apply when switching scripts with the same draft revision', async () => {
+    const user = userEvent.setup();
+    mocks.getVNScriptDraft.mockImplementation(async (scriptId: number) =>
+      scriptId === 2
+        ? { ...draftResponse, script_id: 2, draft: { scenes: [{ id: 'second', text: 'Look around.' }] } }
+        : draftResponse
+    );
+    mocks.listVNScriptVersions.mockImplementation((scriptId: number) =>
+      Promise.resolve({
+        items: scriptId === 2 ? [secondVersionResponse] : [versionResponse],
+        limit: 25,
+        offset: 0,
+        total: 1,
+        has_more: false,
+        pagination: { limit: 25, offset: 0, total: 1, has_more: false },
+      })
+    );
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: /Second Route/ }));
+    await screen.findByText('Script #2');
+
+    expect(screen.queryByText(/Preview inserted 2 operations/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+    expect(mocks.applyVNScriptSnippet).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    await waitFor(() => {
+      expect(mocks.previewVNScriptSnippet).toHaveBeenLastCalledWith(2, expect.objectContaining({
+        draft_revision: 3,
+      }));
+    });
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply snippet' })).toBeEnabled();
+  });
+
+  it('handles draft revision conflicts without duplicating snippet content', async () => {
+    const user = userEvent.setup();
+    const conflict = new Error('[object Object]') as Error & {
+      detail?: { code?: string; message?: string; details?: { reason?: string } };
+      status?: number;
+    };
+    conflict.status = 409;
+    conflict.detail = {
+      code: 'invalid_request',
+      message: 'draft_revision_conflict',
+      details: { reason: 'draft_revision_conflict' },
+    };
+    mocks.applyVNScriptSnippet.mockRejectedValueOnce(conflict);
+    render(<VNScriptsWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /Generated choice set/ }));
+    await user.click(screen.getByRole('button', { name: 'Preview snippet' }));
+    expect(await screen.findByText(/Preview inserted 2 operations/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply snippet' }));
+
+    expect(await screen.findByText('Draft changed on the server. Reloaded the latest draft; review before applying again.')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getVNScriptDraft).toHaveBeenCalledTimes(2));
+    expect(screen.getByDisplayValue(/Wake up/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/choices/)).not.toBeInTheDocument();
   });
 
   it('creates from a selected template and shows the returned draft immediately', async () => {
