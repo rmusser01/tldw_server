@@ -15,6 +15,8 @@ const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
 const PROJECTS_PATH = `${AGENT_ORCHESTRATION_BASE_PATH}/projects`
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE =
   "Agent orchestration is not available on this server."
+const AGENT_ORCHESTRATION_UNSUPPORTED_CODE =
+  "AGENT_ORCHESTRATION_UNSUPPORTED"
 const MAX_TASK_DETAILS = 12
 const MAX_RECENT_RUNS = 6
 
@@ -35,6 +37,8 @@ type TaskSummary = {
   project_id: number
   title: string
   status: string
+  created_at?: string | null
+  updated_at?: string | null
   metadata?: Record<string, unknown> | null
   canonical_workspace?: CanonicalWorkspaceLink | null
 }
@@ -80,6 +84,10 @@ type WorkspaceRunHistoryEntry = {
   taskTitle: string
   run: RunItem
 }
+
+type WorkspaceACPHistoryError =
+  | { kind: "message"; message: string }
+  | { kind: "unsupported" }
 
 export interface WorkspaceACPHistoryModalProps {
   open: boolean
@@ -142,6 +150,13 @@ const getRunTimestamp = (run: RunItem): number => {
   return Number.isNaN(timestamp) ? 0 : timestamp
 }
 
+const getTaskTimestamp = (task: TaskSummary): number => {
+  const candidate = task.updated_at || task.created_at
+  if (!candidate) return task.id
+  const timestamp = Date.parse(candidate)
+  return Number.isNaN(timestamp) ? task.id : timestamp
+}
+
 const getSessionId = (run: RunItem): string | null =>
   normalizeWorkspaceId(run.session?.session_id) ||
   normalizeWorkspaceId(run.session_id)
@@ -153,6 +168,21 @@ const statusColor = (status: string): string => {
   return "default"
 }
 
+const createUnsupportedError = (): Error & { code: string } =>
+  Object.assign(new Error(AGENT_ORCHESTRATION_UNSUPPORTED_CODE), {
+    code: AGENT_ORCHESTRATION_UNSUPPORTED_CODE
+  })
+
+const isUnsupportedError = (
+  error: unknown
+): error is Error & { code: string } =>
+  Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: string }).code === AGENT_ORCHESTRATION_UNSUPPORTED_CODE
+  )
+
 export const WorkspaceACPHistoryModal: React.FC<
   WorkspaceACPHistoryModalProps
 > = ({ open, workspaceId, workspaceName, onCancel, onOpenAgentTasks }) => {
@@ -163,7 +193,7 @@ export const WorkspaceACPHistoryModal: React.FC<
     loading: connectionConfigLoading
   } = useCanonicalConnectionConfig()
   const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<WorkspaceACPHistoryError | null>(null)
   const [entries, setEntries] = React.useState<WorkspaceRunHistoryEntry[]>([])
 
   const buildRequestTransport = React.useCallback(
@@ -188,7 +218,7 @@ export const WorkspaceACPHistoryModal: React.FC<
   )
 
   const fetchJson = React.useCallback(
-    async <T,>(path: string): Promise<T> => {
+    async <T,>(path: string, signal?: AbortSignal): Promise<T> => {
       const transport = buildRequestTransport(path)
       if (!transport) {
         throw new Error(
@@ -199,13 +229,19 @@ export const WorkspaceACPHistoryModal: React.FC<
       }
 
       const response = await fetch(transport.url, {
-        headers: getHeaders(transport)
+        headers: getHeaders(transport),
+        signal
       })
       if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE)
+        const message = await readApiErrorMessage(response)
+        if (
+          response.status === 404 &&
+          path === PROJECTS_PATH &&
+          message === "Not Found"
+        ) {
+          throw createUnsupportedError()
         }
-        throw new Error(await readApiErrorMessage(response))
+        throw new Error(message)
       }
       return (await response.json()) as T
     },
@@ -216,6 +252,7 @@ export const WorkspaceACPHistoryModal: React.FC<
     if (!open) return
 
     let cancelled = false
+    const abortController = new AbortController()
 
     const loadHistory = async () => {
       const canonicalWorkspaceId = workspaceId?.trim()
@@ -230,7 +267,10 @@ export const WorkspaceACPHistoryModal: React.FC<
           )
         }
 
-        const projectsPayload = await fetchJson<unknown>(PROJECTS_PATH)
+        const projectsPayload = await fetchJson<unknown>(
+          PROJECTS_PATH,
+          abortController.signal
+        )
         const projects = normalizeListPayload<ProjectSummary>(
           projectsPayload,
           "projects"
@@ -243,7 +283,8 @@ export const WorkspaceACPHistoryModal: React.FC<
           await Promise.all(
             matchingProjects.map(async (project) => {
               const tasksPayload = await fetchJson<unknown>(
-                `${PROJECTS_PATH}/${project.id}/tasks`
+                `${PROJECTS_PATH}/${project.id}/tasks`,
+                abortController.signal
               )
               const tasks = normalizeListPayload<TaskSummary>(
                 tasksPayload,
@@ -255,12 +296,19 @@ export const WorkspaceACPHistoryModal: React.FC<
         ).flat()
 
         const taskDetails = await Promise.all(
-          taskRows.slice(0, MAX_TASK_DETAILS).map(async ({ project, task }) => {
-            const detail = await fetchJson<TaskDetail>(
-              `${AGENT_ORCHESTRATION_BASE_PATH}/tasks/${task.id}`
+          [...taskRows]
+            .sort(
+              (left, right) =>
+                getTaskTimestamp(right.task) - getTaskTimestamp(left.task)
             )
-            return { project, task: detail }
-          })
+            .slice(0, MAX_TASK_DETAILS)
+            .map(async ({ project, task }) => {
+              const detail = await fetchJson<TaskDetail>(
+                `${AGENT_ORCHESTRATION_BASE_PATH}/tasks/${task.id}`,
+                abortController.signal
+              )
+              return { project, task: detail }
+            })
         )
 
         const recentEntries = taskDetails
@@ -280,8 +328,21 @@ export const WorkspaceACPHistoryModal: React.FC<
           setEntries(recentEntries)
         }
       } catch (err) {
+        if (cancelled || abortController.signal.aborted) {
+          return
+        }
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load ACP run history")
+          setError(
+            isUnsupportedError(err)
+              ? { kind: "unsupported" }
+              : {
+                  kind: "message",
+                  message:
+                    err instanceof Error
+                      ? err.message
+                      : "Failed to load ACP run history"
+                }
+          )
         }
       } finally {
         if (!cancelled) {
@@ -294,6 +355,7 @@ export const WorkspaceACPHistoryModal: React.FC<
 
     return () => {
       cancelled = true
+      abortController.abort()
     }
   }, [fetchJson, open, workspaceId])
 
@@ -307,6 +369,14 @@ export const WorkspaceACPHistoryModal: React.FC<
     },
     [navigate]
   )
+
+  const errorDescription =
+    error?.kind === "unsupported"
+      ? t(
+          "playground:workspace.orchestrationUnsupported",
+          AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE
+        )
+      : error?.message
 
   return (
     <Modal
@@ -345,7 +415,7 @@ export const WorkspaceACPHistoryModal: React.FC<
               "playground:workspace.acpRunHistoryLoadFailed",
               "Could not load ACP run history"
             )}
-            description={error}
+            description={errorDescription}
           />
         )}
 

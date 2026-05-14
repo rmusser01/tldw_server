@@ -1488,6 +1488,155 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
   })
 
+  it("aborts ACP run history requests when the modal closes", async () => {
+    let capturedSignal: AbortSignal | undefined
+    fetchMockState.fetch.mockImplementation(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedSignal = init?.signal as AbortSignal | undefined
+        return new Promise<Response>(() => undefined)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    await waitFor(() => expect(capturedSignal).toBeInstanceOf(AbortSignal))
+
+    const closeButtons = within(modal).getAllByRole("button", { name: "Close" })
+    fireEvent.click(closeButtons[closeButtons.length - 1])
+
+    expect(capturedSignal?.aborted).toBe(true)
+  })
+
+  it("prioritizes newest workspace tasks before fetching ACP run detail", async () => {
+    const detailRequests: string[] = []
+
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 44,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () =>
+            Array.from({ length: 13 }, (_value, index) => {
+              const id = index + 1
+              return {
+                id,
+                project_id: 44,
+                title: `Task ${id}`,
+                status: "complete",
+                created_at: `2026-05-13T13:${String(id).padStart(2, "0")}:00.000Z`,
+                updated_at: `2026-05-13T13:${String(id).padStart(2, "0")}:30.000Z`,
+                canonical_workspace: {
+                  canonical_workspace_id: "workspace-alpha"
+                }
+              }
+            })
+        } as Response
+      }
+
+      if (
+        url.startsWith(
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/"
+        )
+      ) {
+        detailRequests.push(url)
+        const id = Number(url.split("/").pop())
+        return {
+          ok: true,
+          json: async () => ({
+            id,
+            project_id: 44,
+            title: `Task ${id}`,
+            status: "complete",
+            runs:
+              id === 13
+                ? [
+                    {
+                      id: 130,
+                      task_id: 13,
+                      status: "completed",
+                      result_summary: "Newest task run",
+                      completed_at: "2026-05-13T14:00:00.000Z",
+                      session: {
+                        session_id: "sess-newest",
+                        links: {
+                          diagnostics: "/api/v1/acp/sessions/sess-newest/diagnostics"
+                        }
+                      },
+                      history: {
+                        artifact_count: 0,
+                        diagnostic_count: 1,
+                        audit_event_count: 0
+                      }
+                    }
+                  ]
+                : []
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Newest task run")).toBeInTheDocument()
+    expect(detailRequests).toContain(
+      "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/13"
+    )
+    expect(detailRequests).not.toContain(
+      "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/1"
+    )
+  })
+
   it("shows an empty ACP run history state for workspaces without runs", async () => {
     fetchMockState.fetch.mockResolvedValue({
       ok: true,
@@ -1548,6 +1697,86 @@ describe("WorkspaceHeader workspace browser modal", () => {
     ).toBeInTheDocument()
     expect(
       within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
+  it("surfaces missing task errors instead of treating them as unsupported orchestration", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 44,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 55,
+              project_id: 44,
+              title: "Deleted task",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/55"
+      ) {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({
+            detail: "Task not found"
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Task not found")).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Agent orchestration is not available on this server.")
     ).not.toBeInTheDocument()
   })
 
