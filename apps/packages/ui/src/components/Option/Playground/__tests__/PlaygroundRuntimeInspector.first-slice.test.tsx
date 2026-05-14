@@ -59,6 +59,29 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument();
   });
 
+  it("keeps cockpit rail sections in runtime configuration order", () => {
+    renderInspector({
+      settingSummaries: [{ label: "Temperature", value: "0.7" }],
+      toolSummary: {
+        state: "available",
+        label: "MCP tools",
+        detail: "3 chat tools enabled",
+      },
+    });
+
+    expect(
+      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual([
+      "Runtime",
+      "Model & Chat",
+      "MCP tools",
+      "Character / Persona",
+      "Scoped settings",
+      "Run controls",
+      "Timeline",
+    ]);
+  });
+
   it("derives provider and model display from provider-qualified selected model when provider is missing", () => {
     renderInspector({
       selectedProvider: null,
@@ -226,8 +249,11 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
     expect(props.onStopStreaming).toHaveBeenCalledTimes(1);
     expect(
-      screen.queryByRole("button", { name: "Regenerate last response" }),
-    ).toBeNull();
+      screen.getByRole("button", { name: "Regenerate last response" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Wait for the current turn to finish before regenerating."),
+    ).toBeInTheDocument();
   });
 
   it("calls the existing regenerate handler when ready", () => {
@@ -243,10 +269,11 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     );
 
     expect(props.onRegenerate).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDisabled();
+    expect(screen.getByText("No turn is running.")).toBeInTheDocument();
   });
 
-  it("hides stop and regenerate controls when the shared handlers are unavailable", () => {
+  it("explains unavailable run controls when shared handlers are unavailable", () => {
     renderInspector({
       canStopStreaming: false,
       canRegenerate: false,
@@ -255,11 +282,15 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     });
 
     expect(
-      screen.queryByRole("button", { name: "Stop generation" }),
-    ).toBeNull();
+      screen.getByRole("button", { name: "Stop generation" }),
+    ).toBeDisabled();
     expect(
-      screen.queryByRole("button", { name: "Regenerate last response" }),
-    ).toBeNull();
+      screen.getByRole("button", { name: "Regenerate last response" }),
+    ).toBeDisabled();
+    expect(screen.getByText("No turn is running.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Regenerate becomes available after an assistant response."),
+    ).toBeInTheDocument();
   });
 
   it("renders streaming, degraded, and error details through explicit status props", () => {

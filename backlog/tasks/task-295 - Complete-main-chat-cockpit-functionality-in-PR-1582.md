@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 07:10'
+updated_date: '2026-05-14 07:19'
 labels:
   - webui
   - chat
@@ -150,6 +150,8 @@ Maintainer approved P0 after reviewing the recorded P0 gate evidence. Proceeding
 Task 6 P1 context session rail implementation completed. Context rail now treats prompt and assistant as first-class sources, removes individual knowledge media file sources with source-specific labels, surfaces server session title status error state, and clears stale next-send context when switching server chats. Real-server proof exposed a React maximum-update loop in disposable character send from unstable selectedAssistant normalization plus repeated same-id character hydration; fixed by memoizing selected assistant identity and preventing same-id character greeting refetch. Verification: focused Vitest passed 7 files / 66 tests; real-server Playwright passed 4 tests against local frontend/backend with no route interception and real disposable character select send clear through complete-v2; git diff --check passed. Bandit not applicable for frontend TypeScript TSX and Playwright only. PR 1582 remains draft pending P1/P2 approval.
 
 Additional recovery verification: saveMessageOnError now falls back to a local chat title if provider title generation fails during error recovery. Focused Vitest passed 1 file / 2 tests for saveMessageOnError.
+
+Task 7 P1 run controls recovery and degraded-health implementation completed. Runtime rail now keeps Stop and Regenerate visible as explicit run controls, enables them only when the shared request state allows the action, and shows disabled reasons for idle turns, active turns, and missing assistant responses. Status strip now labels degraded non-blocking health as chat-available and exposes a Model and Chat recovery action for error states. New copy is mirrored into the extension locale catalog. Verification: focused Vitest passed 5 files / 39 tests covering runtime inspector, status strip, chat error banner, cockpit wiring, and locale mirror; real-server Playwright first failed inside the sandbox because Chromium could not register a macOS Mach service, then passed outside the sandbox with 4 real-server tests against local frontend/backend and no route interception; git diff --check passed before this note. Bandit not applicable for frontend TypeScript TSX JSON and Playwright only. PR 1582 remains draft pending P1/P2 approval.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

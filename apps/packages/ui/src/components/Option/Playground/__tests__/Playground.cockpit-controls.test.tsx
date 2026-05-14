@@ -439,10 +439,15 @@ describe("Playground cockpit controls", () => {
         1,
       );
       expect(
-        within(runtimeInspector).queryByRole("button", {
+        within(runtimeInspector).getByRole("button", {
           name: "Regenerate last response",
         }),
-      ).toBeNull();
+      ).toBeDisabled();
+      expect(
+        within(runtimeInspector).getByText(
+          "Wait for the current turn to finish before regenerating.",
+        ),
+      ).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("2 messages")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Mira Vale")).toBeInTheDocument();
 
@@ -846,10 +851,11 @@ describe("Playground cockpit controls", () => {
       await screen.findByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
     expect(
-      within(runtimeInspector).queryByRole("button", {
+      within(runtimeInspector).getByRole("button", {
         name: "Stop generation",
       }),
-    ).toBeNull();
+    ).toBeDisabled();
+    expect(within(runtimeInspector).getByText("No turn is running.")).toBeInTheDocument();
 
     fireEvent.click(
       within(runtimeInspector).getByRole("button", {

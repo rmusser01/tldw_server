@@ -2549,11 +2549,32 @@
   "cockpit_route": {
     "message": "Route {{route}}"
   },
+  "cockpit_runControls": {
+    "message": "Run controls"
+  },
   "cockpit_stopGeneration": {
     "message": "Stop generation"
   },
+  "cockpit_stopUnavailableIdle": {
+    "message": "No turn is running."
+  },
   "cockpit_regenerateLastResponse": {
     "message": "Regenerate last response"
+  },
+  "cockpit_regenerateUnavailableStreaming": {
+    "message": "Wait for the current turn to finish before regenerating."
+  },
+  "cockpit_regenerateUnavailableNoAssistant": {
+    "message": "Regenerate becomes available after an assistant response."
+  },
+  "cockpit_degradedChatAvailable": {
+    "message": "Chat remains available."
+  },
+  "cockpit_reviewModelChatSettings": {
+    "message": "Review Model & Chat settings"
+  },
+  "cockpit_reviewSettings": {
+    "message": "Review settings"
   },
   "cockpit_modelAndCharacter": {
     "message": "Model and character"

@@ -73,6 +73,10 @@ export const PlaygroundStatusStrip = ({
     }),
     effectiveMessageCount,
   );
+  const degradedChatAvailableLabel =
+    isDegraded && !errorMessage
+      ? t("cockpit.degradedChatAvailable", "Chat remains available.")
+      : null;
 
   return (
     <footer
@@ -132,11 +136,16 @@ export const PlaygroundStatusStrip = ({
         {errorMessage ? (
           <span className={pillClass}>{errorMessage}</span>
         ) : (
-          degradedChecks.map((check, index) => (
-            <span className={pillClass} key={`degraded-${index}-${check}`}>
-              {check}
-            </span>
-          ))
+          <>
+            {degradedChecks.map((check, index) => (
+              <span className={pillClass} key={`degraded-${index}-${check}`}>
+                {check}
+              </span>
+            ))}
+            {degradedChatAvailableLabel ? (
+              <span className={pillClass}>{degradedChatAvailableLabel}</span>
+            ) : null}
+          </>
         )}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -166,7 +175,20 @@ export const PlaygroundStatusStrip = ({
             {t("cockpit.context", "Context")}
           </button>
         ) : null}
-        {!selectedModel && onOpenModelSettings ? (
+        {errorMessage && onOpenModelSettings ? (
+          <button
+            type="button"
+            className={actionClass}
+            onClick={onOpenModelSettings}
+            aria-label={t(
+              "cockpit.reviewModelChatSettings",
+              "Review Model & Chat settings",
+            )}
+          >
+            <Settings2 className="h-3 w-3" aria-hidden="true" />
+            {t("cockpit.reviewSettings", "Review settings")}
+          </button>
+        ) : !selectedModel && onOpenModelSettings ? (
           <button
             type="button"
             className={actionClass}

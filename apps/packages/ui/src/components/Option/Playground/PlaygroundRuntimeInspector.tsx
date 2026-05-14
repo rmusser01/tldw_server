@@ -1,7 +1,14 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { getDesignSystemState } from "@/design-system";
-import { Settings2, SlidersHorizontal, UserRound, Wrench } from "lucide-react";
+import {
+  RotateCcw,
+  Settings2,
+  SlidersHorizontal,
+  Square,
+  UserRound,
+  Wrench,
+} from "lucide-react";
 import {
   formatCockpitMessageCount,
   useCockpitMessageCount,
@@ -13,6 +20,8 @@ const railValueClass = "mt-1 text-sm font-medium text-text";
 const railMutedClass = "mt-1 text-xs text-text-muted";
 const railActionClass =
   "inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+const railDisabledActionClass =
+  `${railActionClass} disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-surface2`;
 
 export type RuntimeSettingSummary = {
   label: string;
@@ -101,6 +110,7 @@ export const PlaygroundRuntimeInspector = ({
   toolSummary = null,
 }: PlaygroundRuntimeInspectorProps) => {
   const { t } = useTranslation("playground");
+  const runControlsId = React.useId();
   const effectiveMessageCount = useCockpitMessageCount(messageCount);
   const selectedModelHasProvider = Boolean(selectedModel?.includes(":"));
   const selectedModelSeparator = selectedModel?.indexOf(":") ?? -1;
@@ -176,6 +186,26 @@ export const PlaygroundRuntimeInspector = ({
       ? t("cockpit.chatToolAccess", "Chat tool access")
       : toolSummary?.label;
   const canChooseMcpTools = toolSummary?.state === "available";
+  const stopControlEnabled =
+    streaming && canStopStreaming && Boolean(onStopStreaming);
+  const regenerateControlEnabled =
+    !streaming && canRegenerate && Boolean(onRegenerate);
+  const stopDisabledReason = stopControlEnabled
+    ? null
+    : t("cockpit.stopUnavailableIdle", "No turn is running.");
+  const regenerateDisabledReason = regenerateControlEnabled
+    ? null
+    : streaming
+      ? t(
+          "cockpit.regenerateUnavailableStreaming",
+          "Wait for the current turn to finish before regenerating.",
+        )
+      : t(
+          "cockpit.regenerateUnavailableNoAssistant",
+          "Regenerate becomes available after an assistant response.",
+        );
+  const stopReasonId = `${runControlsId}-stop-disabled-reason`;
+  const regenerateReasonId = `${runControlsId}-regenerate-disabled-reason`;
 
   return (
     <div
@@ -227,31 +257,6 @@ export const PlaygroundRuntimeInspector = ({
             </p>
           </div>
         ) : null}
-        <div className="mt-3 flex flex-wrap gap-2">
-          {canStopStreaming && onStopStreaming ? (
-            <button
-              type="button"
-              onClick={onStopStreaming}
-              className={railActionClass}
-              aria-label={t("cockpit.stopGeneration", "Stop generation")}
-            >
-              {t("cockpit.stopGeneration", "Stop generation")}
-            </button>
-          ) : null}
-          {!streaming && canRegenerate && onRegenerate ? (
-            <button
-              type="button"
-              onClick={onRegenerate}
-              className={railActionClass}
-              aria-label={t(
-                "cockpit.regenerateLastResponse",
-                "Regenerate last response",
-              )}
-            >
-              {t("cockpit.regenerateLastResponse", "Regenerate last response")}
-            </button>
-          ) : null}
-        </div>
       </section>
 
       <section
@@ -276,6 +281,85 @@ export const PlaygroundRuntimeInspector = ({
             {t("cockpit.modelChatSettings", "Model & Chat settings")}
           </button>
         </div>
+      </section>
+
+      <section className={railSectionClass} aria-label={mcpToolsLabel}>
+        <h2 className={railHeadingClass}>{mcpToolsLabel}</h2>
+        {toolSummary ? (
+          <div className="mt-2 rounded-md border border-border bg-bg px-2.5 py-2">
+            <div className="flex items-start gap-2">
+              <span
+                className={`rounded border p-1 ${toolStateClass(
+                  toolSummary.state,
+                )}`}
+              >
+                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-text">
+                  {toolCardLabel}
+                </p>
+                {toolSummary.detail ? (
+                  <p className="mt-0.5 text-xs text-text-muted">
+                    {toolSummary.detail}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            {toolSummary.onOpen ? (
+              <button
+                type="button"
+                className={`${railActionClass} mt-2 gap-1.5`}
+                onClick={toolSummary.onOpen}
+                aria-label={t("cockpit.openMcpTools", "Open MCP tools")}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("cockpit.openTools", "Open tools")}
+              </button>
+            ) : null}
+            {canChooseMcpTools && toolChoice && onToolChoiceChange ? (
+              <div
+                className="mt-3 grid grid-cols-3 gap-1"
+                aria-label={t("cockpit.mcpToolChoice", "MCP tool choice")}
+              >
+                {toolChoices.map((choice) => (
+                  <button
+                    key={choice.value}
+                    type="button"
+                    className={railActionClass}
+                    aria-label={t(
+                      `cockpit.mcpToolChoice.${choice.value}`,
+                      `MCP tool choice ${choice.label}`,
+                    )}
+                    aria-pressed={toolChoice === choice.value}
+                    onClick={() => onToolChoiceChange(choice.value)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {onOpenMcpSettings ? (
+              <button
+                type="button"
+                className={`${railActionClass} mt-2 gap-1.5`}
+                onClick={onOpenMcpSettings}
+                data-cockpit-mcp-settings-trigger
+                aria-label={t("cockpit.configureMcpTools", "Configure MCP tools")}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("cockpit.configureMcp", "Configure MCP")}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className={railMutedClass}>
+            {t(
+              "cockpit.toolsComposerManaged",
+              "Turn tools are managed from the composer.",
+            )}
+          </p>
+        )}
       </section>
 
       <section
@@ -402,84 +486,54 @@ export const PlaygroundRuntimeInspector = ({
 
       <section
         className={railSectionClass}
-        aria-label={mcpToolsLabel}
+        aria-label={t("cockpit.runControls", "Run controls")}
       >
-        <h2 className={railHeadingClass}>{mcpToolsLabel}</h2>
-        {toolSummary ? (
-          <div className="mt-2 rounded-md border border-border bg-bg px-2.5 py-2">
-            <div className="flex items-start gap-2">
-              <span
-                className={`rounded border p-1 ${toolStateClass(
-                  toolSummary.state,
-                )}`}
-              >
-                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-text">
-                  {toolCardLabel}
-                </p>
-                {toolSummary.detail ? (
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {toolSummary.detail}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            {toolSummary.onOpen ? (
-              <button
-                type="button"
-                className={`${railActionClass} mt-2 gap-1.5`}
-                onClick={toolSummary.onOpen}
-                aria-label={t("cockpit.openMcpTools", "Open MCP tools")}
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                {t("cockpit.openTools", "Open tools")}
-              </button>
-            ) : null}
-            {canChooseMcpTools && toolChoice && onToolChoiceChange ? (
-              <div
-                className="mt-3 grid grid-cols-3 gap-1"
-                aria-label={t("cockpit.mcpToolChoice", "MCP tool choice")}
-              >
-                {toolChoices.map((choice) => (
-                  <button
-                    key={choice.value}
-                    type="button"
-                    className={railActionClass}
-                    aria-label={t(
-                      `cockpit.mcpToolChoice.${choice.value}`,
-                      `MCP tool choice ${choice.label}`,
-                    )}
-                    aria-pressed={toolChoice === choice.value}
-                    onClick={() => onToolChoiceChange(choice.value)}
-                  >
-                    {choice.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {onOpenMcpSettings ? (
-              <button
-                type="button"
-                className={`${railActionClass} mt-2 gap-1.5`}
-                onClick={onOpenMcpSettings}
-                data-cockpit-mcp-settings-trigger
-                aria-label={t("cockpit.configureMcpTools", "Configure MCP tools")}
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                {t("cockpit.configureMcp", "Configure MCP")}
-              </button>
+        <h2 className={railHeadingClass}>
+          {t("cockpit.runControls", "Run controls")}
+        </h2>
+        <div className="mt-2 grid gap-2">
+          <div>
+            <button
+              type="button"
+              disabled={!stopControlEnabled}
+              onClick={stopControlEnabled ? onStopStreaming : undefined}
+              className={`${railDisabledActionClass} w-full justify-start gap-1.5`}
+              aria-label={t("cockpit.stopGeneration", "Stop generation")}
+              aria-describedby={!stopControlEnabled ? stopReasonId : undefined}
+            >
+              <Square className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.stopGeneration", "Stop generation")}
+            </button>
+            {stopDisabledReason ? (
+              <p id={stopReasonId} className={railMutedClass}>
+                {stopDisabledReason}
+              </p>
             ) : null}
           </div>
-        ) : (
-          <p className={railMutedClass}>
-            {t(
-              "cockpit.toolsComposerManaged",
-              "Turn tools are managed from the composer.",
-            )}
-          </p>
-        )}
+          <div>
+            <button
+              type="button"
+              disabled={!regenerateControlEnabled}
+              onClick={regenerateControlEnabled ? onRegenerate : undefined}
+              className={`${railDisabledActionClass} w-full justify-start gap-1.5`}
+              aria-label={t(
+                "cockpit.regenerateLastResponse",
+                "Regenerate last response",
+              )}
+              aria-describedby={
+                !regenerateControlEnabled ? regenerateReasonId : undefined
+              }
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.regenerateLastResponse", "Regenerate last response")}
+            </button>
+            {regenerateDisabledReason ? (
+              <p id={regenerateReasonId} className={railMutedClass}>
+                {regenerateDisabledReason}
+              </p>
+            ) : null}
+          </div>
+        </div>
       </section>
 
       <section

@@ -644,7 +644,7 @@ git commit -m "feat(chat): complete cockpit context session rail"
 - Test: `apps/packages/ui/src/components/PersonaGarden/__tests__/FirstRunGate.test.tsx` or existing readiness tests only if readiness behavior changes.
 - Test: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 
-- [ ] **Step 1: Write failing run-control tests**
+- [x] **Step 1: Write failing run-control tests**
 
 Cover:
 
@@ -655,15 +655,15 @@ Cover:
 - Unrelated degraded health permits `/chat` immediately with warnings.
 - Chat-blocking readiness blocks or disables send clearly.
 
-- [ ] **Step 2: Implement disabled/recovery states**
+- [x] **Step 2: Implement disabled/recovery states**
 
 Keep actions wired to existing `stopStreamingRequest` and `regenerateLastMessage`; do not bypass the request state machine.
 
-- [ ] **Step 3: Prove degraded-but-chat-allowed**
+- [x] **Step 3: Prove degraded-but-chat-allowed**
 
 Use existing readiness events and real-server health behavior. Do not mock health in merge-critical Playwright proof.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 bunx vitest run apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundStatusStrip.first-slice.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx --reporter=verbose

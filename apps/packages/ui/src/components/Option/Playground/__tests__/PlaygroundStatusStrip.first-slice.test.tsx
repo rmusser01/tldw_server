@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlaygroundStatusStrip } from "../PlaygroundStatusStrip";
@@ -62,10 +62,13 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Degraded");
     expect(status).toHaveTextContent("Embeddings unavailable");
+    expect(status).toHaveTextContent("Chat remains available.");
     expect(status).toHaveTextContent("Temporary");
   });
 
   it("renders recoverable error state ahead of degraded state", () => {
+    const openModelSettings = vi.fn();
+
     render(
       <PlaygroundStatusStrip
         mode="focus"
@@ -79,11 +82,14 @@ describe("PlaygroundStatusStrip first-slice state", () => {
         temporaryChat={false}
         degradedChecks={["Embeddings unavailable"]}
         errorMessage="Provider failed"
+        onOpenModelSettings={openModelSettings}
       />,
     );
 
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Error");
     expect(status).toHaveTextContent("Provider failed");
+    fireEvent.click(screen.getByRole("button", { name: "Review Model & Chat settings" }));
+    expect(openModelSettings).toHaveBeenCalledTimes(1);
   });
 });
