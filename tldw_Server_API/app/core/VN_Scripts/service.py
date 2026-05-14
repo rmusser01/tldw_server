@@ -19,6 +19,10 @@ from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_payload_hash
 from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety_definition
 from tldw_Server_API.app.core.VN_Scripts.authoring_catalog import list_authoring_catalog
+from tldw_Server_API.app.core.VN_Scripts.authoring_graph import (
+    MAX_SUPPLIED_DRAFT_BYTES,
+    build_script_authoring_graph,
+)
 from tldw_Server_API.app.core.VN_Scripts.snippet_patcher import SnippetPatchResult, apply_snippet_patch
 from tldw_Server_API.app.core.VN_Scripts.templates import instantiate_template, list_template_catalog
 from tldw_Server_API.app.core.VN_Scripts.validator import VNScriptValidationContext, validate_script_program
@@ -284,6 +288,59 @@ class VNScriptService:
             raise ValueError("script_not_found")
         return draft
 
+    def get_draft_graph(self, script_id: int) -> dict[str, Any]:
+        """Return a computed authoring graph for the stored draft without persistence."""
+        script = self._require_script(script_id)
+        draft_row = self.get_draft(script_id)
+        validation = self.validate_draft_payload(script, draft_row["draft"])
+        return build_script_authoring_graph(
+            draft_row["draft"],
+            source="stored_draft",
+            script_id=script_id,
+            base_revision=int(draft_row["revision"]),
+            validation_diagnostics=validation,
+            validation_context_source="current_draft_context",
+        )
+
+    def preview_draft_graph(
+        self,
+        script_id: int,
+        draft: Mapping[str, Any],
+        *,
+        draft_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Return a computed authoring graph for a supplied draft without persistence."""
+        script = self._require_script(script_id)
+        if not isinstance(draft, Mapping):
+            raise ValueError("supplied_draft_invalid_shape")
+        if _payload_size_bytes(draft) > MAX_SUPPLIED_DRAFT_BYTES:
+            raise ValueError("supplied_draft_too_large")
+        draft_row = self.get_draft(script_id)
+        current_revision = int(draft_row["revision"])
+        validation = self.validate_draft_payload(script, draft)
+        result = build_script_authoring_graph(
+            draft,
+            source="supplied_draft",
+            script_id=script_id,
+            base_revision=current_revision,
+            validation_diagnostics=validation,
+            validation_context_source="current_draft_context",
+        )
+        if draft_revision is not None and int(draft_revision) != current_revision:
+            result["diagnostics"]["warnings"].append(
+                {
+                    "code": "graph_preview_revision_stale",
+                    "severity": "warning",
+                    "message": "Supplied draft revision does not match the current stored draft revision.",
+                    "path": "$.draft_revision",
+                    "details": {
+                        "supplied_draft_revision": int(draft_revision),
+                        "current_revision": current_revision,
+                    },
+                }
+            )
+        return result
+
     def replace_draft(
         self,
         script_id: int,
@@ -509,6 +566,18 @@ class VNScriptService:
             raise ValueError("script_version_not_found")
         return version
 
+    def get_version_graph(self, script_id: int, version_id: int) -> dict[str, Any]:
+        """Return a computed authoring graph for an immutable published version."""
+        version = self.get_version(script_id, version_id)
+        return build_script_authoring_graph(
+            version["program"],
+            source="published_version",
+            script_id=script_id,
+            version_id=version_id,
+            validation_diagnostics=_stored_version_validation(version),
+            validation_context_source="published_version_snapshot",
+        )
+
     def get_manifest_snapshot(self, script_id: int, version_id: int) -> dict[str, Any]:
         """Return the manifest snapshot pinned to a version."""
         self._require_script(script_id)
@@ -641,6 +710,21 @@ def _approved_slot_keys(manifest: Mapping[str, Any]) -> set[str]:
 
 def _empty_audio_refs(program: Mapping[str, Any]) -> Mapping[str, Mapping[str, Any]]:
     return {}
+
+
+def _payload_size_bytes(payload: Mapping[str, Any]) -> int:
+    return len(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
+def _stored_version_validation(version: Mapping[str, Any]) -> dict[str, Any]:
+    validation = version.get("validation")
+    if isinstance(validation, Mapping):
+        return {
+            "valid": bool(validation.get("valid")),
+            "errors": list(validation.get("errors") or []),
+            "warnings": list(validation.get("warnings") or []),
+        }
+    return {"valid": False, "errors": [], "warnings": []}
 
 
 def _script_metadata_payload(

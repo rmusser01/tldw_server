@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Generator, Mapping
 from copy import deepcopy
 import json
 from typing import Any
 
+import pytest
+
+from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import VNAssetPackCreate
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Scripts.authoring_graph import (
     GRAPH_SEMANTICS_VERSION,
     MAX_EDGES,
@@ -15,6 +21,7 @@ from tldw_Server_API.app.core.VN_Scripts.authoring_graph import (
     build_script_authoring_graph,
     content_hash_for_program,
 )
+from tldw_Server_API.app.core.VN_Scripts.service import VNScriptService
 from tldw_Server_API.app.core.VN_Scripts.validator import (
     VNScriptValidationContext,
     validate_script_program,
@@ -34,6 +41,65 @@ def _program() -> dict[str, Any]:
             "end label": [{"op": "end"}],
         },
     }
+
+
+def _manifest(*, pack_id: int = 7, slot_key: str = "background.archive.default") -> dict[str, Any]:
+    return {
+        "schema_version": "vn_asset_manifest.v1",
+        "pack_id": pack_id,
+        "title": f"Pack {pack_id}",
+        "primary_character_id": None,
+        "content_rating": "general",
+        "assets": {
+            "backgrounds": [{"slot_key": slot_key, "item_id": 100, "mime_type": "image/png"}],
+            "sprites": [],
+            "depth_companions": [],
+            "cgs": [],
+        },
+    }
+
+
+def _service(chacha_db: CharactersRAGDB, *, owner_user_id: int = 42) -> VNScriptService:
+    return VNScriptService(
+        chacha_db,
+        owner_user_id=owner_user_id,
+        manifest_resolver=lambda asset_pack_id: _manifest(pack_id=asset_pack_id),
+    )
+
+
+def _create_script(service: VNScriptService, draft: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    return service.create_script(
+        title="Archive Door",
+        primary_asset_pack_id=7,
+        policy_profile_id="local_default",
+        generation_profile_id="story_default",
+        content_rating="general",
+        initial_draft=draft or _program(),
+        initial_diagnostics={"valid": False, "errors": [{"code": "stale_stored"}], "warnings": []},
+    )
+
+
+def _create_character_pack(chacha_db: CharactersRAGDB, *, age_status: str = "adult") -> tuple[int, int]:
+    character_id = chacha_db.add_character_card(
+        {
+            "name": "Adult Mira",
+            "description": "A careful archivist.",
+            "personality": "Patient and exacting.",
+            "scenario": "Cataloging an orbital library.",
+            "extensions": {"safety_metadata": {"age_status": age_status}},
+        }
+    )
+    pack = VNAssetPackService(chacha_db, owner_user_id=42).create_pack(
+        VNAssetPackCreate(title="Character Pack", primary_character_id=character_id)
+    )
+    return pack.id, character_id
+
+
+@pytest.fixture
+def chacha_db() -> Generator[CharactersRAGDB, None, None]:
+    database = CharactersRAGDB(":memory:", client_id="vn-script-authoring-graph-test-client")
+    yield database
+    database.close_connection()
 
 
 def _diagnostic_codes(result: dict[str, Any], severity: str) -> list[str]:
@@ -478,3 +544,148 @@ def test_default_validation_diagnostics_are_fresh_for_each_result() -> None:
     second = build_script_authoring_graph(_program())
 
     assert second["validation_diagnostics"] == {"valid": False, "errors": [], "warnings": []}
+
+
+def test_service_get_draft_graph_is_non_mutating_and_uses_live_validation(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service, draft=_program())
+    before = service.get_draft(script["id"])
+
+    result = service.get_draft_graph(script["id"])
+    after = service.get_draft(script["id"])
+
+    assert result["source"] == "stored_draft"
+    assert result["script_id"] == script["id"]
+    assert result["base_revision"] == before["revision"]
+    assert result["validation_context_source"] == "current_draft_context"
+    assert result["validation_diagnostics"]["valid"] is True
+    assert "stale_stored" not in {
+        error["code"] for error in result["validation_diagnostics"].get("errors", [])
+    }
+    assert after == before
+
+
+def test_service_graph_methods_require_ownership(chacha_db: CharactersRAGDB) -> None:
+    owner_service = _service(chacha_db, owner_user_id=42)
+    other_service = _service(chacha_db, owner_user_id=7)
+    script = _create_script(owner_service, draft=_program())
+
+    with pytest.raises(ValueError, match="script_not_found"):
+        other_service.get_draft_graph(script["id"])
+
+    with pytest.raises(ValueError, match="script_not_found"):
+        other_service.preview_draft_graph(script["id"], _program())
+
+
+def test_service_preview_draft_graph_accepts_stale_revision_with_warning(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service, draft=_program())
+    before = service.get_draft(script["id"])
+
+    supplied = _program()
+    supplied["labels"]["intro.scene"][0]["text"] = "Unsaved opening."
+    result = service.preview_draft_graph(script["id"], supplied, draft_revision=-1)
+    after = service.get_draft(script["id"])
+
+    assert result["source"] == "supplied_draft"
+    assert result["script_id"] == script["id"]
+    assert result["base_revision"] == before["revision"] == 1
+    assert result["content_hash"] == content_hash_for_program(supplied)
+    assert result["validation_context_source"] == "current_draft_context"
+    assert any(
+        diagnostic["code"] == "graph_preview_revision_stale"
+        for diagnostic in result["diagnostics"]["warnings"]
+    )
+    assert after == before
+
+
+def test_service_preview_draft_graph_rejects_invalid_shape_and_oversized_drafts(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service, draft=_program())
+
+    with pytest.raises(ValueError, match="supplied_draft_invalid_shape"):
+        service.preview_draft_graph(script["id"], ["not", "a", "mapping"])  # type: ignore[arg-type]
+
+    oversized_draft = {"schema_version": PROGRAM_SCHEMA_VERSION, "blob": "x" * MAX_SUPPLIED_DRAFT_BYTES}
+    with pytest.raises(ValueError, match="supplied_draft_too_large"):
+        service.preview_draft_graph(script["id"], oversized_draft)
+
+
+def test_service_version_graph_uses_published_version_snapshot_context(chacha_db: CharactersRAGDB) -> None:
+    service = _service(chacha_db)
+    script = _create_script(service, draft=_program())
+    published = service.publish_script(
+        script["id"],
+        draft_revision=1,
+        label="v1",
+        idempotency_key="publish-graph",
+        acknowledgements=["character_safety_missing"],
+    )
+    service.update_script(
+        script["id"],
+        {
+            "primary_asset_pack_id": 8,
+            "policy_profile_id": "strict_hosted",
+            "content_rating": "mature",
+        },
+    )
+    mutated_draft = _program()
+    mutated_draft["primary_asset_pack_id"] = 8
+    mutated_draft["labels"]["intro.scene"][0]["text"] = "Mutable draft changed."
+    service.replace_draft(script["id"], if_revision=1, draft=mutated_draft)
+
+    result = service.get_version_graph(script["id"], published["version_id"])
+
+    assert result["source"] == "published_version"
+    assert result["script_id"] == script["id"]
+    assert result["base_revision"] is None
+    assert result["version_id"] == published["version_id"]
+    assert result["content_hash"] == content_hash_for_program(_program())
+    assert result["validation_context_source"] == "published_version_snapshot"
+    assert result["validation_diagnostics"]["valid"] is True
+    assert "primary_asset_pack_mismatch" not in {
+        error["code"] for error in result["validation_diagnostics"].get("errors", [])
+    }
+
+
+def test_service_version_graph_reuses_published_validation_after_live_character_changes(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    pack_id, character_id = _create_character_pack(chacha_db, age_status="adult")
+    service = VNScriptService(chacha_db, owner_user_id=42)
+    program = _program()
+    program["primary_asset_pack_id"] = pack_id
+    script = service.create_script(
+        title="Archive Door",
+        primary_asset_pack_id=pack_id,
+        policy_profile_id="strict_hosted",
+        generation_profile_id="story_default",
+        content_rating="general",
+        initial_draft=program,
+        initial_diagnostics={"valid": True, "errors": [], "warnings": []},
+    )
+    published = service.publish_script(
+        script["id"],
+        draft_revision=1,
+        label="adult",
+        idempotency_key="publish-adult-character",
+        acknowledgements=[],
+    )
+    version = service.get_version(script["id"], published["version_id"])
+    original_validation = dict(version["validation"])
+    character = chacha_db.get_character_card_by_id(character_id)
+
+    assert original_validation["valid"] is True
+    assert character is not None
+    assert chacha_db.update_character_card(
+        character_id,
+        {"extensions": {"safety_metadata": {"age_status": "missing"}}},
+        int(character["version"]),
+    )
+
+    result = service.get_version_graph(script["id"], published["version_id"])
+
+    assert result["validation_context_source"] == "published_version_snapshot"
+    assert result["validation_diagnostics"] == original_validation
