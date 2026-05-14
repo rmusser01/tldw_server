@@ -5,6 +5,7 @@ Status: Current implementation record, refreshed for admin reporting closeout on
 Parent epic: [#1471](https://github.com/rmusser01/tldw_server/issues/1471)
 Operational doc: [Agent_Client_Protocol.md](../Development/Agent_Client_Protocol.md)
 Release checklist: [ACP_Production_Readiness.md](../Development/ACP_Production_Readiness.md)
+Work product artifact contract: [Traceable_Work_Product_Artifact_Contract.md](Traceable_Work_Product_Artifact_Contract.md)
 
 ## 1) Summary
 
@@ -54,6 +55,7 @@ parallel ACP-only workspace product.
 | Structured completion signals | Shipped by [#1479](https://github.com/rmusser01/tldw_server/issues/1479) | Runs validate machine-readable completion state before review/finalization and persist failure reason codes. |
 | Reviewer-agent loop | Shipped by [#1478](https://github.com/rmusser01/tldw_server/issues/1478) | Reviewer runs are durable, decisions are audited, rejections can retry, and repeated rejection moves tasks to triage. |
 | Run history and drill-through | Shipped by [#1475](https://github.com/rmusser01/tldw_server/issues/1475) | Task detail includes runs, reviews, session links, history counts, failure context, prompt/result previews, and reviewer decisions. |
+| Traceable output artifact mapping | Contract documented under [#1538](https://github.com/rmusser01/tldw_server/issues/1538) | ACP session artifacts remain execution evidence; structured agent deliverables can be promoted into workspace work products only through the traceable artifact contract from [#1525](https://github.com/rmusser01/tldw_server/issues/1525). |
 | Governance, RBAC, and audit | Shipped by [#1476](https://github.com/rmusser01/tldw_server/issues/1476) | ACP control surfaces use token scope guards where applicable, prompt/permission flows use shared governance coordination, and audit events are sanitized. |
 | Workspace and sandbox readiness | Shipped with runtime caveats by [#1477](https://github.com/rmusser01/tldw_server/issues/1477) | Workspace roots fail closed; workspace MCP servers and env flow into sessions; sandbox mode merges configured and per-session env. Docker/Lima/VZ runtime verification remains host-specific. |
 | Schedules and triggers | Shipped by [#1474](https://github.com/rmusser01/tldw_server/issues/1474) | ACP schedules route through APScheduler to the core Scheduler `acp_run` handler; triggers sanitize secrets and expose operator state. |
@@ -307,6 +309,54 @@ live-certification work for downstream agents stays in
 [#1564](https://github.com/rmusser01/tldw_server/issues/1564), not this
 summary-reporting issue.
 
+### Traceable ACP Output Artifacts
+
+[#1538](https://github.com/rmusser01/tldw_server/issues/1538) connects ACP
+agent outputs to the product artifact contract in
+[#1525](https://github.com/rmusser01/tldw_server/issues/1525). The rule is:
+ACP session artifacts are execution evidence by default; only structured
+deliverables that satisfy
+[Traceable_Work_Product_Artifact_Contract.md](Traceable_Work_Product_Artifact_Contract.md)
+should become canonical workspace work-product artifacts.
+
+| ACP output | Artifact treatment |
+| --- | --- |
+| Raw ACP session artifacts from `/acp/sessions/{session_id}/artifacts` | Keep as execution artifacts linked from task/run/session detail. They are not polished workspace work products by themselves. |
+| Prompt text, transcript events, raw model/tool payloads, and diagnostics | Keep as authenticated drill-through evidence with `?redacted=true` support-safe views. Do not promote into workspace artifacts. |
+| Structured completion signals and run result summaries | Store on run/task history and link as provenance for a promoted artifact when a deliverable is accepted. |
+| Reviewer decisions, rejection reasons, retries, and triage state | Preserve as review metadata on the promoted artifact version and as durable ACP run/review history. |
+| Agent-authored brief/spec/report/table/action plan with source references | Eligible for promotion into a work-product artifact when it has owner/workspace placement, source lineage, review state, version metadata, and retention/redaction posture. |
+| Exported files from an accepted deliverable | Treat as export artifacts tied to a specific work-product artifact version, not as the canonical record. |
+
+Promotion should follow this workflow:
+
+1. ACP task produces a structured deliverable and a machine-readable completion
+   signal.
+2. Reviewer agent or manual reviewer accepts, requests revision, rejects, or
+   routes the output to triage using existing reviewer-loop semantics.
+3. Accepted or explicitly draftable deliverables create or update a work-product
+   artifact with `producer_type="acp"`, ACP task/run/session IDs, source-lineage
+   snapshot, review decision, artifact state, and version metadata.
+4. Rejected or `needs_revision` outputs remain linked to ACP task/run history and
+   may create a new artifact version only when the user or reviewer requests a
+   revised deliverable.
+5. Support-safe views use the existing ACP redaction contract for transcripts,
+   payloads, local paths, and diagnostic metadata; artifact detail should show
+   safe previews, source labels, decision state, and links back to authenticated
+   ACP drill-through.
+
+Implementation should be split into:
+
+| Slice | Scope |
+| --- | --- |
+| Storage/API | Add or map work-product artifact records, version chains, source-lineage records, review metadata, and ACP producer references. |
+| UI detail | Show artifact detail, source lineage, ACP provenance, review state, revise/retry/reject/accept controls, exports, and authenticated ACP drill-through links. |
+| Verification | Contract tests for ACP-to-artifact promotion, redacted support-safe views, reviewer-loop state mapping, versioning, and export identity. |
+
+The initial implementation should target one golden-path deliverable, such as a
+source-grounded workspace brief generated by an ACP task. Template-specific
+artifact types and broad export coverage should remain separate follow-ups.
+
 ## 13) Remaining Work Before Production Signoff
 
 These items remain under the #1471/#1472 closeout rather than this PRD refresh:
@@ -342,3 +392,6 @@ minimum, a release candidate needs:
 - 2026-05-14 admin reporting closeout: documented the #1537
   execution-health metric groups, reporting surfaces, dependencies, and
   follow-up split after the Agent Registry summary display shipped.
+- 2026-05-14 artifact contract closeout: linked ACP output promotion to the
+  traceable work-product artifact contract and split #1538 implementation into
+  storage/API, UI detail, and verification slices.
