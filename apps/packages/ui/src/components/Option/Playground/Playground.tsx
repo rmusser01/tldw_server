@@ -1554,6 +1554,35 @@ export const Playground = () => {
     selectedSystemPromptRecord,
     selectedQuickPrompt,
     systemPrompt,
+    copy: {
+      customPromptLabel: toText(
+        t("playground:cockpit.customPrompt", "Custom prompt"),
+      ),
+      inlineSystemPromptActiveDetail: toText(
+        t(
+          "playground:cockpit.inlineSystemPromptActive",
+          "Inline system prompt active",
+        ),
+      ),
+      noPromptContextDetail: toText(
+        t(
+          "playground:cockpit.noPromptContext",
+          "No prompt context will be added.",
+        ),
+      ),
+      noPromptSelectedLabel: toText(
+        t("playground:cockpit.noPromptSelected", "No prompt selected"),
+      ),
+      quickPromptLabel: toText(
+        t("playground:cockpit.quickPrompt", "Quick prompt"),
+      ),
+      selectedPromptDetail: toText(
+        t("playground:cockpit.systemPrompt", "System prompt"),
+      ),
+      systemPromptLabel: toText(
+        t("playground:cockpit.systemPrompt", "System prompt"),
+      ),
+    },
   });
   const clearPromptContextFromCockpit = React.useCallback(() => {
     setSelectedQuickPrompt(null);
@@ -1849,6 +1878,46 @@ export const Playground = () => {
         selectedAssistant,
         selectedCharacter,
         personaMemoryMode: serverChatPersonaMemoryMode,
+        copy: {
+          assistantFallbackName: toText(
+            t("playground:cockpit.assistantFallback", "Assistant"),
+          ),
+          characterSelected: toText(
+            t("playground:cockpit.characterSelected", "Character selected"),
+          ),
+          legacyCharacterFallbackName: (id) =>
+            toText(
+              t("playground:cockpit.characterFallbackById", `Character ${id}`, {
+                id,
+              }),
+            ),
+          memoryReadOnly: toText(
+            t("playground:cockpit.personaMemoryReadOnly", "memory read-only"),
+          ),
+          memoryReadWrite: toText(
+            t("playground:cockpit.personaMemoryReadWrite", "memory read/write"),
+          ),
+          noAssistantSelected: toText(
+            t(
+              "playground:cockpit.noAssistantSelected",
+              "No assistant selected",
+            ),
+          ),
+          personaFallbackName: toText(
+            t("playground:cockpit.personaFallback", "Persona"),
+          ),
+          personaSelected: toText(
+            t("playground:cockpit.personaSelected", "Persona selected"),
+          ),
+          personaSelectedWithMemoryMode: (memoryMode) =>
+            toText(
+              t(
+                "playground:cockpit.personaSelectedWithMemoryMode",
+                `Persona selected - ${memoryMode}`,
+                { memoryMode },
+              ),
+            ),
+        },
       })}
       onOpenModelSettings={openModelSettings}
       onOpenAssistantSelect={() => openAssistantSelector({ tab: "character" })}
@@ -1867,6 +1936,53 @@ export const Playground = () => {
         toolsLoading: mcpToolsLoading,
         discoveredCount: discoveredMcpToolCount,
         chatToolCount: chatMcpToolCount,
+        copy: {
+          availableDetail: (chatToolCount, discoveredCount) => {
+            const chatToolsLabel =
+              chatToolCount === 1
+                ? toText(
+                    t(
+                      "playground:cockpit.mcpChatToolsAvailableOne",
+                      "1 chat tool available",
+                    ),
+                  )
+                : toText(
+                    t(
+                      "playground:cockpit.mcpChatToolsAvailableMany",
+                      `${chatToolCount} chat tools available`,
+                      { count: chatToolCount },
+                    ),
+                  );
+            if (discoveredCount <= chatToolCount) return chatToolsLabel;
+            const discoveredSuffix = toText(
+              t(
+                "playground:cockpit.mcpDiscoveredSuffix",
+                ` (${discoveredCount} discovered)`,
+                { count: discoveredCount },
+              ),
+            );
+            return `${chatToolsLabel}${discoveredSuffix}`;
+          },
+          emptyDetail: toText(
+            t("playground:composer.mcpToolsEmpty", "No MCP tools available"),
+          ),
+          loadingDetail: toText(
+            t("playground:composer.mcpToolsLoading", "Loading tools..."),
+          ),
+          offlineDetail: toText(
+            t("playground:composer.mcpToolsUnhealthy", "MCP tools are offline"),
+          ),
+          toolsLabel: toText(t("playground:cockpit.mcpTools", "MCP tools")),
+          unavailableDetail: toText(
+            t(
+              "playground:composer.mcpToolsUnavailable",
+              "MCP tools unavailable",
+            ),
+          ),
+          unavailableLabel: toText(
+            t("playground:composer.mcpUnavailable", "MCP unavailable"),
+          ),
+        },
       })}
     />
   );

@@ -93,6 +93,24 @@ describe("playground cockpit summary helpers", () => {
     ).toBe("Fallback Name");
   });
 
+  it("ignores stale selected prompt records when the record id no longer matches", () => {
+    expect(
+      buildCockpitPromptSummary({
+        selectedSystemPrompt: "prompt-next",
+        selectedSystemPromptRecord: {
+          id: "prompt-previous",
+          title: "Stale Prompt Title",
+        },
+        selectedQuickPrompt: null,
+        systemPrompt: null,
+      }),
+    ).toEqual({
+      state: "system",
+      label: "System prompt",
+      detail: "prompt-next",
+    });
+  });
+
   it("keeps inline custom prompt distinct from quick and selected prompts", () => {
     expect(
       buildCockpitPromptSummary({
@@ -190,6 +208,65 @@ describe("playground cockpit summary helpers", () => {
       state: "available",
       label: "MCP tools",
       detail: "2 chat tools available (3 discovered)",
+    });
+  });
+
+  it("uses caller-provided copy without coupling helpers to UI translation", () => {
+    const selectedAssistant: AssistantSelection = {
+      kind: "persona",
+      id: "persona-1",
+      name: "Research Persona",
+    };
+
+    expect(
+      buildCockpitAssistantSummary({
+        selectedAssistant,
+        selectedCharacter: null,
+        personaMemoryMode: "read_only",
+        copy: {
+          personaSelected: "TR persona selected",
+          memoryReadOnly: "TR memory read-only",
+          personaSelectedWithMemoryMode: (mode) => `TR persona selected (${mode})`,
+        },
+      }).detail,
+    ).toBe("TR persona selected (TR memory read-only)");
+
+    expect(
+      buildCockpitPromptSummary({
+        selectedSystemPrompt: "prompt-123",
+        selectedSystemPromptRecord: {
+          id: "prompt-123",
+          title: "Research Brief",
+        },
+        selectedQuickPrompt: null,
+        systemPrompt: null,
+        copy: {
+          selectedPromptDetail: "TR selected prompt",
+        },
+      }),
+    ).toEqual({
+      state: "system",
+      label: "Research Brief",
+      detail: "TR selected prompt",
+    });
+
+    expect(
+      buildCockpitMcpSummary({
+        hasMcp: true,
+        healthState: "healthy",
+        toolsLoading: false,
+        discoveredCount: 4,
+        chatToolCount: 2,
+        copy: {
+          toolsLabel: "TR MCP tools",
+          availableDetail: (chatToolCount, discoveredCount) =>
+            `TR ${chatToolCount}/${discoveredCount} tools`,
+        },
+      }),
+    ).toEqual({
+      state: "available",
+      label: "TR MCP tools",
+      detail: "TR 2/4 tools",
     });
   });
 

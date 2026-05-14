@@ -4,6 +4,7 @@ import type {
   RuntimeAssistantSummary,
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
+import type { McpHealthState } from "@/store/mcp-tools";
 
 type LegacyCharacterSelection = {
   id?: string | number;
@@ -11,6 +12,81 @@ type LegacyCharacterSelection = {
 };
 
 type PersonaMemoryMode = "read_only" | "read_write";
+type CockpitMcpHealthState = McpHealthState | "degraded";
+
+type AssistantSummaryCopy = Partial<{
+  assistantFallbackName: string;
+  characterSelected: string;
+  legacyCharacterFallbackName: (id: string | number) => string;
+  memoryReadOnly: string;
+  memoryReadWrite: string;
+  noAssistantSelected: string;
+  personaFallbackName: string;
+  personaSelected: string;
+  personaSelectedWithMemoryMode: (memoryMode: string) => string;
+}>;
+
+type PromptSummaryCopy = Partial<{
+  customPromptLabel: string;
+  inlineSystemPromptActiveDetail: string;
+  noPromptContextDetail: string;
+  noPromptSelectedLabel: string;
+  quickPromptLabel: string;
+  selectedPromptDetail: string;
+  systemPromptLabel: string;
+}>;
+
+type McpSummaryCopy = Partial<{
+  availableDetail: (chatToolCount: number, discoveredCount: number) => string;
+  emptyDetail: string;
+  loadingDetail: string;
+  offlineDetail: string;
+  toolsLabel: string;
+  unavailableDetail: string;
+  unavailableLabel: string;
+}>;
+
+const defaultAssistantCopy = {
+  assistantFallbackName: "Assistant",
+  characterSelected: "Character selected",
+  legacyCharacterFallbackName: (id: string | number) => `Character ${id}`,
+  memoryReadOnly: "memory read-only",
+  memoryReadWrite: "memory read/write",
+  noAssistantSelected: "No assistant selected",
+  personaFallbackName: "Persona",
+  personaSelected: "Persona selected",
+  personaSelectedWithMemoryMode: (memoryMode: string) =>
+    `Persona selected - ${memoryMode}`,
+} satisfies Required<AssistantSummaryCopy>;
+
+const defaultPromptCopy = {
+  customPromptLabel: "Custom prompt",
+  inlineSystemPromptActiveDetail: "Inline system prompt active",
+  noPromptContextDetail: "No prompt context will be added.",
+  noPromptSelectedLabel: "No prompt selected",
+  quickPromptLabel: "Quick prompt",
+  selectedPromptDetail: "System prompt",
+  systemPromptLabel: "System prompt",
+} satisfies Required<PromptSummaryCopy>;
+
+const defaultMcpCopy = {
+  availableDetail: (chatToolCount: number, discoveredCount: number) => {
+    const chatToolsLabel = formatCountLabel(
+      chatToolCount,
+      "chat tool",
+      "chat tools",
+    );
+    const discoveredSuffix =
+      discoveredCount > chatToolCount ? ` (${discoveredCount} discovered)` : "";
+    return `${chatToolsLabel} available${discoveredSuffix}`;
+  },
+  emptyDetail: "No MCP tools available",
+  loadingDetail: "Loading tools...",
+  offlineDetail: "MCP tools are offline",
+  toolsLabel: "MCP tools",
+  unavailableDetail: "MCP tools unavailable",
+  unavailableLabel: "MCP unavailable",
+} satisfies Required<McpSummaryCopy>;
 
 const normalizeText = (value: string | null | undefined): string | null => {
   if (typeof value !== "string") return null;
@@ -20,9 +96,10 @@ const normalizeText = (value: string | null | undefined): string | null => {
 
 const formatPersonaMemoryMode = (
   personaMemoryMode: PersonaMemoryMode | null | undefined,
+  copy: Required<AssistantSummaryCopy>,
 ): string | null => {
-  if (personaMemoryMode === "read_only") return "memory read-only";
-  if (personaMemoryMode === "read_write") return "memory read/write";
+  if (personaMemoryMode === "read_only") return copy.memoryReadOnly;
+  if (personaMemoryMode === "read_write") return copy.memoryReadWrite;
   return null;
 };
 
@@ -36,22 +113,26 @@ export function buildCockpitAssistantSummary(input: {
   selectedAssistant: AssistantSelection | null | undefined;
   selectedCharacter: LegacyCharacterSelection | null | undefined;
   personaMemoryMode?: PersonaMemoryMode | null;
+  copy?: AssistantSummaryCopy;
 }): RuntimeAssistantSummary {
+  const copy = { ...defaultAssistantCopy, ...input.copy };
   const selectedAssistant = input.selectedAssistant;
   if (selectedAssistant?.kind === "persona") {
-    const memoryMode = formatPersonaMemoryMode(input.personaMemoryMode);
+    const memoryMode = formatPersonaMemoryMode(input.personaMemoryMode, copy);
     return {
       mode: "persona",
-      name: normalizeText(selectedAssistant.name) || "Persona",
-      detail: memoryMode ? `Persona selected - ${memoryMode}` : "Persona selected",
+      name: normalizeText(selectedAssistant.name) || copy.personaFallbackName,
+      detail: memoryMode
+        ? copy.personaSelectedWithMemoryMode(memoryMode)
+        : copy.personaSelected,
     };
   }
 
   if (selectedAssistant?.kind === "character") {
     return {
       mode: "character",
-      name: normalizeText(selectedAssistant.name) || "Assistant",
-      detail: "Character selected",
+      name: normalizeText(selectedAssistant.name) || copy.assistantFallbackName,
+      detail: copy.characterSelected,
     };
   }
 
@@ -59,12 +140,14 @@ export function buildCockpitAssistantSummary(input: {
   if (legacyCharacter) {
     const legacyName =
       normalizeText(legacyCharacter.name) ||
-      (legacyCharacter.id != null ? `Character ${legacyCharacter.id}` : null);
+      (legacyCharacter.id != null
+        ? copy.legacyCharacterFallbackName(legacyCharacter.id)
+        : null);
     if (legacyName) {
       return {
         mode: "character",
         name: legacyName,
-        detail: "Character selected",
+        detail: copy.characterSelected,
       };
     }
   }
@@ -72,7 +155,7 @@ export function buildCockpitAssistantSummary(input: {
   return {
     mode: "none",
     name: null,
-    detail: "No assistant selected",
+    detail: copy.noAssistantSelected,
   };
 }
 
@@ -85,16 +168,24 @@ export function buildCockpitPromptSummary(input: {
   } | null;
   selectedQuickPrompt: string | null | undefined;
   systemPrompt: string | null | undefined;
+  copy?: PromptSummaryCopy;
 }): PlaygroundPromptSummary {
+  const copy = { ...defaultPromptCopy, ...input.copy };
   const selectedSystemPrompt = normalizeText(input.selectedSystemPrompt);
   if (selectedSystemPrompt) {
-    const selectedPromptLabel =
-      normalizeText(input.selectedSystemPromptRecord?.title) ||
-      normalizeText(input.selectedSystemPromptRecord?.name);
+    const selectedSystemPromptRecordId = normalizeText(
+      input.selectedSystemPromptRecord?.id,
+    );
+    const recordMatchesSelection =
+      selectedSystemPromptRecordId === selectedSystemPrompt;
+    const selectedPromptLabel = recordMatchesSelection
+      ? normalizeText(input.selectedSystemPromptRecord?.title) ||
+        normalizeText(input.selectedSystemPromptRecord?.name)
+      : null;
     return {
       state: "system",
-      label: selectedPromptLabel || "System prompt",
-      detail: selectedPromptLabel ? "System prompt" : selectedSystemPrompt,
+      label: selectedPromptLabel || copy.systemPromptLabel,
+      detail: selectedPromptLabel ? copy.selectedPromptDetail : selectedSystemPrompt,
     };
   }
 
@@ -102,7 +193,7 @@ export function buildCockpitPromptSummary(input: {
   if (selectedQuickPrompt) {
     return {
       state: "quick",
-      label: "Quick prompt",
+      label: copy.quickPromptLabel,
       detail: selectedQuickPrompt,
     };
   }
@@ -110,72 +201,64 @@ export function buildCockpitPromptSummary(input: {
   if (normalizeText(input.systemPrompt)) {
     return {
       state: "custom",
-      label: "Custom prompt",
-      detail: "Inline system prompt active",
+      label: copy.customPromptLabel,
+      detail: copy.inlineSystemPromptActiveDetail,
     };
   }
 
   return {
     state: "none",
-    label: "No prompt selected",
-    detail: "No prompt context will be added.",
+    label: copy.noPromptSelectedLabel,
+    detail: copy.noPromptContextDetail,
   };
 }
 
 export function buildCockpitMcpSummary(input: {
   hasMcp: boolean;
-  healthState: string;
+  healthState: CockpitMcpHealthState;
   toolsLoading: boolean;
   discoveredCount: number;
   chatToolCount: number;
   disabledReason?: string;
+  copy?: McpSummaryCopy;
 }): RuntimeToolSummary {
+  const copy = { ...defaultMcpCopy, ...input.copy };
   if (!input.hasMcp || input.healthState === "unavailable") {
     return {
       state: "unavailable",
-      label: "MCP unavailable",
-      detail: input.disabledReason || "MCP tools unavailable",
+      label: copy.unavailableLabel,
+      detail: input.disabledReason || copy.unavailableDetail,
     };
   }
 
   if (input.toolsLoading) {
     return {
       state: "disabled",
-      label: "MCP tools",
-      detail: input.disabledReason || "Loading tools...",
+      label: copy.toolsLabel,
+      detail: input.disabledReason || copy.loadingDetail,
     };
   }
 
   if (input.healthState === "unhealthy" || input.healthState === "degraded") {
     return {
       state: "degraded",
-      label: "MCP tools",
-      detail: input.disabledReason || "MCP tools are offline",
+      label: copy.toolsLabel,
+      detail: input.disabledReason || copy.offlineDetail,
     };
   }
 
   if (input.chatToolCount <= 0) {
     return {
       state: "disabled",
-      label: "MCP tools",
-      detail: input.disabledReason || "No MCP tools available",
+      label: copy.toolsLabel,
+      detail: input.disabledReason || copy.emptyDetail,
     };
   }
 
-  const chatToolsLabel = formatCountLabel(
-    input.chatToolCount,
-    "chat tool",
-    "chat tools",
-  );
-  const discoveredSuffix =
-    input.discoveredCount > input.chatToolCount
-      ? ` (${input.discoveredCount} discovered)`
-      : "";
-
   return {
     state: "available",
-    label: "MCP tools",
-    detail: `${chatToolsLabel} available${discoveredSuffix}`,
+    label: copy.toolsLabel,
+    detail: copy.availableDetail(input.chatToolCount, input.discoveredCount),
   };
 }
 
