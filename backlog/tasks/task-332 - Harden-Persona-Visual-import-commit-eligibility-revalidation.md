@@ -12,6 +12,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1657'
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
+  - 'https://github.com/rmusser01/tldw_server/pull/1677'
 documentation:
   - Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md
   - Docs/Code_Documentation/Persona_Visual_Packs.md
