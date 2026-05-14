@@ -13,10 +13,13 @@ const mocks = vi.hoisted(() => ({
   getVNScriptAuthoringCatalog: vi.fn(),
   getVNScriptDiagnostics: vi.fn(),
   getVNScriptDraft: vi.fn(),
+  getVNScriptDraftGraph: vi.fn(),
   getVNScriptManifestSnapshot: vi.fn(),
+  getVNScriptVersionGraph: vi.fn(),
   listVNScriptTemplates: vi.fn(),
   listVNScripts: vi.fn(),
   listVNScriptVersions: vi.fn(),
+  previewVNScriptDraftGraph: vi.fn(),
   previewVNScriptSnippet: vi.fn(),
   publishVNScript: vi.fn(),
   putVNScriptDraft: vi.fn(),
@@ -35,10 +38,13 @@ vi.mock('@web/lib/api/vnScripts', () => ({
   getVNScriptAuthoringCatalog: (...args: unknown[]) => mocks.getVNScriptAuthoringCatalog(...args),
   getVNScriptDiagnostics: (...args: unknown[]) => mocks.getVNScriptDiagnostics(...args),
   getVNScriptDraft: (...args: unknown[]) => mocks.getVNScriptDraft(...args),
+  getVNScriptDraftGraph: (...args: unknown[]) => mocks.getVNScriptDraftGraph(...args),
   getVNScriptManifestSnapshot: (...args: unknown[]) => mocks.getVNScriptManifestSnapshot(...args),
+  getVNScriptVersionGraph: (...args: unknown[]) => mocks.getVNScriptVersionGraph(...args),
   listVNScriptTemplates: (...args: unknown[]) => mocks.listVNScriptTemplates(...args),
   listVNScripts: (...args: unknown[]) => mocks.listVNScripts(...args),
   listVNScriptVersions: (...args: unknown[]) => mocks.listVNScriptVersions(...args),
+  previewVNScriptDraftGraph: (...args: unknown[]) => mocks.previewVNScriptDraftGraph(...args),
   previewVNScriptSnippet: (...args: unknown[]) => mocks.previewVNScriptSnippet(...args),
   publishVNScript: (...args: unknown[]) => mocks.publishVNScript(...args),
   putVNScriptDraft: (...args: unknown[]) => mocks.putVNScriptDraft(...args),
@@ -195,6 +201,7 @@ const vnCapabilitiesResponse = {
   enabled_modules: { scripts: true, play: true },
   features: {
     script_authoring_catalog: true,
+    script_authoring_graph: true,
     scripted_generation: true,
   },
   limits: {},
@@ -292,6 +299,72 @@ const authoringCatalogResponse = {
   limits: { max_operations: 100 },
 };
 
+const graphResponse = {
+  schema_version: 'vn_script_authoring_graph.v1',
+  graph_semantics_version: 'vn_script_authoring_graph_edges.v1',
+  program_schema_version: 'vn_script_program.v1',
+  script_id: 1,
+  source: 'stored_draft',
+  base_revision: 3,
+  version_id: null,
+  content_hash: 'sha256:opening',
+  validation_context_source: 'current_draft_context',
+  truncated: false,
+  limits: {
+    max_labels: 500,
+    max_ops: 5000,
+    max_edges: 10000,
+    max_supplied_draft_bytes: 1048576,
+  },
+  outline: {
+    entry_label: 'start',
+    labels: [
+      {
+        id: 'label:start',
+        label: 'start',
+        source_path: "$.labels['start']",
+        op_count: 2,
+        incoming_edge_count: 0,
+        outgoing_edge_count: 1,
+        reachable: true,
+        terminal: 'continues',
+        summary: 'Opening label',
+      },
+    ],
+  },
+  graph: {
+    nodes: [
+      {
+        id: 'label:start',
+        type: 'label',
+        label: 'start',
+        source_path: "$.labels['start']",
+        reachable: true,
+        terminal: 'continues',
+        summary: 'Opening label',
+      },
+    ],
+    edges: [],
+  },
+  diagnostics: {
+    errors: [],
+    warnings: [
+      {
+        code: 'graph_fallthrough_not_inferred',
+        severity: 'warning',
+        message: 'Fallthrough is not inferred.',
+        path: "$.labels['start'][1]",
+        details: { next_label: 'end' },
+      },
+    ],
+  },
+  validation_diagnostics: {
+    valid: false,
+    errors: [{ code: 'missing_target', message: 'Missing target.' }],
+    warnings: [{ code: 'unused_label', message: 'Unused label.' }],
+  },
+};
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -369,6 +442,19 @@ describe('VNScriptsWorkbench', () => {
       draft: templateDraftResponse,
     });
     mocks.getVNScriptDraft.mockResolvedValue(draftResponse);
+    mocks.getVNScriptDraftGraph.mockResolvedValue(graphResponse);
+    mocks.previewVNScriptDraftGraph.mockResolvedValue({
+      ...graphResponse,
+      source: 'supplied_draft',
+      content_hash: 'sha256:preview',
+    });
+    mocks.getVNScriptVersionGraph.mockResolvedValue({
+      ...graphResponse,
+      source: 'published_version',
+      version_id: 12,
+      validation_context_source: 'published_version_snapshot',
+      content_hash: 'sha256:version',
+    });
     mocks.putVNScriptDraft.mockResolvedValue({
       ...draftResponse,
       revision: 4,
@@ -445,6 +531,70 @@ describe('VNScriptsWorkbench', () => {
     expect(screen.getByText('Policy 202')).toBeInTheDocument();
     expect(screen.getByText('Generation 303')).toBeInTheDocument();
     expect(screen.getByText(/2026-05-12T10:15:00Z/)).toBeInTheDocument();
+  });
+
+  it('loads and renders the saved draft graph outline with graph diagnostics separated from validation diagnostics', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Load saved graph' }));
+
+    await waitFor(() => expect(mocks.getVNScriptDraftGraph).toHaveBeenCalledWith(1));
+    expect(screen.getByText('Script graph')).toBeInTheDocument();
+    expect(screen.getByText('stored_draft')).toBeInTheDocument();
+    expect(screen.getByText('sha256:opening')).toBeInTheDocument();
+    expect(screen.getByText('Opening label')).toBeInTheDocument();
+    expect(screen.getByText(/graph_fallthrough_not_inferred/)).toBeInTheDocument();
+    expect(screen.getByText('Graph diagnostics')).toBeInTheDocument();
+    expect(screen.getByText('Validation diagnostics')).toBeInTheDocument();
+    expect(screen.getByText(/missing_target/)).toBeInTheDocument();
+  });
+
+  it('previews the current unsaved draft graph without saving the draft', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    const editor = await screen.findByLabelText('Draft JSON');
+    fireEvent.change(editor, {
+      target: { value: '{"labels":{"start":[{"op":"narrate","text":"Changed."}]}}' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Preview current JSON graph' }));
+
+    await waitFor(() => expect(mocks.previewVNScriptDraftGraph).toHaveBeenCalledWith(1, {
+      draft_revision: 3,
+      draft: { labels: { start: [{ op: 'narrate', text: 'Changed.' }] } },
+    }));
+    expect(mocks.putVNScriptDraft).not.toHaveBeenCalled();
+    expect(screen.getByText('supplied_draft')).toBeInTheDocument();
+    expect(screen.getByText('sha256:preview')).toBeInTheDocument();
+  });
+
+  it('keeps the graph inspector hidden when backend capabilities disable the graph feature', async () => {
+    mocks.apiClient.get.mockResolvedValueOnce({
+      ...vnCapabilitiesResponse,
+      features: { ...vnCapabilitiesResponse.features, script_authoring_graph: false },
+    });
+
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    expect(screen.queryByRole('button', { name: 'Load saved graph' })).not.toBeInTheDocument();
+    expect(mocks.getVNScriptDraftGraph).not.toHaveBeenCalled();
+  });
+
+  it('loads a published version graph from the version card', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByText('Version 2');
+    await user.click(screen.getByRole('button', { name: 'Graph for version 2' }));
+
+    await waitFor(() => expect(mocks.getVNScriptVersionGraph).toHaveBeenCalledWith(1, 12));
+    const versionCard = screen.getByTestId('version-12');
+    expect(within(versionCard).getByText('published_version')).toBeInTheDocument();
+    expect(within(versionCard).getByText('sha256:version')).toBeInTheDocument();
+    expect(within(versionCard).getByText('published_version_snapshot')).toBeInTheDocument();
   });
 
   it('creates a script shell, prepends it, selects it, and loads its details', async () => {

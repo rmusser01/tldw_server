@@ -1,12 +1,14 @@
 import { apiClient } from '@web/lib/api';
 import type {
   VNScriptAuthoringCatalogResponse,
+  VNScriptAuthoringGraphResponse,
   VNScriptCreate,
   VNScriptCreateFromTemplateRequest,
   VNScriptCreateFromTemplateResponse,
   VNScriptDiagnosticsResponse,
   VNScriptDraftPutRequest,
   VNScriptDraftResponse,
+  VNScriptGraphPreviewRequest,
   VNScriptListQuery,
   VNScriptListResponse,
   VNScriptManifestSnapshotResponse,
@@ -80,6 +82,17 @@ export function getVNScriptDraft(scriptId: number): Promise<VNScriptDraftRespons
   return apiClient.get(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/draft`);
 }
 
+export function getVNScriptDraftGraph(scriptId: number): Promise<VNScriptAuthoringGraphResponse> {
+  return apiClient.get(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/draft/graph`);
+}
+
+export function previewVNScriptDraftGraph(
+  scriptId: number,
+  request: VNScriptGraphPreviewRequest
+): Promise<VNScriptAuthoringGraphResponse> {
+  return apiClient.post(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/draft/graph-preview`, request);
+}
+
 export function putVNScriptDraft(
   scriptId: number,
   request: VNScriptDraftPutRequest
@@ -133,6 +146,13 @@ export function getVNScriptVersion(
   versionId: number
 ): Promise<VNScriptVersionResponse> {
   return apiClient.get(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/versions/${versionId}`);
+}
+
+export function getVNScriptVersionGraph(
+  scriptId: number,
+  versionId: number
+): Promise<VNScriptAuthoringGraphResponse> {
+  return apiClient.get(`${VN_SCRIPTS_BASE}/scripts/${scriptId}/versions/${versionId}/graph`);
 }
 
 export function getVNScriptManifestSnapshot(

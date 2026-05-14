@@ -24,12 +24,15 @@ import {
   getVNScript,
   getVNScriptDiagnostics,
   getVNScriptDraft,
+  getVNScriptDraftGraph,
   getVNScriptManifestSnapshot,
   getVNScriptVersion,
+  getVNScriptVersionGraph,
   listVNScriptTemplates,
   listVNScripts,
   listVNScriptVersions,
   patchVNScript,
+  previewVNScriptDraftGraph,
   previewVNScriptSnippet,
   publishVNScript,
   putVNScriptDraft,
@@ -268,6 +271,59 @@ describe('vnScripts api client', () => {
     expect(mocks.apiClient.post).toHaveBeenCalledWith(
       '/vn/vn-scripts/scripts/17/draft/snippet-apply',
       request
+    );
+  });
+
+  it('calls the VN script stored draft graph endpoint', async () => {
+    mocks.apiClient.get.mockResolvedValueOnce({
+      schema_version: 'vn_script_authoring_graph.v1',
+      graph_semantics_version: 'vn_script_authoring_graph_edges.v1',
+      program_schema_version: 'vn_script_program.v1',
+      script_id: 17,
+      source: 'stored_draft',
+      base_revision: 4,
+      version_id: null,
+      content_hash: 'sha256:stored',
+      validation_context_source: 'current_draft_context',
+      truncated: false,
+      limits: { max_labels: 500 },
+      outline: { entry_label: 'start', labels: [] },
+      graph: { nodes: [], edges: [] },
+      diagnostics: { errors: [], warnings: [] },
+      validation_diagnostics: { valid: true, errors: [], warnings: [] },
+    });
+
+    const response = await getVNScriptDraftGraph(17);
+
+    expect(response.source).toBe('stored_draft');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-scripts/scripts/17/draft/graph');
+  });
+
+  it('calls the VN script draft graph preview endpoint with the supplied draft payload', async () => {
+    const request = {
+      draft_revision: 4,
+      draft: {
+        schema_version: 'vn_script_program.v1',
+        entry_label: 'start',
+        labels: {
+          start: [{ op: 'end' }],
+        },
+      },
+    };
+
+    await previewVNScriptDraftGraph(17, request);
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-scripts/scripts/17/draft/graph-preview',
+      request
+    );
+  });
+
+  it('calls the VN script published version graph endpoint', async () => {
+    await getVNScriptVersionGraph(17, 9);
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-scripts/scripts/17/versions/9/graph'
     );
   });
 });

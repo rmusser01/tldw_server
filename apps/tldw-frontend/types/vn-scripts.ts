@@ -150,6 +150,101 @@ export interface VNScriptSnippetApplyResponse {
   patch_summary: VNScriptSnippetPatchSummary;
 }
 
+export type VNScriptGraphSource = 'stored_draft' | 'supplied_draft' | 'published_version';
+export type VNScriptGraphValidationContextSource =
+  | 'current_draft_context'
+  | 'published_version_snapshot';
+export type VNScriptGraphTerminalState = 'terminal' | 'continues' | 'unknown';
+export type VNScriptGraphNodeType = 'label' | 'operation';
+export type VNScriptGraphEdgeType =
+  | 'jump'
+  | 'choice'
+  | 'generated_choice_handler'
+  | 'generation_cancel';
+export type VNScriptGraphDiagnosticSeverity = 'error' | 'warning';
+
+export interface VNScriptGraphPreviewRequest {
+  draft: unknown;
+  draft_revision?: number | null;
+}
+
+export interface VNScriptGraphDiagnostic {
+  code: string;
+  severity: VNScriptGraphDiagnosticSeverity;
+  message: string;
+  path: string;
+  details: Record<string, unknown>;
+}
+
+export interface VNScriptGraphDiagnostics {
+  errors: VNScriptGraphDiagnostic[];
+  warnings: VNScriptGraphDiagnostic[];
+}
+
+export interface VNScriptGraphOutlineLabel {
+  id: string;
+  label: string;
+  source_path: string;
+  op_count: number;
+  incoming_edge_count: number;
+  outgoing_edge_count: number;
+  reachable: boolean;
+  terminal: VNScriptGraphTerminalState;
+  summary: string;
+}
+
+export interface VNScriptGraphOutline {
+  entry_label?: string | null;
+  labels: VNScriptGraphOutlineLabel[];
+}
+
+export interface VNScriptGraphNode {
+  id: string;
+  type: VNScriptGraphNodeType;
+  label: string;
+  source_path: string;
+  reachable?: boolean | null;
+  terminal?: VNScriptGraphTerminalState | null;
+  op_index?: number | null;
+  op?: string | null;
+  summary: string;
+}
+
+export interface VNScriptGraphEdge {
+  id: string;
+  type: VNScriptGraphEdgeType;
+  source_id: string;
+  target_id?: string | null;
+  source_path: string;
+  target_label: string;
+  metadata?: Record<string, unknown> | null;
+  missing_target: boolean;
+  omitted_target: boolean;
+}
+
+export interface VNScriptGraphBody {
+  nodes: VNScriptGraphNode[];
+  edges: VNScriptGraphEdge[];
+}
+
+export interface VNScriptAuthoringGraphResponse {
+  schema_version: 'vn_script_authoring_graph.v1';
+  graph_semantics_version: 'vn_script_authoring_graph_edges.v1';
+  program_schema_version: 'vn_script_program.v1';
+  script_id?: number | null;
+  source: VNScriptGraphSource;
+  base_revision?: number | null;
+  version_id?: number | null;
+  content_hash: string;
+  validation_context_source: VNScriptGraphValidationContextSource;
+  truncated: boolean;
+  limits: Record<string, number>;
+  outline: VNScriptGraphOutline;
+  graph: VNScriptGraphBody;
+  diagnostics: VNScriptGraphDiagnostics;
+  validation_diagnostics: Record<string, unknown>;
+}
+
 export type VNScriptCreateFromTemplateRequest = Omit<VNScriptCreate, 'title'> & {
   title?: string | null;
 };
