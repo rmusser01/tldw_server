@@ -640,6 +640,63 @@ class ACPSessionStore:
         records = [self._dict_to_record(d) for d in rows]
         return records, total
 
+    async def list_sessions_with_messages_since(
+        self,
+        *,
+        since: datetime,
+        page_size: int = 1000,
+    ) -> list[SessionRecord]:
+        """List sessions in the lookback window with messages batch-loaded."""
+        return await asyncio.to_thread(
+            self._list_sessions_with_messages_since_sync,
+            since,
+            page_size,
+        )
+
+    def _list_sessions_with_messages_since_sync(
+        self,
+        since: datetime,
+        page_size: int,
+    ) -> list[SessionRecord]:
+        """Synchronously page filtered sessions and batch-load messages."""
+        from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+            session_within_range,
+        )
+
+        if since.tzinfo:
+            since_iso = since.astimezone(timezone.utc).isoformat()
+        else:
+            since_iso = since.replace(tzinfo=timezone.utc).isoformat()
+        safe_page_size = max(1, min(int(page_size), 1000))
+        offset = 0
+        rows_in_range: list[dict[str, Any]] = []
+
+        while True:
+            rows, total = self._db.list_sessions_since(
+                since_iso=since_iso,
+                limit=safe_page_size,
+                offset=offset,
+            )
+            if not rows:
+                break
+            rows_in_range.extend(row for row in rows if session_within_range(row, since=since))
+            offset += len(rows)
+            if offset >= total:
+                break
+
+        messages_by_id = self._db.get_messages_for_sessions([
+            str(row["session_id"]) for row in rows_in_range
+        ])
+        return [
+            self._dict_to_record(
+                row,
+                self._db_messages_to_record_messages(
+                    messages_by_id.get(str(row["session_id"]), []),
+                ),
+            )
+            for row in rows_in_range
+        ]
+
     async def get_agent_usage_stats(self, *, range_days: int = 7) -> list[dict[str, Any]]:
         """Return per-agent aggregated token usage for the last *range_days* days."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=range_days)).isoformat()

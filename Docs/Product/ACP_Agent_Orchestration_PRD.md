@@ -57,6 +57,7 @@ parallel ACP-only workspace product.
 | Governance, RBAC, and audit | Shipped by [#1476](https://github.com/rmusser01/tldw_server/issues/1476) | ACP control surfaces use token scope guards where applicable, prompt/permission flows use shared governance coordination, and audit events are sanitized. |
 | Workspace and sandbox readiness | Shipped with runtime caveats by [#1477](https://github.com/rmusser01/tldw_server/issues/1477) | Workspace roots fail closed; workspace MCP servers and env flow into sessions; sandbox mode merges configured and per-session env. Docker/Lima/VZ runtime verification remains host-specific. |
 | Schedules and triggers | Shipped by [#1474](https://github.com/rmusser01/tldw_server/issues/1474) | ACP schedules route through APScheduler to the core Scheduler `acp_run` handler; triggers sanitize secrets and expose operator state. |
+| Admin execution-health reporting | Backend contract added under [#1537](https://github.com/rmusser01/tldw_server/issues/1537) | `/api/v1/admin/acp/execution-health/summary` summarizes ACP sessions, failure buckets, setup blockers, retention/redaction posture, and downstream-agent compatibility evidence for admin display. |
 | Frontend setup/run/diagnose UX | Shipped by [#1473](https://github.com/rmusser01/tldw_server/issues/1473) | Agent Tasks, Agent Registry, and ACP Playground share connection/auth handling; Agent Tasks shows setup gaps and task diagnostics without manual ID copying. |
 | Production readiness closeout | Remaining under [#1472](https://github.com/rmusser01/tldw_server/issues/1472) | Final release signoff still needs the readiness matrix closeout, broader live-backend E2E, Go runner verification, and accepted runtime caveats. |
 
@@ -149,6 +150,10 @@ All paths below are mounted below `/api/v1`.
 - `GET /acp/sessions/{session_id}/checkpoints`
 - `WS /acp/sessions/{session_id}/stream`
 - `WS /acp/sessions/{session_id}/ssh`
+
+### Admin Reporting
+
+- `GET /admin/acp/execution-health/summary`
 
 ### Agent Orchestration
 
@@ -260,6 +265,10 @@ The current implementation exposes enough state to derive:
 - average runs and reviews per task
 - run duration and failure reasons
 - token usage and run cost aggregates from ACP run history
+- ACP execution-health buckets for setup blockers, runner/session failures,
+  reviewer outcomes, governance denials, structured completion failures,
+  sandbox/runtime errors, retention/redaction actions, setup-health dimensions,
+  and documented-unverified compatibility
 - schedule queued, skipped, disabled, and error states
 - audit event volume by action and session
 
