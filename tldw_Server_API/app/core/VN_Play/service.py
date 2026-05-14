@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     ERROR_SCRIPTED_STORY_TURN_NOT_ALLOWED,
     ERROR_STALE_SCENE_VERSION,
     ERROR_TURN_IN_PROGRESS,
+    ERROR_TURN_LOCK_ABANDONED,
     EVENT_CHOICE_SELECTED,
     EVENT_CHOICE_PRESENTED,
     EVENT_MODEL_TURN,
@@ -109,6 +110,8 @@ from tldw_Server_API.app.core.VN_Policy.service import evaluate_character_safety
 from tldw_Server_API.app.core.VN_Play.models import SceneState, TurnResult
 from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, coerce_turn_result
 from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
+
+TURN_LOCK_LEASE_SECONDS = 300
 from tldw_Server_API.app.core.VN_Scripts.service import _character_safety_status
 
 _CONFLICT_REPLAY_ERROR_CODES = {
@@ -521,6 +524,7 @@ class VNPlayService:
             session_id,
             owner_user_id=self.owner_user_id,
         )
+        session = self._recover_expired_active_turn_lock(session)
         if session.scene_version != client_scene_version:
             turn_request = self.repo.create_turn_request(
                 session_id=session_id,
@@ -589,6 +593,8 @@ class VNPlayService:
             owner_user_id=self.owner_user_id,
             turn_request_id=int(turn_request["id"]),
             expected_scene_version=client_scene_version,
+            lease_owner="vn-play-turn",
+            locked_until=_utc_now_plus_iso(TURN_LOCK_LEASE_SECONDS),
         )
         if not lock_acquired:
             return self._abandon_conflicting_turn(turn_request, session_id)
@@ -699,6 +705,7 @@ class VNPlayService:
             )
 
         session = self.get_session(session_id)
+        session = self._recover_expired_active_turn_lock(session)
         if session.scene_version != client_scene_version:
             raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
         if session.active_turn_request_id is not None:
@@ -736,6 +743,8 @@ class VNPlayService:
             owner_user_id=self.owner_user_id,
             turn_request_id=int(turn_request["id"]),
             expected_scene_version=client_scene_version,
+            lease_owner="vn-play-turn",
+            locked_until=_utc_now_plus_iso(TURN_LOCK_LEASE_SECONDS),
         )
         if not lock_acquired:
             return self._abandon_conflicting_turn(turn_request, session_id)
@@ -3781,6 +3790,7 @@ class VNPlayService:
         expected_scene_version: int,
     ) -> None:
         session = self.get_session(session_id)
+        session = self._recover_expired_active_turn_lock(session)
         if session.scene_version != expected_scene_version:
             self._abandon_session_action(
                 session_id=session_id,
@@ -3827,6 +3837,18 @@ class VNPlayService:
                 error_code=error_code,
             )
             raise VNPlayConflictError(error_code)
+
+    def _recover_expired_active_turn_lock(self, session: VNPlaySession) -> VNPlaySession:
+        if session.active_turn_request_id is None:
+            return session
+        recovered = self.repo.recover_expired_active_turn_lock(
+            session_id=session.id,
+            owner_user_id=self.owner_user_id,
+            error_code=ERROR_TURN_LOCK_ABANDONED,
+        )
+        if recovered is None:
+            return session
+        return self.get_session(session.id)
 
     def _branch_restore_target_event_id(
         self,
