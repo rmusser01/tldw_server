@@ -1,10 +1,10 @@
 ---
 id: TASK-338
 title: Document traceable artifact contract and ACP output mapping
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-14 06:46'
-updated_date: '2026-05-14 19:23'
+updated_date: '2026-05-14 12:45'
 labels:
   - acp
   - docs
@@ -40,7 +40,7 @@ Define the traceable work-product artifact contract needed by issue #1525, then 
 4. Define CSV/XLSX lineage export convention. Status: Complete.
 5. Enumerate ACP artifact-detail visibility categories and redaction behavior. Status: Complete.
 6. Normalize docs to the canonical needs_revision state literal. Status: Complete.
-7. Keep Backlog task provisional until PR review/merge, then verify and push. Status: In Progress.
+7. Keep Backlog task provisional until PR review/merge, then verify and push. Status: Complete.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -55,20 +55,22 @@ Reopened for PR #1687 review-fix pass. Live unresolved review threads: Gemini pr
 Addressed review feedback locally: clarified ACP producer_id versus workspace task_id, linked version history to workspace history/audit events, specified CSV/XLSX lineage sidecar/hidden-sheet conventions, enumerated ACP artifact-detail visibility by category, normalized needs_revision literals, and kept task status provisional while PR #1687 remains in review.
 
 Review-fix verification before commit: git diff --check passed; presence guard found producer_id ACP Task ID semantics, workspace-history linkage, sidecar JSON lineage convention, ACP artifact-detail visibility table, needs_revision literal, and provisional Backlog status; stale-language guard found no hyphenated review-state spelling, no premature Done front matter, and no completed final-summary wording.
+
+Post-merge closeout: PR #1687 merged into dev at 2026-05-14T19:39:31Z with merge commit c63e0070c26140e1aa01b0ef9af896306125c0be. Issues #1525 and #1538 were closed with merge evidence. This task is now safe to mark Done.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Pending final closeout until PR #1687 is reviewed and merged. The docs/design contract and PR review fixes are on the branch, but this task should not return to Done until the PR has passed review and merge.
+Completed after PR #1687 merged. Added the traceable work-product artifact contract, mapped ACP run outputs and promotable deliverables into it, addressed review feedback on producer/task identity, workspace-history linkage, CSV/XLSX lineage, artifact-detail visibility, and needs_revision state spelling, closed issues #1525 and #1538 with merge evidence, and left follow-up implementation slices for storage/API, UI detail, export adapters, ACP promotion, and verification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
