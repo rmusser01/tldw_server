@@ -80,6 +80,21 @@ def _install_fake_helper_socket(monkeypatch, responses: dict[str, object], socke
     return requests
 
 
+def _valid_create_vm_request(**overrides: object) -> dict[str, object]:
+    request: dict[str, object] = {
+        "owner": "tldw",
+        "runtime": "vz_linux",
+        "vm_name": "run-1",
+        "run_id": "run-1",
+        "template": "/tmp/template.img",
+        "workspace_path": "/tmp/workspace",
+        "network_policy": "deny_all",
+        "timeout_sec": 30,
+    }
+    request.update(overrides)
+    return request
+
+
 def test_helper_client_exports_expected_protocol_version() -> None:
     from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
         EXPECTED_HELPER_PROTOCOL_VERSION,
@@ -282,13 +297,90 @@ def test_helper_client_raw_validation_rejects_null_exec_guest_output_limit() -> 
     assert exc_info.value.error_code == "invalid_request"
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_code", "expected_message"),
+    [
+        ({"runtime": "vz_macos"}, "runtime_unsupported", "vz_macos"),
+        ({"vm_name": "bad/name"}, "create_vm_request_invalid", "vm_id_invalid"),
+        ({"template": "relative.img"}, "create_vm_request_invalid", "template_path_invalid"),
+        ({"workspace_path": "workspace"}, "create_vm_request_invalid", "workspace_path_invalid"),
+        ({"run_manifest_path": "runs/run-1/manifest.json"}, "create_vm_request_invalid", "run_manifest_path_invalid"),
+        ({"timeout_sec": 0}, "create_vm_timeout_invalid", "timeout_out_of_range"),
+    ],
+)
+def test_helper_client_validates_create_vm_request_contract_in_test_mode(
+    monkeypatch,
+    overrides: dict[str, object],
+    expected_code: str,
+    expected_message: str,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient().create_vm(_valid_create_vm_request(**overrides))
+
+    assert exc_info.value.error_code == expected_code
+    assert exc_info.value.message == expected_message
+
+
+def test_helper_client_rejects_invalid_create_vm_before_socket_request(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    requests = _install_fake_helper_socket(
+        monkeypatch,
+        {
+            "create_vm": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "vm_id": "unexpected",
+                "state": "created",
+            }
+        },
+    )
+
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient().create_vm(_valid_create_vm_request(runtime="vz_macos"))
+
+    assert exc_info.value.error_code == "runtime_unsupported"
+    assert requests == []
+
+
+def test_helper_client_rejects_create_vm_existing_symlink_path(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    workspace_target = tmp_path / "workspace-target"
+    workspace_target.mkdir()
+    workspace_link = tmp_path / "workspace-link"
+    workspace_link.symlink_to(workspace_target, target_is_directory=True)
+
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient().create_vm(
+            _valid_create_vm_request(workspace_path=str(workspace_link))
+        )
+
+    assert exc_info.value.error_code == "create_vm_request_invalid"
+    assert exc_info.value.message == "workspace_path_invalid"
+
+
+def test_helper_client_rejects_create_vm_broken_symlink_path(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    template_link = tmp_path / "template-link.img"
+    template_link.symlink_to(tmp_path / "missing-template.img")
+
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient().create_vm(
+            _valid_create_vm_request(template=str(template_link))
+        )
+
+    assert exc_info.value.error_code == "create_vm_request_invalid"
+    assert exc_info.value.message == "template_path_invalid"
+
+
 def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     client = MacOSVirtualizationHelperClient()
 
     with pytest.raises(MacOSVirtualizationHelperUnavailable):
-        client.create_vm({"runtime": "vz_linux", "vm_name": "vz-linux-run-2"})
+        client.create_vm(_valid_create_vm_request(vm_name="vz-linux-run-2"))
 
 
 def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:
@@ -605,8 +697,10 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
             "runtime": "vz_linux",
             "vm_name": "run-1",
             "template_id": "vz_linux:debian-bookworm-arm64",
+            "template": "/tmp/template.img",
             "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
             "planning_source": "image_store",
+            "workspace_path": "/tmp/workspace",
         }
     )
     exec_reply = client.exec_guest(vm_id=vm.vm_id, request={"argv": ["/bin/echo", "ok"]})
@@ -707,7 +801,7 @@ def test_socket_helper_maps_error_payload_to_helper_failure(monkeypatch) -> None
     client = MacOSVirtualizationHelperClient()
 
     with pytest.raises(MacOSVirtualizationHelperFailure) as excinfo:
-        client.create_vm({"runtime": "vz_linux", "vm_name": "run-1"})
+        client.create_vm(_valid_create_vm_request())
 
     assert excinfo.value.error_code == "template_invalid"
     assert "template path is invalid" in str(excinfo.value)

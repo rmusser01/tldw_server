@@ -361,6 +361,83 @@ import Testing
     #expect(registry.status(vmID: "vm-malformed-policy") == nil)
 }
 
+@Test func unixSocketServerRejectsInvalidCreateVMContractBeforeBoot() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let cases = [
+        (
+            """
+            {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-runtime","runtime":"vz_macos","template":"/tmp/template.img","workspace_path":"/workspace"}}
+            """,
+            "runtime_unsupported",
+            "vz_macos",
+            "vm-runtime"
+        ),
+        (
+            """
+            {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"bad/name","template":"/tmp/template.img","workspace_path":"/workspace"}}
+            """,
+            "create_vm_request_invalid",
+            "vm_id_invalid",
+            "bad/name"
+        ),
+        (
+            """
+            {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-template","template":"relative.img","workspace_path":"/workspace"}}
+            """,
+            "create_vm_request_invalid",
+            "template_path_invalid",
+            "vm-template"
+        ),
+        (
+            """
+            {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-workspace","template":"/tmp/template.img","workspace_path":"workspace"}}
+            """,
+            "create_vm_request_invalid",
+            "workspace_path_invalid",
+            "vm-workspace"
+        ),
+        (
+            """
+            {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-timeout","template":"/tmp/template.img","workspace_path":"/workspace","timeout_sec":0}}
+            """,
+            "create_vm_timeout_invalid",
+            "timeout_out_of_range",
+            "vm-timeout"
+        ),
+        (
+            """
+            {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-timeout-shape","template":"/tmp/template.img","workspace_path":"/workspace","timeout_sec":"30"}}
+            """,
+            "invalid_request",
+            "invalid_request",
+            "vm-timeout-shape"
+        ),
+    ]
+
+    for (request, expectedCode, expectedMessage, vmID) in cases {
+        let responseData = try server.handleRequestData(request.data(using: .utf8)!)
+        let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        #expect(json?["error_code"] as? String == expectedCode)
+        #expect(json?["message"] as? String == expectedMessage)
+        #expect(registry.status(vmID: vmID) == nil)
+    }
+}
+
 @Test func unixSocketServerRejectsValidateHostNonStringNetworkPolicy() throws {
     let server = UnixSocketServer(
         socketPath: "/tmp/macos-vz-helper.sock",

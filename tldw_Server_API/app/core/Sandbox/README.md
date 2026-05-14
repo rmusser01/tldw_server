@@ -86,8 +86,12 @@ Current limitations:
 - Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, `seatbelt`, or `worktree`.
 - `vz_linux` VM creation is fail-closed at both Python admission and helper
   protocol layers: only `network_policy=deny_all` is accepted, and the helper
-  records the accepted policy in VM metadata/status details. The current
-  Virtualization.framework configuration does not attach a network device.
+  records the accepted policy in VM metadata/status details. The helper also
+  rejects malformed direct `create_vm` requests before boot, including
+  unsupported runtimes, invalid VM ids, non-absolute or NUL-bearing paths,
+  symlink paths, oversized metadata, and out-of-range startup
+  timeouts. The current Virtualization.framework configuration does not attach
+  a network device.
 - `vz_linux` passes `SANDBOX_MAX_LOG_BYTES` to helper `exec_guest` as
   `max_output_bytes`, clamped to the helper protocol ceiling of 256 MiB, and
   also uses the effective cap when publishing stdout/stderr frames. Rebuilt

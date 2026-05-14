@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MacOSVZHelperDaemon
 
@@ -157,7 +158,7 @@ import Testing
     )
     let metadata = VMOwnershipMetadata(
         owner: "tldw",
-        runtime: "vz_linux",
+        runtime: " VZ_LINUX ",
         runID: "run-owned",
         sessionID: "session-owned",
         sessionMode: true,
@@ -181,6 +182,7 @@ import Testing
     let listed = service.listVMs().vms.first
 
     #expect(response.metadata.owner == "tldw")
+    #expect(response.metadata.runtime == "vz_linux")
     #expect(response.metadata.runID == "run-owned")
     #expect(response.metadata.sessionID == "session-owned")
     #expect(response.metadata.sessionMode == true)
@@ -225,6 +227,82 @@ import Testing
         Issue.record("expected unsupportedNetworkPolicy, got \(error)")
     }
     #expect(registry.status(vmID: "vm-allowlist") == nil)
+}
+
+@Test func helperServiceCreateVMRejectsInvalidContractBeforeRegistryMutation() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    #expect(throws: HelperServiceError.self) {
+        _ = try service.createVM(
+            vmID: "bad/name",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 5
+        )
+    }
+    #expect(registry.status(vmID: "bad/name") == nil)
+
+    #expect(throws: HelperServiceError.self) {
+        _ = try service.createVM(
+            vmID: "vm-relative-workspace",
+            templatePath: "/tmp/template.img",
+            workspacePath: "workspace",
+            readinessTimeoutSeconds: 5
+        )
+    }
+    #expect(registry.status(vmID: "vm-relative-workspace") == nil)
+
+    #expect(throws: HelperServiceError.self) {
+        _ = try service.createVM(
+            vmID: "vm-timeout",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 0
+        )
+    }
+    #expect(registry.status(vmID: "vm-timeout") == nil)
+}
+
+@Test func helperServiceCreateVMRejectsExistingSymlinkWorkspaceBeforeRegistryMutation() throws {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("macos-vz-create-vm-\(UUID().uuidString)")
+    let target = root.appendingPathComponent("target", isDirectory: true)
+    let link = root.appendingPathComponent("workspace-link", isDirectory: true)
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    #expect(throws: HelperServiceError.self) {
+        _ = try service.createVM(
+            vmID: "vm-symlink-workspace",
+            templatePath: "/tmp/template.img",
+            workspacePath: link.path,
+            readinessTimeoutSeconds: 5
+        )
+    }
+    #expect(registry.status(vmID: "vm-symlink-workspace") == nil)
 }
 
 @Test func helperServiceCreateVMDefaultsMissingOwnershipMetadataToUnknown() throws {
