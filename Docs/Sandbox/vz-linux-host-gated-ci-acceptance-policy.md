@@ -112,7 +112,11 @@ a fresh VM and completes. Scheduled runs must not enable these drills by default
 
 Host reboot and launchd-managed restart are not part of the current host-gated
 CI contract. Maintainers validating those paths should treat them as manual
-operator procedures: restore or verify helper readiness first, inspect
+operator procedures. `tools/macos-vz-helper/scripts/vz-helperctl.py launchd ...`
+can inspect, bootstrap, kickstart, and bootout the helper through explicit
+operator commands, but host-gated CI should not run those actions unless the
+prepared runner is intentionally configured for LaunchAgent validation. Restore
+or verify helper readiness first, inspect
 `/api/v1/sandbox/admin/macos-diagnostics`, run reconciliation repair in dry-run
 mode before any mutation, and then run the real host smoke. A host reboot drill
 must not be added to scheduled CI until a dedicated prepared runner can tolerate
@@ -140,8 +144,10 @@ These are expected and should not block ordinary PRs:
   `include_failure_drills=true`
 - managed helper `restart-drill` skipped because no helper was started through
   the local `vz-helperctl.py start` workflow
-- host reboot or launchd-managed restart validation handled through a manual
-  operator procedure rather than the workflow
+- launchd operator validation skipped because the helper is managed through
+  direct `vz-helperctl.py start` or no LaunchAgent plist has been prepared
+- host reboot validation handled through a manual operator procedure rather
+  than the workflow
 
 A manual run that fails before VM execution because the runner is missing the
 configured bundle path is an operator setup failure, not a sandbox runtime

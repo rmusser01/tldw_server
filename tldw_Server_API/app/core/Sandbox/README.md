@@ -140,7 +140,7 @@ Current limitations:
 - The generic admin startup warning endpoint is `GET /api/v1/admin/startup-warnings`.
   It exposes current-process warning records only; there is no
   cross-process aggregation or persistence in this slice.
-- `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `restart-drill`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
+- `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `restart-drill`, `stop`, `plist`, `launchd`, and `smoke`; it can generate launchd plist scaffolding and run explicit launchd operator actions but does not install or load services automatically.
 - helper-backed template validation now distinguishes canonical bundles from
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `SandboxImageStore` persists template manifests under
@@ -178,6 +178,11 @@ Current limitations:
   `tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill` after the helper
   has been started through the managed wrapper. This is a local operator drill,
   not launchd automation or host reboot validation.
+- Manual LaunchAgent lifecycle checks can be run through
+  `tools/macos-vz-helper/scripts/vz-helperctl.py launchd ...`. The command
+  supports explicit `status`, `bootstrap`, `kickstart`, and `bootout` actions,
+  expects dry-run inspection before mutation, and only writes plist/runtime
+  scaffolding when `--write-plist` and `--create-dirs` are passed.
 - The host-gated CI acceptance policy for real `vz_linux` smoke lives in
   `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`. It defines
   manual/nightly gates, expected skips, artifact upload expectations, branch
