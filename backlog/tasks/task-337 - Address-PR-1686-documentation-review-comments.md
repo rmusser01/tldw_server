@@ -1,10 +1,10 @@
 ---
 id: TASK-337
 title: Address PR 1686 documentation review comments
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-14 05:46'
-updated_date: '2026-05-14 05:51'
+updated_date: '2026-05-14 06:08'
 labels:
   - acp
   - docs
@@ -14,6 +14,7 @@ references:
   - 'https://github.com/rmusser01/tldw_server/pull/1686'
   - 'https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239357872'
   - 'https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239357916'
+  - 'https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239428965'
 priority: medium
 ---
 
@@ -41,12 +42,14 @@ Resolved Gemini review threads after pushing c8c6f836d: linked dependency issue 
 Qodo posted a new actionable review thread after the Gemini fixes: PRD compatibility fields need fully qualified compatibility.* paths.
 
 Addressed Qodo compatibility-field thread by changing the PRD contract row to compatibility.documented_unverified_agents, compatibility.live_certification_required, and compatibility.docs_url. Verification: git diff --check passed; targeted rg confirmed the unqualified PRD field paths are absent and the qualified paths are present.
+
+Resolved Qodo compatibility-field thread after pushing 6917cae21: https://github.com/rmusser01/tldw_server/pull/1686#discussion_r3239428965.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed all actionable PR #1686 review comments by linking ACP dependency issue references in the readiness prose, wrapping the Agent Registry UI verification command in a subshell, and qualifying PRD compatibility field paths under compatibility.*. Verification: git diff --check and targeted rg guards passed. Skips: Bandit and backend/frontend tests were skipped because the changes are Markdown-only. Gemini threads were replied to and resolved; the Qodo compatibility thread is ready to resolve after this commit is pushed.
+Addressed all actionable PR #1686 review comments by linking ACP dependency issue references in the readiness prose, wrapping the Agent Registry UI verification command in a subshell, and qualifying PRD compatibility field paths under compatibility.*. Verification: git diff --check and targeted rg guards passed. Skips: Bandit and backend/frontend tests were skipped because the changes are Markdown-only. Gemini and Qodo review threads were replied to and resolved.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
