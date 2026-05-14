@@ -102,6 +102,8 @@ Mature cockpit verification: focused cockpit Vitest passed (20 tests); real-serv
 Added staged P-series completion spec for issue #1646. Earlier cockpit completion notes are historical only; PR #1582 remains draft and must not be considered merge-ready until P0, P1, and P2 are all fully completed and explicitly approved by the human maintainer.
 
 Corrected TASK-295 after issue #1646: the prior checked acceptance criteria and final summary are superseded. The task is In Progress until the P0 P1 and P2 completion gates are implemented verified and explicitly approved.
+
+Reviewed and hardened the P-series completion spec before implementation planning. Added explicit state-contract inventory, real populated server proof requirements, per-stage focus expectations, MCP non-hardcoding requirement, degraded-health functional proof before P2 polish, and implementation risks to avoid reachability-only completion.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
