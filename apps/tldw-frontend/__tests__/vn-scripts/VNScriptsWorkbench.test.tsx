@@ -543,12 +543,98 @@ describe('VNScriptsWorkbench', () => {
     await waitFor(() => expect(mocks.getVNScriptDraftGraph).toHaveBeenCalledWith(1));
     expect(screen.getByText('Script graph')).toBeInTheDocument();
     expect(screen.getByText('stored_draft')).toBeInTheDocument();
+    expect(screen.getByText('vn_script_authoring_graph.v1')).toBeInTheDocument();
+    expect(screen.getByText('vn_script_program.v1')).toBeInTheDocument();
     expect(screen.getByText('sha256:opening')).toBeInTheDocument();
     expect(screen.getByText('Opening label')).toBeInTheDocument();
     expect(screen.getByText(/graph_fallthrough_not_inferred/)).toBeInTheDocument();
     expect(screen.getByText('Graph diagnostics')).toBeInTheDocument();
     expect(screen.getByText('Validation diagnostics')).toBeInTheDocument();
     expect(screen.getByText(/missing_target/)).toBeInTheDocument();
+  });
+
+  it('lets authors select an outline source path and highlights it near the draft editor', async () => {
+    const user = userEvent.setup();
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Load saved graph' }));
+    await user.click(await screen.findByRole('button', { name: /Select source path for start/ }));
+
+    expect(screen.getByText(/Selected graph path/)).toBeInTheDocument();
+    expect(screen.getAllByText("$.labels['start']").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Selected graph path/).closest('div')).toHaveClass('bg-primary/10');
+  });
+
+  it('shows graph loading and error states for failed graph requests', async () => {
+    const user = userEvent.setup();
+    const graphRequest = createDeferred<typeof graphResponse>();
+    mocks.getVNScriptDraftGraph.mockReturnValueOnce(graphRequest.promise);
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Load saved graph' }));
+    expect(screen.getByRole('button', { name: 'Load saved graph' })).toBeDisabled();
+
+    graphRequest.reject(new Error('graph_backend_down'));
+
+    expect(await screen.findByText('graph_backend_down')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Load saved graph' })).toBeEnabled();
+  });
+
+  it('clears graph loading state when switching scripts while a graph request is in flight', async () => {
+    const user = userEvent.setup();
+    const graphRequest = createDeferred<typeof graphResponse>();
+    mocks.getVNScriptDraftGraph.mockReturnValueOnce(graphRequest.promise);
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Load saved graph' }));
+    expect(screen.getByRole('button', { name: 'Load saved graph' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /Second Route/ }));
+
+    await waitFor(() => expect(mocks.getVNScriptDraft).toHaveBeenCalledWith(2));
+    expect(screen.getByRole('button', { name: 'Load saved graph' })).toBeEnabled();
+  });
+
+  it('ignores stale saved graph responses after a newer preview graph response wins', async () => {
+    const user = userEvent.setup();
+    const savedRequest = createDeferred<typeof graphResponse>();
+    const previewRequest = createDeferred<typeof graphResponse>();
+    mocks.getVNScriptDraftGraph.mockReturnValueOnce(savedRequest.promise);
+    mocks.previewVNScriptDraftGraph.mockReturnValueOnce(previewRequest.promise);
+    render(<VNScriptsWorkbench />);
+
+    await screen.findByRole('button', { name: /Opening Route/ });
+    await user.click(screen.getByRole('button', { name: 'Load saved graph' }));
+    fireEvent.change(screen.getByLabelText('Draft JSON'), {
+      target: { value: '{"labels":{"start":[{"op":"narrate","text":"Changed."}]}}' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Preview current JSON graph' }));
+
+    previewRequest.resolve({
+      ...graphResponse,
+      source: 'supplied_draft',
+      content_hash: 'sha256:newer-preview',
+      outline: {
+        ...graphResponse.outline,
+        labels: [{ ...graphResponse.outline.labels[0], summary: 'Newer preview label' }],
+      },
+    });
+    await screen.findByText('sha256:newer-preview');
+
+    savedRequest.resolve({
+      ...graphResponse,
+      content_hash: 'sha256:stale-saved',
+      outline: {
+        ...graphResponse.outline,
+        labels: [{ ...graphResponse.outline.labels[0], summary: 'Stale saved label' }],
+      },
+    });
+
+    await waitFor(() => expect(screen.queryByText('sha256:stale-saved')).not.toBeInTheDocument());
+    expect(screen.getByText('Newer preview label')).toBeInTheDocument();
+    expect(screen.queryByText('Stale saved label')).not.toBeInTheDocument();
   });
 
   it('previews the current unsaved draft graph without saving the draft', async () => {

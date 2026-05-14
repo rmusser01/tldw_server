@@ -4,6 +4,7 @@ title: Add VN script graph and outline inspector
 status: In Progress
 assignee: []
 created_date: '2026-05-14 04:15'
+updated_date: '2026-05-14 05:10'
 labels:
   - vn
   - frontend
@@ -40,7 +41,25 @@ Implement GitHub issue #1680: add a WebUI consumer for the backend-owned VN scri
 - The panel renders backend source/hash/revision/semantics metadata, outline rows, limits, graph diagnostics, and validation diagnostics as separate UI concepts.
 - Added version-card Graph actions for published version graph inspection.
 - Frontend only renders server-shaped graph data; it does not compute graph edges or validate script op semantics.
+- PR #1681 review fixes added graph schema metadata rendering, source path selection, stale response guards, and loading reset on script switch.
 <!-- SECTION:NOTES:END -->
+
+## Verification
+
+<!-- SECTION:VERIFICATION:BEGIN -->
+- `bun run test:run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend`: 2 files passed, 53 tests passed.
+- `git diff --check`: passed.
+- `bun run lint -- components/vn-scripts/VNScriptsWorkbench.tsx lib/api/vnScripts.ts types/vn-scripts.ts __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend`: exited 0; repo-wide baseline warnings remain because the package lint script prepends `eslint .`.
+- `./node_modules/.bin/tsc --noEmit` from `apps/tldw-frontend`: failed on pre-existing shared UI type errors in `../packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx` and `../packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx`; no errors were reported in the touched VN script files before the baseline failures stopped the run.
+- Bandit skipped: frontend/docs/backlog-only change, no Python touched.
+- PR #1681 review-fix verification: `bun run test:run __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` passed 43 tests; `bun run test:run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` passed 57 tests; `git diff --check` passed; `bun run lint -- components/vn-scripts/VNScriptsWorkbench.tsx __tests__/vn-scripts/VNScriptsWorkbench.test.tsx __tests__/vn-scripts/vnScriptsApi.test.ts` exited 0 with the repo-wide warning baseline; `bun run tsc --noEmit` still fails on the known shared UI baseline files listed above.
+<!-- SECTION:VERIFICATION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the VN script graph inspector WebUI slice for issue #1680. The frontend now has typed graph API helpers, a capability-gated read-only graph panel for saved drafts and unsaved draft previews, per-version graph inspection from published version cards, focused coverage for the new graph flows, and custom-frontend documentation for graph-inspector usage and staleness keys.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -51,19 +70,3 @@ Implement GitHub issue #1680: add a WebUI consumer for the backend-owned VN scri
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Verification
-
-<!-- SECTION:VERIFICATION:BEGIN -->
-- `bun run test:run __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend`: 2 files passed, 53 tests passed.
-- `git diff --check`: passed.
-- `bun run lint -- components/vn-scripts/VNScriptsWorkbench.tsx lib/api/vnScripts.ts types/vn-scripts.ts __tests__/vn-scripts/vnScriptsApi.test.ts __tests__/vn-scripts/VNScriptsWorkbench.test.tsx` from `apps/tldw-frontend`: exited 0; repo-wide baseline warnings remain because the package lint script prepends `eslint .`.
-- `./node_modules/.bin/tsc --noEmit` from `apps/tldw-frontend`: failed on pre-existing shared UI type errors in `../packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx` and `../packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx`; no errors were reported in the touched VN script files before the baseline failures stopped the run.
-- Bandit skipped: frontend/docs/backlog-only change, no Python touched.
-<!-- SECTION:VERIFICATION:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the VN script graph inspector WebUI slice for issue #1680. The frontend now has typed graph API helpers, a capability-gated read-only graph panel for saved drafts and unsaved draft previews, per-version graph inspection from published version cards, focused coverage for the new graph flows, and custom-frontend documentation for graph-inspector usage and staleness keys.
-<!-- SECTION:FINAL_SUMMARY:END -->
