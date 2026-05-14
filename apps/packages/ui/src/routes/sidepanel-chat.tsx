@@ -10,6 +10,7 @@ import {
   saveHistory,
   saveMessage
 } from "@/db/dexie/helpers"
+import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
@@ -2197,7 +2198,10 @@ const SidepanelChat = () => {
       case "running":
         return t("sidepanel:ingest.running", "Processing")
       case "completed":
-        return t("sidepanel:ingest.completed", "Ready")
+        return t(
+          "sidepanel:ingest.completed",
+          getDesignSystemState("ready").label
+        )
       case "failed":
         return t("sidepanel:ingest.failed", "Failed")
       case "cancelled":

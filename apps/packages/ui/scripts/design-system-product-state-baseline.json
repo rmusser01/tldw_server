@@ -5148,17 +5148,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Option/Playground/PlaygroundForm.tsx:Degraded",
-    "path": "src/components/Option/Playground/PlaygroundForm.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Degraded",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Degraded\" state label in src/components/Option/Playground/PlaygroundForm.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "canonical-state-label:src/components/Option/PresentationStudio/ExtensionStartPanel.tsx:Ready#label-ready-extensionstartpanel-line-398-1k4mwwz",
     "path": "src/components/Option/PresentationStudio/ExtensionStartPanel.tsx",
     "rule": "canonical-state-label",
@@ -5254,17 +5243,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing hardcoded \"Ready\" state label in src/components/Option/WritingPlayground/index.tsx before the guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/routes/sidepanel-chat.tsx:Ready",
-    "path": "src/routes/sidepanel-chat.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Ready\" state label in src/routes/sidepanel-chat.tsx before the guard.",
     "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },

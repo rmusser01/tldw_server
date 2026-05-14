@@ -4,7 +4,7 @@ title: 'Migrate design-system product state: Chat and Playground'
 status: In Progress
 assignee: []
 created_date: '2026-05-14 03:18'
-updated_date: '2026-05-14 04:21'
+updated_date: '2026-05-14 04:28'
 labels:
   - design-system
   - webui
@@ -43,6 +43,8 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 <!-- SECTION:NOTES:BEGIN -->
 Continuation after tracker PR #1679 merged. Starting first product-area slice for GitHub issue #1658 / TASK-45.44.1 in isolated worktree .worktrees/design-system-chat-playground-migration.
+
+Migrated Chat and Playground target labels. Target guard findings are now zero and target baseline entries are now zero. Focused guard suite passes. Full design-system verifier still fails on inherited WorkspaceACPHistoryModal Alert outside this task. Bandit skipped for UI-only changes.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
