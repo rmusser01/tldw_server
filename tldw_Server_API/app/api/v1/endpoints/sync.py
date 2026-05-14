@@ -64,24 +64,18 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.Sync_Client import SYNC_BATCH_SIZE
-from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
-from tldw_Server_API.app.core.Sync.v2.domain_adapters import (
-    ChatDomainAdapter,
-    MediaCompatibilityAdapter,
-    NotesDomainAdapter,
-    SourceCacheAdapter,
-    WorkspacesDomainAdapter,
-)
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
     SyncStoreError,
 )
+from tldw_Server_API.app.core.Sync.v2.factory import (
+    default_sync_v2_registry,
+    sync_v2_service_for_user,
+)
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
-from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 #
@@ -175,16 +169,7 @@ def _sync_user_id(user: User) -> str:
     return user_id or user.username
 
 
-def _default_sync_v2_registry() -> SyncAdapterRegistry:
-    return SyncAdapterRegistry(
-        [
-            NotesDomainAdapter(),
-            ChatDomainAdapter(),
-            WorkspacesDomainAdapter(),
-            SourceCacheAdapter(),
-            MediaCompatibilityAdapter(),
-        ]
-    )
+_default_sync_v2_registry = default_sync_v2_registry
 
 
 def get_sync_v2_service(
@@ -192,15 +177,18 @@ def get_sync_v2_service(
 ) -> SyncV2Service:
     """Build the per-user Sync v2 service dependency."""
 
-    sync_db = SyncDatabase(user_id=_sync_user_id(user))
-    return SyncV2Service(
-        store=SyncV2Store(sync_db),
-        adapters=_default_sync_v2_registry(),
+    return sync_v2_service_for_user(_sync_user_id(user))
+
+
+def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException:
+    safe_context = {
+        key: value
+        for key, value in context.items()
+        if value not in (None, "")
+    }
+    logger.bind(error_type=type(exc).__name__, **safe_context).warning(
+        "Sync v2 request failed"
     )
-
-
-def _safe_sync_v2_http_error(exc: Exception) -> HTTPException:
-    logger.bind(error_type=type(exc).__name__).warning("Sync v2 request failed")
     if isinstance(exc, SyncIdempotencyConflictError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -223,6 +211,7 @@ def _safe_sync_v2_http_error(exc: Exception) -> HTTPException:
             "invalid sync cursor" in lowered
             or "page_size" in lowered
             or "resolution envelope" in lowered
+            or "payload exceeds" in lowered
         ):
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -239,11 +228,25 @@ def _safe_sync_v2_http_error(exc: Exception) -> HTTPException:
                     "message": "Sync resource conflicts with an existing registration.",
                 },
             )
+        not_found_markers = (
+            "not found or is not accessible",
+            "not found:",
+            "was not found",
+            "not accessible",
+        )
+        if any(marker in lowered for marker in not_found_markers):
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error_code": "sync_resource_not_found",
+                    "message": "Requested sync resource was not found or is not accessible.",
+                },
+            )
         return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
-                "error_code": "sync_resource_not_found",
-                "message": "Requested sync resource was not found or is not accessible.",
+                "error_code": "sync_store_error",
+                "message": "Internal sync storage error while processing request.",
             },
         )
     return HTTPException(
@@ -339,7 +342,11 @@ def register_sync_v2_device(
             capabilities=request.capabilities,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=request.device_id,
+        ) from exc
     return SyncDeviceRegisterResponse(
         device_id=registration.device.device_id,
         server_capabilities=_api_capabilities_from_core(registration.server_capabilities),
@@ -370,7 +377,12 @@ def enroll_sync_v2_dataset(
             metadata=request.metadata,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            workspace_id=request.workspace_id,
+        ) from exc
     dataset = enrollment.dataset
     return SyncDatasetEnrollResponse(
         dataset_id=dataset.dataset_id,
@@ -404,7 +416,12 @@ def get_sync_v2_restore_manifest(
             domains=domains,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_ids=dataset_ids,
+            domains=domains,
+        ) from exc
     return SyncRestoreManifestResponse(
         datasets=[asdict(dataset) for dataset in manifest.datasets],
         devices=[asdict(device) for device in manifest.devices],
@@ -431,7 +448,13 @@ def push_sync_v2_envelopes(
             envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            envelope_count=len(request.envelopes),
+        ) from exc
     return SyncPushResponse(
         dataset_id=result.dataset_id,
         accepted=[SyncPushAcceptedEnvelope(**asdict(item)) for item in result.accepted],
@@ -467,7 +490,13 @@ def pull_sync_v2_envelopes(
             include_own_changes=include_own_changes,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            cursor=cursor,
+        ) from exc
     return SyncPullResponse(
         dataset_id=result.dataset_id,
         envelopes=[
@@ -500,7 +529,12 @@ def list_sync_v2_conflicts(
             status=conflict_status,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            conflict_status=conflict_status,
+        ) from exc
     return [_api_conflict_from_core(conflict) for conflict in conflicts]
 
 
@@ -534,7 +568,12 @@ def resolve_sync_v2_conflict(
             notes=request.notes,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            conflict_id=conflict_id,
+            resolved_by_device_id=request.resolved_by_device_id,
+        ) from exc
     return _api_conflict_from_core(conflict)
 
 
@@ -558,7 +597,13 @@ def list_sync_v2_key_recovery_bundles(
             key_purpose=key_purpose,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            key_purpose=key_purpose,
+        ) from exc
     return SyncKeyRecoveryBundleListResponse(
         dataset_id=dataset_id,
         key_records=[_api_key_record_export(record) for record in records],
@@ -606,7 +651,13 @@ def store_sync_v2_key_recovery_bundle(
             rotation_of_key_record_id=request.rotation_of_key_record_id,
         )
     except Exception as exc:
-        raise _safe_sync_v2_http_error(exc) from exc
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            key_purpose=request.key_purpose,
+        ) from exc
     return _api_key_record_metadata(record)
 
 

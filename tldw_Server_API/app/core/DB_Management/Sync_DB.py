@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncRestoreManifestStats,
 )
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, QueryResult
@@ -106,6 +107,10 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_sequence
     ON sync_envelopes(dataset_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
+    ON sync_envelopes(dataset_id, status, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
+    ON sync_envelopes(dataset_id, device_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
@@ -230,6 +235,10 @@ CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_sequence
     ON sync_envelopes(dataset_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_domain_sequence
     ON sync_envelopes(dataset_id, domain, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_status_sequence
+    ON sync_envelopes(dataset_id, status, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_envelopes_dataset_device_sequence
+    ON sync_envelopes(dataset_id, device_id, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_entity
     ON sync_envelopes(dataset_id, domain, entity_id);
 CREATE INDEX IF NOT EXISTS idx_sync_envelopes_stable_key
@@ -291,7 +300,7 @@ CREATE INDEX IF NOT EXISTS idx_sync_key_records_device
 def utcnow_iso() -> str:
     """Return an ISO-8601 UTC timestamp for Sync v2 rows."""
 
-    return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def encode_json(value: Any, *, default: Any) -> str:
@@ -311,6 +320,32 @@ def decode_json(value: str | None, *, default: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+def _domain_filter_sql(domains: Sequence[SyncDomain] | None, params: list[Any]) -> str:
+    """Append a portable domain IN predicate and return its SQL fragment."""
+
+    if domains is None:
+        return ""
+    placeholders = ", ".join("?" for _ in domains)
+    params.extend(domains)
+    return f" AND domain IN ({placeholders})"
+
+
+def _manifest_attachment_size_class(size_bytes: int) -> str:
+    if size_bytes <= 1_048_576:
+        return "small"
+    if size_bytes <= 16_777_216:
+        return "medium"
+    return "large"
+
+
+def _timestamp_to_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
 
 
 def _sqlite_path_from_url(database_url: str, default_path: Path) -> Path | str:
@@ -592,6 +627,9 @@ class SyncDatabase:
                     backend_type=BackendType.SQLITE,
                     sqlite_path=str(sqlite_target),
                 )
+            raise SyncStoreError(
+                f"Unsupported SYNC_V2_DATABASE_URL scheme for Sync v2: {scheme}"
+            )
 
         if custom_path:
             return DatabaseConfig(
@@ -982,6 +1020,8 @@ class SyncDatabase:
         *,
         limit: int = 100,
         domains: Sequence[SyncDomain] | None = None,
+        status: str | Sequence[str] | None = None,
+        exclude_device_id: str | None = None,
     ) -> list[SyncEnvelope]:
         if limit < 1:
             return []
@@ -993,9 +1033,21 @@ class SyncDatabase:
         if domains is not None:
             if not domains:
                 return []
-            placeholders = ", ".join("?" for _ in domains)
-            sql += f" AND domain IN ({placeholders})"
-            params.extend(domains)
+            sql += _domain_filter_sql(domains, params)
+        if status is not None:
+            statuses = [status] if isinstance(status, str) else list(status)
+            if not statuses:
+                return []
+            if len(statuses) == 1:
+                sql += " AND status = ?"
+                params.append(statuses[0])
+            else:
+                placeholders = ", ".join("?" for _ in statuses)
+                sql += f" AND status IN ({placeholders})"
+                params.extend(statuses)
+        if exclude_device_id is not None:
+            sql += " AND (device_id IS NULL OR device_id <> ?)"
+            params.append(exclude_device_id)
         sql += " ORDER BY server_sequence ASC LIMIT ?"
         params.append(limit)
         result = self.execute(sql, tuple(params))
@@ -1192,6 +1244,19 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_conflict_from_row(row) for row in result.rows]
 
+    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
+        """Return a conflict by ID without scanning dataset conflict lists."""
+
+        row = _first(
+            self.execute(
+                "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                (conflict_id,),
+            )
+        )
+        if row is None:
+            return None
+        return _conflict_from_row(row)
+
     def get_unresolved_conflict_for_envelope(
         self,
         dataset_id: str,
@@ -1340,6 +1405,112 @@ class SyncDatabase:
         sql += " ORDER BY created_at ASC, key_record_id ASC"
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
+
+    def summarize_restore_manifest_dataset(
+        self,
+        dataset_id: str,
+        *,
+        user_id: str,
+        domains: Sequence[SyncDomain] | None = None,
+    ) -> SyncRestoreManifestStats:
+        """Return aggregate restore-manifest statistics for a dataset."""
+
+        if not user_id:
+            raise SyncStoreError("user_id is required for Sync restore manifest summary")
+        self._require_dataset(dataset_id)
+        domain_filter_enabled = domains is not None
+        domain_list = list(domains or [])
+
+        counts: dict[str, int] = {}
+        byte_estimates: dict[str, int] = {}
+        last_updated_at: str | None = None
+        unresolved_conflicts = 0
+        attachment_availability: dict[str, int] = {}
+        attachment_size_classes: dict[str, int] = {}
+
+        if not domain_filter_enabled or domain_list:
+            params: list[Any] = [dataset_id]
+            sql = """
+                SELECT domain,
+                       COUNT(*) AS envelope_count,
+                       COALESCE(SUM(COALESCE(payload_size_bytes, 0)), 0) AS byte_estimate,
+                       MAX(server_timestamp) AS last_updated_at
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+            """
+            sql += _domain_filter_sql(domain_list if domain_filter_enabled else None, params)
+            sql += " GROUP BY domain"
+            for row in self.execute(sql, tuple(params)).rows:
+                domain = str(row["domain"])
+                counts[domain] = int(row["envelope_count"] or 0)
+                byte_estimates[domain] = int(row["byte_estimate"] or 0)
+                row_last_updated = _timestamp_to_string(row.get("last_updated_at"))
+                if row_last_updated and (
+                    last_updated_at is None or row_last_updated > last_updated_at
+                ):
+                    last_updated_at = row_last_updated
+
+            params = [dataset_id]
+            sql = """
+                SELECT COUNT(*) AS conflict_count
+                  FROM sync_conflicts
+                 WHERE dataset_id = ?
+                   AND status = 'unresolved'
+            """
+            sql += _domain_filter_sql(domain_list if domain_filter_enabled else None, params)
+            conflict_row = _first(self.execute(sql, tuple(params)))
+            unresolved_conflicts = int((conflict_row or {}).get("conflict_count") or 0)
+
+            params = [dataset_id]
+            sql = """
+                SELECT payload_clear_json
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND payload_clear_json LIKE ?
+            """
+            params.append('%"attachment_id"%')
+            sql += _domain_filter_sql(domain_list if domain_filter_enabled else None, params)
+            for row in self.execute(sql, tuple(params)).rows:
+                payload_clear = decode_json(row.get("payload_clear_json"), default={})
+                if not isinstance(payload_clear, dict) or not payload_clear.get("attachment_id"):
+                    continue
+                availability = str(payload_clear.get("availability", "unknown"))
+                attachment_availability[availability] = (
+                    attachment_availability.get(availability, 0) + 1
+                )
+                try:
+                    size_bytes = int(payload_clear.get("size_bytes") or 0)
+                except (TypeError, ValueError):
+                    size_bytes = 0
+                size_class = _manifest_attachment_size_class(size_bytes)
+                attachment_size_classes[size_class] = (
+                    attachment_size_classes.get(size_class, 0) + 1
+                )
+
+        key_row = _first(
+            self.execute(
+                """
+                SELECT 1 AS key_available
+                  FROM sync_key_records
+                 WHERE dataset_id = ?
+                   AND user_id = ?
+                   AND key_purpose = 'dataset_recovery'
+                   AND revoked_at IS NULL
+                 LIMIT 1
+                """,
+                (dataset_id, user_id),
+            )
+        )
+
+        return SyncRestoreManifestStats(
+            approximate_counts=dict(sorted(counts.items())),
+            byte_estimates=dict(sorted(byte_estimates.items())),
+            last_updated_at=last_updated_at,
+            unresolved_conflicts=unresolved_conflicts,
+            attachment_availability=dict(sorted(attachment_availability.items())),
+            attachment_size_classes=dict(sorted(attachment_size_classes.items())),
+            key_recovery_available=key_row is not None,
+        )
 
     def _ensure_domain_state(
         self,

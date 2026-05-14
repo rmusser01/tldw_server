@@ -107,18 +107,17 @@ def redact_private_mapping_for_log(value: Mapping[str, Any]) -> dict[str, Any]:
     for key, item in value.items():
         if _is_sensitive_key(key):
             redacted[str(key)] = _REDACTED
-        elif isinstance(item, Mapping):
-            redacted[str(key)] = redact_private_mapping_for_log(item)
-        elif isinstance(item, list):
-            redacted[str(key)] = [
-                redact_private_mapping_for_log(element)
-                if isinstance(element, Mapping)
-                else element
-                for element in item
-            ]
         else:
-            redacted[str(key)] = item
+            redacted[str(key)] = _redact_private_value(item)
     return redacted
+
+
+def _redact_private_value(item: Any) -> Any:
+    if isinstance(item, Mapping):
+        return redact_private_mapping_for_log(item)
+    if isinstance(item, list):
+        return [_redact_private_value(element) for element in item]
+    return item
 
 
 def _dataclass_to_dict(value: object) -> dict[str, Any]:

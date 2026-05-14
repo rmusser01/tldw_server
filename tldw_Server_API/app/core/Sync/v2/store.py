@@ -20,6 +20,7 @@ from .models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncRestoreManifestStats,
 )
 
 
@@ -59,12 +60,16 @@ class SyncV2Store:
         *,
         limit: int = 100,
         domains: Sequence[SyncDomain] | None = None,
+        status: str | Sequence[str] | None = None,
+        exclude_device_id: str | None = None,
     ) -> list[SyncEnvelope]:
         return self.db.list_envelopes_after(
             dataset_id,
             since_sequence,
             limit=limit,
             domains=domains,
+            status=status,
+            exclude_device_id=exclude_device_id,
         )
 
     def list_envelopes_for_entity(
@@ -105,6 +110,9 @@ class SyncV2Store:
         status: ConflictStatus | None = None,
     ) -> list[SyncConflict]:
         return self.db.list_conflicts(dataset_id, status=status)
+
+    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
+        return self.db.get_conflict(conflict_id)
 
     def get_unresolved_conflict_for_envelope(
         self,
@@ -154,6 +162,19 @@ class SyncV2Store:
             user_id=user_id,
             device_id=device_id,
             key_purpose=key_purpose,
+        )
+
+    def summarize_restore_manifest_dataset(
+        self,
+        dataset_id: str,
+        *,
+        user_id: str,
+        domains: Sequence[SyncDomain] | None = None,
+    ) -> SyncRestoreManifestStats:
+        return self.db.summarize_restore_manifest_dataset(
+            dataset_id,
+            user_id=user_id,
+            domains=domains,
         )
 
 

@@ -51,8 +51,4 @@ Added Sync v2 restore e2e coverage and documentation. The new e2e validates the 
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
-- [x] #7 Acceptance criteria completed
-- [x] #8 Tests or verification recorded
-- [x] #9 Bandit run on touched production code
-- [x] #10 Implementation notes added
 <!-- DOD:END -->

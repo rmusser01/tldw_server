@@ -120,7 +120,12 @@ def _is_source_ref(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
         or _metadata_value(envelope, "relationship")
         or ""
     ).strip().lower()
-    return kind in _SOURCE_REF_KINDS or "source" in link_type
+    link_tokens = {
+        token
+        for token in link_type.replace("-", "_").replace(" ", "_").split("_")
+        if token
+    }
+    return kind in _SOURCE_REF_KINDS or "source" in link_tokens
 
 
 def _source_id(envelope: SyncEnvelope | SyncEnvelopeCreate) -> object | None:

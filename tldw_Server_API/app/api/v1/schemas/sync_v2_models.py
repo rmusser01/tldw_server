@@ -21,6 +21,7 @@ V1_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "server_trusted",
     "shared_workspace_v1",
 ]
+SYNC_V2_MAX_PUSH_ENVELOPES = 100
 
 _PRIVATE_CLEAR_PAYLOAD_ALLOWED_KEYS = {
     "archive_status",
@@ -267,7 +268,10 @@ class SyncPushRequest(BaseModel):
 
     dataset_id: str
     device_id: str = Field(..., min_length=1)
-    envelopes: list[SyncV2Envelope] = Field(default_factory=list)
+    envelopes: list[SyncV2Envelope] = Field(
+        default_factory=list,
+        max_length=SYNC_V2_MAX_PUSH_ENVELOPES,
+    )
     idempotency_key: str | None = None
     last_known_cursor: str | None = None
 
@@ -424,6 +428,7 @@ __all__ = [
     "ConflictStatus",
     "DatasetScopeType",
     "EncryptionPolicy",
+    "SYNC_V2_MAX_PUSH_ENVELOPES",
     "SyncAttachmentUploadRequest",
     "SyncAttachmentUploadResponse",
     "SyncCapabilitiesResponse",

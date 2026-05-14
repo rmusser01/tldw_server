@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -412,7 +411,13 @@ class SyncV2Service:
                 )
             )
 
-        next_sequence = max((item.server_sequence for item in accepted), default=None)
+        sequences = [item.server_sequence for item in accepted]
+        sequences.extend(
+            item.server_sequence
+            for item in conflicts
+            if item.server_sequence is not None
+        )
+        next_sequence = max(sequences, default=None)
         return SyncPushResult(
             dataset_id=dataset_id,
             accepted=accepted,
@@ -437,11 +442,7 @@ class SyncV2Service:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
         if dataset is None:
-            since_sequence = self._parse_cursor(cursor)
-            return SyncPullResult(
-                dataset_id=dataset_id,
-                next_cursor=str(since_sequence),
-            )
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
 
         selected_domains = self._selected_domains(dataset, domains)
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
@@ -535,70 +536,65 @@ class SyncV2Service:
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
     ) -> SyncConflict:
+        conflict = self.store.get_conflict(conflict_id)
+        if conflict is None:
+            raise SyncStoreError("Sync conflict was not found or is not accessible")
+        dataset = self.store.get_dataset(conflict.dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync conflict was not found or is not accessible")
         if resolved_by_device_id is not None:
             self._require_registered_device(user_id, resolved_by_device_id)
-        for dataset in self.store.list_datasets_for_user(user_id):
-            conflict = next(
-                (
-                    item
-                    for item in self.store.list_conflicts(dataset.dataset_id)
-                    if item.conflict_id == conflict_id
-                ),
-                None,
-            )
-            if conflict is not None:
-                if resolution_envelope is not None:
-                    resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
-                    self._require_registered_device(user_id, resolution_device_id or "")
-                    if resolution_envelope.dataset_id != dataset.dataset_id:
-                        raise SyncStoreError(
-                            "Sync resolution envelope dataset_id must match the conflict dataset"
-                        )
-                    if (
-                        resolution_envelope.domain != conflict.domain
-                        or resolution_envelope.entity_id != conflict.entity_id
-                    ):
-                        raise SyncStoreError(
-                            "Sync resolution envelope must target the conflict domain and entity"
-                        )
-                    if (
-                        resolved_by_device_id is not None
-                        and resolution_envelope.device_id is not None
-                        and resolution_envelope.device_id != resolved_by_device_id
-                    ):
-                        raise SyncStoreError(
-                            "Sync resolution envelope device_id must match resolved_by_device_id"
-                        )
-                    if self._payload_exceeds_size_limit(resolution_envelope):
-                        raise SyncStoreError(
-                            "Sync resolution envelope payload exceeds the server size limit"
-                        )
-                    try:
-                        outcome = self._evaluate_envelope(dataset, resolution_envelope)
-                    except PrivatePayloadValidationError as exc:
-                        raise SyncStoreError(
-                            "Sync resolution envelope private payload validation failed"
-                        ) from exc
-                    if not isinstance(outcome, AdapterAccepted):
-                        raise SyncStoreError("Sync resolution envelope was not accepted")
-                    inserted = self.store.insert_envelope(
-                        replace(
-                            resolution_envelope,
-                            device_id=resolution_device_id,
-                            status="accepted",
-                        )
-                    )
-                    resolved_by_envelope_id = inserted.client_envelope_id
-                    resolved_by_device_id = resolution_device_id
-                return self.store.resolve_conflict(
-                    conflict_id,
-                    status="dismissed" if action == "dismiss" else "resolved",
-                    resolved_by_envelope_id=resolved_by_envelope_id,
-                    resolved_by_device_id=resolved_by_device_id,
-                    resolution_action=action,
-                    resolution_notes=notes,
+        if resolution_envelope is not None:
+            resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
+            self._require_registered_device(user_id, resolution_device_id or "")
+            if resolution_envelope.dataset_id != dataset.dataset_id:
+                raise SyncStoreError(
+                    "Sync resolution envelope dataset_id must match the conflict dataset"
                 )
-        raise SyncStoreError("Sync conflict was not found or is not accessible")
+            if (
+                resolution_envelope.domain != conflict.domain
+                or resolution_envelope.entity_id != conflict.entity_id
+            ):
+                raise SyncStoreError(
+                    "Sync resolution envelope must target the conflict domain and entity"
+                )
+            if (
+                resolved_by_device_id is not None
+                and resolution_envelope.device_id is not None
+                and resolution_envelope.device_id != resolved_by_device_id
+            ):
+                raise SyncStoreError(
+                    "Sync resolution envelope device_id must match resolved_by_device_id"
+                )
+            if self._payload_exceeds_size_limit(resolution_envelope):
+                raise SyncStoreError(
+                    "Sync resolution envelope payload exceeds the server size limit"
+                )
+            try:
+                outcome = self._evaluate_envelope(dataset, resolution_envelope)
+            except PrivatePayloadValidationError as exc:
+                raise SyncStoreError(
+                    "Sync resolution envelope private payload validation failed"
+                ) from exc
+            if not isinstance(outcome, AdapterAccepted):
+                raise SyncStoreError("Sync resolution envelope was not accepted")
+            inserted = self.store.insert_envelope(
+                replace(
+                    resolution_envelope,
+                    device_id=resolution_device_id,
+                    status="accepted",
+                )
+            )
+            resolved_by_envelope_id = inserted.client_envelope_id
+            resolved_by_device_id = resolution_device_id
+        return self.store.resolve_conflict(
+            conflict_id,
+            status="dismissed" if action == "dismiss" else "resolved",
+            resolved_by_envelope_id=resolved_by_envelope_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=action,
+            resolution_notes=notes,
+        )
 
     def store_key_recovery_bundle(
         self,
@@ -806,40 +802,15 @@ class SyncV2Service:
         page_limit: int,
         include_own_changes: bool,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
-        chunk_size = max(page_limit + 1, self.settings.max_pull_page_size)
-        scan_cursor = since_sequence
-        raw_seen: list[SyncEnvelope] = []
-        visible: list[SyncEnvelope] = []
-
-        while len(visible) <= page_limit:
-            raw_chunk = self.store.list_envelopes_after(
-                dataset_id,
-                scan_cursor,
-                limit=chunk_size,
-                domains=domains,
-            )
-            if not raw_chunk:
-                break
-
-            raw_seen.extend(raw_chunk)
-            last_sequence = raw_chunk[-1].server_sequence
-            if last_sequence <= scan_cursor:
-                break
-            scan_cursor = last_sequence
-
-            for envelope in raw_chunk:
-                if envelope.status != "accepted":
-                    continue
-                if not include_own_changes and envelope.device_id == device_id:
-                    continue
-                visible.append(envelope)
-                if len(visible) > page_limit:
-                    break
-
-            if len(raw_chunk) < chunk_size:
-                break
-
-        return raw_seen, visible
+        visible = self.store.list_envelopes_after(
+            dataset_id,
+            since_sequence,
+            limit=page_limit + 1,
+            domains=domains,
+            status="accepted",
+            exclude_device_id=None if include_own_changes else device_id,
+        )
+        return visible, visible
 
     def _manifest_dataset(
         self,
@@ -849,37 +820,14 @@ class SyncV2Service:
         domains: set[SyncDomain],
     ) -> SyncRestoreManifestDataset:
         selected_domains = [domain for domain in dataset.domains if not domains or domain in domains]
-        envelopes = self.store.list_envelopes_after(
-            dataset.dataset_id,
-            0,
-            limit=self.settings.restore_manifest_scan_limit,
-            domains=selected_domains,
-        )
-        counts: Counter[str] = Counter()
-        byte_estimates: defaultdict[str, int] = defaultdict(int)
-        availability: Counter[str] = Counter()
-        size_classes: Counter[str] = Counter()
-        last_updated_at = dataset.updated_at
-
-        for envelope in envelopes:
-            counts[envelope.domain] += 1
-            byte_estimates[envelope.domain] += envelope.payload_size_bytes or 0
-            if envelope.server_timestamp > last_updated_at:
-                last_updated_at = envelope.server_timestamp
-            if envelope.payload_clear.get("attachment_id"):
-                availability[str(envelope.payload_clear.get("availability", "unknown"))] += 1
-                size_classes[_size_class(int(envelope.payload_clear.get("size_bytes") or 0))] += 1
-
-        conflicts = [
-            conflict
-            for conflict in self.store.list_conflicts(dataset.dataset_id, status="unresolved")
-            if not domains or conflict.domain in domains
-        ]
-        key_records = self.store.list_key_records(
+        stats = self.store.summarize_restore_manifest_dataset(
             dataset.dataset_id,
             user_id=user_id,
-            key_purpose="dataset_recovery",
+            domains=selected_domains,
         )
+        last_updated_at = stats.last_updated_at or dataset.updated_at
+        if last_updated_at < dataset.updated_at:
+            last_updated_at = dataset.updated_at
         metadata: dict[str, object] = (
             {} if dataset.encryption_policy == "client_private_v1" else dict(dataset.metadata)
         )
@@ -889,23 +837,15 @@ class SyncV2Service:
             encryption_policy=dataset.encryption_policy,
             domains=selected_domains,
             workspace_id=dataset.workspace_id,
-            approximate_counts=dict(sorted(counts.items())),
-            byte_estimates=dict(sorted(byte_estimates.items())),
+            approximate_counts=stats.approximate_counts,
+            byte_estimates=stats.byte_estimates,
             last_updated_at=last_updated_at,
-            unresolved_conflicts=len(conflicts),
-            attachment_availability=dict(sorted(availability.items())),
-            attachment_size_classes=dict(sorted(size_classes.items())),
-            key_recovery_available=any(record.revoked_at is None for record in key_records),
+            unresolved_conflicts=stats.unresolved_conflicts,
+            attachment_availability=stats.attachment_availability,
+            attachment_size_classes=stats.attachment_size_classes,
+            key_recovery_available=stats.key_recovery_available,
             metadata=metadata,
         )
-
-
-def _size_class(size_bytes: int) -> str:
-    if size_bytes <= 1_048_576:
-        return "small"
-    if size_bytes <= 16_777_216:
-        return "medium"
-    return "large"
 
 
 def _compact_json_size(value: object) -> int:

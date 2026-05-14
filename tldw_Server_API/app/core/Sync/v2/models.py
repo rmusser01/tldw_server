@@ -204,6 +204,19 @@ class SyncKeyRecord:
     revoked_at: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class SyncRestoreManifestStats:
+    """Database-side aggregate statistics for one restore-manifest dataset."""
+
+    approximate_counts: dict[str, int] = field(default_factory=dict)
+    byte_estimates: dict[str, int] = field(default_factory=dict)
+    last_updated_at: str | None = None
+    unresolved_conflicts: int = 0
+    attachment_availability: dict[str, int] = field(default_factory=dict)
+    attachment_size_classes: dict[str, int] = field(default_factory=dict)
+    key_recovery_available: bool = False
+
+
 __all__ = [
     "ConflictStatus",
     "DatasetScopeType",
@@ -221,4 +234,5 @@ __all__ = [
     "SyncKeyRecord",
     "SyncKeyRecordCreate",
     "SyncOperation",
+    "SyncRestoreManifestStats",
 ]

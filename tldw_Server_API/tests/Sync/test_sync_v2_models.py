@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+    SYNC_V2_MAX_PUSH_ENVELOPES,
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
     SyncPushRequest,
@@ -56,12 +57,13 @@ def test_sync_envelope_allows_private_routing_metadata_in_clear_payload():
 
 def test_sync_envelope_rejects_unknown_clear_payload_keys_for_private_policy():
     payload = _private_envelope_payload(
-        payload_ciphertext=None,
         payload_clear={"fields": {"headline": "known plaintext"}},
     )
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         SyncV2Envelope.model_validate(payload)
+
+    assert "payload_clear.fields is not allowed" in str(exc_info.value)
 
 
 def test_sync_envelope_requires_adapter_version():
@@ -103,16 +105,37 @@ def test_push_response_reports_per_envelope_outcomes():
 
 
 def test_push_request_rejects_envelope_dataset_mismatch():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         SyncPushRequest.model_validate(
             {
                 "dataset_id": "dataset-1",
+                "device_id": "device-1",
                 "envelopes": [
                     _private_envelope_payload(
                         client_envelope_id="env-2",
                         dataset_id="dataset-2",
                     )
                 ],
+            }
+        )
+
+    assert "envelope dataset_id must match SyncPushRequest.dataset_id" in str(
+        exc_info.value
+    )
+
+
+def test_push_request_rejects_oversized_envelope_batches():
+    envelopes = [
+        _private_envelope_payload(client_envelope_id=f"env-{index}")
+        for index in range(SYNC_V2_MAX_PUSH_ENVELOPES + 1)
+    ]
+
+    with pytest.raises(ValidationError):
+        SyncPushRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "envelopes": envelopes,
             }
         )
 

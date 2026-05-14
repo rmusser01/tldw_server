@@ -139,6 +139,14 @@ def test_private_mapping_redacts_human_readable_private_fields_recursively():
                 "stable_key": "note:1",
             }
         ],
+        "batches": [
+            [
+                {
+                    "content": "known nested private item content",
+                    "stable_key": "note:2",
+                }
+            ]
+        ],
     }
 
     redacted = redact_private_mapping_for_log(payload)
@@ -152,4 +160,7 @@ def test_private_mapping_redacts_human_readable_private_fields_recursively():
     assert redacted["metadata"]["label"] == "<redacted>"
     assert redacted["metadata"]["body"] == "<redacted>"
     assert redacted["items"][0]["content"] == "<redacted>"
+    assert redacted["batches"][0][0]["stable_key"] == "note:2"
+    assert redacted["batches"][0][0]["content"] == "<redacted>"
     assert "known private" not in rendered
+    assert "known nested private" not in rendered

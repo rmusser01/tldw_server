@@ -569,6 +569,35 @@ def test_workspaces_adapter_accepts_source_ref_membership_by_source_id():
     assert outcome == AdapterAccepted(client_envelope_id="workspace-source-b")
 
 
+def test_workspaces_adapter_does_not_treat_resource_link_type_as_source_ref():
+    incoming = _envelope(
+        client_envelope_id="workspace-resource-link",
+        domain="workspaces",
+        entity_id="workspace-1:resource-1",
+        stable_key="workspace_resource:workspace-1:resource-1",
+        operation="link",
+        routing_metadata={
+            "entity_kind": "workspace_resource",
+            "workspace_id": "workspace-1",
+            "link_type": "resource",
+        },
+        payload_clear={
+            "entity_kind": "workspace_resource",
+            "workspace_id": "workspace-1",
+            "link_type": "resource",
+        },
+        payload_hash="sha256:resource-1",
+    )
+
+    outcome = WorkspacesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id="workspace-resource-link")
+
+
 def test_workspaces_adapter_conflicts_ordered_or_rename_metadata_flags():
     incoming = _envelope(
         client_envelope_id="workspace-rename",

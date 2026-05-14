@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     StaticSyncAdapter,
     SyncAdapterRegistry,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
@@ -311,6 +312,28 @@ def test_pull_endpoint_filters_domains_excludes_echo_and_pages(client: TestClien
     assert first.json()["has_more"] is True
     assert [item["client_envelope_id"] for item in second.json()["envelopes"]] == ["remote-note-2"]
     assert second.json()["has_more"] is False
+
+
+def test_sync_store_errors_without_not_found_marker_return_server_error(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def _raise_store_error(**_kwargs):
+        raise SyncStoreError("cursor write failed")
+
+    monkeypatch.setattr(sync_service, "pull", _raise_store_error)
+
+    response = client.get(
+        "/api/v1/sync/pull",
+        params={"dataset_id": "dataset-1", "device_id": "device-1", "cursor": "0"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "error_code": "sync_store_error",
+        "message": "Internal sync storage error while processing request.",
+    }
 
 
 def test_pull_endpoint_preserves_dataset_encryption_policy(client: TestClient):

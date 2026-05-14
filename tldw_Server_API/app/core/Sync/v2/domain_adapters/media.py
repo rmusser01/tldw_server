@@ -221,7 +221,7 @@ def _payload_mapping_and_text(payload_value: Any) -> tuple[dict[str, Any], str]:
     payload = json.loads(payload_value)
     if not isinstance(payload, dict):
         raise ValueError("Legacy media sync payload must be a JSON object")
-    return payload, payload_value
+    return payload, json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _payload_hash(payload_text: str) -> str:

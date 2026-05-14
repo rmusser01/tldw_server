@@ -239,6 +239,13 @@ def test_push_rejects_envelopes_for_datasets_user_cannot_access(sync_service: Sy
     assert result.rejected[0].client_envelope_id == "env-1"
     assert result.rejected[0].error_code == "dataset_not_found_or_forbidden"
 
+    with pytest.raises(SyncStoreError, match="dataset was not found"):
+        sync_service.pull(
+            user_id="user-2",
+            dataset_id="dataset-1",
+            device_id="user-2-device",
+        )
+
 
 def test_push_returns_per_envelope_accepted_rejected_and_conflict_outcomes(
     sync_store: SyncV2Store,
@@ -302,7 +309,8 @@ def test_push_returns_per_envelope_accepted_rejected_and_conflict_outcomes(
     assert result.rejected[0].error_code == "domain_validation_failed"
     assert result.conflicts[0].client_envelope_id == "env-conflict"
     assert result.conflicts[0].conflict_id == "conflict-generated"
-    assert result.next_cursor == str(result.accepted[0].server_sequence)
+    assert result.conflicts[0].server_sequence is not None
+    assert result.next_cursor == str(result.conflicts[0].server_sequence)
 
 
 def test_push_rejects_unsupported_adapter_versions_per_envelope(sync_service: SyncV2Service):
@@ -606,8 +614,10 @@ def test_conflict_push_retry_reuses_existing_unresolved_conflict(
     manifest = service.restore_manifest(user_id="user-1")
 
     assert first.conflicts[0].conflict_id == "conflict-first"
+    assert first.next_cursor == str(first.conflicts[0].server_sequence)
     assert retried.conflicts[0].conflict_id == first.conflicts[0].conflict_id
     assert retried.conflicts[0].server_sequence == first.conflicts[0].server_sequence
+    assert retried.next_cursor == str(retried.conflicts[0].server_sequence)
     assert len(sync_store.list_conflicts("dataset-1", status="unresolved")) == 1
     assert manifest.datasets[0].unresolved_conflicts == 1
 
@@ -727,6 +737,98 @@ def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
     assert resolved.resolution_action == "merge"
     assert [envelope.client_envelope_id for envelope in pulled.envelopes] == ["env-resolution"]
     assert pulled.envelopes[0].status == "accepted"
+
+
+def test_resolve_conflict_uses_direct_lookup_without_dataset_conflict_scan(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+
+    def fail_scan(*_args, **_kwargs):
+        raise AssertionError("resolve_conflict should not scan dataset conflict lists")
+
+    monkeypatch.setattr(sync_store, "list_datasets_for_user", fail_scan)
+    monkeypatch.setattr(sync_store, "list_conflicts", fail_scan)
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        conflict_id=pushed.conflicts[0].conflict_id,
+        action="dismiss",
+    )
+
+    assert resolved.status == "dismissed"
+    assert resolved.resolution_action == "dismiss"
+
+
+def test_resolve_conflict_rejects_conflicts_owned_by_another_user(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes",
+                    entity_id="note-1",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1")
+    _register_devices(service, "user-2", "device-2")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes"])
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_envelope(client_envelope_id="env-conflict")],
+    )
+
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        service.resolve_conflict(
+            user_id="user-2",
+            conflict_id=pushed.conflicts[0].conflict_id,
+            action="dismiss",
+        )
 
 
 def test_device_scoped_operations_require_registered_user_device(
@@ -1250,9 +1352,10 @@ def test_pull_excludes_conflict_envelopes_from_normal_results(
     assert pull_result.envelopes == []
 
 
-def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
+def test_pull_uses_server_side_filters_past_echo_filled_raw_window(
     sync_store: SyncV2Store,
     registry: SyncAdapterRegistry,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     service = SyncV2Service(
         store=sync_store,
@@ -1291,6 +1394,14 @@ def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
         device_id="device-2",
         envelopes=[remote_envelope],
     )
+    original_list_envelopes_after = sync_store.list_envelopes_after
+    list_calls: list[dict[str, object]] = []
+
+    def tracked_list_envelopes_after(*args, **kwargs):
+        list_calls.append(dict(kwargs))
+        return original_list_envelopes_after(*args, **kwargs)
+
+    monkeypatch.setattr(sync_store, "list_envelopes_after", tracked_list_envelopes_after)
 
     page = service.pull(
         user_id="user-1",
@@ -1305,6 +1416,14 @@ def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
     assert [envelope.client_envelope_id for envelope in page.envelopes] == [
         "remote-after-echoes"
     ]
+    assert list_calls == [
+        {
+            "limit": 2,
+            "domains": ["notes"],
+            "status": "accepted",
+            "exclude_device_id": "device-1",
+        }
+    ]
     assert page.next_cursor == "12"
     assert page.has_more is False
 
@@ -1312,6 +1431,7 @@ def test_pull_scans_past_echo_filled_raw_window_before_remote_change(
 def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
     sync_service: SyncV2Service,
     sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     sync_service.register_device(
         user_id="user-1",
@@ -1371,6 +1491,13 @@ def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
             wrapped_key_blob="wrapped:secret-key",
         )
     )
+
+    def fail_scan(*_args, **_kwargs):
+        raise AssertionError("restore_manifest should use aggregate store summaries")
+
+    monkeypatch.setattr(sync_store, "list_envelopes_after", fail_scan)
+    monkeypatch.setattr(sync_store, "list_conflicts", fail_scan)
+    monkeypatch.setattr(sync_store, "list_key_records", fail_scan)
 
     manifest = sync_service.restore_manifest(user_id="user-1")
 

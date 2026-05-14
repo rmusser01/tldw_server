@@ -3,12 +3,13 @@ from __future__ import annotations
 import inspect
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 import tldw_Server_API.app.core.Sync.v2.store as store_module
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncDatasetNotFoundError,
     SyncIdempotencyConflictError,
@@ -115,6 +116,14 @@ def _key_record(**overrides) -> SyncKeyRecordCreate:
     return SyncKeyRecordCreate(**payload)
 
 
+def test_sync_database_rejects_unsupported_database_url_scheme(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("SYNC_V2_DATABASE_URL", "mysql://sync.example/sync_v2")
+    monkeypatch.delenv("SYNC_V2_SQLITE_PATH", raising=False)
+
+    with pytest.raises(SyncStoreError, match="Unsupported SYNC_V2_DATABASE_URL scheme"):
+        SyncDatabase(sqlite_path=tmp_path / "ignored.db")
+
+
 def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store):
     required_tables = {
         "sync_devices",
@@ -128,6 +137,16 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
 
     for table_name in required_tables:
         assert sync_store.db.backend.table_exists(table_name)
+
+
+def test_sync_timestamps_are_timezone_aware_utc():
+    timestamp = utcnow_iso()
+
+    parsed = datetime.fromisoformat(timestamp)
+
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)
+    assert parsed.tzinfo == timezone.utc
 
 
 def test_sync_store_facade_does_not_embed_sql_statements():
@@ -298,6 +317,42 @@ def test_list_envelopes_after_cursor_is_ordered_and_domain_filterable(sync_store
     assert sync_store.list_envelopes_after("dataset-1", 0, domains=["notes"]) == [first, third]
 
 
+def test_list_envelopes_after_filters_status_and_excluded_device_in_sql(
+    sync_store: SyncV2Store,
+):
+    sync_store.enroll_dataset(_dataset())
+    own = sync_store.insert_envelope(_envelope(client_envelope_id="own-accepted"))
+    remote = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="remote-accepted",
+            entity_id="note-remote",
+            stable_key="note:remote",
+            device_id="device-2",
+            payload_hash="sha256:remote",
+        )
+    )
+    sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="remote-conflict",
+            entity_id="note-conflict",
+            stable_key="note:conflict",
+            device_id="device-2",
+            payload_hash="sha256:conflict",
+            status="conflict",
+        )
+    )
+
+    visible = sync_store.list_envelopes_after(
+        "dataset-1",
+        0,
+        status="accepted",
+        exclude_device_id="device-1",
+    )
+
+    assert own not in visible
+    assert [envelope.client_envelope_id for envelope in visible] == ["remote-accepted"]
+
+
 def test_device_cursor_upsert_and_fetch(sync_store: SyncV2Store):
     sync_store.enroll_dataset(_dataset())
 
@@ -345,6 +400,8 @@ def test_conflict_insert_list_and_resolve_lifecycle(sync_store: SyncV2Store):
     inserted = sync_store.insert_conflict(_conflict())
 
     assert inserted.status == "unresolved"
+    assert sync_store.get_conflict("conflict-1") == inserted
+    assert sync_store.get_conflict("missing-conflict") is None
     assert sync_store.list_conflicts("dataset-1") == [inserted]
     assert sync_store.list_conflicts("dataset-1", status="resolved") == []
 

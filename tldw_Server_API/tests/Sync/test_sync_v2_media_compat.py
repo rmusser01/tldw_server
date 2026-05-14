@@ -181,6 +181,16 @@ def test_media_adapter_unsupported_versions_are_rejected_through_service(tmp_pat
 
 
 def test_legacy_media_sync_log_translates_without_private_plaintext_leakage():
+    canonical_payload = json.dumps(
+        {
+            "content": "Private content",
+            "deleted": False,
+            "title": "Private title",
+            "uuid": "media-1",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     entry = {
         "change_id": 42,
         "entity": "Media",
@@ -209,8 +219,10 @@ def test_legacy_media_sync_log_translates_without_private_plaintext_leakage():
     }
     assert envelope.payload_ciphertext == "ciphertext:legacy-media"
     assert envelope.payload_clear == {"entity_kind": "Media", "deleted": False}
-    assert envelope.payload_hash.startswith("sha256:")
-    assert envelope.payload_size_bytes == len(entry["payload"].encode("utf-8"))
+    assert envelope.payload_hash == (
+        f"sha256:{hashlib.sha256(canonical_payload.encode('utf-8')).hexdigest()}"
+    )
+    assert envelope.payload_size_bytes == len(canonical_payload.encode("utf-8"))
     assert "Private title" not in str(envelope.payload_clear)
     assert "Private content" not in str(envelope.payload_clear)
 

@@ -12,13 +12,10 @@ labels:
   - prd
 dependencies: []
 references:
-  - >-
-    /Users/macbook-dev/Documents/GitHub/tldw_chatbook/Sync_Interop/server_sync_service.py
-  - >-
-    /Users/macbook-dev/Documents/GitHub/tldw_chatbook/Sync_Interop/sync_scope_service.py
-  - >-
-    /Users/macbook-dev/Documents/GitHub/tldw_chatbook/Sync_Interop/sync_state_repository.py
-  - /Users/macbook-dev/Documents/GitHub/tldw_chatbook/Notes/sync_engine.py
+  - external:tldw_chatbook/Sync_Interop/server_sync_service.py
+  - external:tldw_chatbook/Sync_Interop/sync_scope_service.py
+  - external:tldw_chatbook/Sync_Interop/sync_state_repository.py
+  - external:tldw_chatbook/Notes/sync_engine.py
 documentation:
   - Docs/Design/Sync-Engine.md
   - tldw_Server_API/app/api/v1/endpoints/sync.py
