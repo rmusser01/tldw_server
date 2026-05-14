@@ -80,13 +80,21 @@ describe("playground cockpit actions", () => {
   });
 
   it("opens the shared prompt selector from the cockpit rail", async () => {
-    const event = nextCustomEvent<{ source: string }>(OPEN_PROMPT_SELECT_EVENT);
+    const event = nextCustomEvent<{
+      returnFocusSelector: string;
+      source: string;
+    }>(OPEN_PROMPT_SELECT_EVENT);
 
-    openPromptSelector();
+    openPromptSelector({
+      returnFocusSelector: "[data-testid='cockpit-prompt-select-trigger']",
+    });
 
     await expect(event).resolves.toMatchObject({
       type: OPEN_PROMPT_SELECT_EVENT,
-      detail: { source: "playground-cockpit" },
+      detail: {
+        returnFocusSelector: "[data-testid='cockpit-prompt-select-trigger']",
+        source: "playground-cockpit",
+      },
     });
   });
 

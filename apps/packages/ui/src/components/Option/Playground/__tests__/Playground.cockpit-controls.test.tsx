@@ -316,6 +316,9 @@ describe("Playground cockpit controls", () => {
       expect(messageOptionState.value.setSelectedSystemPrompt).toHaveBeenCalledWith(
         "",
       );
+      expect(
+        within(contextRail).getByRole("button", { name: "Select a prompt" }),
+      ).toHaveFocus();
       expect(messageOptionState.value.setContextFiles).not.toHaveBeenCalled();
       expect(within(contextRail).queryByText("1 file(s)")).toBeNull();
       fireEvent.click(

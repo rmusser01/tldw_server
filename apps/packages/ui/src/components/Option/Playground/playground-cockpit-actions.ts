@@ -69,8 +69,11 @@ export const openAssistantSelector = (
   });
 };
 
-export const openPromptSelector = () => {
+export const openPromptSelector = (
+  options: { returnFocusSelector?: string } = {},
+) => {
   dispatchOpenPromptSelect({
+    returnFocusSelector: options.returnFocusSelector,
     source: "playground-cockpit",
   });
 };

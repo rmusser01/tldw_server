@@ -30,8 +30,10 @@ type AssistantSummaryCopy = Partial<{
 type PromptSummaryCopy = Partial<{
   customPromptLabel: string;
   inlineSystemPromptActiveDetail: string;
+  loadingPromptDetail: string;
   noPromptContextDetail: string;
   noPromptSelectedLabel: string;
+  selectedPromptUnavailableDetail: string;
   quickPromptLabel: string;
   selectedPromptDetail: string;
   systemPromptLabel: string;
@@ -63,8 +65,10 @@ const defaultAssistantCopy = {
 const defaultPromptCopy = {
   customPromptLabel: "Custom prompt",
   inlineSystemPromptActiveDetail: "Inline system prompt active",
+  loadingPromptDetail: "Loading prompt details...",
   noPromptContextDetail: "No prompt context will be added.",
   noPromptSelectedLabel: "No prompt selected",
+  selectedPromptUnavailableDetail: "Prompt details unavailable",
   quickPromptLabel: "Quick prompt",
   selectedPromptDetail: "System prompt",
   systemPromptLabel: "System prompt",
@@ -167,6 +171,7 @@ export function buildCockpitPromptSummary(input: {
     title?: string;
     name?: string;
   } | null;
+  selectedSystemPromptStatus?: "idle" | "loading" | "loaded" | "unavailable";
   selectedQuickPrompt: string | null | undefined;
   systemPrompt: string | null | undefined;
   copy?: PromptSummaryCopy;
@@ -183,10 +188,18 @@ export function buildCockpitPromptSummary(input: {
       ? normalizeText(input.selectedSystemPromptRecord?.title) ||
         normalizeText(input.selectedSystemPromptRecord?.name)
       : null;
+    const selectedPromptDetail =
+      input.selectedSystemPromptStatus === "loading"
+        ? copy.loadingPromptDetail
+        : input.selectedSystemPromptStatus === "unavailable"
+          ? copy.selectedPromptUnavailableDetail
+          : selectedPromptLabel
+            ? copy.selectedPromptDetail
+            : selectedSystemPrompt;
     return {
       state: "system",
       label: selectedPromptLabel || copy.systemPromptLabel,
-      detail: selectedPromptLabel ? copy.selectedPromptDetail : selectedSystemPrompt,
+      detail: selectedPromptDetail,
     };
   }
 

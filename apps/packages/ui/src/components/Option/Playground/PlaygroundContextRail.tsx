@@ -1,4 +1,4 @@
-import type React from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import {
   BookOpen,
@@ -20,6 +20,7 @@ const railActionClass =
 const clearActionClass =
   "inline-flex shrink-0 items-center rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
+const PROMPT_SELECT_TRIGGER_SELECTOR = "[data-cockpit-prompt-select-trigger]";
 
 type ContextCountItem = {
   label: string;
@@ -117,6 +118,13 @@ export const PlaygroundContextRail = ({
   onClearResearch,
 }: PlaygroundContextRailProps) => {
   const { t } = useTranslation("playground");
+  const railRef = React.useRef<HTMLDivElement | null>(null);
+  const clearPromptFromRail = React.useCallback(() => {
+    onClearPrompt?.();
+    railRef.current
+      ?.querySelector<HTMLElement>(PROMPT_SELECT_TRIGGER_SELECTOR)
+      ?.focus();
+  }, [onClearPrompt]);
   const activeSourceCount = contextSources.filter(
     (source) => source.state !== "disabled",
   ).length;
@@ -220,6 +228,7 @@ export const PlaygroundContextRail = ({
 
   return (
     <div
+      ref={railRef}
       data-testid="playground-context-rail"
       className="flex min-w-0 flex-col gap-2 text-sm"
     >
@@ -430,7 +439,7 @@ export const PlaygroundContextRail = ({
               type="button"
               className={railActionClass}
               aria-label={t("cockpit.clearPrompt", "Clear prompt")}
-              onClick={onClearPrompt}
+              onClick={clearPromptFromRail}
             >
               {t("cockpit.clearPrompt", "Clear prompt")}
             </button>

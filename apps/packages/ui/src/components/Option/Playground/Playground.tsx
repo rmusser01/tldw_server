@@ -131,6 +131,8 @@ type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
 const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
 const COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR =
   "[data-cockpit-assistant-select-trigger]";
+const COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR =
+  "[data-cockpit-prompt-select-trigger]";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -256,6 +258,8 @@ export const Playground = () => {
   } = useStoreChatModelSettings();
   const [selectedSystemPromptRecord, setSelectedSystemPromptRecord] =
     React.useState<{ id?: string; title?: string; name?: string } | null>(null);
+  const [selectedSystemPromptStatus, setSelectedSystemPromptStatus] =
+    React.useState<"idle" | "loading" | "loaded" | "unavailable">("idle");
   const mcpHealthState = useMcpToolsStore((state) => state.healthState);
   const mcpToolsLoading = useMcpToolsStore((state) => state.toolsLoading);
   const discoveredMcpToolCount = useMcpToolsStore(
@@ -268,9 +272,11 @@ export const Playground = () => {
     const promptId = String(selectedSystemPrompt || "").trim();
     if (!promptId) {
       setSelectedSystemPromptRecord(null);
+      setSelectedSystemPromptStatus("idle");
       return;
     }
 
+    setSelectedSystemPromptStatus("loading");
     void getPromptById(promptId)
       .then((prompt) => {
         if (cancelled) return;
@@ -284,9 +290,13 @@ export const Playground = () => {
               }
             : null,
         );
+        setSelectedSystemPromptStatus(prompt ? "loaded" : "unavailable");
       })
       .catch(() => {
-        if (!cancelled) setSelectedSystemPromptRecord(null);
+        if (!cancelled) {
+          setSelectedSystemPromptRecord(null);
+          setSelectedSystemPromptStatus("unavailable");
+        }
       });
 
     return () => {
@@ -1557,6 +1567,7 @@ export const Playground = () => {
   const promptSummary: PlaygroundPromptSummary = buildCockpitPromptSummary({
     selectedSystemPrompt,
     selectedSystemPromptRecord,
+    selectedSystemPromptStatus,
     selectedQuickPrompt,
     systemPrompt,
     copy: {
@@ -1569,6 +1580,12 @@ export const Playground = () => {
           "Inline system prompt active",
         ),
       ),
+      loadingPromptDetail: toText(
+        t(
+          "playground:cockpit.loadingPromptDetails",
+          "Loading prompt details...",
+        ),
+      ),
       noPromptContextDetail: toText(
         t(
           "playground:cockpit.noPromptContext",
@@ -1577,6 +1594,12 @@ export const Playground = () => {
       ),
       noPromptSelectedLabel: toText(
         t("playground:cockpit.noPromptSelected", "No prompt selected"),
+      ),
+      selectedPromptUnavailableDetail: toText(
+        t(
+          "playground:cockpit.promptDetailsUnavailable",
+          "Prompt details unavailable",
+        ),
       ),
       quickPromptLabel: toText(
         t("playground:cockpit.quickPrompt", "Quick prompt"),
@@ -1594,6 +1617,11 @@ export const Playground = () => {
     setSelectedSystemPrompt("");
     setSystemPrompt("");
   }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
+  const openPromptSelectorFromCockpit = React.useCallback(() => {
+    openPromptSelector({
+      returnFocusSelector: COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR,
+    });
+  }, []);
   const cockpitAssistantSelectTab =
     selectedAssistant?.kind === "persona" ? "persona" : "character";
   const openAssistantSelectorFromCockpit = React.useCallback(() => {
@@ -1882,8 +1910,9 @@ export const Playground = () => {
         <button
           type="button"
           className="inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          data-cockpit-prompt-select-trigger
           aria-label={toText(t("playground:cockpit.selectPrompt", "Select a prompt"))}
-          onClick={openPromptSelector}
+          onClick={openPromptSelectorFromCockpit}
         >
           {toText(t("playground:cockpit.selectPrompt", "Select prompt"))}
         </button>

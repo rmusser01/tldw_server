@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
 
 const mocks = vi.hoisted(() => ({
   getAllPrompts: vi.fn(async () => []),
@@ -279,5 +280,35 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
 
     expect(await screen.findByText("Loading via registry")).toBeInTheDocument()
+  })
+
+  it("returns focus to the launching rail trigger after prompt selection", async () => {
+    const user = userEvent.setup()
+    const { props } = renderPromptSelect({
+      selectedSystemPrompt: undefined
+    })
+    render(
+      <button type="button" data-testid="cockpit-prompt-select-trigger">
+        Select prompt from rail
+      </button>
+    )
+    const trigger = screen.getByTestId("cockpit-prompt-select-trigger")
+    trigger.focus()
+
+    window.dispatchEvent(
+      new CustomEvent(OPEN_PROMPT_SELECT_EVENT, {
+        detail: {
+          returnFocusSelector: "[data-testid='cockpit-prompt-select-trigger']",
+          source: "playground-cockpit"
+        }
+      })
+    )
+
+    await user.click(await screen.findByRole("menuitem", { name: /Prompt One/i }))
+
+    await waitFor(() => {
+      expect(props.setSelectedSystemPrompt).toHaveBeenCalledWith("prompt-1")
+      expect(trigger).toHaveFocus()
+    })
   })
 })

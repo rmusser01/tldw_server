@@ -111,6 +111,36 @@ describe("playground cockpit summary helpers", () => {
     });
   });
 
+  it("uses recoverable copy while selected prompt records load or fail", () => {
+    expect(
+      buildCockpitPromptSummary({
+        selectedSystemPrompt: "prompt-123",
+        selectedSystemPromptRecord: null,
+        selectedSystemPromptStatus: "loading",
+        selectedQuickPrompt: null,
+        systemPrompt: null,
+      }),
+    ).toEqual({
+      state: "system",
+      label: "System prompt",
+      detail: "Loading prompt details...",
+    });
+
+    expect(
+      buildCockpitPromptSummary({
+        selectedSystemPrompt: "prompt-123",
+        selectedSystemPromptRecord: null,
+        selectedSystemPromptStatus: "unavailable",
+        selectedQuickPrompt: null,
+        systemPrompt: null,
+      }),
+    ).toEqual({
+      state: "system",
+      label: "System prompt",
+      detail: "Prompt details unavailable",
+    });
+  });
+
   it("keeps inline custom prompt distinct from quick and selected prompts", () => {
     expect(
       buildCockpitPromptSummary({

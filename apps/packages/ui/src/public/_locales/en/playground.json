@@ -2447,6 +2447,42 @@
   "cockpit_searchContext": {
     "message": "Search & Context"
   },
+  "cockpit_promptContext": {
+    "message": "Prompt context"
+  },
+  "cockpit_prompts": {
+    "message": "Prompts"
+  },
+  "cockpit_customPrompt": {
+    "message": "Custom prompt"
+  },
+  "cockpit_inlineSystemPromptActive": {
+    "message": "Inline system prompt active"
+  },
+  "cockpit_loadingPromptDetails": {
+    "message": "Loading prompt details..."
+  },
+  "cockpit_noPromptContext": {
+    "message": "No prompt context will be added."
+  },
+  "cockpit_noPromptSelected": {
+    "message": "No prompt selected"
+  },
+  "cockpit_promptDetailsUnavailable": {
+    "message": "Prompt details unavailable"
+  },
+  "cockpit_quickPrompt": {
+    "message": "Quick prompt"
+  },
+  "cockpit_selectPrompt": {
+    "message": "Select prompt"
+  },
+  "cockpit_systemPrompt": {
+    "message": "System prompt"
+  },
+  "cockpit_clearPrompt": {
+    "message": "Clear prompt"
+  },
   "cockpit_conversationSession": {
     "message": "Conversation session"
   },

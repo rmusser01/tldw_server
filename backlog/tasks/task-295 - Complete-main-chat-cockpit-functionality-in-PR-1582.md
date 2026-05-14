@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 04:22'
+updated_date: '2026-05-14 04:36'
 labels:
   - webui
   - chat
@@ -134,6 +134,8 @@ Task 1 blocker: real-server disposable assistant rail proof is implemented in ch
 Task 1 verification refresh after focus-restoration tightening: focused Vitest fallback from apps/tldw-frontend passed 4 files / 34 tests; Playwright discovery listed 4 chat-cockpit.real-server.spec.ts tests including the new disposable character rail proof; git diff --check passed again. Real-server execution remains blocked by unreachable http://127.0.0.1:8000/api/v1/health.
 
 Task 1 local follow-up validation passed focused Vitest for Header TTS lazy mount plus Playground MCP control plus useCharacterGreeting. git diff check passed. Real server health probe on 127.0.0.1:8000 failed with curl exit 7 so Playwright real server proof remains blocked. Bandit not applicable for TypeScript and Playwright only.
+
+Task 2 implementation: prompt rail now opens the shared prompt selector with a return-focus contract, restores focus after prompt selection or modal close, clears prompt context without clearing other context groups, reports inline custom prompts separately, and replaces raw selected prompt IDs with loading/unavailable recovery copy while records resolve. Task 2 verification: focused Vitest from apps/tldw-frontend passed 6 files / 45 tests for cockpit summaries, rail controls, prompt selector focus return, action events, and locale mirror. PromptSelect-only regression passed again after defensive timer fallback cleanup. git diff --check passed. Real-server health probe to http://127.0.0.1:8000/api/v1/health still fails with curl exit 7, so no mocked real-server proof was run for this slice. Bandit not applicable because this slice touched frontend TypeScript/TSX and JSON locale files only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

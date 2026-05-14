@@ -9,7 +9,10 @@ import { getAllPrompts } from "@/db/dexie/helpers"
 import type { Prompt } from "@/db/dexie/types"
 import { getDesignSystemState } from "@/design-system"
 import { useStorage } from "@plasmohq/storage/hook"
-import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
+import {
+  OPEN_PROMPT_SELECT_EVENT,
+  type PromptSelectOpenDetail
+} from "@/utils/prompt-select-events"
 import { IconButton } from "./IconButton"
 import {
   normalizeSystemPromptOverrideValue,
@@ -46,6 +49,22 @@ export const PromptSelect: React.FC<Props> = ({
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
   const [editorOverrideActive, setEditorOverrideActive] = useState(false)
   const searchInputRef = useRef<InputRef | null>(null)
+  const returnFocusSelectorRef = useRef<string | null>(null)
+
+  const restorePromptSelectFocus = React.useCallback(() => {
+    const returnFocusSelector = returnFocusSelectorRef.current
+    if (!returnFocusSelector || typeof document === "undefined") return
+    returnFocusSelectorRef.current = null
+
+    const focusTarget = () => {
+      document.querySelector<HTMLElement>(returnFocusSelector)?.focus()
+    }
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(focusTarget)
+      return
+    }
+    globalThis.setTimeout(focusTarget, 0)
+  }, [])
 
   const { data } = useQuery({
     queryKey: ["getAllPromptsForSelect"],
@@ -174,6 +193,7 @@ export const PromptSelect: React.FC<Props> = ({
           handlePromptChange(prompt.id)
         }
         setDropdownOpen(false)
+        restorePromptSelectFocus()
       }
     })
 
@@ -230,6 +250,7 @@ export const PromptSelect: React.FC<Props> = ({
     t,
     handlePromptChange,
     openSystemPromptEditor,
+    restorePromptSelectFocus,
     setDropdownOpen,
     setSelectedSystemPrompt
   ])
@@ -238,7 +259,11 @@ export const PromptSelect: React.FC<Props> = ({
   useEffect(() => {
     if (typeof window === "undefined") return
 
-    const handleOpenPromptSelect = () => {
+    const handleOpenPromptSelect = (event: Event) => {
+      const detail = (event as CustomEvent<PromptSelectOpenDetail>).detail
+      if (detail?.returnFocusSelector) {
+        returnFocusSelectorRef.current = detail.returnFocusSelector
+      }
       setDropdownOpen(true)
     }
 
@@ -285,7 +310,12 @@ export const PromptSelect: React.FC<Props> = ({
         <>
           <Dropdown
             open={dropdownOpen}
-            onOpenChange={setDropdownOpen}
+            onOpenChange={(nextOpen) => {
+              setDropdownOpen(nextOpen)
+              if (!nextOpen) {
+                restorePromptSelectFocus()
+              }
+            }}
             menu={{
               items: groupedMenuItems,
               style: {
