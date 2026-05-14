@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import zipfile
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -15,8 +14,8 @@ from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
 )
 from tldw_Server_API.app.core.Persona.visual_portability.archive import normalize_member_name
 from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
+    import_preview_plan_from_stored_json,
     is_import_preview_plan_committable,
-    is_import_preview_result_committable,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     ASSET_BYTES_STATUS_PRESENT,
@@ -94,8 +93,7 @@ class PersonaVisualPackImporter:
         expected_fingerprint = str(preview.get("canonical_payload_fingerprint") or "")
         if expected_fingerprint and revalidated["canonical_payload_fingerprint"] != expected_fingerprint:
             raise ValueError("import_archive_fingerprint_changed")
-        if not is_import_preview_result_committable(revalidated):
-            raise ValueError("import_preview_not_committable")
+        _validate_preview_commit_allowed(revalidated)
         revalidated_conflicts = revalidated.get("conflicts")
         current_conflicts = revalidated_conflicts if isinstance(revalidated_conflicts, list) else []
         if current_conflicts and not conflict_choice_explicit:
@@ -261,11 +259,7 @@ class PersonaVisualPackImporter:
             )
 
     def _validate_preview_ready(self, *, preview: dict[str, Any], archive_path: Path) -> None:
-        if str(preview.get("status") or "") != "completed":
-            raise ValueError("import_preview_not_completed")
-        proposed_plan = _import_preview_json_field(preview, "proposed_plan_json", {})
-        if not is_import_preview_plan_committable(proposed_plan):
-            raise ValueError("import_preview_not_committable")
+        _validate_preview_commit_allowed(preview)
         if not archive_path.is_file():
             raise ValueError("import_archive_not_found")
         expires_at = _parse_datetime(preview.get("expires_at"))
@@ -280,17 +274,26 @@ class PersonaVisualPackImporter:
             progress(stage, payload)
 
 
-def _import_preview_json_field(row: Mapping[str, Any], key: str, default: Any) -> Any:
-    """Read a JSON-backed import preview column with a typed fallback."""
-    value = row.get(key)
-    if value in (None, ""):
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(str(value))
-    except json.JSONDecodeError:
-        return default
+def _import_preview_proposed_plan(preview: Mapping[str, Any]) -> tuple[Mapping[str, Any], bool]:
+    """Return proposed-plan metadata from either a row or fresh preview payload."""
+    if "proposed_plan" in preview:
+        proposed_plan = preview.get("proposed_plan")
+        if isinstance(proposed_plan, Mapping):
+            return proposed_plan, True
+        return {}, False
+    return import_preview_plan_from_stored_json(preview.get("proposed_plan_json"))
+
+
+def _validate_preview_commit_allowed(preview: Mapping[str, Any]) -> None:
+    """Reject previews that are not currently eligible for import commit."""
+    status_value = str(preview.get("status") or "").strip()
+    if status_value == "blocked":
+        raise ValueError("import_preview_not_commit_eligible")
+    if status_value != "completed":
+        raise ValueError("import_preview_not_completed")
+    proposed_plan, proposed_plan_valid = _import_preview_proposed_plan(preview)
+    if not proposed_plan_valid or not is_import_preview_plan_committable(proposed_plan):
+        raise ValueError("import_preview_not_commit_eligible")
 
 
 def _replaceable_pack_ids_from_conflicts(conflicts: Any) -> set[str]:

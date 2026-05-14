@@ -1351,6 +1351,44 @@ def test_start_import_commit_creates_jobs_backed_portability_row(
     assert row["persona_id"] == persona_id
 
 
+def test_start_import_commit_normalizes_completed_preview_status(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Accept completed previews even when stored status has surrounding whitespace."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Whitespace Status Import Persona")
+        archive_path = tmp_path / "commit-status-spaces.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-spaced-status",
+            status=" completed ",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={"target_mode": "create_new"},
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 202, response.text
+    assert manager.created
+
+
 def test_start_import_commit_rejects_commit_ineligible_preview(
     persona_db: CharactersRAGDB,
     tmp_path: Path,
@@ -1391,7 +1429,7 @@ def test_start_import_commit_rejects_commit_ineligible_preview(
         )
 
     assert response.status_code == 409, response.text
-    assert response.json()["detail"] == "import_preview_not_committable"
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
     assert manager.created == []
 
 
@@ -1591,6 +1629,138 @@ def test_start_import_commit_rejects_incomplete_preview(
         )
 
     assert response.status_code == 409
+    assert manager.created == []
+
+
+def test_start_import_commit_rejects_ineligible_completed_preview(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Reject completed previews whose stored plan is explicitly not commit eligible."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Ineligible Import Commit Persona")
+        archive_path = tmp_path / "commit-ineligible.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-ineligible",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={
+                "target_mode": "create_new",
+                "commit_eligible": False,
+                "commit_blockers": ["unsupported_renderer"],
+            },
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
+    assert manager.created == []
+
+
+def test_start_import_commit_reports_blocked_preview_as_not_commit_eligible(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Return the commit-eligibility error for blocked import previews."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Blocked Import Commit Persona")
+        archive_path = tmp_path / "commit-blocked.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-blocked",
+            status="blocked",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={
+                "target_mode": "create_new",
+                "commit_eligible": False,
+                "commit_blockers": ["unsupported_renderer"],
+            },
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
+    assert manager.created == []
+
+
+@pytest.mark.parametrize("stored_plan_json", ["{not-json", "[]"])
+def test_start_import_commit_rejects_invalid_stored_preview_plan(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+    stored_plan_json: str,
+) -> None:
+    """Reject commit requests when the persisted proposed plan is malformed."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Invalid Plan Import Commit Persona")
+        archive_path = tmp_path / "commit-invalid-plan.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-invalid-plan",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={"target_mode": "create_new"},
+        )
+        repo.replace_import_preview_proposed_plan_json(
+            str(preview["id"]),
+            stored_plan_json,
+            owner_user_id="1",
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
     assert manager.created == []
 
 

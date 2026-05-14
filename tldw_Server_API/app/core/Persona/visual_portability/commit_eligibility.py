@@ -7,6 +7,7 @@ any visual pack records are created.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -21,6 +22,23 @@ def is_import_preview_result_committable(preview_result: Mapping[str, Any]) -> b
     if str(preview_result.get("status") or "") != "completed":
         return False
     return is_import_preview_plan_committable(preview_result.get("proposed_plan"))
+
+
+def import_preview_plan_from_stored_json(value: Any) -> tuple[Mapping[str, Any], bool]:
+    """Parse stored proposed-plan JSON while preserving corrupted-row signal."""
+    if value in (None, ""):
+        return {}, True
+    if isinstance(value, Mapping):
+        return value, True
+    if isinstance(value, list):
+        return {}, False
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}, False
+    if not isinstance(parsed, Mapping):
+        return {}, False
+    return parsed, True
 
 
 def import_preview_commit_blockers(proposed_plan: Any) -> list[str]:
