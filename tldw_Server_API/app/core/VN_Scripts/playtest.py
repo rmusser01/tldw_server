@@ -48,22 +48,22 @@ def build_script_playtest(
     choice_boundaries: list[dict[str, Any]] = []
     generation_boundaries: list[dict[str, Any]] = []
     endings: list[dict[str, Any]] = []
+    all_labels = _program_labels(program)
     visited_labels: set[str] = set()
-    seen_states: set[str] = set()
-    queue: deque[tuple[dict[str, Any], list[dict[str, Any]]]] = deque()
-    queue.append((_initial_script_position(program), []))
+    queue: deque[tuple[dict[str, Any], list[dict[str, Any]], set[str]]] = deque()
+    queue.append((_initial_script_position(program), [], set()))
     truncated = False
     total_steps = 0
 
     while queue and len(paths) < bounded_max_paths:
-        position, decisions = queue.popleft()
+        position, decisions, path_states = queue.popleft()
         path_id = f"path:{len(paths) + 1}"
         state_key = _state_key(position)
-        if state_key in seen_states:
+        if state_key in path_states:
             diagnostics["warnings"].append(
                 _diag(
                     "playtest_loop_detected",
-                    "Traversal reached an already visited script position.",
+                    "Traversal reached an already visited script position in this path.",
                     "$.labels",
                     {"progress_token": _script_progress_token(position), "path_id": path_id},
                 )
@@ -71,7 +71,7 @@ def build_script_playtest(
             endings.append(_ending(path_id, position, "loop_detected"))
             paths.append(_path(path_id, decisions, position, status="loop_detected"))
             continue
-        seen_states.add(state_key)
+        next_path_states = {*path_states, state_key}
 
         try:
             execution = _execute_script_program(
@@ -110,8 +110,28 @@ def build_script_playtest(
         if choices:
             boundary = _choice_boundary(path_id, choices, decisions, next_position)
             choice_boundaries.append(boundary)
-            paths.append(_path(path_id, decisions, next_position, status="choice_boundary", boundary=boundary))
+            valid_choices: list[dict[str, Any]] = []
             for choice in choices:
+                target = str(choice.get("target") or "")
+                if target not in all_labels:
+                    diagnostics["errors"].append(
+                        _diag(
+                            "playtest_choice_target_error",
+                            "Choice target label is not present in the script program.",
+                            "$.labels",
+                            {
+                                "path_id": path_id,
+                                "choice_id": str(choice.get("id") or ""),
+                                "target": target,
+                                "progress_token": _script_progress_token(next_position),
+                            },
+                        )
+                    )
+                    continue
+                valid_choices.append(dict(choice))
+            status = "choice_target_error" if len(valid_choices) < len(choices) else "choice_boundary"
+            paths.append(_path(path_id, decisions, next_position, status=status, boundary=boundary))
+            for choice in valid_choices:
                 if len(paths) + len(queue) >= bounded_max_paths:
                     truncated = True
                     continue
@@ -124,6 +144,7 @@ def build_script_playtest(
                             "variables": dict(next_position.get("variables") or {}),
                         },
                         [*decisions, {"choice_id": str(choice["id"]), "text": str(choice.get("text") or "")}],
+                        next_path_states,
                     )
                 )
             continue
@@ -155,7 +176,6 @@ def build_script_playtest(
             )
         )
 
-    all_labels = _program_labels(program)
     unvisited_labels = sorted(all_labels - visited_labels)
     valid = bool(validation.get("valid"))
     runtime_ready = valid and not diagnostics["errors"] and not truncated

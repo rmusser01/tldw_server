@@ -41,6 +41,61 @@ def test_playtest_reports_choice_boundaries_and_endings() -> None:
     assert {ending["label"] for ending in result["endings"]} == {"open", "leave"}
 
 
+def test_playtest_reports_missing_choice_target_as_runtime_blocker() -> None:
+    program = {
+        "schema_version": "vn_script_program.v1",
+        "entry_label": "start",
+        "labels": {
+            "start": [
+                {
+                    "op": "choice",
+                    "id": "door",
+                    "choices": [
+                        {"id": "open", "text": "Open", "target": "open"},
+                        {"id": "bad", "text": "Broken", "target": "missing"},
+                    ],
+                }
+            ],
+            "open": [{"op": "end"}],
+        },
+    }
+
+    result = build_script_playtest(program, source="stored_draft", validation_diagnostics=_valid())
+
+    error_codes = {error["code"] for error in result["diagnostics"]["errors"]}
+    assert "playtest_choice_target_error" in error_codes
+    assert result["runtime_ready"] is False
+    assert result["summary"]["ending_count"] == 1
+    assert {path["status"] for path in result["paths"]} == {"choice_target_error", "ended"}
+
+
+def test_playtest_allows_cross_branch_convergence_without_loop_warning() -> None:
+    program = {
+        "schema_version": "vn_script_program.v1",
+        "entry_label": "start",
+        "labels": {
+            "start": [
+                {
+                    "op": "choice",
+                    "id": "route",
+                    "choices": [
+                        {"id": "left", "text": "Left", "target": "same_end"},
+                        {"id": "right", "text": "Right", "target": "same_end"},
+                    ],
+                }
+            ],
+            "same_end": [{"op": "end"}],
+        },
+    }
+
+    result = build_script_playtest(program, source="stored_draft", validation_diagnostics=_valid())
+
+    warning_codes = {warning["code"] for warning in result["diagnostics"]["warnings"]}
+    assert "playtest_loop_detected" not in warning_codes
+    assert result["runtime_ready"] is True
+    assert result["summary"]["ending_count"] == 2
+
+
 def test_playtest_reports_generation_boundary_without_model_call() -> None:
     program = {
         "schema_version": "vn_script_program.v1",

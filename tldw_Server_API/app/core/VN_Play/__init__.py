@@ -1,5 +1,7 @@
 """VN Play runtime package."""
 
+from typing import Any
+
 from tldw_Server_API.app.core.VN_Play.constants import (
     LINKED_CHAT_MODE_READ_ONLY_CONTEXT,
     MODE_FREEFORM,
@@ -46,7 +48,7 @@ _SERVICE_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy-load service exports so pure helper imports do not initialize service."""
     if name in _SERVICE_EXPORTS:
         from tldw_Server_API.app.core.VN_Play import service

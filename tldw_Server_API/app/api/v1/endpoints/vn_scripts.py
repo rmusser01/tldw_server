@@ -331,7 +331,10 @@ async def playtest_draft(
             script,
             profile_store=profile_store,
         )
-        draft = request.draft if request.draft is not None else service.get_draft(script_id)["draft"]
+        draft_row = None if request.draft is not None else service.get_draft(script_id)
+        draft = request.draft if request.draft is not None else draft_row["draft"]
+        if not isinstance(draft, Mapping):
+            raise ValueError("supplied_draft_invalid_shape")
         audio_refs = await _resolve_accessible_audio_refs(
             draft,
             files_repo=files_repo,
@@ -355,6 +358,7 @@ async def playtest_draft(
                 max_steps=request.max_steps,
                 max_paths=request.max_paths,
                 audio_refs=audio_refs,
+                draft_row=draft_row,
                 policy_profile=policy_profile,
                 generation_profile=generation_profile,
                 generation_profiles=generation_profiles,

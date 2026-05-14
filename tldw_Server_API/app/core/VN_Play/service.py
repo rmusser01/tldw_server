@@ -511,6 +511,13 @@ class VNPlayService:
             }
         )
 
+        session = self.get_session(session_id)
+        persisted_scene_state = self.repo.get_scene_state(
+            session_id,
+            owner_user_id=self.owner_user_id,
+        )
+        session = self._recover_expired_active_turn_lock(session)
+
         existing = self.repo.get_turn_request_by_key(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
@@ -519,12 +526,6 @@ class VNPlayService:
         if existing is not None:
             return self._response_for_existing_turn(existing, request_payload_hash)
 
-        session = self.get_session(session_id)
-        persisted_scene_state = self.repo.get_scene_state(
-            session_id,
-            owner_user_id=self.owner_user_id,
-        )
-        session = self._recover_expired_active_turn_lock(session)
         if session.scene_version != client_scene_version:
             turn_request = self.repo.create_turn_request(
                 session_id=session_id,
@@ -693,6 +694,9 @@ class VNPlayService:
         if not idempotency_key:
             raise VNPlayTurnError("idempotency_key_required")
 
+        session = self.get_session(session_id)
+        session = self._recover_expired_active_turn_lock(session)
+
         existing = self.repo.get_turn_request_by_key(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
@@ -704,8 +708,6 @@ class VNPlayService:
                 str(existing["request_payload_hash"]),
             )
 
-        session = self.get_session(session_id)
-        session = self._recover_expired_active_turn_lock(session)
         if session.scene_version != client_scene_version:
             raise VNPlayConflictError(ERROR_STALE_SCENE_VERSION)
         if session.active_turn_request_id is not None:

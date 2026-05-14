@@ -598,7 +598,7 @@ class VNPlayRepository:
             if cursor.rowcount != 1:
                 return False
             if lease_owner is not None or locked_until is not None:
-                conn.execute(
+                lease_cursor = conn.execute(
                     """
                     UPDATE vn_play_turn_requests
                     SET lease_owner = ?,
@@ -616,6 +616,8 @@ class VNPlayRepository:
                         owner_user_id,
                     ),
                 )
+                if lease_cursor.rowcount != 1:
+                    raise RuntimeError("turn_request_lease_update_failed")
             return True
 
     def try_acquire_session_action_lock(
@@ -3861,6 +3863,7 @@ def _json_loads(value: Any, default: Any) -> Any:
 
 
 def _parse_datetime_utc(value: Any) -> datetime | None:
+    """Parse a stored timestamp value and normalize it to UTC."""
     if value is None:
         return None
     if isinstance(value, datetime):

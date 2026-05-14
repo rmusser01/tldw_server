@@ -1226,6 +1226,51 @@ def test_turn_and_session_action_locks_share_session_mutation_gate(
     assert repo.get_session(session["id"], owner_user_id=42)["active_session_action_id"] is None
 
 
+def test_try_acquire_turn_lock_rolls_back_when_request_lease_update_misses(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    session = repo.create_session(
+        owner_user_id=42,
+        mode="freeform",
+        title="Library night",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-1",
+        settings={},
+    )
+    other_session = repo.create_session(
+        owner_user_id=42,
+        mode="freeform",
+        title="Other room",
+        primary_character_id=1,
+        vn_asset_pack_id=10,
+        content_rating="general",
+        seed="seed-2",
+        settings={},
+    )
+    foreign_turn = repo.create_turn_request(
+        session_id=other_session["id"],
+        owner_user_id=42,
+        idempotency_key="foreign-turn",
+        request_payload_hash="foreign-turn",
+        base_scene_version=0,
+    )
+
+    with pytest.raises(RuntimeError, match="turn_request_lease_update_failed"):
+        repo.try_acquire_turn_lock(
+            session_id=session["id"],
+            owner_user_id=42,
+            turn_request_id=foreign_turn["id"],
+            expected_scene_version=0,
+            lease_owner="worker-1",
+            locked_until="2999-01-01 00:00:00",
+        )
+
+    assert repo.get_session(session["id"], owner_user_id=42)["active_turn_request_id"] is None
+
+
 def test_session_action_terminal_update_clears_only_matching_lock(
     chacha_db: CharactersRAGDB,
 ) -> None:

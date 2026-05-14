@@ -374,6 +374,7 @@ class VNScriptService:
         *,
         max_steps: int = 500,
         max_paths: int = 100,
+        draft_row: Mapping[str, Any] | None = None,
         audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
         policy_profile: ProfileRow | None = None,
         generation_profile: ProfileRow | None = None,
@@ -381,7 +382,7 @@ class VNScriptService:
     ) -> dict[str, Any]:
         """Return a deterministic playtest traversal for the stored draft."""
         script = self._require_script(script_id)
-        draft_row = self.get_draft(script_id)
+        draft_row = draft_row if draft_row is not None else self.get_draft(script_id)
         validation = self.validate_draft_payload(
             script,
             draft_row["draft"],
@@ -692,7 +693,14 @@ class VNScriptService:
             validation_context_source="published_version_snapshot",
         )
 
-    def playtest_version(self, script_id: int, version_id: int, *, max_steps: int = 500, max_paths: int = 100) -> dict[str, Any]:
+    def playtest_version(
+        self,
+        script_id: int,
+        version_id: int,
+        *,
+        max_steps: int = 500,
+        max_paths: int = 100,
+    ) -> dict[str, Any]:
         """Return a deterministic playtest traversal for an immutable published version."""
         version = self.get_version(script_id, version_id)
         return build_script_playtest(
