@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 15:03'
+updated_date: '2026-05-14 19:18'
 labels:
   - webui
   - chat
@@ -154,6 +154,10 @@ Additional recovery verification: saveMessageOnError now falls back to a local c
 Task 7 P1 run controls recovery and degraded-health implementation completed. Runtime rail now keeps Stop and Regenerate visible as explicit run controls, enables them only when the shared request state allows the action, and shows disabled reasons for idle turns, active turns, and missing assistant responses. Status strip now labels degraded non-blocking health as chat-available and exposes a Model and Chat recovery action for error states. New copy is mirrored into the extension locale catalog. Verification: focused Vitest passed 5 files / 39 tests covering runtime inspector, status strip, chat error banner, cockpit wiring, and locale mirror; real-server Playwright first failed inside the sandbox because Chromium could not register a macOS Mach service, then passed outside the sandbox with 4 real-server tests against local frontend/backend and no route interception; git diff --check passed before this note. Bandit not applicable for frontend TypeScript TSX JSON and Playwright only. PR 1582 remains draft pending P1/P2 approval.
 
 Task 8 P1 keyboard focus and mobile parity implementation completed. Added shared visible-focus restoration for duplicate desktop/mobile cockpit rail targets, reused it from assistant prompt model and MCP modal return paths, and expanded real-server mobile proof for Search and Context, prompt selector, assistant selector, MCP settings, web search, and focus mode. Verification: focused Vitest passed 7 files and 42 tests from apps/tldw-frontend; sandboxed Playwright failed only because Chromium could not register the macOS Mach service; escalated real-server Playwright passed 4 tests against http://localhost:8080 and http://127.0.0.1:8000 with no route interception after narrowing a prompt-dropdown assertion and sending the disposable character proof with Enter; git diff --check passed. Bandit not applicable because this slice touched frontend TypeScript TSX Playwright and Markdown only. PR 1582 remains draft pending P1/P2 approval gates.
+
+Task 9 P2 polish follow-up completed. TldwChatService now logs recoverable stream failures with console.warn string output instead of console.error Error objects so provider credential failures remain recoverable in /chat rather than opening the Next dev runtime overlay. Added regression coverage that stream failures reject with Stream completion failed and do not call console.error.
+
+Verification: focused Vitest from apps/tldw-frontend passed 11 files / 90 tests covering cockpit summaries controls runtime inspector context rail a11y shell status strip locale mirror MCP control scoped settings and TldwChat stream sanitization. Real-server Playwright passed 4 tests against http://127.0.0.1:8000 and http://localhost:8080 with no route interception including desktop cockpit/focus mobile cockpit/focus and real disposable character select/send/clear/delete. Real screenshot evidence remains saved at /private/tmp/chat-cockpit-p2-desktop-cockpit.png /private/tmp/chat-cockpit-p2-desktop-focus.png /private/tmp/chat-cockpit-p2-mobile-cockpit.png and /private/tmp/chat-cockpit-p2-mobile-focus.png from a real server run returning chat completion status 200. git diff --check passed. Bandit not applicable because this follow-up touched frontend TypeScript test/service code only. PR #1582 remains draft pending maintainer P2 approval.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
