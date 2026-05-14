@@ -92,6 +92,10 @@ const RUNTIME_WARNING_LABELS: Record<string, string> = {
   weaker_than_vm_isolation: "Weaker than VM isolation"
 }
 
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label ?? "ready"
+const UNAVAILABLE_STATE_LABEL =
+  getDesignSystemState("unavailable")?.label ?? "unavailable"
+
 type SandboxDiagnosticsErrorState = {
   title: string
   description: string
@@ -529,9 +533,6 @@ const MonitoringDashboardPage: React.FC = () => {
   const hostLocalWarningRuntimes = Array.isArray(sandboxDiagnostics?.summary?.host_local_warning_runtimes)
     ? sandboxDiagnostics.summary.host_local_warning_runtimes
     : []
-  const readyStateLabel = getDesignSystemState("ready")?.label ?? "ready"
-  const unavailableStateLabel =
-    getDesignSystemState("unavailable")?.label ?? "unavailable"
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
@@ -582,10 +583,10 @@ const MonitoringDashboardPage: React.FC = () => {
               <Descriptions.Item label="Total">
                 {sandboxDiagnostics.summary.total}
               </Descriptions.Item>
-              <Descriptions.Item label={readyStateLabel}>
+              <Descriptions.Item label={READY_STATE_LABEL}>
                 {sandboxDiagnostics.summary.ready}
               </Descriptions.Item>
-              <Descriptions.Item label={unavailableStateLabel}>
+              <Descriptions.Item label={UNAVAILABLE_STATE_LABEL}>
                 {sandboxDiagnostics.summary.unavailable}
               </Descriptions.Item>
               <Descriptions.Item label="Host-gated">

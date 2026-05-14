@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -72,7 +72,6 @@ vi.mock("@/design-system", async (importActual) => {
   }
 })
 
-import { getDesignSystemState } from "@/design-system"
 import MonitoringDashboardPage from "../MonitoringDashboardPage"
 
 describe("MonitoringDashboardPage", () => {
@@ -241,16 +240,28 @@ describe("MonitoringDashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText(designSystemLabels.ready)).toBeTruthy()
     })
-    expect(screen.getByText(designSystemLabels.unavailable)).toBeTruthy()
-    expect(screen.getByText("2")).toBeTruthy()
-    expect(screen.getByText("1")).toBeTruthy()
-    expect(getDesignSystemState).toHaveBeenCalledWith("ready")
-    expect(getDesignSystemState).toHaveBeenCalledWith("unavailable")
+    const readyItem = screen
+      .getByText(designSystemLabels.ready)
+      .closest(".ant-descriptions-item-container")
+    const unavailableItem = screen
+      .getByText(designSystemLabels.unavailable)
+      .closest(".ant-descriptions-item-container")
+
+    expect(readyItem).not.toBeNull()
+    expect(unavailableItem).not.toBeNull()
+    expect(within(readyItem as HTMLElement).getByText("2")).toBeTruthy()
+    expect(within(unavailableItem as HTMLElement).getByText("1")).toBeTruthy()
   })
 
   it("falls back to readable state keys when sandbox readiness registry labels are missing", async () => {
     designSystemLabels.missingKeys.add("ready")
     designSystemLabels.missingKeys.add("unavailable")
+    vi.resetModules()
+    const { default: FallbackMonitoringDashboardPage } = await import(
+      "../MonitoringDashboardPage"
+    )
+    const { getDesignSystemState: getFallbackDesignSystemState } =
+      await import("@/design-system")
     mocks.getSandboxRuntimeDiagnostics.mockResolvedValue({
       source: "feature_discovery",
       summary: {
@@ -266,14 +277,14 @@ describe("MonitoringDashboardPage", () => {
       startup_warning_summary: null
     })
 
-    render(<MonitoringDashboardPage />)
+    render(<FallbackMonitoringDashboardPage />)
 
     await waitFor(() => {
       expect(screen.getByText("ready")).toBeTruthy()
     })
     expect(screen.getByText("unavailable")).toBeTruthy()
-    expect(getDesignSystemState).toHaveBeenCalledWith("ready")
-    expect(getDesignSystemState).toHaveBeenCalledWith("unavailable")
+    expect(getFallbackDesignSystemState).toHaveBeenCalledWith("ready")
+    expect(getFallbackDesignSystemState).toHaveBeenCalledWith("unavailable")
   })
 
   it("distinguishes forbidden sandbox diagnostics from unavailable diagnostics", async () => {

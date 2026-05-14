@@ -7,7 +7,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-14 07:30'
-updated_date: '2026-05-14 19:22'
+updated_date: '2026-05-14 19:33'
 labels:
   - design-system
   - frontend
@@ -56,6 +56,8 @@ Implemented the MonitoringDashboardPage readiness summary through getDesignSyste
 PR review follow-up: Gemini flagged empty-string state-label fallbacks as confusing if the registry lookup fails. Reopened the task to change the fallback to descriptive lowercase keys and add focused coverage for missing registry entries.
 
 Review follow-up implemented: ready/unavailable fallbacks now use descriptive lowercase state keys instead of empty strings, with focused coverage for missing registry entries.
+
+Second PR review follow-up implemented: moved readiness label lookups to module-scope constants and tightened readiness count assertions so each count is checked inside its matching design-system label container.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -66,6 +68,10 @@ Migrated the admin MonitoringDashboardPage sandbox readiness summary labels for 
 Review follow-up: addressed Gemini feedback by replacing empty-string missing-registry fallbacks with readable lowercase state-key fallbacks and adding regression coverage for missing ready/unavailable registry entries.
 
 Verification: RED focused Vitest failed on the mocked registry labels before implementation and failed again on the missing-registry fallback test before the review fix; GREEN focused Vitest passed 10/10; product-state guard tests passed 52/52; bun run verify:design-system-state passed with 494 allowed legacy exceptions and canonical-state-label at 15; git diff --check passed. Broad bunx tsc --noEmit --pretty false still exits 2 on existing repo-wide UI/test type debt, with no observed MonitoringDashboardPage, design-system baseline, or touched-file errors in the output. Bandit skipped because this slice only touches UI TypeScript, JSON baseline data, and Backlog metadata.
+
+Second review follow-up: addressed CodeRabbit comments by resolving ready/unavailable labels once at module scope and binding the readiness count assertions to their corresponding summary label containers.
+
+Post-review verification: focused MonitoringDashboardPage Vitest passed 10/10 after the module-scope and count-binding changes; product-state guard tests passed 52/52; bun run verify:design-system-state passed after refreshing only MonitoringDashboardPage AntD Alert baseline IDs; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
