@@ -80,6 +80,24 @@ const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
 
+const modelSettingsState = vi.hoisted(() => ({
+  value: {
+    systemPrompt: "",
+    setSystemPrompt: vi.fn(),
+    temperature: 0.7 as number | undefined,
+    topP: 0.9 as number | undefined,
+    topK: undefined as number | undefined,
+    numCtx: 8192 as number | undefined,
+    numPredict: undefined as number | undefined,
+    reasoningEffort: undefined as string | undefined,
+    apiProvider: "openai" as string | undefined,
+    activeSettingsScope: "openai:gpt-4.1-mini" as string | undefined,
+    scopedSettingsByModelKey: {
+      "openai:gpt-4.1-mini": { numCtx: 8192 },
+    } as Record<string, Record<string, unknown>>,
+  },
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, defaultValue?: string) => defaultValue || key,
@@ -123,10 +141,7 @@ vi.mock("@/db/dexie/helpers", () => ({
 }));
 
 vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({
-    systemPrompt: "",
-    setSystemPrompt: vi.fn(),
-  }),
+  useStoreChatModelSettings: () => modelSettingsState.value,
 }));
 
 vi.mock("@/hooks/useSmartScroll", () => ({
@@ -234,6 +249,19 @@ vi.mock("react-router-dom", async () => {
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
     storageState.values.clear();
+    modelSettingsState.value.systemPrompt = "";
+    modelSettingsState.value.setSystemPrompt = vi.fn();
+    modelSettingsState.value.temperature = 0.7;
+    modelSettingsState.value.topP = 0.9;
+    modelSettingsState.value.topK = undefined;
+    modelSettingsState.value.numCtx = 8192;
+    modelSettingsState.value.numPredict = undefined;
+    modelSettingsState.value.reasoningEffort = undefined;
+    modelSettingsState.value.apiProvider = "openai";
+    modelSettingsState.value.activeSettingsScope = "openai:gpt-4.1-mini";
+    modelSettingsState.value.scopedSettingsByModelKey = {
+      "openai:gpt-4.1-mini": { numCtx: 8192 },
+    };
     messageOptionState.value.messages = [
       { id: "message-1", role: "user", content: "Hello" },
       { id: "message-2", role: "assistant", content: "Hi" },
@@ -373,6 +401,14 @@ describe("Playground cockpit controls", () => {
       expect(
         within(runtimeInspector).getByText("Route openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("Temperature")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("0.7")).toBeInTheDocument();
+      expect(
+        within(runtimeInspector).getAllByText("Inherited").length,
+      ).toBeGreaterThan(0);
+      expect(within(runtimeInspector).getByText("Context")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("8192")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("Override")).toBeInTheDocument();
       fireEvent.click(
         within(runtimeInspector).getByRole("button", {
           name: "Stop generation",
@@ -411,6 +447,13 @@ describe("Playground cockpit controls", () => {
       );
 
       expect(openModelSettings).toHaveBeenCalledTimes(1);
+      expect(
+        (openModelSettings.mock.calls[0]?.[0] as CustomEvent<{
+          returnFocusSelector: string;
+        }>).detail,
+      ).toEqual({
+        returnFocusSelector: "[data-cockpit-model-settings-trigger]",
+      });
       expect(openAssistantSelect).toHaveBeenCalledTimes(1);
       expect(openActorSettings).not.toHaveBeenCalled();
       expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith(

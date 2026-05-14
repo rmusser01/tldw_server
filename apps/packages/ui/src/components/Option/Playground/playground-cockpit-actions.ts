@@ -30,6 +30,10 @@ export const SET_TEMPORARY_CHAT_EVENT = "tldw:cockpit-set-temporary-chat";
 
 export type SearchAndContextTab = "search" | "context";
 
+export type ModelSettingsOpenDetail = {
+  returnFocusSelector?: string;
+};
+
 const dispatchCockpitEvent = <TDetail>(
   eventName: string,
   detail?: TDetail,
@@ -51,8 +55,12 @@ export const openSearchAndContext = (
   });
 };
 
-export const openModelSettings = () => {
-  dispatchCockpitEvent(OPEN_MODEL_SETTINGS_EVENT);
+export const openModelSettings = (
+  options: { returnFocusSelector?: string } = {},
+) => {
+  dispatchCockpitEvent<ModelSettingsOpenDetail>(OPEN_MODEL_SETTINGS_EVENT, {
+    returnFocusSelector: options.returnFocusSelector,
+  });
 };
 
 export const openActorSettings = () => {

@@ -43,11 +43,20 @@ describe("playground cockpit actions", () => {
   });
 
   it("opens model settings through the existing model-settings event", async () => {
-    const event = nextCustomEvent(OPEN_MODEL_SETTINGS_EVENT);
+    const event = nextCustomEvent<{ returnFocusSelector: string }>(
+      OPEN_MODEL_SETTINGS_EVENT,
+    );
 
-    openModelSettings();
+    openModelSettings({
+      returnFocusSelector: "[data-testid='cockpit-model-settings-trigger']",
+    });
 
-    await expect(event).resolves.toMatchObject({ type: OPEN_MODEL_SETTINGS_EVENT });
+    await expect(event).resolves.toMatchObject({
+      type: OPEN_MODEL_SETTINGS_EVENT,
+      detail: {
+        returnFocusSelector: "[data-testid='cockpit-model-settings-trigger']",
+      },
+    });
   });
 
   it("opens actor settings through the existing actor-settings event", async () => {

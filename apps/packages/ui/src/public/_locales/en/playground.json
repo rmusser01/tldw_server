@@ -2771,6 +2771,12 @@
   "cockpit_settingsDefault": {
     "message": "Using default settings for this provider:model."
   },
+  "cockpit_settingInherited": {
+    "message": "Inherited"
+  },
+  "cockpit_settingOverride": {
+    "message": "Override"
+  },
   "cockpit_temperature": {
     "message": "Temperature"
   },

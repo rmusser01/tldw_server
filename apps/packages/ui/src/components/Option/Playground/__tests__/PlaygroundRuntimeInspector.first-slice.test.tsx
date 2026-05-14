@@ -88,6 +88,30 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(props.onOpenSceneDirector).not.toHaveBeenCalled();
   });
 
+  it("distinguishes inherited defaults from provider:model overrides", () => {
+    renderInspector({
+      settingSummaries: [
+        {
+          label: "Temperature",
+          value: "0.7",
+          source: "default",
+        },
+        {
+          label: "Context",
+          value: "8192",
+          source: "override",
+        },
+      ],
+    });
+
+    expect(screen.getByText("Temperature")).toBeInTheDocument();
+    expect(screen.getByText("0.7")).toBeInTheDocument();
+    expect(screen.getByText("Inherited")).toBeInTheDocument();
+    expect(screen.getByText("Context")).toBeInTheDocument();
+    expect(screen.getByText("8192")).toBeInTheDocument();
+    expect(screen.getByText("Override")).toBeInTheDocument();
+  });
+
   it("shows a clear assistant action when a character is selected", () => {
     const props = renderInspector();
 

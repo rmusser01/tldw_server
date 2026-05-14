@@ -45,7 +45,10 @@ import {
   getPromptById,
   getRecentChatFromWebUI,
 } from "@/db/dexie/helpers";
-import { useStoreChatModelSettings } from "@/store/model";
+import {
+  type ChatModelSettings,
+  useStoreChatModelSettings,
+} from "@/store/model";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import { ChevronDown, Keyboard, Search, X } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
@@ -133,6 +136,8 @@ const COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR =
   "[data-cockpit-assistant-select-trigger]";
 const COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR =
   "[data-cockpit-prompt-select-trigger]";
+const COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR =
+  "[data-cockpit-model-settings-trigger]";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -255,6 +260,8 @@ export const Playground = () => {
     numPredict,
     reasoningEffort,
     apiProvider,
+    activeSettingsScope,
+    scopedSettingsByModelKey,
   } = useStoreChatModelSettings();
   const [selectedSystemPromptRecord, setSelectedSystemPromptRecord] =
     React.useState<{ id?: string; title?: string; name?: string } | null>(null);
@@ -1810,44 +1817,65 @@ export const Playground = () => {
   ] satisfies Array<PlaygroundContextSource | null>).filter(
     Boolean,
   ) as PlaygroundContextSource[];
+  const activeScopedModelSettings =
+    activeSettingsScope && scopedSettingsByModelKey
+      ? scopedSettingsByModelKey[activeSettingsScope]
+      : undefined;
+  const getRuntimeSettingSource = (key: keyof ChatModelSettings) =>
+    activeSettingsScope
+      ? Object.prototype.hasOwnProperty.call(activeScopedModelSettings || {}, key)
+        ? "override"
+        : "default"
+      : undefined;
   const runtimeSettingSummaries: RuntimeSettingSummary[] = [
     typeof temperature === "number"
       ? {
           label: toText(t("playground:cockpit.temperature", "Temperature")),
           value: String(temperature),
+          source: getRuntimeSettingSource("temperature"),
         }
       : null,
     typeof topP === "number"
       ? {
           label: toText(t("playground:cockpit.topP", "Top P")),
           value: String(topP),
+          source: getRuntimeSettingSource("topP"),
         }
       : null,
     typeof topK === "number"
       ? {
           label: toText(t("playground:cockpit.topK", "Top K")),
           value: String(topK),
+          source: getRuntimeSettingSource("topK"),
         }
       : null,
     typeof numCtx === "number"
       ? {
           label: toText(t("playground:cockpit.contextWindow", "Context")),
           value: String(numCtx),
+          source: getRuntimeSettingSource("numCtx"),
         }
       : null,
     typeof numPredict === "number"
       ? {
           label: toText(t("playground:cockpit.maxTokens", "Max tokens")),
           value: String(numPredict),
+          source: getRuntimeSettingSource("numPredict"),
         }
       : null,
     typeof reasoningEffort === "string" && reasoningEffort.length > 0
       ? {
           label: toText(t("playground:cockpit.reasoning", "Reasoning")),
           value: reasoningEffort,
+          source: getRuntimeSettingSource("reasoningEffort"),
         }
       : null,
   ].filter((item): item is RuntimeSettingSummary => Boolean(item));
+  const openModelSettingsFromCockpit = React.useCallback(() => {
+    openModelSettings({
+      returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
+    });
+  }, []);
   const statusContextSummary = [
     hasPromptContext ? promptSummary.label : null,
     webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
@@ -1986,7 +2014,7 @@ export const Playground = () => {
             ),
         },
       })}
-      onOpenModelSettings={openModelSettings}
+      onOpenModelSettings={openModelSettingsFromCockpit}
       onOpenAssistantSelect={openAssistantSelectorFromCockpit}
       onClearAssistant={clearAssistantFromCockpit}
       onInspectAssistant={inspectAssistantFromCockpit}

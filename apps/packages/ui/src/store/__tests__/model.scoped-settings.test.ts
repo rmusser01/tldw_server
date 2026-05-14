@@ -92,6 +92,30 @@ describe("provider:model scoped chat model settings", () => {
     ).toBe(0.4)
   })
 
+  it("isolates overrides for different providers that expose the same model id", () => {
+    const store = useStoreChatModelSettings.getState()
+
+    store.updateSettings({ temperature: 0.7, topP: 0.9 })
+    store.setActiveSettingsScope("openai:gpt-4o")
+    useStoreChatModelSettings.getState().setTemperature(0.2)
+
+    useStoreChatModelSettings.getState().setActiveSettingsScope("azure:gpt-4o")
+    useStoreChatModelSettings.getState().setTopP(0.4)
+
+    expect(
+      useStoreChatModelSettings.getState().getEffectiveSettings("openai:gpt-4o")
+    ).toMatchObject({
+      temperature: 0.2,
+      topP: 0.9
+    })
+    expect(
+      useStoreChatModelSettings.getState().getEffectiveSettings("azure:gpt-4o")
+    ).toMatchObject({
+      temperature: 0.7,
+      topP: 0.4
+    })
+  })
+
   it("canonicalizes scoped setting keys when casing or whitespace differs", () => {
     const store = useStoreChatModelSettings.getState()
 

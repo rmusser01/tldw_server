@@ -182,6 +182,7 @@ import {
   OPEN_TURN_TOOLS_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
+  type ModelSettingsOpenDetail,
 } from "./playground-cockpit-actions";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
 // QueuedRequest moved to usePlaygroundQueueManagement
@@ -576,6 +577,7 @@ export const PlaygroundForm = ({
     typeof window === "undefined" ? 0 : window.innerHeight,
   );
   const [openModelSettings, setOpenModelSettings] = React.useState(false);
+  const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
@@ -1089,6 +1091,31 @@ export const PlaygroundForm = ({
     storedCharacterId,
   ]);
 
+  const restoreModelSettingsFocus = React.useCallback(() => {
+    const returnFocusSelector = modelSettingsReturnFocusSelectorRef.current;
+    if (!returnFocusSelector || typeof document === "undefined") return;
+    modelSettingsReturnFocusSelectorRef.current = null;
+
+    const focusTarget = () => {
+      document.querySelector<HTMLElement>(returnFocusSelector)?.focus();
+    };
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(focusTarget);
+      return;
+    }
+    globalThis.setTimeout(focusTarget, 0);
+  }, []);
+
+  const setOpenModelSettingsWithFocusRestore = React.useCallback(
+    (nextOpen: boolean) => {
+      setOpenModelSettings(nextOpen);
+      if (!nextOpen) {
+        restoreModelSettingsFocus();
+      }
+    },
+    [restoreModelSettingsFocus],
+  );
+
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = () => setOpenActorSettings(true);
@@ -1100,7 +1127,12 @@ export const PlaygroundForm = ({
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
-    const handler = () => setOpenModelSettings(true);
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<ModelSettingsOpenDetail>).detail;
+      modelSettingsReturnFocusSelectorRef.current =
+        detail?.returnFocusSelector ?? null;
+      setOpenModelSettings(true);
+    };
     window.addEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     return () => {
       window.removeEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
@@ -2789,6 +2821,7 @@ export const PlaygroundForm = ({
     setWebSearch(!webSearch);
   }, [setWebSearch, webSearch]);
   const handleOpenModelSettings = React.useCallback(() => {
+    modelSettingsReturnFocusSelectorRef.current = null;
     closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
   }, [closeComposerPopoversExcept, setOpenModelSettings]);
@@ -5731,7 +5764,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyCurrentChatModelSettings
               open={openModelSettings}
-              setOpen={setOpenModelSettings}
+              setOpen={setOpenModelSettingsWithFocusRestore}
               isOCREnabled={useOCR}
             />
           </React.Suspense>

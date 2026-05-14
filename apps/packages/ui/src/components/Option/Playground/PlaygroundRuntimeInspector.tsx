@@ -17,6 +17,7 @@ const railActionClass =
 export type RuntimeSettingSummary = {
   label: string;
   value: string;
+  source?: "default" | "override";
 };
 
 export type RuntimeToolSummary = {
@@ -263,6 +264,7 @@ export const PlaygroundRuntimeInspector = ({
           <button
             type="button"
             onClick={onOpenModelSettings}
+            data-cockpit-model-settings-trigger
             className={`${railActionClass} justify-start gap-1.5`}
             aria-label={t(
               "cockpit.openModelChatSettings",
@@ -368,7 +370,22 @@ export const PlaygroundRuntimeInspector = ({
             {settingSummaries.map((setting) => (
               <React.Fragment key={setting.label}>
                 <dt className="truncate text-text-muted">{setting.label}</dt>
-                <dd className="font-medium text-text">{setting.value}</dd>
+                <dd className="flex items-center justify-end gap-1.5 font-medium text-text">
+                  <span>{setting.value}</span>
+                  {setting.source ? (
+                    <span
+                      className={
+                        setting.source === "override"
+                          ? "rounded border border-focus/40 bg-focus/10 px-1.5 py-0.5 text-[10px] font-semibold text-focus"
+                          : "rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
+                      }
+                    >
+                      {setting.source === "override"
+                        ? t("cockpit.settingOverride", "Override")
+                        : t("cockpit.settingInherited", "Inherited")}
+                    </span>
+                  ) : null}
+                </dd>
               </React.Fragment>
             ))}
           </dl>

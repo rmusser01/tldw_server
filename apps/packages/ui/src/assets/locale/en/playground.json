@@ -1024,6 +1024,8 @@
     "noCharacterSelected": "No character selected",
     "scopedSettings": "Scoped settings",
     "settingsDefault": "Using default settings for this provider:model.",
+    "settingInherited": "Inherited",
+    "settingOverride": "Override",
     "temperature": "Temperature",
     "topP": "Top P",
     "topK": "Top K",
