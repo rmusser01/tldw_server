@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-05-14 19:57'
-updated_date: '2026-05-14 20:00'
+updated_date: '2026-05-14 20:13'
 labels:
   - persona
   - persona-visual
@@ -14,6 +14,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1694'
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
+  - 'https://github.com/rmusser01/tldw_server/pull/1701'
 priority: medium
 ---
 
@@ -52,6 +53,8 @@ Stage 1 green: service tests cover listing the bundled starter fixture, copying 
 Stage 2 green: API tests cover catalog list/detail, copy-to-draft without activation, unknown starter errors, and cross-user target rejection.
 
 Verification completed: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short --disable-warnings` -> 53 passed; `python -m py_compile tldw_Server_API/app/core/Persona/visual_starter_catalog.py tldw_Server_API/app/core/Persona/visual_starter_fixtures.py` -> passed; Bandit touched Python scope -> 0 findings in `/tmp/bandit_persona_visual_starter_catalog.json`; `git diff --check` -> passed.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1701.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

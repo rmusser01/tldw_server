@@ -75,8 +75,8 @@
 - [x] Update `Docs/Code_Documentation/Persona_Visual_Packs.md`.
 - [x] Update Backlog task notes and check completed acceptance criteria.
 - [x] Run focused pytest, py_compile, Bandit, and diff whitespace checks.
-- [ ] Commit the implementation with issue `#1694` references.
-- [ ] Open a draft PR against `dev` and link `#1694` plus epic `#1510`.
+- [x] Commit the implementation with issue `#1694` references.
+- [x] Open a draft PR against `dev` and link `#1694` plus epic `#1510`.
 
 ---
 
