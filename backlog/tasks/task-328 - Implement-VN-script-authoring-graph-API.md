@@ -70,11 +70,13 @@ Task 3 API schemas/endpoints completed and accepted after review. Commit b02d27d
 
 Task 4 capabilities/docs completed. Commits 22e0224ed and 89a221561 add route-gated features.script_authoring_graph capability discovery, API docs for graph endpoints/source modes/response shape/diagnostics/limits/hashing/custom frontend flow/non-goals, and a regression test that keeps the graph feature disabled when only partial scripts routes are registered.
 
-Final verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/VN_Scripts/test_vn_script_authoring_graph.py tldw_Server_API/tests/VN_Scripts/test_vn_scripts_api.py tldw_Server_API/tests/VN_Platform/test_vn_capabilities_api.py -> 60 passed, 8 warnings; targeted VN capabilities pytest -> 3 passed, 8 warnings; compileall on touched VN modules passed; Bandit on touched backend VN modules reported 0 findings; git diff --check and git diff --cached --check passed.
+PR review fixes added on 2026-05-14: graph draft endpoints now resolve AuthNZ profile rows and accessible audio refs before validation; graph reachability is derived from emitted bounded edges so truncated responses stay internally consistent; capabilities now require exact graph route path+method pairs; supplied_draft_invalid_shape has explicit 400 mapping; helper docstrings and wrapped long lines added. Regression coverage added for custom AuthNZ graph validation context, method-aware capability gating, emitted-edge reachability under edge truncation, and static fallthrough warning diagnostics.
+
+Final verification after review fixes: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts -q -> 123 passed, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Platform/test_vn_capabilities_api.py -q -> 4 passed, 8 warnings; compileall on touched VN modules passed; Bandit on touched backend VN modules reported 0 findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL:BEGIN -->
-Opened PR #1656 for the backend-only VN script authoring graph API. Implemented deterministic pure graph construction, non-mutating service methods for stored draft/supplied draft preview/published version graph responses, VN Scripts schemas/endpoints, route-gated features.script_authoring_graph capability discovery, and API documentation. CI state on PR #1656 is pending at creation time.
+Opened PR #1656 for the backend-only VN script authoring graph API and addressed live PR review feedback. The API now computes deterministic authoring graphs for stored drafts, supplied draft previews, and published versions; keeps graph responses non-mutating; validates draft graph responses with the same resolved profile/audio context as existing VN Scripts validation; uses emitted bounded edges for reachability; advertises features.script_authoring_graph only when the exact graph routes and methods are registered; and documents graph behavior for custom frontend clients.
 <!-- SECTION:FINAL:END -->

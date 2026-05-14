@@ -281,6 +281,34 @@ def test_graph_reachability_matches_validator_unreachable_warnings() -> None:
     }
 
 
+def test_graph_warns_that_static_reachability_does_not_infer_fallthrough() -> None:
+    result = build_script_authoring_graph(
+        {
+            "schema_version": PROGRAM_SCHEMA_VERSION,
+            "entry_label": "start",
+            "labels": {
+                "start": [{"op": "narrate", "text": "Opening."}],
+                "next": [{"op": "end"}],
+            },
+        }
+    )
+
+    fallthrough_warnings = [
+        diagnostic
+        for diagnostic in result["diagnostics"]["warnings"]
+        if diagnostic["code"] == "graph_fallthrough_not_inferred"
+    ]
+    assert fallthrough_warnings == [
+        {
+            "code": "graph_fallthrough_not_inferred",
+            "severity": "warning",
+            "message": "Static graph reachability does not infer implicit fallthrough to the next label.",
+            "path": "$.labels['start']",
+            "details": {"label": "start", "next_label": "next"},
+        }
+    ]
+
+
 def test_terminal_classification_is_conservative() -> None:
     result = build_script_authoring_graph(
         {
@@ -487,7 +515,16 @@ def test_graph_limits_return_partial_truncated_graph_with_diagnostics() -> None:
 
     assert edge_limited["truncated"] is True
     assert len(edge_limited["graph"]["edges"]) == 1
-    assert edge_limited["diagnostics"]["warnings"][-1]["code"] == "graph_edge_limit_exceeded"
+    assert "graph_edge_limit_exceeded" in _diagnostic_codes(edge_limited, "warnings")
+    assert {label["label"] for label in edge_limited["outline"]["labels"] if label["reachable"]} == {
+        "start",
+        "a",
+    }
+    assert "b" in {
+        diagnostic["details"]["label"]
+        for diagnostic in edge_limited["diagnostics"]["warnings"]
+        if diagnostic["code"] == "graph_label_unreachable"
+    }
 
 
 def test_label_limit_truncation_does_not_emit_edges_to_omitted_label_nodes() -> None:

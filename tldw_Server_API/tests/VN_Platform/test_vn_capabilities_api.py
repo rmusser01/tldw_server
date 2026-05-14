@@ -110,3 +110,29 @@ def test_vn_capabilities_require_graph_routes_for_script_authoring_graph() -> No
     assert body["enabled_modules"]["scripts"] is True
     assert body["features"]["script_authoring_catalog"] is True
     assert body["features"]["script_authoring_graph"] is False
+
+
+def test_vn_capabilities_require_graph_route_methods_for_script_authoring_graph() -> None:
+    partial_scripts_router = APIRouter(prefix="/vn-scripts")
+
+    @partial_scripts_router.get("/scripts/{script_id}/draft/graph")
+    async def draft_graph_stub(script_id: int) -> dict[str, int]:
+        return {"script_id": script_id}
+
+    @partial_scripts_router.get("/scripts/{script_id}/draft/graph-preview")
+    async def wrong_method_preview_graph_stub(script_id: int) -> dict[str, int]:
+        return {"script_id": script_id}
+
+    @partial_scripts_router.get("/scripts/{script_id}/versions/{version_id}/graph")
+    async def version_graph_stub(script_id: int, version_id: int) -> dict[str, int]:
+        return {"script_id": script_id, "version_id": version_id}
+
+    app = FastAPI()
+    app.include_router(vn_capabilities_router, prefix="/api/v1/vn")
+    app.include_router(partial_scripts_router, prefix="/api/v1/vn")
+    response = TestClient(app).get("/api/v1/vn/vn-capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled_modules"]["scripts"] is True
+    assert body["features"]["script_authoring_graph"] is False

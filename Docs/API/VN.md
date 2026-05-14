@@ -200,6 +200,10 @@ Each outline label includes:
 - `terminal`: one of `terminal`, `continues`, or `unknown`.
 - `summary`: compact text for display.
 
+Reachability is derived from the emitted static graph edges. When a response is
+truncated by node or edge limits, labels that would only be reachable through
+omitted edges are reported as unreachable in that partial graph.
+
 `graph` is the detailed layer for advanced clients. It contains label nodes,
 operation nodes, and static edges. Node IDs are deterministic:
 
@@ -237,6 +241,11 @@ conditions such as missing edge targets, unreachable labels, invalid label
 bodies, omitted edge targets, or output truncation. These diagnostics are
 intended to help authoring tools render partial structure from incomplete
 drafts.
+
+When a label could rely on implicit fallthrough to the next label,
+diagnostics include `graph_fallthrough_not_inferred` with the candidate
+`next_label`. Treat this as a static-analysis limitation marker, not a
+validation error.
 
 `validation_diagnostics` come from the VN script validator and remain the
 authoritative publish/runtime compatibility signal. A graph response can be

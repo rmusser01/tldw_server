@@ -26,6 +26,11 @@ VN_SCRIPT_AUTHORING_GRAPH_PATHS = (
     f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/draft/graph-preview",
     f"{VN_RESOURCE_PATHS['scripts']}/scripts/{{script_id}}/versions/{{version_id}}/graph",
 )
+VN_SCRIPT_AUTHORING_GRAPH_ROUTES = (
+    (VN_SCRIPT_AUTHORING_GRAPH_PATHS[0], "GET"),
+    (VN_SCRIPT_AUTHORING_GRAPH_PATHS[1], "POST"),
+    (VN_SCRIPT_AUTHORING_GRAPH_PATHS[2], "GET"),
+)
 VN_SUPPORTED_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"]
 VN_SUPPORTED_AUDIO_MEDIA_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg"]
 
@@ -33,15 +38,16 @@ VN_SUPPORTED_AUDIO_MEDIA_TYPES = ["audio/mpeg", "audio/wav", "audio/ogg"]
 def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
     """Build a route-aware capabilities payload for the current FastAPI app."""
     route_paths = _route_paths(routes)
+    route_methods = _route_methods(routes)
     enabled_modules = {
         key: _has_registered_resource(route_paths, path)
         for key, path in VN_RESOURCE_PATHS.items()
     }
     scripted_generation_enabled = enabled_modules["scripts"] and enabled_modules["play"]
     script_authoring_catalog_enabled = enabled_modules["scripts"]
-    script_authoring_graph_enabled = _has_registered_paths(
-        route_paths,
-        VN_SCRIPT_AUTHORING_GRAPH_PATHS,
+    script_authoring_graph_enabled = _has_registered_route_methods(
+        route_methods,
+        VN_SCRIPT_AUTHORING_GRAPH_ROUTES,
     )
 
     return {
@@ -112,6 +118,7 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
 
 
 def _route_paths(routes: Iterable[Any]) -> set[str]:
+    """Return the FastAPI route paths registered in the current app."""
     return {
         path
         for route in routes
@@ -119,10 +126,29 @@ def _route_paths(routes: Iterable[Any]) -> set[str]:
     }
 
 
+def _route_methods(routes: Iterable[Any]) -> set[tuple[str, str]]:
+    """Return registered (path, HTTP method) pairs for FastAPI routes."""
+    pairs: set[tuple[str, str]] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if not isinstance(path, str) or not isinstance(methods, Iterable):
+            continue
+        for method in methods:
+            if isinstance(method, str):
+                pairs.add((path, method.upper()))
+    return pairs
+
+
 def _has_registered_resource(paths: set[str], resource_path: str) -> bool:
+    """Return whether any registered route belongs to a resource prefix."""
     prefix = resource_path.rstrip("/")
     return any(path == prefix or path.startswith(f"{prefix}/") for path in paths)
 
 
-def _has_registered_paths(paths: set[str], required_paths: Iterable[str]) -> bool:
-    return all(path in paths for path in required_paths)
+def _has_registered_route_methods(
+    route_methods: set[tuple[str, str]],
+    required_routes: Iterable[tuple[str, str]],
+) -> bool:
+    """Return whether all required route paths exist with their expected methods."""
+    return all((path, method.upper()) in route_methods for path, method in required_routes)

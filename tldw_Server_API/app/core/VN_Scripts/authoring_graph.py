@@ -6,7 +6,7 @@ from collections.abc import Mapping
 import hashlib
 import json
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 SCHEMA_VERSION = "vn_script_authoring_graph.v1"
 GRAPH_SEMANTICS_VERSION = "vn_script_authoring_graph_edges.v1"
@@ -182,7 +182,7 @@ def build_script_authoring_graph(
                     if target_label in incoming_counts:
                         incoming_counts[target_label] += 1
 
-    reachable = _reachable_labels(entry_label, labels) if entry_label and isinstance(labels, Mapping) else set()
+    reachable = _reachable_labels(entry_label, edges) if entry_label else set()
     for label in sorted(label_names - reachable):
         if label != entry_label:
             _append_diag(
@@ -194,7 +194,11 @@ def build_script_authoring_graph(
                 {"label": label},
             )
 
-    terminal_by_label = {label: _terminal_state(raw_ops, outgoing_counts.get(label, 0)) for label, raw_ops in label_items}
+    terminal_by_label = {
+        label: _terminal_state(raw_ops, outgoing_counts.get(label, 0))
+        for label, raw_ops in label_items
+    }
+    _append_fallthrough_limitations(label_items, outgoing_counts, terminal_by_label, diagnostics)
     reachable_by_label = {label: label in reachable for label, _ in label_items}
     for node in nodes:
         label = str(node["label"])
@@ -508,7 +512,17 @@ def _validation_diagnostics(validation_diagnostics: Mapping[str, Any] | None) ->
     }
 
 
-def _reachable_labels(entry_label: str, labels: Mapping[str, Any]) -> set[str]:
+def _reachable_labels(entry_label: str, edges: list[dict[str, Any]]) -> set[str]:
+    """Return labels reachable through emitted static graph edges."""
+    adjacency: dict[str, list[str]] = {}
+    for edge in edges:
+        if edge.get("target_id") is None:
+            continue
+        source_label = _edge_source_label(edge)
+        target_label = edge.get("target_label")
+        if isinstance(source_label, str) and isinstance(target_label, str):
+            adjacency.setdefault(source_label, []).append(target_label)
+
     reachable: set[str] = set()
     stack = [entry_label]
     while stack:
@@ -516,24 +530,42 @@ def _reachable_labels(entry_label: str, labels: Mapping[str, Any]) -> set[str]:
         if label in reachable:
             continue
         reachable.add(label)
-        raw_ops = labels.get(label)
+        stack.extend(reversed(adjacency.get(label, [])))
+    return reachable
+
+
+def _edge_source_label(edge: Mapping[str, Any]) -> str | None:
+    """Extract the encoded source label from an emitted operation edge ID."""
+    source_id = edge.get("source_id")
+    if not isinstance(source_id, str):
+        return None
+    parts = source_id.split(":")
+    if len(parts) < 3 or parts[0] != "op":
+        return None
+    return unquote(parts[1])
+
+
+def _append_fallthrough_limitations(
+    label_items: list[tuple[str, Any]],
+    outgoing_counts: Mapping[str, int],
+    terminal_by_label: Mapping[str, str],
+    diagnostics: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Append warnings for labels whose possible fallthrough is intentionally static-only."""
+    for index, (label, raw_ops) in enumerate(label_items[:-1]):
         if not isinstance(raw_ops, list):
             continue
-        for opcode in raw_ops:
-            if not isinstance(opcode, Mapping):
-                continue
-            if opcode.get("op") == "jump" and isinstance(opcode.get("target"), str):
-                stack.append(str(opcode["target"]))
-            elif opcode.get("op") == "generate":
-                if isinstance(opcode.get("on_cancel"), str):
-                    stack.append(str(opcode["on_cancel"]))
-                if isinstance(opcode.get("on_generated_choice"), str):
-                    stack.append(str(opcode["on_generated_choice"]))
-            elif opcode.get("op") == "choice" and isinstance(opcode.get("choices"), list):
-                for choice in opcode["choices"]:
-                    if isinstance(choice, Mapping) and isinstance(choice.get("target"), str):
-                        stack.append(str(choice["target"]))
-    return reachable
+        if outgoing_counts.get(label, 0) > 0 or terminal_by_label.get(label) != "unknown":
+            continue
+        next_label = label_items[index + 1][0]
+        _append_diag(
+            diagnostics["warnings"],
+            "graph_fallthrough_not_inferred",
+            "warning",
+            "Static graph reachability does not infer implicit fallthrough to the next label.",
+            bracket_label_path(label),
+            {"label": label, "next_label": next_label},
+        )
 
 
 def _terminal_state(raw_ops: Any, outgoing_edge_count: int) -> str:

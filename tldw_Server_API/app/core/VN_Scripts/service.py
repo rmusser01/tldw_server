@@ -288,11 +288,26 @@ class VNScriptService:
             raise ValueError("script_not_found")
         return draft
 
-    def get_draft_graph(self, script_id: int) -> dict[str, Any]:
+    def get_draft_graph(
+        self,
+        script_id: int,
+        *,
+        audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
+        policy_profile: ProfileRow | None = None,
+        generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
+    ) -> dict[str, Any]:
         """Return a computed authoring graph for the stored draft without persistence."""
         script = self._require_script(script_id)
         draft_row = self.get_draft(script_id)
-        validation = self.validate_draft_payload(script, draft_row["draft"])
+        validation = self.validate_draft_payload(
+            script,
+            draft_row["draft"],
+            audio_refs=audio_refs,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
+        )
         return build_script_authoring_graph(
             draft_row["draft"],
             source="stored_draft",
@@ -308,6 +323,10 @@ class VNScriptService:
         draft: Mapping[str, Any],
         *,
         draft_revision: int | None = None,
+        audio_refs: Mapping[str, Mapping[str, Any]] | None = None,
+        policy_profile: ProfileRow | None = None,
+        generation_profile: ProfileRow | None = None,
+        generation_profiles: Mapping[str, ProfileRow] | None = None,
     ) -> dict[str, Any]:
         """Return a computed authoring graph for a supplied draft without persistence."""
         script = self._require_script(script_id)
@@ -317,7 +336,14 @@ class VNScriptService:
             raise ValueError("supplied_draft_too_large")
         draft_row = self.get_draft(script_id)
         current_revision = int(draft_row["revision"])
-        validation = self.validate_draft_payload(script, draft)
+        validation = self.validate_draft_payload(
+            script,
+            draft,
+            audio_refs=audio_refs,
+            policy_profile=policy_profile,
+            generation_profile=generation_profile,
+            generation_profiles=generation_profiles,
+        )
         result = build_script_authoring_graph(
             draft,
             source="supplied_draft",
@@ -713,10 +739,19 @@ def _empty_audio_refs(program: Mapping[str, Any]) -> Mapping[str, Mapping[str, A
 
 
 def _payload_size_bytes(payload: Mapping[str, Any]) -> int:
-    return len(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    """Return the canonical JSON byte size used for supplied-draft limits."""
+    return len(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
 
 
 def _stored_version_validation(version: Mapping[str, Any]) -> dict[str, Any]:
+    """Return validation diagnostics pinned to a published script version."""
     validation = version.get("validation")
     if isinstance(validation, Mapping):
         return {
@@ -884,7 +919,9 @@ def _script_metadata_consistency_errors(script: Mapping[str, Any], program: Mapp
     return errors
 
 
-def _policy_profile_validation_issues(policy_decision: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _policy_profile_validation_issues(
+    policy_decision: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     reasons = policy_decision.get("reasons")

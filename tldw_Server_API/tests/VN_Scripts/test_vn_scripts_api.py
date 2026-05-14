@@ -595,6 +595,63 @@ def test_graph_preview_accepts_supplied_draft_without_persisting(
     assert draft_after["draft"] == stored
 
 
+def test_graph_endpoints_use_resolved_authnz_profile_context(
+    client: TestClient,
+    chacha_dbs: dict[int, CharactersRAGDB],
+    authnz_pool: DatabasePool,
+) -> None:
+    asset_pack_id, _ = _create_asset_pack(chacha_dbs[42])
+
+    async def seed_profiles() -> None:
+        store = VNPolicyProfileStore(authnz_pool)
+        await store.initialize()
+        await store.create_policy_profile(
+            profile_id="custom_local",
+            display_name="Custom Local",
+            description=None,
+            definition=LOCAL_DEFAULT_POLICY_DEFINITION,
+            created_by_user_id=42,
+        )
+        await store.create_generation_profile(
+            profile_id="custom_story",
+            display_name="Custom Story",
+            description=None,
+            definition=STORY_DEFAULT_GENERATION_DEFINITION,
+            created_by_user_id=42,
+        )
+
+    asyncio.run(seed_profiles())
+    create_response = client.post(
+        "/api/v1/vn/vn-scripts/scripts",
+        json={
+            "title": "Archive Door",
+            "primary_asset_pack_id": asset_pack_id,
+            "policy_profile_id": "custom_local",
+            "generation_profile_id": "custom_story",
+            "content_rating": "general",
+        },
+    )
+    script_id = int(create_response.json()["id"])
+    draft = _program(asset_pack_id)
+    draft["generation_defaults"]["profile_id"] = "custom_story"
+    client.put(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft",
+        json={"if_revision": 0, "draft": draft},
+    )
+
+    stored_graph_response = client.get(f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph")
+    preview_graph_response = client.post(
+        f"/api/v1/vn/vn-scripts/scripts/{script_id}/draft/graph-preview",
+        json={"draft": draft, "draft_revision": 1},
+    )
+
+    assert create_response.status_code == 201
+    assert stored_graph_response.status_code == 200
+    assert stored_graph_response.json()["validation_diagnostics"]["valid"] is True
+    assert preview_graph_response.status_code == 200
+    assert preview_graph_response.json()["validation_diagnostics"]["valid"] is True
+
+
 def test_version_graph_endpoint_returns_published_version_graph(
     client: TestClient,
     chacha_dbs: dict[int, CharactersRAGDB],
