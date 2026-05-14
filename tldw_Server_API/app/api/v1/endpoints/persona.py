@@ -401,7 +401,9 @@ def _runtime_explorer_notice_reason_code(diagnostics: dict[str, Any]) -> str | N
     fallback = str(diagnostics.get("fallback") or "")
     if fallback == "hard_safe_denial" or bool(diagnostics.get("safe_denial")):
         return "RUNTIME_EXPLORER_SAFE_DENIAL"
-    if fallback in {"soft_existing_behavior", "circuit_open"}:
+    if fallback == "circuit_open" or bool(diagnostics.get("circuit_open")):
+        return "RUNTIME_EXPLORER_CIRCUIT_OPEN"
+    if fallback == "soft_existing_behavior":
         return "RUNTIME_EXPLORER_FALLBACK"
     return None
 
@@ -410,6 +412,8 @@ def _runtime_explorer_notice_message(diagnostics: dict[str, Any]) -> str:
     reason_code = _runtime_explorer_notice_reason_code(diagnostics)
     if reason_code == "RUNTIME_EXPLORER_SAFE_DENIAL":
         return "Persona runtime explorer selected a safe denial."
+    if reason_code == "RUNTIME_EXPLORER_CIRCUIT_OPEN":
+        return "Persona runtime explorer is temporarily paused after repeated failures; using existing planning."
     return "Persona runtime explorer fell back to existing planning."
 
 
