@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from itertools import islice
 from typing import Any
 
 
@@ -30,6 +31,8 @@ ALLOWED_PROVIDER_RESULT_TYPES = frozenset(
 )
 
 _MAX_TEXT_LENGTH = 500
+_MAX_INPUT_TEXT_LENGTH = 10_000
+_MAX_INT_TEXT_LENGTH = 10
 _MAX_COLLECTION_ITEMS = 64
 _MAX_NESTING_DEPTH = 5
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,79}$")
@@ -214,19 +217,18 @@ def _sanitize_value(value: Any, *, section_name: str, depth: int) -> tuple[Any, 
         return None, True
     if isinstance(value, Mapping):
         out: dict[str, Any] = {}
-        unsafe = False
-        for raw_key, raw_item in list(value.items())[:_MAX_COLLECTION_ITEMS]:
+        unsafe = len(value) > _MAX_COLLECTION_ITEMS
+        for raw_key, raw_item in islice(value.items(), _MAX_COLLECTION_ITEMS):
             key = _safe_text(raw_key, max_length=80)
             if not key:
                 unsafe = True
                 continue
             item, item_unsafe = _sanitize_value(raw_item, section_name=section_name, depth=depth + 1)
-            unsafe = unsafe or item_unsafe or _is_sensitive_key(key)
-            if _is_sensitive_key(key):
+            sensitive_key = _is_sensitive_key(key)
+            unsafe = unsafe or item_unsafe or sensitive_key
+            if sensitive_key:
                 continue
             out[key] = item
-        if len(value) > _MAX_COLLECTION_ITEMS:
-            unsafe = True
         return out, unsafe
     if isinstance(value, list):
         out_items: list[Any] = []
@@ -239,8 +241,8 @@ def _sanitize_value(value: Any, *, section_name: str, depth: int) -> tuple[Any, 
             unsafe = True
         return out_items, unsafe
     if isinstance(value, str):
-        raw_text = value.strip()
-        if _is_unsafe_text(raw_text, section_name=section_name):
+        raw_text, input_too_long = _bounded_input_text(value)
+        if input_too_long or _is_unsafe_text(raw_text, section_name=section_name):
             return "[redacted]", True
         text = _safe_text(raw_text, max_length=_MAX_TEXT_LENGTH)
         return text, False
@@ -274,7 +276,8 @@ def _safe_text(value: Any, *, max_length: int) -> str:
     """Return a stripped bounded text value."""
     if value is None:
         return ""
-    text = str(value).strip()
+    raw_text = value if isinstance(value, str) else str(value)
+    text, _ = _bounded_input_text(raw_text)
     if len(text) > max_length:
         return text[:max_length]
     return text
@@ -292,10 +295,23 @@ def _safe_int(value: Any) -> int | None:
     """Return an integer value when coercion is unambiguous."""
     if isinstance(value, bool):
         return None
+    if isinstance(value, str):
+        if len(value) > _MAX_INT_TEXT_LENGTH:
+            return None
+        value = value.strip()
+        if not value:
+            return None
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bounded_input_text(value: str) -> tuple[str, bool]:
+    """Return bounded text for safety scans and whether input exceeded the limit."""
+    input_too_long = len(value) > _MAX_INPUT_TEXT_LENGTH
+    bounded = value[:_MAX_INPUT_TEXT_LENGTH] if input_too_long else value
+    return bounded.strip(), input_too_long
 
 
 def _diagnostic(code: str, message: str) -> dict[str, str]:

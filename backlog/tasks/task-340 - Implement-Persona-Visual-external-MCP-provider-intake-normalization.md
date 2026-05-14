@@ -48,12 +48,14 @@ Implemented a pure Persona Visual provider envelope normalizer under tldw_Server
 Confirmed this slice has no provider execution, no MCP resource retrieval, no asset writes, no job enqueueing, no persistence, no runtime activation, and no Persona Garden UI changes.
 
 Focused validation completed: pytest tldw_Server_API/tests/Persona/test_persona_visual_provider_envelope.py -q passed with 19 tests; py_compile passed for the helper and test; git diff --check passed; Bandit on the helper wrote /tmp/bandit_persona_visual_provider_envelope.json with no results and no errors.
+
+Review fixes addressed the Gemini sanitizer hardening comments on PR #1691: oversized metadata strings now fail closed before regex scanning, mapping metadata is bounded with lazy iteration instead of materializing the whole mapping, and oversized contract_version strings are rejected before integer coercion. Added regression tests for all three paths. Updated validation passed: pytest tldw_Server_API/tests/Persona/test_persona_visual_provider_envelope.py -q passed with 22 tests; py_compile passed; git diff --check passed; Bandit wrote /tmp/bandit_persona_visual_provider_envelope_review.json with no results and no errors.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the review-only Persona Visual external provider envelope intake helper, focused regression coverage, and a provider-contract documentation pointer. The helper normalizes bounded provider, pack, provenance, diagnostics, and payload metadata; preserves structured blockers and warnings; and fails closed without provider execution, MCP resource retrieval, persistence, import-preview enqueueing, draft or asset writes, runtime activation, Persona Garden UI, VN/CYOA behavior, or live response mutation.
+Added the review-only Persona Visual external provider envelope intake helper, focused regression coverage, and a provider-contract documentation pointer. The helper normalizes bounded provider, pack, provenance, diagnostics, and payload metadata; preserves structured blockers and warnings; and fails closed without provider execution, MCP resource retrieval, persistence, import-preview enqueueing, draft or asset writes, runtime activation, Persona Garden UI, VN/CYOA behavior, or live response mutation. PR review follow-up additionally bounds untrusted text and mapping inputs before expensive sanitizer operations.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

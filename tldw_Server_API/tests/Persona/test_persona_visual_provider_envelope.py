@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
+
 import pytest
 
 from tldw_Server_API.app.core.Persona.visual_portability.provider_envelope import (
@@ -61,6 +63,22 @@ def _blocker_codes(normalized: dict[str, object]) -> list[str]:
         for item in normalized["blockers"]  # type: ignore[index]
         if isinstance(item, dict)
     ]
+
+
+class _BoundedIterationMapping(Mapping[str, str]):
+    """Mapping that raises if sanitizer materializes past the allowed item cap."""
+
+    def __getitem__(self, key: str) -> str:
+        return f"value-{key}"
+
+    def __iter__(self) -> Iterator[str]:
+        for index in range(1_000):
+            if index >= 64:
+                raise AssertionError("sanitizer iterated beyond bounded metadata limit")
+            yield f"field_{index}"
+
+    def __len__(self) -> int:
+        return 1_000
 
 
 def test_normalize_provider_result_envelope_accepts_valid_portable_archive() -> None:
@@ -231,6 +249,42 @@ def test_normalize_provider_result_envelope_checks_unsafe_text_before_truncation
     assert normalized["commit_eligible"] is False
     assert "unsafe_provider_metadata" in _blocker_codes(normalized)
     assert unsafe_value not in str(normalized)
+
+
+def test_normalize_provider_result_envelope_rejects_oversized_metadata_strings() -> None:
+    """Treat oversized provider strings as unsafe before regex scanning or output truncation."""
+    raw = _valid_portable_archive_envelope()
+    unsafe_value = "provider-note-" * 800
+    raw["provider"]["display_name"] = unsafe_value  # type: ignore[index]
+
+    normalized = normalize_provider_result_envelope(raw)
+
+    assert normalized["commit_eligible"] is False
+    assert "unsafe_provider_metadata" in _blocker_codes(normalized)
+    assert unsafe_value not in str(normalized)
+
+
+def test_normalize_provider_result_envelope_bounds_mapping_iteration() -> None:
+    """Avoid materializing all items from untrusted mapping-like metadata."""
+    raw = _valid_portable_archive_envelope()
+    raw["provider"] = _BoundedIterationMapping()
+
+    normalized = normalize_provider_result_envelope(raw)
+
+    assert normalized["commit_eligible"] is False
+    assert "unsafe_provider_metadata" in _blocker_codes(normalized)
+    assert len(normalized["provider"]) == 64
+
+
+def test_normalize_provider_result_envelope_bounds_integer_text_coercion() -> None:
+    """Reject oversized integer text before coercing contract_version."""
+    raw = _valid_portable_archive_envelope()
+    raw["contract_version"] = "1" * 20_000
+
+    normalized = normalize_provider_result_envelope(raw)
+
+    assert normalized["commit_eligible"] is False
+    assert "unsupported_contract_version" in _blocker_codes(normalized)
 
 
 @pytest.mark.parametrize(
