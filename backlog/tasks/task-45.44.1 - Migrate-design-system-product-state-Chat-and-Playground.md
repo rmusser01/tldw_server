@@ -1,9 +1,10 @@
 ---
 id: TASK-45.44.1
 title: 'Migrate design-system product state: Chat and Playground'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:18'
+updated_date: '2026-05-14 04:21'
 labels:
   - design-system
   - webui
@@ -31,6 +32,18 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
 - [ ] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Inspect the two current Chat and Playground product-state baseline entries and their owning files. 2. Add a focused failing regression test for canonical design-system state labels in the affected Chat/Playground surface. 3. Migrate the affected UI text to the canonical design-system state registry or shared primitive without changing unrelated behavior. 4. Remove the resolved Chat and Playground baseline entries only after the verifier reports zero findings for this product area. 5. Run focused Vitest, bun run verify:design-system-state from apps/packages/ui, git diff --check, and document Bandit as skipped for UI-only work.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Continuation after tracker PR #1679 merged. Starting first product-area slice for GitHub issue #1658 / TASK-45.44.1 in isolated worktree .worktrees/design-system-chat-playground-migration.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
