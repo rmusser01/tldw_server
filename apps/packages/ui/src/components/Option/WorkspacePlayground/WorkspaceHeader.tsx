@@ -34,7 +34,8 @@ import {
   Star,
   Share2,
   CircleHelp,
-  Bot
+  Bot,
+  History
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -90,6 +91,7 @@ import {
 } from "@/utils/feature-rollout"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
+import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -174,6 +176,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
   const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
+  const [acpHistoryModalOpen, setAcpHistoryModalOpen] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [deleteConfirmInput, setDeleteConfirmInput] = React.useState("")
   const [deleteTargetWorkspace, setDeleteTargetWorkspace] = React.useState<{
@@ -529,8 +532,17 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     setAgentTaskModalOpen(false)
   }
 
+  const handleOpenAcpHistoryModal = () => {
+    setAcpHistoryModalOpen(true)
+  }
+
+  const handleCloseAcpHistoryModal = () => {
+    setAcpHistoryModalOpen(false)
+  }
+
   const handleOpenAgentTasksPage = () => {
     setAgentTaskModalOpen(false)
+    setAcpHistoryModalOpen(false)
     const canonicalWorkspaceId = workspaceId?.trim()
     if (!canonicalWorkspaceId) {
       navigate("/agent-tasks")
@@ -1474,6 +1486,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             onClick: handleOpenAgentTaskModal
           },
           {
+            key: "acp-run-history",
+            icon: <History className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.acpRunHistory",
+              "ACP run history"
+            ),
+            onClick: handleOpenAcpHistoryModal
+          },
+          {
             key: "duplicate-current",
             icon: <Copy className="h-4 w-4" />,
             label: t(
@@ -1768,6 +1789,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         workspaceTag={workspaceTag}
         onBeforeSubmit={saveCurrentWorkspace}
         onCancel={handleCloseAgentTaskModal}
+        onOpenAgentTasks={handleOpenAgentTasksPage}
+      />
+
+      <WorkspaceACPHistoryModal
+        open={acpHistoryModalOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        onCancel={handleCloseAcpHistoryModal}
         onOpenAgentTasks={handleOpenAgentTasksPage}
       />
 
