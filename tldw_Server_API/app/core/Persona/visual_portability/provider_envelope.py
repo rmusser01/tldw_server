@@ -36,6 +36,7 @@ _MAX_INT_TEXT_LENGTH = 10
 _MAX_COLLECTION_ITEMS = 64
 _MAX_NESTING_DEPTH = 5
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,79}$")
+_INTEGER_TEXT_RE = re.compile(r"^[+-]?\d+$")
 _SECRET_VALUE_RE = re.compile(
     r"(sk-[A-Za-z0-9_-]{6,}|xox[baprs]-|gh[pousr]_[A-Za-z0-9_]{8,}|"
     r"bearer\s+[A-Za-z0-9._-]{8,}|api[_-]?key|secret|token|session[_-]?cookie)",
@@ -151,7 +152,10 @@ def _validate_portable_archive_payload(
     blockers: list[dict[str, str]],
 ) -> None:
     """Add portable archive blockers for missing or unsupported archive payloads."""
-    if diagnostics_status.startswith("blocked") and payload is None:
+    if payload is None:
+        if diagnostics_status.startswith("blocked") and blockers:
+            return
+        blockers.append(_diagnostic("archive_payload_missing", "Portable archive payload is required."))
         return
     if not isinstance(payload, Mapping) or not isinstance(payload.get("archive"), Mapping):
         blockers.append(_diagnostic("archive_payload_missing", "Portable archive payload is required."))
@@ -295,16 +299,16 @@ def _safe_int(value: Any) -> int | None:
     """Return an integer value when coercion is unambiguous."""
     if isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return value
     if isinstance(value, str):
         if len(value) > _MAX_INT_TEXT_LENGTH:
             return None
         value = value.strip()
-        if not value:
+        if not _INTEGER_TEXT_RE.fullmatch(value):
             return None
-    try:
         return int(value)
-    except (TypeError, ValueError):
-        return None
+    return None
 
 
 def _bounded_input_text(value: str) -> tuple[str, bool]:

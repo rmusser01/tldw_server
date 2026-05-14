@@ -130,6 +130,22 @@ def test_normalize_provider_result_envelope_preserves_blocked_diagnostics() -> N
     ]
 
 
+def test_normalize_provider_result_envelope_requires_payload_when_blocked_without_blockers() -> None:
+    """Blocked diagnostic status alone must not make a missing archive payload commit-eligible."""
+    raw = _valid_portable_archive_envelope()
+    raw["diagnostics"] = {
+        "status": "blocked_before_import_preview",
+        "blockers": [],
+        "warnings": [],
+    }
+    raw["payload"] = None
+
+    normalized = normalize_provider_result_envelope(raw)
+
+    assert normalized["commit_eligible"] is False
+    assert "archive_payload_missing" in _blocker_codes(normalized)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_code"),
     [
@@ -280,6 +296,20 @@ def test_normalize_provider_result_envelope_bounds_integer_text_coercion() -> No
     """Reject oversized integer text before coercing contract_version."""
     raw = _valid_portable_archive_envelope()
     raw["contract_version"] = "1" * 20_000
+
+    normalized = normalize_provider_result_envelope(raw)
+
+    assert normalized["commit_eligible"] is False
+    assert "unsupported_contract_version" in _blocker_codes(normalized)
+
+
+@pytest.mark.parametrize("contract_version", [1.0, 1.9])
+def test_normalize_provider_result_envelope_rejects_non_integer_contract_version_numbers(
+    contract_version: float,
+) -> None:
+    """Only true integers or exact integer strings are accepted as contract versions."""
+    raw = _valid_portable_archive_envelope()
+    raw["contract_version"] = contract_version
 
     normalized = normalize_provider_result_envelope(raw)
 
