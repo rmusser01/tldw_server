@@ -11,11 +11,11 @@ const srcDir = path.resolve(testDir, "../..")
 const analyzeLiveSource = (relativePath: string) =>
   guard.analyzeSource({
     relativePath,
-    source: readFileSync(
-      path.resolve(srcDir, relativePath.replace(/^src\//, "")),
-      "utf8"
-    )
+    source: readLiveSource(relativePath)
   })
+
+const readLiveSource = (relativePath: string) =>
+  readFileSync(path.resolve(srcDir, relativePath.replace(/^src\//, "")), "utf8")
 
 describe("Chat and Playground product-state migration guard", () => {
   it("keeps migrated Chat and Playground state labels out of the legacy baseline", () => {
@@ -34,5 +34,27 @@ describe("Chat and Playground product-state migration guard", () => {
     )
 
     expect(migratedFindings).toEqual([])
+  })
+
+  it("does not directly dereference reviewed design-system state labels", () => {
+    expect(
+      readLiveSource("src/components/Option/Playground/PlaygroundForm.tsx")
+    ).not.toContain('getDesignSystemState("degraded").label')
+    expect(readLiveSource("src/routes/sidepanel-chat.tsx")).not.toContain(
+      'getDesignSystemState("ready").label'
+    )
+  })
+
+  it("keeps Workspace ACP history load errors on canonical recovery UI", () => {
+    const findings = analyzeLiveSource(
+      "src/components/Option/WorkspacePlayground/WorkspaceACPHistoryModal.tsx"
+    )
+
+    expect(findings).not.toContainEqual(
+      expect.objectContaining({
+        rule: "antd-product-state-import",
+        subject: "Alert"
+      })
+    )
   })
 })

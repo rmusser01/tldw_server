@@ -1400,7 +1400,7 @@ export const PlaygroundForm = ({
     if (connectionUxState === "connected_degraded") {
       return t(
         "playground:composer.providerStatusDegraded",
-        getDesignSystemState("degraded").label,
+        getDesignSystemState("degraded")?.label ?? "",
       );
     }
     return t("playground:composer.providerStatusHealthy", "Healthy");

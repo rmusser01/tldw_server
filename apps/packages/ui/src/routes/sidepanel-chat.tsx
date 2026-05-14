@@ -2200,7 +2200,7 @@ const SidepanelChat = () => {
       case "completed":
         return t(
           "sidepanel:ingest.completed",
-          getDesignSystemState("ready").label
+          getDesignSystemState("ready")?.label ?? ""
         )
       case "failed":
         return t("sidepanel:ingest.failed", "Failed")
