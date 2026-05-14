@@ -1,7 +1,5 @@
 # Harden design-system baseline reporting and stale-entry cleanup
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Reduce tracker drift by making the product-state verifier report grouped totals that are useful for issue updates and by ensuring stale baseline entries are removed during migration PRs.

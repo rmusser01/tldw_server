@@ -29,10 +29,12 @@ The live verifier remains the ground truth when tracker records disagree.
 
 ## Creation Order
 
-1. Create labels if missing.
-2. Create the epic from `github-epic.md`.
-3. Create the Backlog parent.
-4. Create migration and governance issues.
-5. Create Backlog child tasks.
-6. Update all GitHub issue bodies with Backlog links.
-7. Update the epic dashboard with issue links and Backlog links.
+1. Get human review and approval for these local drafts.
+2. Search for existing design-system or product-state tracker issues to avoid duplicates.
+3. Check for required labels and create missing labels only if approved.
+4. Create the epic from `github-epic.md`.
+5. Create the Backlog parent.
+6. Create migration and governance issues.
+7. Create Backlog child tasks.
+8. Update all GitHub issue bodies with Backlog links.
+9. Update the epic dashboard with issue links and Backlog links.

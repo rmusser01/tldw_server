@@ -1,7 +1,5 @@
 # Define shared design-system component ownership plan
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Reduce duplicate component drift by assigning explicit ownership and migration rules for shared primitives and WebUI-local duplicates.

@@ -1,7 +1,5 @@
 # Add shared design-system component documentation and examples
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Reduce inconsistent product-state migrations by giving implementers canonical examples for shared primitives and state patterns.

@@ -53,6 +53,8 @@ Execute Task 1 of the design-system remaining-work tracker implementation plan b
 - Draft set includes README, epic body, 13 product-area migration bodies, and 6 governance bodies.
 - All draft issue bodies preserve the human approval gate before public GitHub issue, label, PR, or other GitHub-state mutation.
 - Clarified the long-tail draft split note for current threshold groups: `src/components/Option/Chatbooks` with 17 findings and `src/components/Option/Collections` with 7 findings remain in long-tail only as a draft-package boundary until human approval decides whether to split them.
+- Cleaned public issue body drafts by removing draft-only approval text from `github-epic.md`, migration drafts, and governance drafts; README remains the approval gate for public GitHub mutations.
+- Updated README creation order to require human approval, duplicate tracker search, and label checks before creating public GitHub issues or Backlog mirror tasks.
 - Bandit skipped: non-code Markdown-only tracker draft work; no Python files touched.
 <!-- SECTION:NOTES:END -->
 
@@ -62,6 +64,7 @@ Execute Task 1 of the design-system remaining-work tracker implementation plan b
 - `find Docs/superpowers/plans/2026-05-14-design-system-remaining-work-tracker-issue-bodies -type f | sort` listed the expected 21 draft files.
 - `git diff --check` passed.
 - Review fix verification: `git diff --check` passed after clarifying the long-tail threshold-group note.
+- Code-quality follow-up verification: `git diff --check` passed after cleaning public issue body draft text and README creation order.
 <!-- SECTION:VERIFICATION:END -->
 
 ## Final Summary

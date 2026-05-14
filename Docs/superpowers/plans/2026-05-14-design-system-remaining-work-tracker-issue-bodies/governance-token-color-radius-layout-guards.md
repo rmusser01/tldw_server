@@ -1,7 +1,5 @@
 # Design token, color, radius, and layout drift guards
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Reduce non-product-state design drift by deciding which token, color, radius, and layout patterns should be guarded next.

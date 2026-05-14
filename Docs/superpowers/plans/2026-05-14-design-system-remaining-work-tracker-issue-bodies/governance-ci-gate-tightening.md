@@ -1,7 +1,5 @@
 # Define design-system CI gate tightening path
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Reduce future regression risk by defining a staged path from product-state report mode to stricter CI gates without blocking unrelated work.

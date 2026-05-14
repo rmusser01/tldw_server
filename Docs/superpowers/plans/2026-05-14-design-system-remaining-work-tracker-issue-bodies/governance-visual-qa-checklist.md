@@ -1,7 +1,5 @@
 # Add Browser/WebUI/extension visual QA checklist
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Reduce visual regressions by making Browser, WebUI, and extension verification repeatable across shared design-system surfaces.

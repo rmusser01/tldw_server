@@ -1,7 +1,5 @@
 # Migrate design-system product state: Other shared surfaces and long-tail triage
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Scope
 
 Owned paths and product surfaces from the ordered path ownership map:

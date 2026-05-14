@@ -1,7 +1,5 @@
 # Epic: Complete tldw WebUI and extension design-system migration
 
-Draft only: human review and approval are required before creating or updating any public GitHub issue from this body.
-
 ## Purpose
 
 Track the remaining tldw WebUI and browser-extension design-system migration and governance work after the v1 proof surface.
