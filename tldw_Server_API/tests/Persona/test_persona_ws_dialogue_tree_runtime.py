@@ -12,7 +12,12 @@ from starlette.datastructures import State
 
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.Persona.dialogue_tree_scorers import ScoreResult, ScoreSeverity
-from tldw_Server_API.app.core.Persona.runtime_explorer import RuntimeExplorerConfig
+from tldw_Server_API.app.core.Persona.runtime_explorer import (
+    ExplorationFallback,
+    RuntimeBudgetUsage,
+    RuntimeExplorationResult,
+    RuntimeExplorerConfig,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -96,6 +101,29 @@ def _events_for_text(text: str, *, session_id: str = "sess_runtime") -> list[dic
     return events
 
 
+def _notice_for_text(text: str, *, reason_code: str, session_id: str = "sess_runtime") -> dict:
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": session_id,
+                        "text": text,
+                        "use_memory_context": False,
+                        "use_companion_context": False,
+                        "use_persona_state_context": False,
+                    }
+                )
+            )
+            return _recv_until(
+                ws,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == reason_code,
+            )
+
+
 def test_runtime_explorer_provider_reuses_matching_explorer_instances() -> None:
     provider = persona_ep.PersonaRuntimeExplorerProvider()
     config = RuntimeExplorerConfig(enabled=True, max_provider_calls=1)
@@ -142,6 +170,50 @@ def test_runtime_explorer_config_clamps_numeric_settings(monkeypatch) -> None:
     assert config.max_provider_calls == 100
     assert config.timeout_ms == 100
     assert config.max_tokens == 16
+
+
+def test_runtime_explorer_diagnostics_payload_defaults_missing_budget() -> None:
+    result = RuntimeExplorationResult(
+        selected_candidate=None,
+        fallback=ExplorationFallback.SOFT_EXISTING_BEHAVIOR,
+        safe_denial=None,
+        budget=None,  # type: ignore[arg-type]
+        diagnostics={"reason": "candidate_generation_timeout", "error_type": "TimeoutError"},
+    )
+
+    payload = persona_ep._runtime_explorer_diagnostics_payload(result)
+
+    assert payload["provider_calls"] == 0
+    assert payload["candidates_considered"] == 0
+    assert payload["hard_prunes"] == 0
+    assert payload["soft_prunes"] == 0
+    assert payload["elapsed_ms"] == 0
+    assert payload["reason"] == "candidate_generation_timeout"
+    assert payload["error_type"] == "TimeoutError"
+
+
+def test_runtime_explorer_diagnostics_payload_defaults_null_budget_fields() -> None:
+    result = RuntimeExplorationResult(
+        selected_candidate=None,
+        fallback=ExplorationFallback.SOFT_EXISTING_BEHAVIOR,
+        safe_denial=None,
+        budget=RuntimeBudgetUsage(
+            provider_calls=None,  # type: ignore[arg-type]
+            candidates_considered=None,  # type: ignore[arg-type]
+            hard_prunes=None,  # type: ignore[arg-type]
+            soft_prunes=None,  # type: ignore[arg-type]
+            elapsed_ms=None,  # type: ignore[arg-type]
+        ),
+        diagnostics={"reason": "candidate_generation_timeout"},
+    )
+
+    payload = persona_ep._runtime_explorer_diagnostics_payload(result)
+
+    assert payload["provider_calls"] == 0
+    assert payload["candidates_considered"] == 0
+    assert payload["hard_prunes"] == 0
+    assert payload["soft_prunes"] == 0
+    assert payload["elapsed_ms"] == 0
 
 
 def test_runtime_explorer_provider_context_is_minimized_and_redacted(monkeypatch) -> None:
@@ -269,6 +341,44 @@ def test_runtime_explorer_default_generator_can_select_safe_alternative(monkeypa
     assert plan["steps"][0]["policy"]["allow"] is True
 
 
+def test_runtime_explorer_boolean_safe_denial_uses_default_message(monkeypatch) -> None:
+    class _FakeExplorer:
+        def explore(self, _context: dict) -> RuntimeExplorationResult:
+            return RuntimeExplorationResult(
+                selected_candidate=None,
+                fallback=ExplorationFallback.HARD_SAFE_DENIAL,
+                safe_denial=True,  # type: ignore[arg-type]
+                budget=RuntimeBudgetUsage(),
+            )
+
+    class _FakeProvider:
+        def get(self, _config: RuntimeExplorerConfig) -> _FakeExplorer:
+            return _FakeExplorer()
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=True, max_provider_calls=1),
+        raising=False,
+    )
+
+    plan = persona_ep._apply_persona_runtime_explorer_to_plan(
+        base_plan={"steps": []},
+        user_message="unsafe request",
+        session_id="sess_runtime_bool_safe_denial",
+        persona_id="persona-default",
+        runtime_mode="global",
+        memory_context=[],
+        persona_state_fields=[],
+        companion_usage={},
+        persona_exemplar_selection={},
+        runtime_explorer_provider=_FakeProvider(),  # type: ignore[arg-type]
+    )
+
+    assert plan["steps"][0]["args"]["text"] == RuntimeExplorerConfig().safe_denial_text
+    assert plan["steps"][0]["args"]["text"] != "True"
+
+
 def test_runtime_explorer_disabled_preserves_existing_plan_without_debug_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         persona_ep,
@@ -315,17 +425,12 @@ def test_runtime_explorer_fallback_notice_is_bounded_and_trace_safe(monkeypatch)
     )
     monkeypatch.setattr(persona_ep, "_persona_runtime_candidate_generator", _timeout, raising=False)
 
-    events = _events_for_text(
+    notice = _notice_for_text(
         "Authorization: Bearer user-secret find runtime notes",
+        reason_code="RUNTIME_EXPLORER_FALLBACK",
         session_id="sess_runtime_fallback_notice",
     )
 
-    notice = next(
-        event
-        for event in events
-        if event.get("event") == "notice"
-        and event.get("reason_code") == "RUNTIME_EXPLORER_FALLBACK"
-    )
     diagnostics = notice["runtime_explorer"]
     serialized_notice = json.dumps(notice, sort_keys=True)
     assert diagnostics["fallback"] == "soft_existing_behavior"

@@ -356,6 +356,24 @@ def _runtime_explorer_safe_token(value: Any, *, fallback: str = "other") -> str:
     return fallback
 
 
+def _runtime_explorer_budget_int(budget: Any, field_name: str) -> int:
+    """Return a non-negative budget diagnostic integer with malformed fields as zero."""
+    raw_value = getattr(budget, field_name, 0) if budget is not None else 0
+    try:
+        return max(0, int(raw_value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _runtime_explorer_safe_denial_text(value: Any) -> str:
+    """Normalize runtime explorer safe-denial sentinels to user-facing text."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return text
+    return _PERSONA_RUNTIME_SAFE_DENIAL_TEXT
+
+
 def _runtime_explorer_diagnostics_payload(result: RuntimeExplorationResult) -> dict[str, Any]:
     """Build the websocket-safe runtime explorer diagnostics envelope."""
     diagnostics = dict(result.diagnostics or {})
@@ -366,11 +384,11 @@ def _runtime_explorer_diagnostics_payload(result: RuntimeExplorationResult) -> d
             fallback="other",
         ),
         "reason": _runtime_explorer_safe_token(diagnostics.get("reason"), fallback=reason_fallback),
-        "provider_calls": max(0, int(result.budget.provider_calls)),
-        "candidates_considered": max(0, int(result.budget.candidates_considered)),
-        "hard_prunes": max(0, int(result.budget.hard_prunes)),
-        "soft_prunes": max(0, int(result.budget.soft_prunes)),
-        "elapsed_ms": max(0, int(result.budget.elapsed_ms)),
+        "provider_calls": _runtime_explorer_budget_int(result.budget, "provider_calls"),
+        "candidates_considered": _runtime_explorer_budget_int(result.budget, "candidates_considered"),
+        "hard_prunes": _runtime_explorer_budget_int(result.budget, "hard_prunes"),
+        "soft_prunes": _runtime_explorer_budget_int(result.budget, "soft_prunes"),
+        "elapsed_ms": _runtime_explorer_budget_int(result.budget, "elapsed_ms"),
         "circuit_open": bool(result.circuit_open),
         "safe_denial": bool(result.safe_denial),
     }
@@ -722,7 +740,7 @@ def _apply_persona_runtime_explorer_to_plan(
     result = provider.get(config).explore(runtime_context)
     runtime_diagnostics = _runtime_explorer_diagnostics_payload(result) if include_diagnostics else None
     if result.safe_denial:
-        safe_plan = _runtime_safe_denial_plan(result.safe_denial)
+        safe_plan = _runtime_safe_denial_plan(_runtime_explorer_safe_denial_text(result.safe_denial))
         if runtime_diagnostics:
             safe_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
         return safe_plan
