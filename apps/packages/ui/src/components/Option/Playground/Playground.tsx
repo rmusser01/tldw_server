@@ -236,6 +236,7 @@ export const Playground = () => {
     stopStreamingRequest,
     regenerateLastMessage,
     selectedAssistant,
+    serverChatPersonaMemoryMode,
   } = useMessageOption();
   const {
     systemPrompt,
@@ -1847,7 +1848,7 @@ export const Playground = () => {
       assistantSummary={buildCockpitAssistantSummary({
         selectedAssistant,
         selectedCharacter,
-        personaMemoryMode: null,
+        personaMemoryMode: serverChatPersonaMemoryMode,
       })}
       onOpenModelSettings={openModelSettings}
       onOpenAssistantSelect={() => openAssistantSelector({ tab: "character" })}

@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 02:07'
+updated_date: '2026-05-14 02:13'
 labels:
   - webui
   - chat
@@ -112,6 +112,8 @@ Reviewed and hardened the P-series completion spec before implementation plannin
 Created the P-series implementation plan of record at Docs/superpowers/plans/2026-05-14-main-chat-cockpit-p-series-completion-implementation-plan.md. It keeps all work in PR #1582, scopes implementation to the main /chat cockpit rails, requires real-server Playwright proof without route interception, and preserves P0/P1/P2 human approval gates before merge readiness.
 
 Task 0 state contract helper slice: added pure cockpit summary helper guard tests for assistant legacy fallback, persona memory detail, prompt record labels, custom prompt distinction, MCP state contracts, and provider-qualified model routes; wired Playground cockpit assistant, prompt, MCP, and provider-route summaries through the helpers. Verification: helper test passed via bunx vitest; exact paired bunx command was blocked by transient bunx latest/jsdom resolution, then the same two suites passed from apps/tldw-frontend using the repo-installed Vitest with frontend alias config (12 tests). Bandit not applicable because this slice touched TypeScript/TSX and task Markdown only.
+
+Task 0 compliance follow-up: wired serverChatPersonaMemoryMode from useMessageOption into buildCockpitAssistantSummary and added a Playground cockpit regression test proving persona read/write memory mode renders in the runtime rail. Verification: focused helper plus cockpit-controls Vitest passed from apps/tldw-frontend with repo-installed Vitest (13 tests); git diff --check passed. Existing non-fatal mocked-server 400 chat-settings logs remain baseline.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

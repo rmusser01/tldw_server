@@ -42,6 +42,7 @@ const messageOptionState = vi.hoisted(() => ({
       id: "character-1",
       name: "Mira Vale",
     } as { kind: "character" | "persona"; id: string; name: string } | null,
+    serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
     setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
@@ -247,6 +248,7 @@ describe("Playground cockpit controls", () => {
       id: "character-1",
       name: "Mira Vale",
     };
+    messageOptionState.value.serverChatPersonaMemoryMode = null;
     messageOptionState.value.temporaryChat = true;
     messageOptionState.value.webSearch = true;
     messageOptionState.value.toolChoice = "auto";
@@ -414,6 +416,37 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }
+  });
+
+  it("passes persona memory mode through to the cockpit assistant summary", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-1",
+      name: "Research Persona",
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "legacy-character",
+      name: "Legacy Character",
+    };
+    messageOptionState.value.serverChatPersonaMemoryMode = "read_write";
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(
+      within(runtimeInspector).getByText("Research Persona"),
+    ).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).getByText("Persona selected - memory read/write"),
+    ).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).queryByRole("button", {
+        name: "Open Scene Director",
+      }),
+    ).toBeNull();
   });
 
   it("does not render cockpit control rails in focus mode", async () => {
