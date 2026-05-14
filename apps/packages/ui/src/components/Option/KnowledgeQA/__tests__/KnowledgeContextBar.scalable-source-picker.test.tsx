@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { RagSource } from "@/services/rag/unified-rag"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -99,6 +99,7 @@ describe("KnowledgeContextBar scalable source picker", () => {
     renderContextBar()
     await openSpecificSources()
 
+    expect(screen.getByPlaceholderText("Filter docs by title")).toHaveFocus()
     expect(screen.queryByText("Generated Fixture")).not.toBeInTheDocument()
     expect(screen.queryByText("Workspace Scratch")).not.toBeInTheDocument()
     expect(screen.getByText(/ID: 42/)).toBeInTheDocument()
@@ -127,6 +128,25 @@ describe("KnowledgeContextBar scalable source picker", () => {
     })
     expect(screen.getByText("Workspace Scratch")).toBeInTheDocument()
     expect(screen.queryByText("Generated Fixture")).not.toBeInTheDocument()
+  })
+
+  it("supports keyboard switching between document and note source groups", async () => {
+    renderContextBar()
+    await openSpecificSources()
+
+    const dialog = screen.getByRole("dialog", { name: "Specific source selector" })
+    fireEvent.keyDown(dialog, {
+      key: "]",
+    })
+
+    expect(within(dialog).getByRole("button", { name: /Notes/ })).toHaveClass("bg-primary")
+    expect(screen.getByPlaceholderText("Filter notes by title")).toHaveFocus()
+
+    fireEvent.keyDown(dialog, {
+      key: "[",
+    })
+
+    expect(within(dialog).getByRole("button", { name: /Documents & Media/ })).toHaveClass("bg-primary")
   })
 
   it("supports selecting visible sources, clearing visible sources, and selecting recent imports", async () => {

@@ -293,8 +293,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
   // Test 4: Max limit
   // -----------------------------------------------------------------------
   describe("max profiles limit", () => {
-    it("disables save button and shows limit message when 5 profiles exist", () => {
-      const profiles = Array.from({ length: 5 }, (_, index) => ({
+    it("disables save button and shows limit message when 12 profiles exist", () => {
+      const profiles = Array.from({ length: 12 }, (_, index) => ({
         name: `Profile ${index + 1}`,
         sources: ["media_db"] as string[],
         preset: "fast",
@@ -306,7 +306,7 @@ describe("KnowledgeContextBar saved search profiles", () => {
 
       openProfileMenu()
 
-      const limitButton = screen.getByText("Limit reached (5)")
+      const limitButton = screen.getByText("Limit reached (12)")
       expect(limitButton).toBeInTheDocument()
       expect(limitButton.closest("button")).toBeDisabled()
     })
@@ -403,6 +403,101 @@ describe("KnowledgeContextBar saved search profiles", () => {
       fireEvent.keyDown(nameInput, { key: "Enter" })
 
       expect(localStorage.getItem(PROFILES_STORAGE_KEY)).toBeNull()
+    })
+  })
+
+  describe("profile transfer", () => {
+    it("exports profiles with a privacy disclosure before data leaves browser-local storage", () => {
+      localStorage.setItem(
+        PROFILES_STORAGE_KEY,
+        JSON.stringify([
+          {
+            name: "Pinned Evidence",
+            sources: ["media_db"],
+            includeMediaIds: [42],
+            preset: "balanced",
+            enableWebFallback: true,
+          },
+        ])
+      )
+
+      renderContextBar()
+
+      openProfileMenu()
+      fireEvent.click(screen.getByRole("button", { name: "Export profiles" }))
+
+      expect(screen.getAllByText(/Export includes selected source IDs and web fallback state/i)).toHaveLength(2)
+      expect(screen.getAllByText(/copied exports cannot be revoked/i)).toHaveLength(2)
+      const exportedJson = (screen.getByLabelText("Exported profile JSON") as HTMLTextAreaElement).value
+      expect(exportedJson).toContain('"name": "Pinned Evidence"')
+      expect(exportedJson).toContain('"includeMediaIds"')
+    })
+
+    it("imports valid shared profiles and rejects invalid entries", () => {
+      renderContextBar()
+
+      openProfileMenu()
+      fireEvent.click(screen.getByRole("button", { name: "Import profiles" }))
+      fireEvent.change(screen.getByLabelText("Profile import JSON"), {
+        target: {
+          value: JSON.stringify([
+            {
+              name: "Shared QA Scope",
+              sources: ["media_db", "notes"],
+              includeMediaIds: [42],
+              includeNoteIds: ["note-1"],
+              preset: "thorough",
+              enableWebFallback: false,
+            },
+            {
+              name: "Invalid Scope",
+              sources: ["not-real"],
+              preset: "fast",
+              enableWebFallback: true,
+            },
+          ]),
+        },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Import" }))
+
+      expect(screen.getByRole("menuitem", { name: /Shared QA Scope/i })).toBeInTheDocument()
+      expect(screen.queryByRole("menuitem", { name: /Invalid Scope/i })).not.toBeInTheDocument()
+      const stored = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY)!)
+      expect(stored).toHaveLength(1)
+      expect(stored[0].name).toBe("Shared QA Scope")
+    })
+
+    it("de-duplicates profiles within an imported payload by name", () => {
+      renderContextBar()
+
+      openProfileMenu()
+      fireEvent.click(screen.getByRole("button", { name: "Import profiles" }))
+      fireEvent.change(screen.getByLabelText("Profile import JSON"), {
+        target: {
+          value: JSON.stringify([
+            {
+              name: "Shared QA Scope",
+              sources: ["media_db"],
+              preset: "fast",
+              enableWebFallback: true,
+            },
+            {
+              name: "Shared QA Scope",
+              sources: ["notes"],
+              preset: "thorough",
+              enableWebFallback: false,
+            },
+          ]),
+        },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Import" }))
+
+      expect(screen.getAllByRole("menuitem", { name: /Shared QA Scope/i })).toHaveLength(1)
+      const stored = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY)!)
+      expect(stored).toHaveLength(1)
+      expect(stored[0].sources).toEqual(["notes"])
+      expect(stored[0].preset).toBe("thorough")
+      expect(stored[0].enableWebFallback).toBe(false)
     })
   })
 })

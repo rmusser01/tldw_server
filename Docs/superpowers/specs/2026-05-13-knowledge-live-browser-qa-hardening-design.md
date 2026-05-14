@@ -12,6 +12,36 @@ Add a verification-first QA hardening stage to PR #1617 for the `/knowledge` QA 
 
 Saved-view sharing, profile sharing, and advanced organization remain out of scope for PR #1617. Those ideas should become a follow-up product-expansion issue only after QA produces evidence that the new source picker needs them.
 
+## Product Expansion Addendum For Issue #1631
+
+Issue #1631 and PR #1650 intentionally implement the follow-up `/knowledge` source-picker expansion while preserving the QA-only page boundary. `/knowledge` is still not the canonical knowledge CRUD, import, or management hub.
+
+Profile persistence decision:
+
+- Saved source profiles are browser-local for this slice. They are not server-side saved views, cross-device state, team-shared scopes, or user/account resources.
+- Export/import is a manual portability path for browser-local profile JSON, not a sharing or authorization API.
+- The exported JSON may include profile names, selected media/note source IDs, selected source categories, QA preset, and web fallback state.
+- The exported JSON must not include source content, citation excerpts, answers, query history, credentials, provider keys, server tokens, or account identifiers beyond source IDs already selected by the user.
+- Copied/exported JSON cannot be revoked by the app. Deleting a local profile only removes that browser's copy; any already-copied export remains outside app control.
+- Imported source IDs are not access grants. The server's normal auth, ownership, workspace, and visibility checks still determine whether selected sources can be used.
+- Web fallback state may be carried by a profile, but the actual provider remains the configured server default selected by the user's environment.
+
+Required profile copy:
+
+- In the profile menu: state that profiles are saved locally in this browser.
+- Before or during export: state that export includes selected source IDs and web fallback state.
+- When describing copied exports: state that copied profile JSON cannot be revoked.
+- During import: state that import stores the profile locally and does not bypass server access rules.
+
+Shortcut decision:
+
+- The specific source selector may use local dialog shortcuts only while focus is inside the selector dialog.
+- `/` focuses the source filter unless focus is already inside an input, textarea, or select.
+- `[` switches to the media/docs group unless focus is inside an input, textarea, or select.
+- `]` switches to the notes group unless focus is inside an input, textarea, or select.
+- These shortcuts are scoped to the source selector and must not register as global shortcuts.
+- The dialog should expose `aria-keyshortcuts="[ ] /"` and the shortcut mapping should be recorded in `apps/extension/docs/shortcuts.md`.
+
 ## Goals
 
 - Verify `/knowledge` with live browser evidence across WebUI and extension surfaces.
