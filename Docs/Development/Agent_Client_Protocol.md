@@ -312,6 +312,22 @@ The initial contract intentionally stays summary-level. Operator drill-through
 continues to use the existing session detail, events, artifacts, diagnostics,
 audit, run-history, and task-detail endpoints listed above.
 
+The current and planned product surfaces are:
+
+| Surface | Status | Operator role |
+| --- | --- | --- |
+| Admin API | Shipped | `GET /api/v1/admin/acp/execution-health/summary?range_days=30` is the backend-owned reporting contract. |
+| Agent Registry | Shipped | Shows the first admin summary for sessions, compatibility, setup blockers, failure buckets, and retention/redaction posture. |
+| Agent Tasks | Existing drill-through | Task detail and run history remain the per-task investigation path. Add task-list filters or badges only as a follow-up product slice. |
+| ACP Playground diagnostics | Existing drill-through | Session diagnostics remain scoped to the selected run/session. Preflight setup hints can consume the summary later if needed. |
+| Admin/ops surfaces | Future packaging | Trend dashboards, exports, alerts, and deployment reporting belong under the admin/deployment packaging track. |
+| Docs | Shipped | The PRD, readiness matrix, compatibility matrix, and this guide define metric semantics and release caveats. |
+
+Keep the closeout boundaries separate: #1537 owns the summary contract and
+initial admin display; #1512 owns retention cleanup, #1513 owns support-safe
+redacted views, #1529 owns broader admin/deployment packaging, and #1563/#1564
+own live downstream-agent certification evidence.
+
 ### Frontend Setup And Diagnostics Surfaces
 
 Agent Tasks, Agent Registry, and ACP Playground share the same browser transport
