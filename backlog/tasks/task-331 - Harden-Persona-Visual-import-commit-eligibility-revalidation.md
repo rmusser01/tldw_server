@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - codex
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-14 03:49'
+updated_date: '2026-05-14 04:05'
 labels:
   - persona
 dependencies: []
@@ -57,15 +57,29 @@ Implemented shared import preview commit eligibility guards for API enqueue and 
 
 Verification: red tests first confirmed stale blocked revalidation still created packs and commit-ineligible completed preview still queued a job before the fix.
 
-Verification after fix: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q --tb=short` passed 11 tests.
+Verification after fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q --tb=short` passed 11 tests.
 
-Verification after fix: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` passed 40 tests.
+Verification after fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` passed 40 tests.
 
-Verification after fix: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py -q --tb=short` passed 21 tests.
+Verification after fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py -q --tb=short` passed 21 tests.
 
 Verification after fix: `git diff --check` passed.
 
-Verification after fix: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
+Verification after fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1678. GitHub checks were pending at creation time; human-authored Change summary remains required before merge per repo policy.
+
+PR review follow-up: added helper-level regression coverage for malformed proposed plans, missing revalidated proposed plans, null blocker filtering, and legacy renderer previews without `can_commit`. The shared guard now fails closed for non-mapping plans, ignores null blocker values, and only treats `renderer_import_preview.can_commit` as a blocker when that key is explicitly present and not true.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_import_commit_eligibility.py -q --tb=short` passed 4 tests.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q --tb=short` passed 11 tests.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` passed 40 tests.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py -q --tb=short` passed 21 tests.
+
+Verification after review fix: `git diff --check` passed.
+
+Verification after review fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
 <!-- SECTION:NOTES:END -->
