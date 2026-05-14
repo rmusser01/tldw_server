@@ -280,7 +280,7 @@ git add Docs/superpowers/plans/2026-05-14-design-system-remaining-work-tracker-i
 git commit -m "Draft design-system tracker issue bodies"
 ```
 
-Expected: one commit containing only local draft issue body artifacts.
+Expected: one commit containing only the initial local issue body artifacts.
 
 ## Task 2: Human Review Gate and Label Preparation
 
