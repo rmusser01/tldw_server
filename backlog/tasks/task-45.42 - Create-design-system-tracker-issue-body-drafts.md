@@ -52,6 +52,7 @@ Execute Task 1 of the design-system remaining-work tracker implementation plan b
 - Created local-only draft GitHub issue bodies under `Docs/superpowers/plans/2026-05-14-design-system-remaining-work-tracker-issue-bodies/`.
 - Draft set includes README, epic body, 13 product-area migration bodies, and 6 governance bodies.
 - All draft issue bodies preserve the human approval gate before public GitHub issue, label, PR, or other GitHub-state mutation.
+- Clarified the long-tail draft split note for current threshold groups: `src/components/Option/Chatbooks` with 17 findings and `src/components/Option/Collections` with 7 findings remain in long-tail only as a draft-package boundary until human approval decides whether to split them.
 - Bandit skipped: non-code Markdown-only tracker draft work; no Python files touched.
 <!-- SECTION:NOTES:END -->
 
@@ -60,6 +61,7 @@ Execute Task 1 of the design-system remaining-work tracker implementation plan b
 <!-- SECTION:VERIFICATION:BEGIN -->
 - `find Docs/superpowers/plans/2026-05-14-design-system-remaining-work-tracker-issue-bodies -type f | sort` listed the expected 21 draft files.
 - `git diff --check` passed.
+- Review fix verification: `git diff --check` passed after clarifying the long-tail threshold-group note.
 <!-- SECTION:VERIFICATION:END -->
 
 ## Final Summary

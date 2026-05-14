@@ -65,4 +65,8 @@ Top current path groups:
 - Keep AntD where it is only mechanics.
 - Migrate product state language to shared primitives or the state registry.
 - Split implementation into reviewable PRs when the area is too broad.
-- If any long-tail path group has five or more findings at tracker creation, create a dedicated sub-issue or explicitly record why it remains long-tail.
+- Current long-tail path groups meeting the split threshold at tracker creation:
+  - `src/components/Option/Chatbooks`: 17 findings.
+  - `src/components/Option/Collections`: 7 findings.
+- These remain in this long-tail draft for now because this draft package is limited to the issue set approved in the implementation plan, and public GitHub issue creation still requires human review and approval.
+- Before implementation starts on either `Chatbooks` or `Collections`, split that group into a dedicated sub-issue if the human wants separate tracker issues for those surfaces; otherwise record the explicit decision to keep it under this long-tail issue.
