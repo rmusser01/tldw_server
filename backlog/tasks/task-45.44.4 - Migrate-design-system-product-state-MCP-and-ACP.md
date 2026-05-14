@@ -1,9 +1,10 @@
 ---
 id: TASK-45.44.4
 title: 'Migrate design-system product state: MCP and ACP'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
+updated_date: '2026-05-14 06:35'
 labels:
   - design-system
   - webui
@@ -31,6 +32,20 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
 - [ ] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Review-driven unblock from PR #1683: replace the unbaselined WorkspaceACPHistoryModal AntD Alert product-state error with the shared design-system recovery primitive, then rerun the full design-system verifier. Keep the broader MCP/ACP migration task open for the remaining baseline debt.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR #1683 review surfaced a full-verifier blocker in WorkspaceACPHistoryModal. This narrow change is being handled inside the Chat/Playground PR only to restore verifier pass status; it does not complete the broader MCP/ACP migration area.
+
+PR #1683 review unblock completed: after rebasing onto current dev, WorkspaceACPHistoryModal uses the shared design-system Alert primitive for the load-error product state. Full bun run verify:design-system-state exits 0. The broader MCP/ACP baseline migration remains open.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -12,6 +12,7 @@ import { ProviderIcons } from "@/components/Common/ProviderIcon";
 import { type KnowledgeTab } from "@/components/Knowledge";
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu";
 import { isFirefoxTarget } from "@/config/platform";
+import { getDesignSystemState } from "@/design-system";
 import { getAllPrompts } from "@/db/dexie/helpers";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
@@ -1397,7 +1398,10 @@ export const PlaygroundForm = ({
       return t("playground:composer.providerStatusOffline", "Offline");
     }
     if (connectionUxState === "connected_degraded") {
-      return t("playground:composer.providerStatusDegraded", "Degraded");
+      return t(
+        "playground:composer.providerStatusDegraded",
+        getDesignSystemState("degraded")?.label ?? "",
+      );
     }
     return t("playground:composer.providerStatusHealthy", "Healthy");
   }, [connectionUxState, isConnectionReady, t]);
