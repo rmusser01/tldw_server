@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
 
 const designSystemLabels = vi.hoisted(() => ({
   ready: "Registry Ready",
-  unavailable: "Registry Unavailable"
+  unavailable: "Registry Unavailable",
+  missingKeys: new Set<string>()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -49,6 +50,12 @@ vi.mock("@/design-system", async (importActual) => {
     ...actual,
     getDesignSystemState: vi.fn(
       (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        if (designSystemLabels.missingKeys.has(key)) {
+          return undefined as unknown as ReturnType<
+            typeof actual.getDesignSystemState
+          >
+        }
+
         const state = actual.getDesignSystemState(key)
 
         if (key === "ready") {
@@ -71,6 +78,7 @@ import MonitoringDashboardPage from "../MonitoringDashboardPage"
 describe("MonitoringDashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    designSystemLabels.missingKeys.clear()
 
     if (!window.matchMedia) {
       Object.defineProperty(window, "matchMedia", {
@@ -236,6 +244,34 @@ describe("MonitoringDashboardPage", () => {
     expect(screen.getByText(designSystemLabels.unavailable)).toBeTruthy()
     expect(screen.getByText("2")).toBeTruthy()
     expect(screen.getByText("1")).toBeTruthy()
+    expect(getDesignSystemState).toHaveBeenCalledWith("ready")
+    expect(getDesignSystemState).toHaveBeenCalledWith("unavailable")
+  })
+
+  it("falls back to readable state keys when sandbox readiness registry labels are missing", async () => {
+    designSystemLabels.missingKeys.add("ready")
+    designSystemLabels.missingKeys.add("unavailable")
+    mocks.getSandboxRuntimeDiagnostics.mockResolvedValue({
+      source: "feature_discovery",
+      summary: {
+        total: 3,
+        ready: 2,
+        unavailable: 1,
+        host_gated: 0,
+        scaffold: 0,
+        host_local_warning_runtimes: [],
+        repair_supported_runtimes: []
+      },
+      runtimes: [],
+      startup_warning_summary: null
+    })
+
+    render(<MonitoringDashboardPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText("ready")).toBeTruthy()
+    })
+    expect(screen.getByText("unavailable")).toBeTruthy()
     expect(getDesignSystemState).toHaveBeenCalledWith("ready")
     expect(getDesignSystemState).toHaveBeenCalledWith("unavailable")
   })

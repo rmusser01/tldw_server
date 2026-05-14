@@ -529,9 +529,9 @@ const MonitoringDashboardPage: React.FC = () => {
   const hostLocalWarningRuntimes = Array.isArray(sandboxDiagnostics?.summary?.host_local_warning_runtimes)
     ? sandboxDiagnostics.summary.host_local_warning_runtimes
     : []
-  const readyStateLabel = getDesignSystemState("ready")?.label ?? ""
+  const readyStateLabel = getDesignSystemState("ready")?.label ?? "ready"
   const unavailableStateLabel =
-    getDesignSystemState("unavailable")?.label ?? ""
+    getDesignSystemState("unavailable")?.label ?? "unavailable"
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
