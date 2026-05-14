@@ -1153,6 +1153,116 @@ async def test_persona_visual_import_commit_worker_rejects_incomplete_preview(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stored_plan_json", ["{not-json", "[]"])
+async def test_persona_visual_import_commit_worker_rejects_invalid_stored_plan_before_revalidation(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_plan_json: str,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs_worker import (
+        PersonaVisualPortabilityWorker,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability import importer as importer_module
+
+    persona_id, pack, _source_asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    export_result = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(
+        persona_id=persona_id,
+        pack_id=str(pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=export_result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=persona_id,
+        target_packs=db_instance.list_persona_visual_packs(
+            persona_id=persona_id,
+            user_id="user-1",
+        ),
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-1",
+        status="completed",
+        stage="completed",
+        archive_path=str(export_result.archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        conflicts=preview_result["conflicts"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+    with db_instance.transaction() as conn:
+        conn.execute(
+            """
+            UPDATE persona_visual_pack_import_previews
+               SET proposed_plan_json = ?
+             WHERE id = ?
+            """,
+            (stored_plan_json, preview["id"]),
+        )
+    portability_job = repo.create_portability_job(
+        owner_user_id="user-1",
+        job_id="job-commit-1",
+        operation="import_commit",
+        status="queued",
+        stage="queued",
+        preview_id=str(preview["id"]),
+        persona_id=persona_id,
+    )
+
+    class _UnexpectedPreviewer:
+        def create_preview(self, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("import commit revalidated a corrupt stored preview")
+
+    monkeypatch.setattr(
+        importer_module,
+        "PersonaVisualPackImportPreviewer",
+        _UnexpectedPreviewer,
+    )
+    worker = PersonaVisualPortabilityWorker(db=db_instance, repo=repo)
+
+    with pytest.raises(ValueError, match="import_preview_not_commit_eligible"):
+        await worker.handle_job_async(
+            {
+                "id": "job-commit-1",
+                "job_type": PERSONA_VISUAL_PACK_IMPORT_COMMIT_JOB_TYPE,
+                "owner_user_id": "user-1",
+                "payload": {
+                    "user_id": "user-1",
+                    "preview_id": str(preview["id"]),
+                    "portability_job_id": str(portability_job["id"]),
+                    "request_id": "req-commit",
+                    "target_persona_id": persona_id,
+                    "trust_mode": "untrusted_import",
+                    "target_mode": "create_new",
+                },
+            }
+        )
+
+    updated_job = repo.get_portability_job(str(portability_job["id"]), owner_user_id="user-1")
+    assert updated_job is not None
+    assert updated_job["status"] == "failed"
+    assert updated_job["error_message"] == "import_preview_not_commit_eligible"
+    assert len(db_instance.list_persona_visual_packs(persona_id=persona_id, user_id="user-1")) == 1
+
+
+@pytest.mark.asyncio
 async def test_persona_visual_import_commit_worker_rejects_revalidated_blocked_preview(
     db_instance: CharactersRAGDB,
     tmp_path: Path,

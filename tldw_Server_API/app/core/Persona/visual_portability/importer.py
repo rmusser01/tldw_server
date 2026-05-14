@@ -273,7 +273,6 @@ class PersonaVisualPackImporter:
         if progress is not None:
             progress(stage, payload)
 
-
 def _import_preview_proposed_plan(preview: Mapping[str, Any]) -> tuple[Mapping[str, Any], bool]:
     """Return proposed-plan metadata from either a row or fresh preview payload."""
     if "proposed_plan" in preview:

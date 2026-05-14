@@ -56,15 +56,20 @@ Implement GitHub issue #1657 as a focused Persona/Buddy visual-pack hardening sl
 - Added shared importer validation that accepts legacy previews with no commit_eligible flag but rejects blocked previews or explicit commit_eligible false results.
 - Added regression coverage proving blocked revalidation fails the job with no additional draft pack created.
 - No docs changes were needed because the existing docs already describe blocked previews as commit-ineligible review results.
+- Review follow-up: aligned API `blocked` preview reporting with worker `import_preview_not_commit_eligible` handling.
+- Review follow-up: malformed or non-object stored `proposed_plan_json` now fails closed before job enqueueing or worker revalidation, while valid object metadata without `commit_eligible` remains eligible.
+- Review follow-up: verification commands in this task use repo-relative invocations instead of machine-local absolute paths.
 
 ## Verification
 
-- RED: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py::test_start_import_commit_rejects_ineligible_completed_preview tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py::test_persona_visual_import_commit_worker_rejects_revalidated_blocked_preview -q` failed with the API returning 202 and the worker not raising the new guard error.
+- RED: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py::test_start_import_commit_rejects_ineligible_completed_preview tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py::test_persona_visual_import_commit_worker_rejects_revalidated_blocked_preview -q` failed with the API returning 202 and the worker not raising the new guard error.
 - GREEN: same focused two-test command passed with 2 tests.
-- Focused regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q` passed with 51 tests.
-- Syntax: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py` passed.
+- Review RED: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py::test_start_import_commit_reports_blocked_preview_as_not_commit_eligible tldw_Server_API/tests/Persona/test_persona_visuals_api.py::test_start_import_commit_rejects_invalid_stored_preview_plan tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py::test_persona_visual_import_commit_worker_rejects_invalid_stored_plan_before_revalidation -q` failed with 5 failing review-regression cases.
+- Review GREEN: same review-regression command passed with 5 tests.
+- Focused regression: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q` passed with 56 tests.
+- Syntax: `python -m py_compile tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py` passed.
 - Whitespace: `git diff --check` passed.
-- Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py -f json -o /tmp/bandit_persona_visual_commit_guards.json` reported zero findings.
+- Bandit: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/visual_portability/importer.py -f json -o /tmp/bandit_persona_visual_commit_guards_review.json` reported zero findings.
 
 ## Known Skips
 
@@ -72,4 +77,4 @@ Implement GitHub issue #1657 as a focused Persona/Buddy visual-pack hardening sl
 
 ## Final Summary
 
-Hardened Persona Visual import-commit so stored previews with explicit `commit_eligible: false` are rejected before job queueing, and worker-side revalidation rejects blocked or non-commit-eligible previews before draft pack or asset creation. Added focused API and worker regressions while preserving existing eligible preview behavior.
+Hardened Persona Visual import-commit so stored previews with explicit `commit_eligible: false`, blocked status, malformed stored plan JSON, or non-object stored plan JSON are rejected before job queueing or worker revalidation. Worker-side revalidation also rejects blocked or non-commit-eligible previews before draft pack or asset creation. Added focused API and worker regressions while preserving existing eligible preview behavior for valid plan objects without `commit_eligible`.

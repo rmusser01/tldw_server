@@ -2278,8 +2278,11 @@ def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> A
 
 def _persona_visual_import_preview_commit_eligible(preview: dict[str, Any]) -> bool:
     """Return whether stored preview metadata allows queuing import commit."""
-    if str(preview.get("status") or "").strip() == "blocked":
+    status_value = str(preview.get("status") or "").strip()
+    if status_value == "blocked":
         return False
+    if status_value != "completed":
+        return True
     proposed_plan, proposed_plan_valid = import_preview_plan_from_stored_json(
         preview.get("proposed_plan_json")
     )
