@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 05:45'
+updated_date: '2026-05-14 05:47'
 labels:
   - webui
   - chat
@@ -142,6 +142,8 @@ Task 3 implementation: model and chat rail now marks provider:model setting rows
 Task 4 implementation: MCP rail now derives availability from real MCP state, hides dead-end tool-choice controls when MCP is unavailable, keeps recoverable settings access, passes return-focus metadata when the cockpit rail opens MCP settings, and restores focus to the rail trigger when that settings surface closes. Task 4 verification: focused Vitest from apps/tldw-frontend passed 4 files / 35 tests covering useMcpToolsControl, runtime inspector MCP states, Playground cockpit MCP wiring, and cockpit action events. git diff --check passed. Real-server health probe to http://127.0.0.1:8000/api/v1/health still fails with curl exit 7, so real-server MCP proof remains blocked and was not mocked. Bandit not applicable because this slice touched frontend TypeScript/TSX only.
 
 Real server proof refresh completed for chat cockpit spec. The MCP rail assertion now follows the live server state, the prompt rail click matches the rendered accessible name, and the disposable character flow sends through the composer with Enter before clearing the assistant. Full real server Playwright passed with 4 tests against local backend and frontend. git diff check passed.
+
+P0 gate evidence recorded after live server became available. Commit range for the P0 cockpit rail work is ff2306b4f through 56a4c2272. Focused P0 Vitest passed from apps/tldw-frontend with 6 files and 55 tests. Full real server Playwright passed with 4 tests against http://127.0.0.1:8000 and http://localhost:8080 with no route interception and real chat completion attempts. The running server had no MCP chat tools available so the MCP rail proof asserted the real unavailable state plus Configure MCP recovery path. Disposable character proof used real create select send clear delete. gh pr view confirms PR 1582 is OPEN and draft on codex/chat-degraded-health into dev. Waiting for maintainer P0 approval before starting P1.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
