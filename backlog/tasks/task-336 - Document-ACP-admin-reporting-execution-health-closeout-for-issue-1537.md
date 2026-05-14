@@ -4,7 +4,7 @@ title: Document ACP admin reporting execution-health closeout for issue 1537
 status: Done
 assignee: []
 created_date: '2026-05-14 05:09'
-updated_date: '2026-05-14 05:15'
+updated_date: '2026-05-14 05:31'
 labels:
   - acp
   - docs
@@ -12,6 +12,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1537'
+  - 'https://github.com/rmusser01/tldw_server/issues/1537#issuecomment-4447890500'
   - 'https://github.com/rmusser01/tldw_server/pull/1654'
   - 'https://github.com/rmusser01/tldw_server/pull/1686'
 priority: medium
@@ -43,15 +44,15 @@ Document the ACP admin execution-health reporting contract and current product s
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Docs updated in ACP PRD, ACP production readiness matrix, and ACP operator guide. Verification so far: git diff --check passed; targeted rg confirmed #1537 dependencies and no stale 'Backend contract added under' status remains. Bandit skipped because this slice only changes Markdown documentation.
+Docs updated in ACP PRD, ACP production readiness matrix, and ACP operator guide. Verification: git diff --check passed; targeted rg confirmed #1537 dependencies and no stale 'Backend contract added under' status remains. Bandit skipped because this slice only changes Markdown documentation.
 
-Draft PR #1686 opened with Closes #1537 so the issue will close on merge. The PR remains draft until the requester adds the required human-authored Change summary.
+Draft PR #1686 is open for the closeout docs. Issue #1537 was updated with closeout evidence in comment https://github.com/rmusser01/tldw_server/issues/1537#issuecomment-4447890500. Keep the issue open until PR #1686 merges; close manually after merge if GitHub does not auto-close dev-targeted PRs. The PR remains draft until the requester adds the required human-authored Change summary.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Documented the ACP admin execution-health reporting closeout across the product PRD, operator guide, and production readiness matrix. The docs now define the summary endpoint, metric groups, failure buckets, setup-health dimensions, compatibility evidence, retention/redaction posture, product surface split, and dependency boundaries for #1512, #1513, #1529, #1563, and #1564. Verification: git diff --check plus targeted rg checks. Skips: Bandit and backend/frontend tests were skipped because the slice only changes Markdown documentation. Draft PR #1686 closes #1537 on merge after the human Change summary gate is satisfied.
+Documented the ACP admin execution-health reporting closeout across the product PRD, operator guide, and production readiness matrix. The docs now define the summary endpoint, metric groups, failure buckets, setup-health dimensions, compatibility evidence, retention/redaction posture, product surface split, and dependency boundaries for #1512, #1513, #1529, #1563, and #1564. Verification: git diff --check plus targeted rg checks. Skips: Bandit and backend/frontend tests were skipped because the slice only changes Markdown documentation. Draft PR #1686 is open, and issue #1537 has closeout evidence in comment #4447890500; keep #1537 open until PR #1686 merges and the human Change summary gate is satisfied.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
