@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: In Progress
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 05:47'
+updated_date: '2026-05-14 05:51'
 labels:
   - webui
   - chat
@@ -144,6 +144,8 @@ Task 4 implementation: MCP rail now derives availability from real MCP state, hi
 Real server proof refresh completed for chat cockpit spec. The MCP rail assertion now follows the live server state, the prompt rail click matches the rendered accessible name, and the disposable character flow sends through the composer with Enter before clearing the assistant. Full real server Playwright passed with 4 tests against local backend and frontend. git diff check passed.
 
 P0 gate evidence recorded after live server became available. Commit range for the P0 cockpit rail work is ff2306b4f through 56a4c2272. Focused P0 Vitest passed from apps/tldw-frontend with 6 files and 55 tests. Full real server Playwright passed with 4 tests against http://127.0.0.1:8000 and http://localhost:8080 with no route interception and real chat completion attempts. The running server had no MCP chat tools available so the MCP rail proof asserted the real unavailable state plus Configure MCP recovery path. Disposable character proof used real create select send clear delete. gh pr view confirms PR 1582 is OPEN and draft on codex/chat-degraded-health into dev. Waiting for maintainer P0 approval before starting P1.
+
+Maintainer approved P0 after reviewing the recorded P0 gate evidence. Proceeding into P1 context session rail work while keeping PR 1582 draft until P1 and P2 are also completed and explicitly approved.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
