@@ -1167,6 +1167,12 @@ async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(
         )
 
         assert result["status"] == TaskStatus.COMPLETE
+        assert result["artifact_promotion"] == {
+            "created_artifact_ids": ["brief-1"],
+            "updated_artifact_ids": [],
+            "skipped": [],
+            "errors": [],
+        }
         [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
         assert artifact["id"] == "brief-1"
         assert artifact["review_state"] == "accepted"

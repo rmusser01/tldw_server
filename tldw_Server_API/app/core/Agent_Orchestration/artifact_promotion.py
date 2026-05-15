@@ -1,6 +1,7 @@
 """Promotion helpers for ACP deliverables that become workspace artifacts."""
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -37,6 +38,11 @@ _PROMOTABLE_ARTIFACT_TYPES = frozenset(
 )
 _DEFAULT_REDACTION = {"support_safe": True, "redacted": False}
 _PREVIEW_TEXT_MAX_CHARS = 500
+_OPTIONAL_MAPPING_FIELDS = {
+    "producer_metadata": "invalid_producer_metadata",
+    "review_metadata": "invalid_review_metadata",
+    "version_metadata": "invalid_version_metadata",
+}
 
 
 @dataclass(frozen=True)
@@ -95,6 +101,11 @@ def promote_acp_completion_artifacts(
             continue
         artifact = dict(raw_artifact)
 
+        artifact_type = _artifact_type(artifact)
+        if not artifact_type:
+            _record_error(result, artifact_id, "missing_artifact_type")
+            continue
+
         if not _is_promotable_artifact(artifact):
             result.skipped.append({"artifact_id": artifact_id, "reason": "not_promotable"})
             continue
@@ -104,33 +115,37 @@ def promote_acp_completion_artifacts(
             _record_error(result, artifact_id, error_reason)
             continue
 
-        payload = _workspace_artifact_payload(
-            artifact,
-            artifact_id=artifact_id,
-            workspace_id=str(target_workspace_id),
-            task=task,
-            project=project,
-            workspace=workspace,
-            run=run,
-            completion_signal=completion_signal,
-            review_decision=review_decision,
-            review_run=review_run,
-        )
-
-        existing = existing_by_id.get(artifact_id)
-        if existing:
-            updated = note_db.update_workspace_artifact(
-                str(target_workspace_id),
-                artifact_id,
-                _update_payload(payload),
-                expected_version=int(existing.get("version") or 1),
+        try:
+            payload = _workspace_artifact_payload(
+                artifact,
+                artifact_id=artifact_id,
+                workspace_id=str(target_workspace_id),
+                task=task,
+                project=project,
+                workspace=workspace,
+                run=run,
+                completion_signal=completion_signal,
+                review_decision=review_decision,
+                review_run=review_run,
             )
-            existing_by_id[artifact_id] = updated
-            result.updated_artifact_ids.append(artifact_id)
-        else:
-            created = note_db.add_workspace_artifact(str(target_workspace_id), payload)
-            existing_by_id[artifact_id] = created
-            result.created_artifact_ids.append(artifact_id)
+
+            existing = existing_by_id.get(artifact_id)
+            if existing:
+                updated = note_db.update_workspace_artifact(
+                    str(target_workspace_id),
+                    artifact_id,
+                    _update_payload(payload),
+                    expected_version=int(existing.get("version") or 1),
+                )
+                existing_by_id[artifact_id] = updated
+                result.updated_artifact_ids.append(artifact_id)
+            else:
+                created = note_db.add_workspace_artifact(str(target_workspace_id), payload)
+                existing_by_id[artifact_id] = created
+                result.created_artifact_ids.append(artifact_id)
+        except (RuntimeError, TypeError, ValueError, sqlite3.Error):
+            logger.exception("ACP artifact promotion failed for artifact {}", artifact_id)
+            _record_error(result, artifact_id, "promotion_failed")
 
     return result
 
@@ -190,15 +205,13 @@ def _artifact_type(artifact: Mapping[str, Any]) -> str:
         artifact.get("artifact_type")
         or artifact.get("type")
         or artifact.get("kind")
+        or artifact.get("promote_as")
         or ""
     ).strip().lower()
 
 
 def _is_promotable_artifact(artifact: Mapping[str, Any]) -> bool:
-    if artifact.get("promote") is True or artifact.get("work_product") is True:
-        return True
-    promote_as = str(artifact.get("promote_as") or "").strip().lower()
-    return promote_as in _PROMOTABLE_ARTIFACT_TYPES or _artifact_type(artifact) in _PROMOTABLE_ARTIFACT_TYPES
+    return _artifact_type(artifact) in _PROMOTABLE_ARTIFACT_TYPES
 
 
 def _validate_artifact_payload(
@@ -217,6 +230,18 @@ def _validate_artifact_payload(
     source_lineage = artifact.get("source_lineage")
     if not isinstance(source_lineage, Mapping) or not source_lineage:
         return "missing_source_lineage"
+    for field_name, reason in _OPTIONAL_MAPPING_FIELDS.items():
+        if field_name in artifact and artifact[field_name] is not None:
+            if not isinstance(artifact[field_name], Mapping):
+                return reason
+    export_refs = artifact.get("export_refs")
+    if export_refs is not None and not isinstance(export_refs, (list, tuple)):
+        return "invalid_export_refs"
+    if "schema_version" in artifact:
+        try:
+            _schema_version(artifact.get("schema_version"))
+        except (TypeError, ValueError):
+            return "invalid_schema_version"
     return _validate_redaction(artifact.get("redaction"))
 
 
@@ -242,6 +267,26 @@ def _preview_text(artifact: Mapping[str, Any]) -> str | None:
     return content[:_PREVIEW_TEXT_MAX_CHARS] if content else None
 
 
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _coerce_list(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _schema_version(value: Any) -> int:
+    if value is None or value == "":
+        return 1
+    if isinstance(value, bool):
+        raise ValueError("schema_version must be an integer")
+    return int(value)
+
+
 def _workspace_artifact_payload(
     artifact: Mapping[str, Any],
     *,
@@ -255,7 +300,7 @@ def _workspace_artifact_payload(
     review_decision: TaskReviewDecision | None,
     review_run: AgentRun | None,
 ) -> dict[str, Any]:
-    producer_metadata = dict(artifact.get("producer_metadata") or {})
+    producer_metadata = _coerce_mapping(artifact.get("producer_metadata"))
     producer_metadata.update(
         {
             "producer_type": "acp",
@@ -276,7 +321,7 @@ def _workspace_artifact_payload(
         producer_metadata["review_session_id"] = review_run.session_id
         producer_metadata["reviewer_agent_type"] = review_run.agent_type or task.reviewer_agent_type
 
-    review_metadata = dict(artifact.get("review_metadata") or {})
+    review_metadata = _coerce_mapping(artifact.get("review_metadata"))
     review_metadata.update(
         {
             "decision": "accepted",
@@ -290,7 +335,7 @@ def _workspace_artifact_payload(
         review_metadata["review_run_id"] = str(review_run.id)
         review_metadata["review_session_id"] = review_run.session_id
 
-    version_metadata = dict(artifact.get("version_metadata") or {})
+    version_metadata = _coerce_mapping(artifact.get("version_metadata"))
     version_metadata.update(
         {
             "source": "acp_completion_signal",
@@ -302,7 +347,7 @@ def _workspace_artifact_payload(
 
     return {
         "id": artifact_id,
-        "artifact_type": str(artifact.get("artifact_type") or _artifact_type(artifact)),
+        "artifact_type": _artifact_type(artifact),
         "title": str(artifact.get("title") or "").strip(),
         "status": str(artifact.get("status") or "completed"),
         "content": artifact.get("content"),
@@ -316,12 +361,12 @@ def _workspace_artifact_payload(
         "task_id": str(task.id),
         "source_collection_id": artifact.get("source_collection_id"),
         "producer_metadata": producer_metadata,
-        "source_lineage": dict(artifact.get("source_lineage") or {}),
+        "source_lineage": _coerce_mapping(artifact.get("source_lineage")),
         "review_metadata": review_metadata,
         "version_metadata": version_metadata,
-        "export_refs": list(artifact.get("export_refs") or []),
-        "redaction": dict(artifact.get("redaction") or _DEFAULT_REDACTION),
-        "schema_version": int(artifact.get("schema_version") or 1),
+        "export_refs": _coerce_list(artifact.get("export_refs")),
+        "redaction": _coerce_mapping(artifact.get("redaction")) or dict(_DEFAULT_REDACTION),
+        "schema_version": _schema_version(artifact.get("schema_version")),
     }
 
 

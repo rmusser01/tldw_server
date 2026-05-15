@@ -1816,16 +1816,18 @@ async def dispatch_run(
             )
         else:
             try:
-                artifact_promotion_result = promote_acp_completion_artifacts(
-                    canonical_db,
-                    task=task,
-                    project=project,
-                    workspace=workspace,
-                    run=run,
-                    completion_signal=completion_signal,
-                    final_status=task.status,
-                    review_decision=review_decision_for_promotion,
-                    review_run=review_run_for_promotion,
+                artifact_promotion_result = await _run_sync(
+                    lambda: promote_acp_completion_artifacts(
+                        canonical_db,
+                        task=task,
+                        project=project,
+                        workspace=workspace,
+                        run=run,
+                        completion_signal=completion_signal,
+                        final_status=task.status,
+                        review_decision=review_decision_for_promotion,
+                        review_run=review_run_for_promotion,
+                    )
                 )
             except Exception:
                 logger.exception("ACP artifact promotion failed for task {}", task_id)

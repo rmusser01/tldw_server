@@ -175,6 +175,82 @@ def test_updates_existing_promoted_artifact_version(tmp_path):
         orch_db.close()
 
 
+def test_promote_as_is_used_as_persisted_artifact_type(tmp_path):
+    orch_db, note_db, project, workspace, task, run, review_run = _build_context(tmp_path)
+    signal = TaskCompletionSignal(
+        status="completed",
+        summary="Promote-as brief",
+        artifacts=[
+            _brief_payload(
+                id="brief-promote-as",
+                artifact_type=None,
+                promote_as="workspace_spec",
+            )
+        ],
+        raw_payload={},
+    )
+
+    try:
+        result = promote_acp_completion_artifacts(
+            note_db,
+            task=task,
+            project=project,
+            workspace=workspace,
+            run=run,
+            completion_signal=signal,
+            final_status=TaskStatus.COMPLETE,
+            review_decision=TaskReviewDecision(approved=True, feedback="Accepted"),
+            review_run=review_run,
+        )
+
+        assert result.created_artifact_ids == ["brief-promote-as"]
+        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        assert artifact["artifact_type"] == "workspace_spec"
+    finally:
+        note_db.close_all_connections()
+        orch_db.close()
+
+
+def test_promote_flag_without_allowed_artifact_type_is_not_promoted(tmp_path):
+    orch_db, note_db, project, workspace, task, run, review_run = _build_context(tmp_path)
+    signal = TaskCompletionSignal(
+        status="completed",
+        summary="Missing type",
+        artifacts=[
+            _brief_payload(
+                id="brief-missing-type",
+                artifact_type=None,
+                promote=True,
+            )
+        ],
+        raw_payload={},
+    )
+
+    try:
+        result = promote_acp_completion_artifacts(
+            note_db,
+            task=task,
+            project=project,
+            workspace=workspace,
+            run=run,
+            completion_signal=signal,
+            final_status=TaskStatus.COMPLETE,
+            review_decision=TaskReviewDecision(approved=True, feedback="Accepted"),
+            review_run=review_run,
+        )
+
+        assert result.created_artifact_ids == []
+        assert result.updated_artifact_ids == []
+        assert result.skipped == []
+        assert result.errors == [
+            {"artifact_id": "brief-missing-type", "reason": "missing_artifact_type"}
+        ]
+        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    finally:
+        note_db.close_all_connections()
+        orch_db.close()
+
+
 @pytest.mark.parametrize(
     ("final_status", "expected_reason"),
     [
@@ -289,6 +365,57 @@ def test_malformed_promotion_payload_is_not_promoted(tmp_path):
         assert result.skipped == []
         assert result.errors == [{"artifact_id": "brief-1", "reason": "missing_source_lineage"}]
         assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    finally:
+        note_db.close_all_connections()
+        orch_db.close()
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value", "expected_reason"),
+    [
+        ("producer_metadata", "not-a-mapping", "invalid_producer_metadata"),
+        ("review_metadata", "not-a-mapping", "invalid_review_metadata"),
+        ("version_metadata", "not-a-mapping", "invalid_version_metadata"),
+        ("export_refs", {"format": "markdown"}, "invalid_export_refs"),
+        ("schema_version", "not-an-int", "invalid_schema_version"),
+    ],
+)
+def test_malformed_optional_metadata_isolated_to_artifact_error(
+    tmp_path,
+    field_name,
+    bad_value,
+    expected_reason,
+):
+    orch_db, note_db, project, workspace, task, run, review_run = _build_context(tmp_path)
+    signal = TaskCompletionSignal(
+        status="completed",
+        summary="Mixed artifacts",
+        artifacts=[
+            _brief_payload(id="bad-brief", **{field_name: bad_value}),
+            _brief_payload(id="good-brief", title="Good Brief"),
+        ],
+        raw_payload={},
+    )
+
+    try:
+        result = promote_acp_completion_artifacts(
+            note_db,
+            task=task,
+            project=project,
+            workspace=workspace,
+            run=run,
+            completion_signal=signal,
+            final_status=TaskStatus.COMPLETE,
+            review_decision=TaskReviewDecision(approved=True, feedback="Accepted"),
+            review_run=review_run,
+        )
+
+        assert result.created_artifact_ids == ["good-brief"]
+        assert result.updated_artifact_ids == []
+        assert result.skipped == []
+        assert result.errors == [{"artifact_id": "bad-brief", "reason": expected_reason}]
+        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        assert artifact["id"] == "good-brief"
     finally:
         note_db.close_all_connections()
         orch_db.close()
