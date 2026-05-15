@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from starlette.concurrency import run_in_threadpool
+
 from tldw_Server_API.app.core.Local_LLM import handler_utils
 from tldw_Server_API.app.core.Local_LLM.llamacpp_config_lock import LockAcquisitionError, llamacpp_config_write_lock
 from tldw_Server_API.app.core.Setup import setup_manager
@@ -70,7 +72,6 @@ async def tail_managed_log(llm_manager: Any, requested_lines: int) -> dict[str, 
     """Return a bounded, redacted tail of the active handler's configured log file."""
     handler = _require_handler(llm_manager)
     line_count = max(1, min(int(requested_lines), _MAX_LOG_LINES))
-    warnings: list[str] = []
 
     configured_log = getattr(getattr(handler, "config", None), "log_output_file", None)
     if not configured_log:
@@ -82,6 +83,12 @@ async def tail_managed_log(llm_manager: Any, requested_lines: int) -> dict[str, 
     if status.get("status") != "running" or not active_log or active_log_handle is None:
         return {"lines": [], "truncated": False, "warnings": ["No active managed llama.cpp log file is available."]}
 
+    return await run_in_threadpool(_tail_managed_log_file, configured_log, active_log, line_count)
+
+
+def _tail_managed_log_file(configured_log: Any, active_log: Any, line_count: int) -> dict[str, Any]:
+    """Read and redact the managed log tail from a worker thread."""
+    warnings: list[str] = []
     configured_log_path = Path(str(configured_log)).expanduser()
     active_log_path = Path(str(active_log)).expanduser()
     try:

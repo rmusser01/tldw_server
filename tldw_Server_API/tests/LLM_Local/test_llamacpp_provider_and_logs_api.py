@@ -241,6 +241,39 @@ def test_log_tail_reads_only_configured_log_file_and_redacts(tmp_path: Path):
 
 
 @pytest.mark.unit
+def test_log_tail_offloads_file_read_to_threadpool(monkeypatch, tmp_path: Path):
+    configured_log = tmp_path / "configured.log"
+    configured_log.write_text("first\nsecond", encoding="utf-8")
+    calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def fake_run_in_threadpool(func: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(lp.llamacpp_provider_service, "run_in_threadpool", fake_run_in_threadpool)
+    app = _make_app(
+        _Manager(
+            _Handler(
+                log_output_file=str(configured_log),
+                status_log_file=str(configured_log),
+                active_log=True,
+            )
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/logs/tail?lines=1")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["lines"] == ["second"]
+    assert len(calls) == 1
+    func, args, kwargs = calls[0]
+    assert func is lp.llamacpp_provider_service._tail_managed_log_file
+    assert args == (str(configured_log), str(configured_log), 1)
+    assert kwargs == {}
+
+
+@pytest.mark.unit
 def test_log_tail_configured_path_without_active_log_evidence_returns_warning(tmp_path: Path):
     configured_log = tmp_path / "configured.log"
     configured_log.write_text("must-not-read", encoding="utf-8")

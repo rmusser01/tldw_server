@@ -1,9 +1,13 @@
+"""Schemas for the admin llama.cpp configuration and managed-server APIs."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LlamaCppSavedConfig(BaseModel):
+    """Saved [LlamaCpp] settings as persisted in config.txt."""
+
     enabled: bool = False
     executable_path: str | None = None
     models_dir: str | None = None
@@ -22,6 +26,8 @@ class LlamaCppSavedConfig(BaseModel):
 
 
 class LlamaCppActiveConfig(BaseModel):
+    """Runtime llama.cpp handler state observed from the active API process."""
+
     handler_configured: bool
     enabled: bool | None = None
     executable_path: str | None = None
@@ -35,6 +41,8 @@ class LlamaCppActiveConfig(BaseModel):
 
 
 class LlamaCppConfigResponse(BaseModel):
+    """Combined saved/runtime config state plus restart and warning signals."""
+
     saved_config: LlamaCppSavedConfig
     active_config: LlamaCppActiveConfig
     restart_required: bool
@@ -44,6 +52,8 @@ class LlamaCppConfigResponse(BaseModel):
 
 
 class LlamaCppConfigUpdateRequest(BaseModel):
+    """Partial llama.cpp admin config update payload."""
+
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = None
@@ -76,6 +86,8 @@ class LlamaCppConfigUpdateRequest(BaseModel):
 
 
 class LlamaCppValidationRequest(BaseModel):
+    """Request to stat or optionally probe a llama.cpp server binary."""
+
     model_config = ConfigDict(extra="forbid")
 
     binary_path: str = Field(..., min_length=1)
@@ -84,6 +96,8 @@ class LlamaCppValidationRequest(BaseModel):
 
 
 class LlamaCppValidationResponse(BaseModel):
+    """Binary validation result returned to the Admin UI."""
+
     valid: bool
     exists: bool
     executable: bool
@@ -94,12 +108,16 @@ class LlamaCppValidationResponse(BaseModel):
 
 
 class LlamaCppModelMetadata(BaseModel):
+    """Best-effort metadata parsed from a GGUF model filename."""
+
     quantization: str | None = None
     parameter_hint: str | None = None
     context_hint: int | None = None
 
 
 class LlamaCppInventoryItem(BaseModel):
+    """A single model inventory entry from models_dir or registered paths."""
+
     model_id: str
     display_name: str
     basename: str
@@ -112,25 +130,45 @@ class LlamaCppInventoryItem(BaseModel):
 
 
 class LlamaCppInventoryResponse(BaseModel):
+    """Bounded llama.cpp GGUF model inventory response."""
+
     models: list[LlamaCppInventoryItem]
     warnings: list[str] = Field(default_factory=list)
     scan_limited: bool = False
 
 
 class LlamaCppRegisterModelPathRequest(BaseModel):
+    """Request to register an allowlisted local GGUF path for inventory."""
+
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(..., min_length=1)
 
 
 class LlamaCppStartByModelRequest(BaseModel):
+    """Request to launch the managed llama.cpp server by inventory model ID."""
+
     model_config = ConfigDict(extra="forbid")
 
     model_id: str = Field(..., min_length=1)
     server_args: dict[str, object] = Field(default_factory=dict)
 
 
+class LlamaCppStartByModelResponse(BaseModel):
+    """Response returned after launching a managed llama.cpp model by ID."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    backend: str
+    model_id: str
+    model: str | None = None
+    path: str | None = None
+
+
 class LlamaCppUseInChatResponse(BaseModel):
+    """Result of wiring the active managed server into chat provider config."""
+
     provider: str
     endpoint: str
     updated: bool
@@ -139,12 +177,16 @@ class LlamaCppUseInChatResponse(BaseModel):
 
 
 class LlamaCppLogTailResponse(BaseModel):
+    """Redacted bounded tail of the active managed llama.cpp log file."""
+
     lines: list[str] = Field(default_factory=list)
     truncated: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
 class LlamaCppGpuSnapshot(BaseModel):
+    """Best-effort GPU memory snapshot for hardware readiness guidance."""
+
     index: int
     name: str | None = None
     memory_total_bytes: int | None = None
@@ -153,6 +195,8 @@ class LlamaCppGpuSnapshot(BaseModel):
 
 
 class LlamaCppHardwareSnapshotResponse(BaseModel):
+    """CPU/RAM/GPU snapshot used by the llama.cpp Admin readiness panel."""
+
     ram_total_bytes: int | None = None
     ram_available_bytes: int | None = None
     cpu_count: int | None = None

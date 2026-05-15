@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.config import load_comprehensive_config, refresh_c
 _QUANT_RE = re.compile(r"(?:^|[-_.])(Q\d(?:_[A-Z0-9]+)*|F16|F32|BF16|IQ\d_[A-Z0-9_]+)(?:[-_.]|$)", re.IGNORECASE)
 _PARAM_RE = re.compile(r"(?:^|[-_.])(\d+(?:\.\d+)?[bm])(?:[-_.]|$)", re.IGNORECASE)
 _CTX_RE = re.compile(r"(?:^|[-_.])(?:ctx|context)[-_.]?(\d{3,6})(?:[-_.]|$)", re.IGNORECASE)
+_REGISTERED_PATH_DELIMITERS = {",", os.pathsep}
 
 
 def model_id_for_path(path: Path) -> str:
@@ -87,6 +88,7 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
     ID and should not be persisted.
     """
     canonical = _canonical_path(path, "Registered model")
+    _validate_registered_path_for_config(canonical)
     try:
         with llamacpp_config_write_lock():
             saved_config = _read_saved_config()
@@ -119,6 +121,16 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
     if item is None:
         raise ServerError("Registered model path could not be resolved.")
     return item
+
+
+def _validate_registered_path_for_config(path: Path) -> None:
+    text = str(path)
+    try:
+        setup_manager.validate_config_value_single_line("LlamaCpp", "registered_model_paths", text)
+    except ValueError as exc:
+        raise ServerError("Registered model path contains unsupported config characters.") from exc
+    if any(delimiter in text for delimiter in _REGISTERED_PATH_DELIMITERS):
+        raise ServerError("Registered model path contains unsupported list delimiter characters.")
 
 
 def resolve_model_id(model_id: str) -> Path:

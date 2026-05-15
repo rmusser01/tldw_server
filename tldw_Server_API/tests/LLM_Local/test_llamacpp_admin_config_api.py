@@ -533,6 +533,64 @@ def test_llamacpp_config_put_returns_safe_error_when_config_write_fails(monkeypa
 
 
 @pytest.mark.unit
+def test_llamacpp_config_rejects_multiline_values_before_writing(monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    updates: list[dict[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+    monkeypatch.setattr(llamacpp_config_service.setup_manager, "update_config", updates.append)
+
+    with pytest.raises(lp.HTTPException) as exc_info:
+        llamacpp_config_service.update_config_state(
+            {"default_host": "127.0.0.1\nbad = true"},
+            _ManagerWithoutHandler(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "line breaks" in str(exc_info.value.detail)
+    assert updates == []
+
+
+@pytest.mark.unit
+def test_llamacpp_config_rejects_delimited_allowed_paths_before_writing(monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    updates: list[dict[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+    monkeypatch.setattr(llamacpp_config_service.setup_manager, "update_config", updates.append)
+
+    with pytest.raises(lp.HTTPException) as exc_info:
+        llamacpp_config_service.update_config_state(
+            {"allowed_paths": ["/srv/models,shadow"]},
+            _ManagerWithoutHandler(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "cannot contain comma" in str(exc_info.value.detail)
+    assert updates == []
+
+
+@pytest.mark.unit
+def test_setup_manager_rejects_multiline_values_as_writer_defense():
+    from tldw_Server_API.app.core.Setup import setup_manager
+
+    parser = _llamacpp_parser(default_host="127.0.0.1")
+
+    with pytest.raises(ValueError) as exc_info:
+        setup_manager._validate_updates(parser, {"LlamaCpp": {"default_host": "127.0.0.1\nbad = true"}})
+
+    assert "line breaks" in str(exc_info.value)
+
+
+@pytest.mark.unit
 def test_llamacpp_validate_default_is_stat_only_and_does_not_execute(tmp_path: Path):
     script = tmp_path / "llama-server"
     marker = tmp_path / "probe-ran"
@@ -551,6 +609,44 @@ def test_llamacpp_validate_default_is_stat_only_and_does_not_execute(tmp_path: P
     assert body["version_output"] is None
     assert body["help_output"] is None
     assert not marker.exists()
+
+
+@pytest.mark.unit
+def test_llamacpp_validate_endpoint_offloads_probe_to_threadpool(monkeypatch):
+    calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    def fake_validate(binary_path: str, timeout_seconds: float, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "valid": True,
+            "exists": True,
+            "executable": True,
+            "resolved_path": binary_path,
+            "version_output": None,
+            "help_output": None,
+            "warnings": [f"timeout={timeout_seconds}", f"probe={kwargs['run_probe']}"],
+        }
+
+    async def fake_run_in_threadpool(func: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(lp, "run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr(lp.llamacpp_config_service, "validate_binary", fake_validate)
+    app = _make_app_with_manager(_ManagerWithoutHandler())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/validate",
+            json={"binary_path": "/tmp/llama-server", "timeout_seconds": 2.0, "run_probe": True},
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    func, args, kwargs = calls[0]
+    assert func is fake_validate
+    assert args == ("/tmp/llama-server", 2.0)
+    assert isinstance(kwargs["llm_manager"], _ManagerWithoutHandler)
+    assert kwargs["run_probe"] is True
 
 
 @pytest.mark.unit
@@ -603,6 +699,26 @@ def test_llamacpp_validate_run_probe_executes_saved_binary(monkeypatch, tmp_path
     assert body["exists"] is True
     assert body["executable"] is True
     assert body["version_output"] == "llama-server version test"
+
+
+@pytest.mark.unit
+def test_llamacpp_validate_probe_empty_success_output_is_valid(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    script = tmp_path / "llama-server"
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(executable_path=str(script)),
+    )
+
+    result = llamacpp_config_service.validate_binary(str(script), run_probe=True)
+
+    assert result["valid"] is True
+    assert result["version_output"] == ""
+    assert not any("did not return" in warning for warning in result["warnings"])
 
 
 @pytest.mark.unit

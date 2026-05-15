@@ -292,6 +292,14 @@ def _coerce_to_string(value: Any) -> str:
     return str(value)
 
 
+def validate_config_value_single_line(section: str, key: str, value: Any) -> str:
+    """Return a config value string after rejecting multiline injection chars."""
+    text = _coerce_to_string(value)
+    if any(char in text for char in ("\r", "\n", "\x00")):
+        raise ValueError(f"Invalid config value for {section}.{key}: line breaks and NUL bytes are not allowed.")
+    return text
+
+
 def _infer_type(raw_value: str) -> str:
     lowered = raw_value.strip().lower()
     if lowered in {"true", "false", "yes", "no", "on", "off", "1", "0"}:
@@ -583,7 +591,8 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
 
     # Prepare a mutable copy of updates: section -> key -> str(value)
     pending: dict[str, dict[str, str]] = {
-        section: {k: _coerce_to_string(v) for k, v in items.items()} for section, items in updates.items()
+        section: {k: validate_config_value_single_line(section, k, v) for k, v in items.items()}
+        for section, items in updates.items()
     }
 
     current_section: str | None = None
@@ -661,6 +670,7 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
         if not parser.has_section(section):
             raise ValueError(f"Unknown section '{section}' in updates")
         for key, new_value in items.items():
+            serialized_value = validate_config_value_single_line(section, key, new_value)
             allows_new_ingestion_roots = (
                 section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION
                 and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY
@@ -678,14 +688,14 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
 
             current_value = parser.get(section, key, fallback="")
             expected_type = _infer_type(current_value)
-            if str(new_value).strip() == "" and (section, key) in _OPTIONAL_EMPTY_VALUE_FIELDS:
+            if serialized_value.strip() == "" and (section, key) in _OPTIONAL_EMPTY_VALUE_FIELDS:
                 continue
 
             # Accept any string when expected type is string
             if expected_type == "string":
                 continue
 
-            raw = str(new_value)
+            raw = serialized_value
             if expected_type == "boolean":
                 lowered = raw.strip().lower()
                 if lowered not in {"true", "false", "yes", "no", "on", "off", "1", "0"}:

@@ -303,6 +303,33 @@ def test_register_path_rejects_outside_allowed_paths_without_persisting(monkeypa
 
 
 @pytest.mark.unit
+def test_register_path_rejects_delimiter_path_without_persisting(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    model = models_dir / "bad,name.gguf"
+    model.write_text("fake model")
+    updates: list[dict[str, dict[str, str]]] = []
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, registered_model_paths=""),
+    )
+    monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", updates.append)
+
+    app = _make_app_with_manager(_Manager())
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/models/register-path", json={"path": str(model)})
+
+    assert response.status_code == 400, response.text
+    assert "delimiter" in response.json()["detail"].lower()
+    assert str(model) not in response.text
+    assert updates == []
+
+
+@pytest.mark.unit
 def test_register_path_preserves_existing_paths_under_lock(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 

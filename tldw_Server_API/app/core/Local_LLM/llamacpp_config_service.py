@@ -64,6 +64,7 @@ _LIST_FIELDS = {
     "allowed_paths",
     "registered_model_paths",
 }
+_LIST_VALUE_DELIMITERS = {",", os.pathsep}
 _SAVED_FIELDS = (
     "enabled",
     "executable_path",
@@ -180,8 +181,9 @@ def validate_binary(
         if version_output is None and help_output is None:
             warnings.append(f"Binary '{path.name}' did not return version or help output.")
 
+    probe_succeeded = version_output is not None or help_output is not None
     return {
-        "valid": bool(exists and executable and (not run_probe or bool((version_output or help_output) and probe_allowed))),
+        "valid": bool(exists and executable and (not run_probe or (probe_allowed and probe_succeeded))),
         "exists": bool(exists),
         "executable": bool(executable),
         "resolved_path": resolved_path,
@@ -291,10 +293,31 @@ def _payload_to_updates(payload: Any) -> dict[str, Any]:
         if value is None:
             updates[field] = ""
         elif field in _LIST_FIELDS:
-            updates[field] = ", ".join(str(item).strip() for item in value if str(item).strip())
+            values = [value] if isinstance(value, str) else value
+            updates[field] = ", ".join(
+                item for item in (_validate_list_config_value(field, item) for item in values) if item
+            )
         else:
+            _validate_config_value(field, value)
             updates[field] = value
     return updates
+
+
+def _validate_config_value(field: str, value: Any) -> str:
+    try:
+        return setup_manager.validate_config_value_single_line("LlamaCpp", field, value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_list_config_value(field: str, value: Any) -> str:
+    text = _validate_config_value(field, value).strip()
+    if text and any(delimiter in text for delimiter in _LIST_VALUE_DELIMITERS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"LlamaCpp.{field} entries cannot contain comma or path separator characters.",
+        )
+    return text
 
 
 def _probe_binary(path: Path, flag: str, timeout_seconds: float, warnings: list[str]) -> str | None:
