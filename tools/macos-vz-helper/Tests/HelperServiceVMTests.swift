@@ -305,6 +305,38 @@ import Testing
     #expect(registry.status(vmID: "vm-symlink-workspace") == nil)
 }
 
+@Test func helperServiceCreateVMRejectsSymlinkParentWorkspaceBeforeRegistryMutation() throws {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("macos-vz-create-vm-\(UUID().uuidString)")
+    let target = root.appendingPathComponent("target", isDirectory: true)
+    let link = root.appendingPathComponent("workspace-link", isDirectory: true)
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    #expect(throws: HelperServiceError.self) {
+        _ = try service.createVM(
+            vmID: "vm-symlink-parent-workspace",
+            templatePath: "/tmp/template.img",
+            workspacePath: link.appendingPathComponent("nested-workspace").path,
+            readinessTimeoutSeconds: 5
+        )
+    }
+    #expect(registry.status(vmID: "vm-symlink-parent-workspace") == nil)
+}
+
 @Test func helperServiceCreateVMDefaultsMissingOwnershipMetadataToUnknown() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(

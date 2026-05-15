@@ -306,6 +306,11 @@ def test_helper_client_raw_validation_rejects_null_exec_guest_output_limit() -> 
         ({"workspace_path": "workspace"}, "create_vm_request_invalid", "workspace_path_invalid"),
         ({"run_manifest_path": "runs/run-1/manifest.json"}, "create_vm_request_invalid", "run_manifest_path_invalid"),
         ({"timeout_sec": 0}, "create_vm_timeout_invalid", "timeout_out_of_range"),
+        ({"timeout_sec": 3601}, "create_vm_timeout_invalid", "timeout_out_of_range"),
+        ({"timeout_sec": "30"}, "invalid_request", "invalid_request"),
+        ({"runtime": None}, "invalid_request", "invalid_request"),
+        ({"network_policy": None}, "invalid_request", "invalid_request"),
+        ({"vm_name": None, "run_id": "run-1"}, "invalid_request", "invalid_request"),
     ],
 )
 def test_helper_client_validates_create_vm_request_contract_in_test_mode(
@@ -344,6 +349,37 @@ def test_helper_client_rejects_invalid_create_vm_before_socket_request(monkeypat
     assert requests == []
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"vm_name": None, "run_id": "run-1"},
+        {"timeout_sec": "30"},
+    ],
+)
+def test_helper_client_rejects_malformed_create_vm_before_socket_request(
+    monkeypatch,
+    overrides: dict[str, object],
+) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    requests = _install_fake_helper_socket(
+        monkeypatch,
+        {
+            "create_vm": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "vm_id": "unexpected",
+                "state": "created",
+            }
+        },
+    )
+
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient().create_vm(_valid_create_vm_request(**overrides))
+
+    assert exc_info.value.error_code == "invalid_request"
+    assert requests == []
+
+
 def test_helper_client_rejects_create_vm_existing_symlink_path(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     workspace_target = tmp_path / "workspace-target"
@@ -372,6 +408,22 @@ def test_helper_client_rejects_create_vm_broken_symlink_path(monkeypatch, tmp_pa
 
     assert exc_info.value.error_code == "create_vm_request_invalid"
     assert exc_info.value.message == "template_path_invalid"
+
+
+def test_helper_client_rejects_create_vm_symlink_parent_path(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    workspace_target = tmp_path / "workspace-target"
+    workspace_target.mkdir()
+    workspace_link = tmp_path / "workspace-link"
+    workspace_link.symlink_to(workspace_target, target_is_directory=True)
+
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient().create_vm(
+            _valid_create_vm_request(workspace_path=str(workspace_link / "nested-workspace"))
+        )
+
+    assert exc_info.value.error_code == "create_vm_request_invalid"
+    assert exc_info.value.message == "workspace_path_invalid"
 
 
 def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:

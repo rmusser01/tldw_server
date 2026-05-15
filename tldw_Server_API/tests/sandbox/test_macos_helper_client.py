@@ -41,7 +41,10 @@ def test_helper_client_raises_custom_exception_when_helper_unavailable(monkeypat
             {
                 "runtime": "vz_linux",
                 "vm_name": "run-123",
+                "run_id": "run-123",
                 "template": "/tmp/template.img",
                 "workspace_path": "/tmp/workspace",
+                "network_policy": "deny_all",
+                "timeout_sec": 30,
             }
         )

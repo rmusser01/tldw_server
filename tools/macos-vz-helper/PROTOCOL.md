@@ -152,9 +152,12 @@ The helper enforces the `create_vm` request contract before VM boot:
 - `vm_name` or `run_id` must provide a non-empty VM id using only
   alphanumeric characters, `.`, `_`, and `-`, capped at 128 UTF-8 bytes.
 - `template` or `template_path` and `workspace_path` must be absolute, non-NUL
-  paths capped at 4096 UTF-8 bytes. Symlink paths are rejected before
-  boot. The helper does not require these paths to be under one root yet because
-  compatibility templates and session workspaces remain intentionally flexible.
+  paths capped at 4096 UTF-8 bytes. Symlink leaf paths and user-controlled
+  symlinked parent components are rejected before boot; root-level macOS
+  compatibility prefixes such as `/tmp` and `/var` are allowed and subsequent
+  components are still checked. The helper does not require these paths to be
+  under one root yet because compatibility templates and session workspaces
+  remain intentionally flexible.
 - `run_manifest_path`, when present, follows the same absolute path and symlink
   rules.
 - ownership/provenance text metadata is bounded and rejects NUL/control
@@ -359,8 +362,9 @@ the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts
   echoed in VM metadata and status details.
 - `vz_linux` helper VM creation also validates request shape before boot:
   unsupported runtimes, invalid VM ids, non-absolute or NUL-bearing paths,
-  symlink paths, oversized metadata, and out-of-range startup timeouts
-  are rejected without registering a VM.
+  symlink leaf paths or user-controlled symlinked parent components, oversized
+  metadata, and out-of-range startup timeouts are rejected without registering a
+  VM.
 - `vz_linux` guest-agent readiness metadata is additive in protocol version `1`.
   `guest_version`, `guest_workspace_root`, `guest_capabilities_known`, and
   `guest_capabilities` are diagnostic details only. Older guests may omit

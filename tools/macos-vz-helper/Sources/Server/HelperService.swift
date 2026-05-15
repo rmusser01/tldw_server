@@ -31,6 +31,7 @@ final class HelperService {
     private static let maxCreateVMTextBytes = 1024
     private static let maxCreateVMPathBytes = 4096
     private static let maxCreateVMTimeoutSeconds: TimeInterval = 3_600
+    private static let allowedCreateVMSymlinkPrefixes: Set<String> = ["/tmp", "/var"]
 
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
@@ -340,17 +341,23 @@ final class HelperService {
             throw HelperServiceError.invalidCreateVMRequest(reason)
         }
 
-        var pathStat = stat()
-        let result = lstat(value, &pathStat)
-        if result == 0 {
-            let type = pathStat.st_mode & S_IFMT
-            guard type != S_IFLNK else {
+        var currentPath = ""
+        for component in value.split(separator: "/", omittingEmptySubsequences: true) {
+            currentPath += "/\(component)"
+            var pathStat = stat()
+            errno = 0
+            let result = lstat(currentPath, &pathStat)
+            if result == 0 {
+                let type = pathStat.st_mode & S_IFMT
+                guard type != S_IFLNK || Self.allowedCreateVMSymlinkPrefixes.contains(currentPath) else {
+                    throw HelperServiceError.invalidCreateVMRequest(reason)
+                }
+                continue
+            }
+            guard errno == ENOENT else {
                 throw HelperServiceError.invalidCreateVMRequest(reason)
             }
             return
-        }
-        guard errno == ENOENT else {
-            throw HelperServiceError.invalidCreateVMRequest(reason)
         }
     }
 

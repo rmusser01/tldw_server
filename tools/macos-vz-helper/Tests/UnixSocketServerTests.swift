@@ -438,6 +438,43 @@ import Testing
     }
 }
 
+@Test func unixSocketServerRejectsSymlinkParentCreateVMPathBeforeBoot() throws {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("macos-vz-create-vm-\(UUID().uuidString)")
+    let target = root.appendingPathComponent("target", isDirectory: true)
+    let link = root.appendingPathComponent("workspace-link", isDirectory: true)
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+    let workspacePath = link.appendingPathComponent("nested-workspace").path
+    let request = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-symlink-parent","template":"/tmp/template.img","workspace_path":"\(workspacePath)"}}
+    """
+
+    let responseData = try server.handleRequestData(request.data(using: .utf8)!)
+    let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+
+    #expect(json?["error_code"] as? String == "create_vm_request_invalid")
+    #expect(json?["message"] as? String == "workspace_path_invalid")
+    #expect(registry.status(vmID: "vm-symlink-parent") == nil)
+}
+
 @Test func unixSocketServerRejectsValidateHostNonStringNetworkPolicy() throws {
     let server = UnixSocketServer(
         socketPath: "/tmp/macos-vz-helper.sock",

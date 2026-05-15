@@ -4,6 +4,7 @@ import json
 import math
 import os
 import socket
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ _MAX_CREATE_VM_ID_BYTES = 128
 _MAX_CREATE_VM_TEXT_BYTES = 1024
 _MAX_CREATE_VM_PATH_BYTES = 4096
 _MAX_CREATE_VM_TIMEOUT_SEC = 3_600.0
+_ALLOWED_CREATE_VM_SYMLINK_PREFIXES = {Path(os.sep) / "tmp", Path(os.sep) / "var"}
 _CREATE_VM_TEXT_FIELDS = (
     "owner",
     "runtime",
@@ -380,7 +382,10 @@ class MacOSVirtualizationHelperClient:
         if not isinstance(request, dict):
             raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
 
-        runtime = cls._optional_create_vm_string(request, "runtime", default="vz_linux").strip().lower() or "vz_linux"
+        runtime = (
+            cls._optional_create_vm_string(request, "runtime", default="vz_linux").strip().lower()
+            or "vz_linux"
+        )
         if runtime != "vz_linux":
             raise MacOSVirtualizationHelperFailure("runtime_unsupported", runtime)
 
@@ -398,15 +403,19 @@ class MacOSVirtualizationHelperClient:
         vm_id = cls._optional_create_vm_string(
             request,
             "vm_name",
-            default=cls._optional_create_vm_string(request, "run_id", default=""),
+            default="",
         )
+        if not vm_id:
+            vm_id = cls._optional_create_vm_string(request, "run_id", default="")
         cls._validate_create_vm_id(vm_id)
 
         template_path = cls._optional_create_vm_string(
             request,
             "template",
-            default=cls._optional_create_vm_string(request, "template_path", default=""),
+            default="",
         )
+        if not template_path:
+            template_path = cls._optional_create_vm_string(request, "template_path", default="")
         cls._validate_create_vm_path(template_path, "template_path_invalid", required=True)
 
         workspace_path = cls._optional_create_vm_string(request, "workspace_path", default="")
@@ -422,16 +431,22 @@ class MacOSVirtualizationHelperClient:
             )
 
         if "timeout_sec" in request:
-            timeout_sec = cls._finite_positive_timeout(request.get("timeout_sec"))
+            raw_timeout = request.get("timeout_sec")
+            if isinstance(raw_timeout, bool) or not isinstance(raw_timeout, (int, float)):
+                raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+            timeout_sec = cls._finite_positive_timeout(raw_timeout)
             if timeout_sec is None or timeout_sec > _MAX_CREATE_VM_TIMEOUT_SEC:
-                raise MacOSVirtualizationHelperFailure("create_vm_timeout_invalid", "timeout_out_of_range")
+                raise MacOSVirtualizationHelperFailure(
+                    "create_vm_timeout_invalid",
+                    "timeout_out_of_range",
+                )
 
     @staticmethod
     def _optional_create_vm_string(request: dict[str, Any], key: str, *, default: str) -> str:
-        value = request.get(key, default)
-        if value is None:
+        if key not in request:
             return default
-        if not isinstance(value, str):
+        value = request[key]
+        if value is None or not isinstance(value, str):
             raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
         return value
 
@@ -471,10 +486,21 @@ class MacOSVirtualizationHelperClient:
         if not path.is_absolute():
             cls._raise_invalid_create_vm(reason)
         try:
-            if path.is_symlink():
-                cls._raise_invalid_create_vm(reason)
+            cls._validate_create_vm_path_components(path, reason)
         except (OSError, ValueError):
             cls._raise_invalid_create_vm(reason)
+
+    @classmethod
+    def _validate_create_vm_path_components(cls, path: Path, reason: str) -> None:
+        current = Path(path.anchor)
+        for component in path.parts[1:]:
+            current = current / component
+            try:
+                mode = os.lstat(current).st_mode
+            except FileNotFoundError:
+                return
+            if stat.S_ISLNK(mode) and current not in _ALLOWED_CREATE_VM_SYMLINK_PREFIXES:
+                cls._raise_invalid_create_vm(reason)
 
     @classmethod
     def _validate_exec_guest_request(
