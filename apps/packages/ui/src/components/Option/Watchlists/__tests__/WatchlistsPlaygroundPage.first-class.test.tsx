@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
       | "jobs"
       | "runs"
       | "items"
+      | "alerts"
       | "outputs"
       | "templates"
       | "settings",
@@ -255,6 +256,9 @@ vi.mock("../SettingsTab/SettingsTab", () => ({
 vi.mock("../ItemsTab/ItemsTab", () => ({
   ItemsTab: () => <div>Items tab</div>
 }))
+vi.mock("../AlertsTab/AlertsTab", () => ({
+  AlertsTab: () => <div>Alerts tab</div>
+}))
 vi.mock("../shared/WatchlistsHealthBar", () => ({
   WatchlistsHealthBar: () => <div data-testid="watchlists-health-bar" />
 }))
@@ -317,6 +321,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText("Find new ransomware affecting hospitals")).toBeInTheDocument()
     expect(screen.getByText("CTI / OSINT")).toBeInTheDocument()
     expect(screen.getByText("High")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-tab-alerts")).toBeInTheDocument()
   })
 
   it("creates a topic-only Watchlist from the shell wizard, selects it, and opens Feeds", async () => {

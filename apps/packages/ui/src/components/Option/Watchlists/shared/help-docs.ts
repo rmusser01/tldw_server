@@ -11,6 +11,7 @@ export type WatchlistsTabHelpKey =
   | "jobs"
   | "runs"
   | "items"
+  | "alerts"
   | "outputs"
   | "templates"
   | "settings"
@@ -35,6 +36,7 @@ export const WATCHLISTS_TAB_HELP_DOCS: Record<WatchlistsTabHelpKey, string> = {
   jobs: "https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#jobs",
   runs: "https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#runs",
   items: "https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#scraped-items",
+  alerts: "https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#content-alert-rules",
   outputs: "https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#outputs",
   templates: "https://github.com/rmusser01/tldw_server/blob/main/Docs/API-related/Watchlists_API.md#templates",
   settings: "https://github.com/rmusser01/tldw_server/blob/main/Docs/Monitoring/WATCHLISTS_ERROR_PREVENTION_POLICY_2026_02_18.md"

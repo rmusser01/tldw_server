@@ -543,7 +543,7 @@ git commit -m "feat: trigger watchlist content alerts from pipeline"
 - Modify if mirrored: `apps/packages/ui/src/public/_locales/en/watchlists.json`
 - Create: `apps/packages/ui/src/components/Option/Watchlists/__tests__/watchlists-stage3-copy-contract.test.ts`
 
-- [ ] **Step 1: Add failing service and copy tests first**
+- [x] **Step 1: Add failing service and copy tests first**
 
 Run from `apps/packages/ui`:
 
@@ -556,7 +556,7 @@ Run from `apps/packages/ui`:
 
 Expected: tests fail until types, services, and copy are added.
 
-- [ ] **Step 2: Add frontend types and service methods**
+- [x] **Step 2: Add frontend types and service methods**
 
 Add service coverage for:
 
@@ -564,7 +564,7 @@ Add service coverage for:
 - Alert list/detail/update.
 - Query serialization for status, severity, rule ID, source ID, date window, and text query.
 
-- [ ] **Step 3: Add Alerts tab component tests**
+- [x] **Step 3: Add Alerts tab component tests**
 
 Cover:
 
@@ -576,7 +576,7 @@ Cover:
 - Loading and API error states.
 - Extension-width layout without requiring hover-only controls.
 
-- [ ] **Step 4: Implement Alerts tab**
+- [x] **Step 4: Implement Alerts tab**
 
 The tab should provide:
 
@@ -594,11 +594,11 @@ Suggested copy:
 - Empty inbox: `No content alerts match these filters.`
 - Health boundary helper: `Run failures and source problems are health issues, not content alerts.`
 
-- [ ] **Step 5: Integrate tab into the Watchlists shell**
+- [x] **Step 5: Integrate tab into the Watchlists shell**
 
 Update `WatchlistsPlaygroundPage.tsx` to add the tab inside the selected-Watchlist experience. If unread counts are cheap through the alert list response, show a count badge. If not, leave count wiring to Task 5.
 
-- [ ] **Step 6: Run focused frontend tests and commit**
+- [x] **Step 6: Run focused frontend tests and commit**
 
 Run from `apps/packages/ui`:
 

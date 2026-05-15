@@ -22,6 +22,7 @@
       "jobs": "Monitors",
       "runs": "Activity",
       "items": "Articles",
+      "alerts": "Alerts",
       "outputs": "Reports"
     }
   },
@@ -31,6 +32,8 @@
     "jobs": "Monitors",
     "runs": "Activity",
     "items": "Articles",
+    "alerts": "Alerts",
+    "alertsTooltip": "Content matches from your Watchlist alert rules",
     "outputs": "Reports",
     "templates": "Templates",
     "settings": "Settings",
@@ -43,6 +46,7 @@
     "jobs": "Configure monitors",
     "runs": "Check activity",
     "items": "Review articles",
+    "alerts": "Review alerts",
     "outputs": "View reports"
   },
   "taskViews": {
@@ -50,7 +54,7 @@
     "collect": "Collect",
     "collectHint": "Feeds and monitors",
     "review": "Review",
-    "reviewHint": "Activity and articles",
+    "reviewHint": "Alerts, activity, and articles",
     "briefings": "Briefings",
     "briefingsHint": "Reports and templates"
   },
@@ -122,6 +126,10 @@
     "items": {
       "title": "Articles: triage captured content",
       "description": "Review and prioritize captured items. Next, tune monitor scope or open reports."
+    },
+    "alerts": {
+      "title": "Alerts: review matched content",
+      "description": "Create content alert rules and triage item matches here. Run failures stay in Activity as health issues."
     },
     "outputs": {
       "title": "Reports: generated briefing outputs",
@@ -476,6 +484,58 @@
       "primaryCta": "Create a template"
     }
   },
+  "alerts": {
+    "healthBoundary": "Run failures and source problems are health issues, not content alerts.",
+    "boundaryDescription": "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint.",
+    "rulesTitle": "Content alert rules",
+    "rulesDescription": "Create a rule to be notified when new Watchlist items match a descriptor, keyword, classification, entity, or source constraint.",
+    "inboxTitle": "Alert inbox",
+    "inboxDescription": "Review why a new item matched, then mark it read or dismiss it from the active queue.",
+    "createRule": "Create rule",
+    "saveRule": "Save rule",
+    "emptyRules": "No content alert rules yet.",
+    "emptyInbox": "No content alerts match these filters.",
+    "disabled": "Disabled",
+    "enabledTooltip": "Enable or pause this content alert rule",
+    "sourceLink": "Source",
+    "itemLink": "Item",
+    "untitled": "Untitled alert",
+    "noWatchlist": "Select a Watchlist to manage content alert rules and review matching items.",
+    "loadRulesError": "Failed to load content alert rules",
+    "loadAlertsError": "Failed to load content alerts",
+    "validation": {
+      "required": "Name and pattern are required",
+      "saveFailed": "Failed to save content alert rule"
+    },
+    "form": {
+      "name": "Rule name",
+      "kind": "Rule kind",
+      "matchMode": "Match mode",
+      "severity": "Severity",
+      "pattern": "Pattern",
+      "sourceTags": "Source tags",
+      "sourceTagsPlaceholder": "advisory, cti"
+    },
+    "filters": {
+      "status": "Alert status",
+      "severity": "Severity",
+      "rule": "Rule",
+      "sourceId": "Source ID",
+      "search": "Search loaded alerts",
+      "allRules": "All rules",
+      "allSeverity": "All severity"
+    },
+    "actions": {
+      "markRead": "Mark read",
+      "markUnread": "Mark unread",
+      "dismiss": "Dismiss"
+    },
+    "ids": {
+      "item": "Item #{{id}}",
+      "run": "Run #{{id}}",
+      "job": "Job #{{id}}"
+    }
+  },
   "healthBar": {
     "toggleLabel": "Toggle health bar",
     "refresh": "Refresh",
@@ -510,6 +570,7 @@
       "jobs": "Monitor scheduling",
       "runs": "Activity guidance",
       "items": "Article review",
+      "alerts": "Alert guidance",
       "outputs": "Reports guidance",
       "templates": "Template authoring",
       "settings": "Workspace settings"

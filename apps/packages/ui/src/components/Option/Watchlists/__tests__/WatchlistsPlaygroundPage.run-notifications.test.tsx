@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
       | "jobs"
       | "runs"
       | "items"
+      | "alerts"
       | "outputs"
       | "templates"
       | "settings",

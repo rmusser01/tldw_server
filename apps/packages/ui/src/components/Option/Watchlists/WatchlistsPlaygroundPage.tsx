@@ -3,6 +3,7 @@ import { Alert, Button, Drawer, Input, Modal, Select, Switch, Tabs, Tag, Tooltip
 import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
 import type { TabsProps } from "antd"
 import {
+  BellRing,
   CalendarClock,
   ChevronDown,
   ChevronUp,
@@ -111,9 +112,12 @@ const TemplatesTab = React.lazy(() =>
 const SettingsTab = React.lazy(() =>
   import("./SettingsTab/SettingsTab").then((module) => ({ default: module.SettingsTab }))
 )
+const AlertsTab = React.lazy(() =>
+  import("./AlertsTab/AlertsTab").then((module) => ({ default: module.AlertsTab }))
+)
 
 /** Primary tabs in the progressive disclosure layout */
-const PROGRESSIVE_PRIMARY_TABS = ["sources", "items", "outputs"] as const
+const PROGRESSIVE_PRIMARY_TABS = ["sources", "alerts", "items", "outputs"] as const
 
 /** Which secondary section lives inside which primary tab */
 const SECONDARY_IN_PRIMARY: Record<string, string> = {
@@ -191,6 +195,7 @@ type WatchlistsTabKey =
   | "jobs"
   | "runs"
   | "items"
+  | "alerts"
   | "outputs"
   | "templates"
   | "settings"
@@ -297,7 +302,7 @@ const toTags = (value: string): string[] =>
 
 const resolveTaskViewForTab = (tab: string): TaskViewKey | null => {
   if (tab === "sources" || tab === "jobs") return "collect"
-  if (tab === "runs" || tab === "items") return "review"
+  if (tab === "runs" || tab === "items" || tab === "alerts") return "review"
   if (tab === "outputs" || tab === "templates") return "briefings"
   return null
 }
@@ -702,6 +707,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     jobs: t("watchlists:help.tabs.jobs", "Monitor scheduling"),
     runs: t("watchlists:help.tabs.runs", "Activity guidance"),
     items: t("watchlists:help.tabs.items", "Article review"),
+    alerts: t("watchlists:help.tabs.alerts", "Alert guidance"),
     outputs: t("watchlists:help.tabs.outputs", "Reports guidance"),
     templates: t("watchlists:help.tabs.templates", "Template authoring"),
     settings: t("watchlists:help.tabs.settings", "Workspace settings")
@@ -723,6 +729,10 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     {
       key: "items" as const,
       label: t("watchlists:quickActions.items", "Review articles")
+    },
+    {
+      key: "alerts" as const,
+      label: t("watchlists:quickActions.alerts", "Review alerts")
     },
     {
       key: "outputs" as const,
@@ -840,6 +850,25 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           key: "open-reports",
           label: t("watchlists:orientation.actions.openReports", "Open Reports"),
           target: "outputs"
+        }
+      ]
+    },
+    alerts: {
+      title: t("watchlists:orientation.alerts.title", "Alerts: review matched content"),
+      description: t(
+        "watchlists:orientation.alerts.description",
+        "Create content alert rules and triage item matches here. Run failures stay in Activity as health issues."
+      ),
+      actions: [
+        {
+          key: "open-articles",
+          label: t("watchlists:orientation.actions.openArticles", "Open Articles"),
+          target: "items"
+        },
+        {
+          key: "open-activity",
+          label: t("watchlists:orientation.actions.openActivity", "Open Activity"),
+          target: "runs"
         }
       ]
     },
@@ -1513,6 +1542,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
             <ItemsTab />
           </Suspense>
         )
+      case "alerts":
+        return (
+          <Suspense fallback={tabPanelFallback}>
+            <AlertsTab />
+          </Suspense>
+        )
       case "outputs":
         return (
           <Suspense fallback={tabPanelFallback}>
@@ -1599,6 +1634,18 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       children: renderWatchlistsTab("items")
     },
     {
+      key: "alerts",
+      label: (
+        <Tooltip title={t("watchlists:tabs.alertsTooltip", "Content matches from your Watchlist alert rules")}>
+          <span className="flex items-center gap-2">
+            <BellRing className="h-4 w-4" />
+            {t("watchlists:tabs.alerts", "Alerts")}
+          </span>
+        </Tooltip>
+      ),
+      children: renderWatchlistsTab("alerts")
+    },
+    {
       key: "outputs",
       label: (
         <span className="flex items-center gap-2">
@@ -1659,6 +1706,18 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       )
     },
     {
+      key: "alerts",
+      label: (
+        <Tooltip title={t("watchlists:tabs.alertsTooltip", "Content matches from your Watchlist alert rules")}>
+          <span className="flex items-center gap-2">
+            <BellRing className="h-4 w-4" />
+            {t("watchlists:tabs.alerts", "Alerts")}
+          </span>
+        </Tooltip>
+      ),
+      children: renderWatchlistsTab("alerts")
+    },
+    {
       key: "items",
       label: (
         <Tooltip title={t("watchlists:tabs.itemsTooltip", "Articles and posts collected from your sources")}>
@@ -1716,7 +1775,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     ? progressiveTabItems
     : iaExperimentEnabled
       ? (() => {
-          const reducedIaPrimaryTabKeys = ["overview", "sources", "items", "outputs", "settings"] as const
+          const reducedIaPrimaryTabKeys = ["overview", "sources", "alerts", "items", "outputs", "settings"] as const
           const primarySet = new Set<string>(reducedIaPrimaryTabKeys)
           const primaryItems = allTabItems.filter((item) => item?.key && primarySet.has(String(item.key)))
           if (primarySet.has(activeTab)) return primaryItems

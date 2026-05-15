@@ -30,6 +30,13 @@ import type {
   WatchlistsIaExperimentTelemetrySummaryResponse,
   WatchlistsRcTelemetrySummaryResponse,
   WatchlistContainer,
+  WatchlistContentAlert,
+  WatchlistContentAlertRule,
+  WatchlistContentAlertRuleCreate,
+  WatchlistContentAlertRuleUpdate,
+  WatchlistContentAlertSeverity,
+  WatchlistContentAlertStatus,
+  WatchlistContentAlertUpdate,
   WatchlistCreate,
   WatchlistJob,
   WatchlistJobCreate,
@@ -152,6 +159,106 @@ export const restoreWatchlist = async (
   return bgRequest<WatchlistContainer>({
     path: `/api/v1/watchlists/${watchlistId}/restore` as any,
     method: "POST"
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Alerts API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface FetchContentAlertRulesParams {
+  enabled?: boolean
+  page?: number
+  size?: number
+}
+
+export interface FetchContentAlertsParams {
+  status?: WatchlistContentAlertStatus
+  severity?: WatchlistContentAlertSeverity
+  rule_id?: number
+  source_id?: number
+  page?: number
+  size?: number
+}
+
+export interface ContentAlertRuleDeleteResponse {
+  deleted: boolean
+}
+
+export const fetchWatchlistContentAlertRules = async (
+  watchlistId: number,
+  params?: FetchContentAlertRulesParams
+): Promise<PaginatedResponse<WatchlistContentAlertRule>> => {
+  const qs = buildQuery(params || {})
+  return bgRequest<PaginatedResponse<WatchlistContentAlertRule>>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules${qs}` as any,
+    method: "GET"
+  })
+}
+
+export const createWatchlistContentAlertRule = async (
+  watchlistId: number,
+  rule: WatchlistContentAlertRuleCreate
+): Promise<WatchlistContentAlertRule> => {
+  return bgRequest<WatchlistContentAlertRule>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules` as any,
+    method: "POST",
+    body: rule
+  })
+}
+
+export const updateWatchlistContentAlertRule = async (
+  watchlistId: number,
+  ruleId: number,
+  updates: WatchlistContentAlertRuleUpdate
+): Promise<WatchlistContentAlertRule> => {
+  return bgRequest<WatchlistContentAlertRule>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules/${ruleId}` as any,
+    method: "PATCH",
+    body: updates
+  })
+}
+
+export const deleteWatchlistContentAlertRule = async (
+  watchlistId: number,
+  ruleId: number
+): Promise<ContentAlertRuleDeleteResponse> => {
+  return bgRequest<ContentAlertRuleDeleteResponse>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules/${ruleId}` as any,
+    method: "DELETE"
+  })
+}
+
+export const fetchWatchlistContentAlerts = async (
+  watchlistId: number,
+  params?: FetchContentAlertsParams
+): Promise<PaginatedResponse<WatchlistContentAlert>> => {
+  const qs = buildQuery(params || {})
+  return bgRequest<PaginatedResponse<WatchlistContentAlert>>({
+    path: `/api/v1/watchlists/${watchlistId}/alerts${qs}` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlistContentAlert = async (
+  watchlistId: number,
+  alertId: number
+): Promise<WatchlistContentAlert> => {
+  return bgRequest<WatchlistContentAlert>({
+    path: `/api/v1/watchlists/${watchlistId}/alerts/${alertId}` as any,
+    method: "GET"
+  })
+}
+
+export const updateWatchlistContentAlert = async (
+  watchlistId: number,
+  alertId: number,
+  updates: WatchlistContentAlertUpdate
+): Promise<WatchlistContentAlert> => {
+  return bgRequest<WatchlistContentAlert>({
+    path: `/api/v1/watchlists/${watchlistId}/alerts/${alertId}` as any,
+    method: "PATCH",
+    body: updates
   })
 }
 

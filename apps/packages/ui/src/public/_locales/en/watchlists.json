@@ -17,6 +17,57 @@
   "comingSoon": {
     "message": "Coming soon..."
   },
+  "tabs_alerts": {
+    "message": "Alerts"
+  },
+  "tabs_alertsTooltip": {
+    "message": "Content matches from your Watchlist alert rules"
+  },
+  "quickActions_alerts": {
+    "message": "Review alerts"
+  },
+  "orientation_alerts_title": {
+    "message": "Alerts: review matched content"
+  },
+  "orientation_alerts_description": {
+    "message": "Create content alert rules and triage item matches here. Run failures stay in Activity as health issues."
+  },
+  "help_tabs_alerts": {
+    "message": "Alert guidance"
+  },
+  "alerts_healthBoundary": {
+    "message": "Run failures and source problems are health issues, not content alerts."
+  },
+  "alerts_boundaryDescription": {
+    "message": "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint."
+  },
+  "alerts_rulesTitle": {
+    "message": "Content alert rules"
+  },
+  "alerts_rulesDescription": {
+    "message": "Create a rule to be notified when new Watchlist items match a descriptor, keyword, classification, entity, or source constraint."
+  },
+  "alerts_inboxTitle": {
+    "message": "Alert inbox"
+  },
+  "alerts_inboxDescription": {
+    "message": "Review why a new item matched, then mark it read or dismiss it from the active queue."
+  },
+  "alerts_createRule": {
+    "message": "Create rule"
+  },
+  "alerts_saveRule": {
+    "message": "Save rule"
+  },
+  "alerts_emptyRules": {
+    "message": "No content alert rules yet."
+  },
+  "alerts_emptyInbox": {
+    "message": "No content alerts match these filters."
+  },
+  "alerts_validation_required": {
+    "message": "Name and pattern are required"
+  },
   "setupWizard_title": {
     "message": "Create Watchlist"
   },

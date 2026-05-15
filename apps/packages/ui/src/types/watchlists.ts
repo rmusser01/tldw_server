@@ -326,6 +326,118 @@ export interface ScrapedItemUpdate {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Content Alert Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type WatchlistContentAlertRuleKind =
+  | "keyword"
+  | "regex"
+  | "descriptor"
+  | "classification"
+  | "entity"
+  | "ioc"
+  | "cve"
+
+export type WatchlistContentAlertMatchMode = "contains" | "exact" | "regex"
+export type WatchlistContentAlertSeverity = "info" | "low" | "medium" | "high" | "critical"
+export type WatchlistContentAlertStatus = "unread" | "read" | "dismissed"
+
+export interface WatchlistContentAlertSourceConstraints {
+  source_ids?: number[]
+  source_types?: SourceType[]
+  source_tags?: string[]
+  url_contains?: string[]
+  [key: string]: unknown
+}
+
+export interface WatchlistContentAlertRuleCreate {
+  name: string
+  rule_kind: WatchlistContentAlertRuleKind
+  match_mode?: WatchlistContentAlertMatchMode
+  pattern: string
+  severity?: WatchlistContentAlertSeverity
+  enabled?: boolean
+  classification?: string | null
+  descriptor?: string | null
+  entity_type?: string | null
+  source_constraints?: WatchlistContentAlertSourceConstraints | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface WatchlistContentAlertRuleUpdate {
+  name?: string
+  enabled?: boolean
+  rule_kind?: WatchlistContentAlertRuleKind
+  match_mode?: WatchlistContentAlertMatchMode
+  pattern?: string
+  severity?: WatchlistContentAlertSeverity
+  classification?: string | null
+  descriptor?: string | null
+  entity_type?: string | null
+  source_constraints?: WatchlistContentAlertSourceConstraints | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface WatchlistContentAlertRule {
+  id: number
+  watchlist_id: number
+  name: string
+  enabled: boolean
+  rule_kind: WatchlistContentAlertRuleKind
+  match_mode: WatchlistContentAlertMatchMode
+  pattern: string
+  severity: WatchlistContentAlertSeverity
+  classification?: string | null
+  descriptor?: string | null
+  entity_type?: string | null
+  source_constraints?: WatchlistContentAlertSourceConstraints | null
+  metadata?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WatchlistContentAlertEvidence {
+  url?: string | null
+  title?: string | null
+  summary?: string | null
+  published_at?: string | null
+  source_id?: number
+  source_name?: string | null
+  source_url?: string | null
+  source_type?: SourceType | string | null
+  source_tags?: string[]
+  rule_kind?: WatchlistContentAlertRuleKind | string
+  match_mode?: WatchlistContentAlertMatchMode | string
+  pattern?: string | null
+  matched_text?: string | null
+  [key: string]: unknown
+}
+
+export interface WatchlistContentAlert {
+  id: number
+  watchlist_id: number
+  rule_id: number
+  item_id: number
+  run_id: number
+  job_id: number
+  source_id: number
+  severity: WatchlistContentAlertSeverity
+  status: WatchlistContentAlertStatus
+  title?: string | null
+  snippet?: string | null
+  matched_text?: string | null
+  evidence: WatchlistContentAlertEvidence
+  dedupe_key: string
+  created_at: string
+  read_at?: string | null
+  dismissed_at?: string | null
+}
+
+export interface WatchlistContentAlertUpdate {
+  status: WatchlistContentAlertStatus
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Output Types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -648,6 +760,7 @@ export type WatchlistTab =
   | "jobs"
   | "runs"
   | "items"
+  | "alerts"
   | "outputs"
   | "templates"
   | "settings"
