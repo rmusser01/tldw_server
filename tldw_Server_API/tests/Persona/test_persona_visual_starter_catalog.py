@@ -70,6 +70,18 @@ def test_starter_catalog_lists_bundled_sprite_pack(
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(set(starter["states_offered"]))
 
 
+def test_get_starter_pack_returns_isolated_manifest_preview(
+    db_instance: CharactersRAGDB,
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+    first = service.get_starter_pack(DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID)
+    first["manifest"]["states"]["idle"]["animation_id"] = "mutated"
+
+    second = service.get_starter_pack(DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID)
+
+    assert second["manifest"]["states"]["idle"]["animation_id"] == "idle"
+
+
 def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
     db_instance: CharactersRAGDB,
     visual_storage_root: Path,
@@ -203,6 +215,51 @@ def test_list_starter_packs_rejects_invalid_fixture_renderer_type(
         service.list_starter_packs()
 
     assert exc_info.value.code == "invalid_starter_fixture"
+
+
+def test_list_starter_packs_rejects_duplicate_fixture_asset_keys(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed = PersonaVisualStarterPack(
+        id="duplicate-asset-key",
+        title="Duplicate asset key",
+        description="Invalid test fixture",
+        renderer_type="sprite_frames",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "states": {"idle": {"animation_id": "idle"}},
+            "animations": {
+                "idle": {
+                    "frames": [{"asset_id": "starter_idle", "duration_ms": 100}],
+                    "frame_rate": 1,
+                }
+            },
+        },
+        assets=(
+            PersonaVisualStarterAsset(
+                asset_key="starter_idle",
+                filename="idle-one.png",
+                mime_type="image/png",
+                content=_png_bytes(),
+                asset_role="frame",
+            ),
+            PersonaVisualStarterAsset(
+                asset_key="starter_idle",
+                filename="idle-two.png",
+                mime_type="image/png",
+                content=_png_bytes(),
+                asset_role="frame",
+            ),
+        ),
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_asset"
+    assert exc_info.value.details["asset_key"] == "starter_idle"
 
 
 def test_get_starter_pack_rejects_invalid_fixture_asset_role(
