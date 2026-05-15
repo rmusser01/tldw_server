@@ -101,6 +101,10 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
     get_character_rate_limiter,
 )
+from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+    apply_world_book_prompt_context,
+    build_world_book_prompt_context,
+)
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
@@ -4427,39 +4431,20 @@ async def prompt_assembly_preview(
 
         lorebook_text = ""
         lorebook_diagnostics: list[dict[str, Any]] = []
+        lorebook_cost_diagnostics: dict[str, Any] = {}
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     turn_context.get("active_character_id")
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    lorebook_diagnostics = wb_result.get("diagnostics") or []
-                    if wb_context and wb_context.strip():
-                        lorebook_text = f"World info:\n{wb_context.strip()}"
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            role = str(msg.get("role", "")).strip().lower()
-                            if role == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(
-                            insert_pos,
-                            {"role": "system", "content": lorebook_text},
-                        )
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            lorebook_text = world_book_context.text
+            lorebook_diagnostics = list(world_book_context.legacy_diagnostics)
+            lorebook_cost_diagnostics = dict(world_book_context.diagnostics) if lorebook_text else {}
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -4514,6 +4499,8 @@ async def prompt_assembly_preview(
             }
             if name == "lorebook" and lorebook_diagnostics:
                 section_payload["diagnostics"] = lorebook_diagnostics
+            if name == "lorebook" and lorebook_cost_diagnostics:
+                section_payload["cost_diagnostics"] = lorebook_cost_diagnostics
             sections.append(section_payload)
 
         message_tokens = sum(_estimate_tokens(str(m.get("content", ""))) for m in messages)
@@ -4773,37 +4760,27 @@ async def character_chat_completion(
 
         # Inject world book context and capture diagnostics for this turn.
         turn_lorebook_diagnostics: Optional[list[dict[str, Any]]] = None
+        turn_lorebook_cost_diagnostics: Optional[dict[str, Any]] = None
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     active_character_id
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    turn_lorebook_diagnostics = wb_result.get("diagnostics") or None
-                    if wb_context and wb_context.strip():
-                        # Insert world book context as a system message after existing system messages.
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            if str(msg.get("role", "")).strip().lower() == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(insert_pos, {
-                            "role": "system",
-                            "content": f"World info:\n{wb_context.strip()}",
-                        })
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            turn_lorebook_diagnostics = (
+                list(world_book_context.legacy_diagnostics)
+                if world_book_context.legacy_diagnostics
+                else None
+            )
+            turn_lorebook_cost_diagnostics = (
+                dict(world_book_context.diagnostics)
+                if world_book_context.text
+                else None
+            )
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass  # world book injection is best-effort
 
@@ -5391,6 +5368,8 @@ async def character_chat_completion(
                 metadata_extra["mood_topic"] = resolved_mood_topic
             if turn_lorebook_diagnostics:
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
+            if turn_lorebook_cost_diagnostics:
+                metadata_extra["lorebook_cost_diagnostics"] = turn_lorebook_cost_diagnostics
             validated_tool_calls = (
                 _validate_and_truncate_tool_calls(assistant_tool_calls)
                 if assistant_tool_calls

@@ -103,22 +103,22 @@ feat(chat): add prompt cost envelope primitives
 - Modify `tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py` if existing expectations need to assert diagnostics.
 
 **Implementation Steps:**
-- [ ] Write failing tests proving preview and completion code paths receive identical world-book text/fingerprint for the same inputs.
-- [ ] Write failing tests for bounded diagnostics:
+- [x] Write failing tests proving preview and completion code paths receive identical world-book text/fingerprint for the same inputs.
+- [x] Write failing tests for bounded diagnostics:
   - matched book IDs and entry IDs are present;
   - trigger text is not persisted verbatim;
   - dropped entries and token-budget truncation are visible;
   - static/pinned entries are flagged when current metadata supports it.
-- [ ] Implement `WorldBookPromptContext`:
+- [x] Implement `WorldBookPromptContext`:
   - `text: str`
   - `system_message: Mapping[str, str] | None`
   - `diagnostics: Mapping[str, Any]`
   - `fingerprint: str`
   - `estimated_tokens: int`
-- [ ] Move duplicated `WorldBookService.process_context(... include_diagnostics=True)` orchestration behind `build_world_book_prompt_context(...)`.
-- [ ] Preserve existing insertion order: world-book system message after existing system messages and before conversational turns.
-- [ ] Wire preview and completion-v2 endpoints to the helper.
-- [ ] Add a guard in tests that preview envelope fingerprint equals provider-send fingerprint when no final prompt mutation occurs.
+- [x] Move duplicated `WorldBookService.process_context(... include_diagnostics=True)` orchestration behind `build_world_book_prompt_context(...)`.
+- [x] Preserve existing insertion order: world-book system message after existing system messages and before conversational turns.
+- [x] Wire preview and completion-v2 endpoints to the helper.
+- [x] Add a guard in tests that preview envelope fingerprint equals provider-send fingerprint when no final prompt mutation occurs.
 
 **Tests:**
 ```bash
