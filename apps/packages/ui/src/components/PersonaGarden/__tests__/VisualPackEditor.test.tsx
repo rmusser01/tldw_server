@@ -131,6 +131,20 @@ const readyGenerationReadiness = {
   reasons: []
 }
 
+const mockVisualPackBackgroundGet = (path: string, method: string) => {
+  if (method !== "GET") return null
+  if (path.endsWith("/generation-readiness")) {
+    return okResponse(readyGenerationReadiness)
+  }
+  if (path === "/api/v1/persona/catalog") {
+    return okResponse([])
+  }
+  if (path === "/api/v1/persona/visual-library") {
+    return okResponse({ items: [] })
+  }
+  return null
+}
+
 describe("VisualPackEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -186,6 +200,8 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
         method === "GET"
@@ -312,6 +328,8 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
         method === "GET"

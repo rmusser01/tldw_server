@@ -4,7 +4,7 @@ title: Implement Persona Visual custom-state runtime triggers
 status: Done
 assignee: []
 created_date: '2026-05-15 03:17'
-updated_date: '2026-05-15 05:19'
+updated_date: '2026-05-15 05:32'
 labels:
   - persona
   - buddy
@@ -45,6 +45,8 @@ Review follow-up started for PR #1717. Actionable comments found: branded custom
 PR #1717 review follow-up addressed: branded PersonaVisualCustomStateId no longer widens PersonaVisualStateId to plain string; runtime visual_state_override is built-in-only in store, resolver, and incoming payload handling; tool_name triggers now require a present structured activeToolName; live voice tool payloads extract object-shaped tool.name/function.name safely; VisualPackEditor clamps stale generation target states after pack switches and guards submit payloads; import conflict commit eligibility now waits for an explicit target-mode choice for the active preview.
 
 Review follow-up verification: bun run test src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx -t "extracts activeToolName" passed; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "clamps stale generation" --testTimeout=20000 passed; bun run test src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx src/store/__tests__/persona-visual-runtime.test.ts passed with 86 tests; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000 passed with 25 tests; git diff --check passed. ./node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false still exits nonzero on existing repo-wide type drift outside this slice; no changed persona visual files were reported in the emitted errors. Bandit remains not applicable for this frontend-only TypeScript/task-file slice.
+
+Follow-up after PR comment: hardened VisualPackEditor localization test background fetch stubs so the candidate-loading assertion no longer waits on unrelated background requests. Verification after this follow-up: bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "localizes loading and refresh labels while candidates are loading" --testTimeout=20000 passed; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000 passed with 25 tests; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
