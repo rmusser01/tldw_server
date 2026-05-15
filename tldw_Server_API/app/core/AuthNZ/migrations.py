@@ -686,6 +686,10 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
         "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_owner_updated "
         "ON prototype_workspaces(owner_user_id, updated_at)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_archived_at_cleanup "
+        "ON prototype_workspaces(archived_at) WHERE archived_at IS NOT NULL"
+    )
 
     conn.execute(
         """
@@ -742,6 +746,11 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_active_lookup "
         "ON prototype_shared_actors(prototype_workspace_id, revoked_at, expires_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_expires_revoked_cleanup "
+        "ON prototype_shared_actors(expires_at, revoked_at) "
+        "WHERE expires_at IS NOT NULL AND revoked_at IS NULL"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_share_link_revoked "
@@ -806,6 +815,14 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
         "actor_shared_actor_id, share_link_id, revoked_at, expires_at, updated_at"
         ")"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_revoked_at_cleanup "
+        "ON prototype_sessions(revoked_at) WHERE revoked_at IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_expires_at_cleanup "
+        "ON prototype_sessions(expires_at) WHERE expires_at IS NOT NULL"
+    )
 
     conn.execute(
         """
@@ -844,6 +861,11 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_prototype_preview_handles_active_scope "
         "ON prototype_preview_handles(scope_id) WHERE is_active = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_inactive_revoked_cleanup "
+        "ON prototype_preview_handles(is_active, revoked_at) "
+        "WHERE is_active = 0 AND revoked_at IS NOT NULL"
     )
 
     conn.execute(

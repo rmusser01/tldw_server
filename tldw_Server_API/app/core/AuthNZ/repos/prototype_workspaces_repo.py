@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -100,6 +101,7 @@ def _load_json_list(raw: Any) -> list[Any]:
 
 
 def _result_row_count(result: Any) -> int:
+    """Extract affected-row counts from SQLite cursors or asyncpg status strings."""
     rowcount = getattr(result, "rowcount", None)
     if isinstance(rowcount, int):
         return max(rowcount, 0)
@@ -157,7 +159,7 @@ class PrototypeWorkspacesRepo:
         return now if self._is_postgres_backend() else now.isoformat()
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self) -> AsyncIterator[PrototypeWorkspacesRepo]:
         """Yield a repository bound to one AuthNZ database transaction."""
         transaction_factory = getattr(self.db_pool, "transaction", None)
         if transaction_factory is None:
@@ -177,7 +179,7 @@ class PrototypeWorkspacesRepo:
             raise
 
     @asynccontextmanager
-    async def _cleanup_transaction(self):
+    async def _cleanup_transaction(self) -> AsyncIterator[PrototypeWorkspacesRepo]:
         """Yield the active transaction-bound repo or open a cleanup transaction."""
         if getattr(self.db_pool, "transaction", None) is None:
             yield self

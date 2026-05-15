@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import pytest
 
@@ -37,14 +39,14 @@ class _FakePool:
         return [dict(zip(cols, row, strict=True)) for row in rows]
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(self) -> AsyncIterator[Any]:
         """Yield a no-autocommit adapter over the in-memory SQLite connection."""
 
         class _TxConn:
             def __init__(self, conn: sqlite3.Connection) -> None:
                 self._conn = conn
 
-            async def execute(self, sql: str, params: tuple = ()):
+            async def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
                 return self._conn.execute(sql, params)
 
             async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:

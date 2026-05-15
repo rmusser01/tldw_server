@@ -99,14 +99,19 @@ def test_migration_086_creates_risk_gate_2_query_indexes() -> None:
         index_names = {str(row[0]) for row in rows}
         assert {
             "idx_prototype_workspaces_owner_updated",
+            "idx_prototype_workspaces_archived_at_cleanup",
             "idx_prototype_sessions_workspace_active_updated",
             "idx_prototype_sessions_active_lookup",
+            "idx_prototype_sessions_revoked_at_cleanup",
+            "idx_prototype_sessions_expires_at_cleanup",
             "idx_prototype_shared_actors_active_lookup",
+            "idx_prototype_shared_actors_expires_revoked_cleanup",
             "idx_prototype_promotion_requests_workspace_status_updated",
             "idx_prototype_preview_handles_workspace",
             "idx_prototype_preview_handles_session",
             "idx_prototype_preview_handles_scope_active",
             "idx_prototype_preview_handles_active_scope",
+            "idx_prototype_preview_handles_inactive_revoked_cleanup",
         }.issubset(index_names)
     finally:
         conn.close()

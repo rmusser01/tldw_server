@@ -246,6 +246,7 @@ Query/index review:
 | active session reuse | workspace, base snapshot, actor type, actor identity, share link, revoked/expiry/runtime filters | `idx_prototype_sessions_active_lookup` |
 | active shared actor check | workspace-scoped actor activity and expiry checks | primary key plus `idx_prototype_shared_actors_active_lookup` |
 | promotion listings/review | workspace and status with update-time cleanup | `idx_prototype_promotion_requests_workspace_status_updated` |
+| cleanup retention sweep | global archived, revoked, expired, and inactive-preview cutoffs | `idx_prototype_workspaces_archived_at_cleanup`, `idx_prototype_sessions_revoked_at_cleanup`, `idx_prototype_sessions_expires_at_cleanup`, `idx_prototype_shared_actors_expires_revoked_cleanup`, `idx_prototype_preview_handles_inactive_revoked_cleanup` |
 | preview handle lookup | handle id, active scope replacement, workspace/session cleanup scans | primary key plus preview handle workspace/session/scope indexes |
 
 ## Preview Broker Guarantees
