@@ -23,6 +23,7 @@ import {
   createPersonaVisualGenerationJob,
   createPersonaVisualImportPreview,
   createPersonaVisualPack,
+  copyPersonaVisualStarterPack,
   deletePersonaVisualLibraryItem,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
@@ -31,6 +32,7 @@ import {
   getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
+  listPersonaVisualStarterPacks,
   listPersonaVisualLibraryItems,
   listPersonaVisualCandidates,
   listPersonaVisualDuplicateTargets,
@@ -45,6 +47,7 @@ import {
   uploadPersonaVisualAsset,
   usePersonaVisualLibraryItem
 } from "@/services/persona-visuals"
+import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
 import type {
   PersonaVisualAnimation,
   PersonaVisualAsset,
@@ -67,6 +70,7 @@ import type {
   PersonaVisualPackExportResponse,
   PersonaVisualPortabilityJobResponse,
   PersonaVisualRendererImportPreview,
+  PersonaVisualStarterPackSummary,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 import {
@@ -766,6 +770,7 @@ const sourceBadgeClass =
   "inline-flex min-h-[22px] items-center rounded border px-1.5 py-0.5 text-xs font-medium"
 const sourceAvailableBadgeClass = `${sourceBadgeClass} border-state-ready/30 bg-state-ready/10 text-state-ready`
 const sourceUnavailableBadgeClass = `${sourceBadgeClass} border-state-unavailable/30 bg-state-unavailable/10 text-state-unavailable`
+const LOADING_STATE_LABEL = getDesignSystemState("loading").label
 
 export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   selectedPersonaId,
@@ -774,7 +779,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   onOpenPersonaVisuals
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
-  const loadingLabel = t("common:loading", getDesignSystemState("loading").label)
+  const loadingLabel = t("common:loading.title", {
+    defaultValue: LOADING_STATE_LABEL
+  })
   const refreshLabel = t("common:refresh", "Refresh")
   const unknownLabel = t("common:unknown", { defaultValue: "unknown" })
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
@@ -816,6 +823,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [duplicateTitle, setDuplicateTitle] = React.useState("")
   const [duplicatingPack, setDuplicatingPack] = React.useState(false)
   const [lastDuplicatedPersonaId, setLastDuplicatedPersonaId] = React.useState("")
+  const [starterPacks, setStarterPacks] = React.useState<
+    PersonaVisualStarterPackSummary[]
+  >([])
+  const [starterPacksLoading, setStarterPacksLoading] = React.useState(false)
+  const [selectedStarterPackId, setSelectedStarterPackId] = React.useState("")
+  const [starterDraftTitle, setStarterDraftTitle] = React.useState("")
+  const [copyingStarterPack, setCopyingStarterPack] = React.useState(false)
   const [libraryItems, setLibraryItems] = React.useState<PersonaVisualLibraryItem[]>([])
   const [libraryLoading, setLibraryLoading] = React.useState(false)
   const [savingToLibrary, setSavingToLibrary] = React.useState(false)
@@ -864,6 +878,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const libraryPanelRef = React.useRef<HTMLDivElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
+  const starterPacksRequestIdRef = React.useRef(0)
   const libraryRequestIdRef = React.useRef(0)
   const importCommitInFlightRef = React.useRef(false)
 
@@ -875,6 +890,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   )
   const selectedDuplicateTarget =
     availableDuplicateTargets.find((target) => target.id === duplicateTargetId) ?? null
+  const selectedStarterPack =
+    starterPacks.find((starter) => starter.id === selectedStarterPackId) ??
+    starterPacks[0] ??
+    null
   const selectedPackLibraryItem = React.useMemo(
     () =>
       selectedPack
@@ -1096,6 +1115,49 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId])
 
+  const loadStarterPacks = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId) {
+      starterPacksRequestIdRef.current += 1
+      setStarterPacks([])
+      setSelectedStarterPackId("")
+      setStarterDraftTitle("")
+      setStarterPacksLoading(false)
+      return
+    }
+    const requestId = starterPacksRequestIdRef.current + 1
+    starterPacksRequestIdRef.current = requestId
+    const isLatestRequest = () => starterPacksRequestIdRef.current === requestId
+    setStarterPacksLoading(true)
+    try {
+      const response = await listPersonaVisualStarterPacks()
+      if (!isLatestRequest()) return
+      const nextStarterPacks = response.starter_packs || []
+      setStarterPacks(nextStarterPacks)
+      setSelectedStarterPackId((current) => {
+        if (current && nextStarterPacks.some((starter) => starter.id === current)) {
+          return current
+        }
+        return nextStarterPacks[0]?.id ?? ""
+      })
+      setStarterDraftTitle((current) => current || nextStarterPacks[0]?.title || "")
+    } catch (loadError) {
+      if (isLatestRequest()) {
+        setStarterPacks([])
+        setSelectedStarterPackId("")
+        setStarterDraftTitle("")
+        if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load bundled starter packs."
+          )
+        }
+      }
+    } finally {
+      if (isLatestRequest()) setStarterPacksLoading(false)
+    }
+  }, [isActive, selectedPersonaId])
+
   const loadLibrary = React.useCallback(async () => {
     if (!isActive || !selectedPersonaId) {
       libraryRequestIdRef.current += 1
@@ -1140,6 +1202,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     void loadDuplicateTargets()
   }, [loadDuplicateTargets])
+
+  React.useEffect(() => {
+    setStarterDraftTitle("")
+    void loadStarterPacks()
+  }, [loadStarterPacks])
 
   React.useEffect(() => {
     void loadLibrary()
@@ -1397,6 +1464,35 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setDuplicatingPack(false)
+    }
+  }
+
+  const handleCopyStarterPack = async () => {
+    if (!selectedPersonaId || !selectedStarterPack) return
+    setCopyingStarterPack(true)
+    setError(null)
+    try {
+      const copied = await copyPersonaVisualStarterPack(selectedStarterPack.id, {
+        target_persona_id: selectedPersonaId,
+        title: starterDraftTitle.trim() || selectedStarterPack.title
+      })
+      await loadPacks(copied.id)
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.starterCopiedDraft", {
+          defaultValue:
+            "Starter pack copied as a draft. Review and activate it when ready."
+        })
+      )
+    } catch (copyError) {
+      setError(
+        copyError instanceof Error
+          ? copyError.message
+          : t("sidepanel:personaGarden.visuals.starterCopyError", {
+              defaultValue: "Failed to copy bundled starter pack."
+            })
+      )
+    } finally {
+      setCopyingStarterPack(false)
     }
   }
 
@@ -1715,6 +1811,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           defaultValue: "Visual pack activated."
         })
       )
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+            detail: {
+              personaId: selectedPersonaId,
+              packId: active.id
+            }
+          })
+        )
+      }
     } catch (activateError) {
       setError(
         activateError instanceof Error
@@ -2391,7 +2497,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       <VisualPackReusePanel
         selectedPersonaName={selectedPersonaName || selectedPersonaId}
         hasSelectedPack={Boolean(selectedPack)}
-        canImport={Boolean(selectedPack)}
+        canImport
         libraryItemCount={libraryItems.length}
         hasDuplicateTargets={availableDuplicateTargets.length > 0}
         duplicateTargetsLoading={duplicateTargetsLoading}
@@ -2400,6 +2506,243 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         onOpenImport={openImportArchivePicker}
         onOpenDuplicate={focusDuplicateControls}
       />
+
+      {starterPacksLoading || starterPacks.length ? (
+        <div
+          data-testid="persona-visual-starter-pack-panel"
+          className="rounded-lg border border-border bg-surface p-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.visuals.starterHeading", {
+                  defaultValue: "Default starter pack"
+                })}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.starterDescription", {
+                  defaultValue:
+                    "Copy a bundled sprite-frame pack as a draft, then review and activate it."
+                })}
+              </div>
+            </div>
+            <Tag>sprite_frames</Tag>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">
+                {t("sidepanel:personaGarden.visuals.starterSelectLabel", {
+                  defaultValue: "Starter"
+                })}
+              </span>
+              <select
+                data-testid="persona-visual-starter-pack-select"
+                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={selectedStarterPack?.id || ""}
+                disabled={starterPacksLoading || !starterPacks.length}
+                onChange={(event) => {
+                  const nextId = event.target.value
+                  const nextStarter = starterPacks.find(
+                    (starter) => starter.id === nextId
+                  )
+                  setSelectedStarterPackId(nextId)
+                  setStarterDraftTitle(nextStarter?.title || "")
+                }}
+              >
+                {starterPacks.map((starter) => (
+                  <option key={starter.id} value={starter.id}>
+                    {starter.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">
+                {t("sidepanel:personaGarden.visuals.starterDraftTitleLabel", {
+                  defaultValue: "Draft title"
+                })}
+              </span>
+              <input
+                data-testid="persona-visual-starter-title-input"
+                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={starterDraftTitle}
+                disabled={!selectedStarterPack}
+                onChange={(event) => setStarterDraftTitle(event.target.value)}
+              />
+            </label>
+            <Button
+              data-testid="persona-visual-starter-copy-button"
+              className="self-end"
+              size="small"
+              icon={<Copy className="h-3.5 w-3.5" />}
+              loading={copyingStarterPack}
+              disabled={!selectedStarterPack || copyingStarterPack}
+              onClick={() => void handleCopyStarterPack()}
+            >
+              {t("sidepanel:personaGarden.visuals.starterCopyAsDraft", {
+                defaultValue: "Copy as draft"
+              })}
+            </Button>
+          </div>
+          {selectedStarterPack ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+              <span>
+                {selectedStarterPack.asset_count}{" "}
+                {t("sidepanel:personaGarden.visuals.starterAssetUnit", {
+                  defaultValue: "assets"
+                })}
+              </span>
+              <span>
+                {selectedStarterPack.total_bytes}{" "}
+                {t("sidepanel:personaGarden.visuals.starterBytesUnit", {
+                  defaultValue: "bytes"
+                })}
+              </span>
+              <span>{selectedStarterPack.states_offered.join(", ")}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!selectedPack ? (
+        <div className="rounded-lg border border-border bg-surface p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+            Portability
+          </div>
+          <div
+            data-testid="persona-visual-portability-copy"
+            className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
+          >
+            <div>
+              {t("sidepanel:personaGarden.visuals.importPreviewHelp", {
+                defaultValue:
+                  "Import preview validates a portable pack archive before it changes this persona."
+              })}
+            </div>
+            <div>
+              {t("sidepanel:personaGarden.visuals.importCommitHelp", {
+                defaultValue:
+                  "Commit import creates a reviewed draft pack for this persona."
+              })}
+            </div>
+          </div>
+          <div className="mt-3 rounded border border-border bg-bg p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Typography.Text strong>Import preview</Typography.Text>
+              <Tag>review only</Tag>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                ref={importPreviewInputRef}
+                data-testid="persona-visual-import-preview-input"
+                type="file"
+                accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+                className="text-xs text-text"
+                onChange={(event) =>
+                  setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
+                }
+              />
+              <Button
+                data-testid="persona-visual-import-preview-button"
+                size="small"
+                icon={<FileSearch className="h-3.5 w-3.5" />}
+                loading={previewingImport}
+                disabled={!selectedImportPreviewFile || Boolean(importPreviewFileError)}
+                onClick={() => void handleStartImportPreview()}
+              >
+                Preview
+              </Button>
+              <Button
+                data-testid="persona-visual-import-preview-refresh-button"
+                size="small"
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
+                loading={refreshingImportPreview}
+                disabled={!importPreview?.preview_id}
+                onClick={() => void handleRefreshImportPreview()}
+              >
+                Refresh
+              </Button>
+            </div>
+            {importPreviewFileError ? (
+              <div
+                data-testid="persona-visual-import-preview-file-error"
+                className="mt-2 text-xs text-state-error"
+              >
+                {importPreviewFileError}
+              </div>
+            ) : null}
+            {importPreview ? (
+              <div className="mt-2 space-y-2 text-xs text-text-muted">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Tag data-testid="persona-visual-import-preview-status">
+                    {importPreview.status}
+                  </Tag>
+                  <span>{importPreview.stage}</span>
+                  <span>{importPreview.preview_id}</span>
+                </div>
+                <div data-testid="persona-visual-import-preview-summary">
+                  {formatImportPreviewSummary(importPreview)}
+                </div>
+                {canCommitImportPreview ? (
+                  <div className="border-t border-border pt-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-medium text-text">
+                        Commit reviewed import
+                      </div>
+                      <Tag>creates draft</Tag>
+                    </div>
+                    {!importPreviewCommitEligible ? (
+                      <div
+                        data-testid="persona-visual-import-commit-blocked"
+                        className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
+                      >
+                        {t(
+                          "sidepanel:personaGarden.visuals.importCommitBlocked",
+                          {
+                            defaultValue:
+                              "Commit unavailable until preview blockers are resolved"
+                          }
+                        )}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button
+                        data-testid="persona-visual-import-commit-button"
+                        size="small"
+                        icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                        loading={committingImport}
+                        disabled={!canStartImportCommit}
+                        onClick={() => void handleStartImportCommit()}
+                      >
+                        Commit import
+                      </Button>
+                      <Button
+                        data-testid="persona-visual-import-commit-refresh-button"
+                        size="small"
+                        icon={<RefreshCw className="h-3.5 w-3.5" />}
+                        loading={refreshingImportCommit}
+                        disabled={!importCommitJob?.job_id}
+                        onClick={() => void handleRefreshImportCommit()}
+                      >
+                        Refresh commit
+                      </Button>
+                    </div>
+                    {importCommitJob ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Tag data-testid="persona-visual-import-commit-status">
+                          {importCommitJob.status}
+                        </Tag>
+                        <span>{importCommitJob.stage}</span>
+                        <span>{importCommitJob.job_id}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">

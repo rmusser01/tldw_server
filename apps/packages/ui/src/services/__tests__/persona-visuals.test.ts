@@ -10,7 +10,11 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-import { getPersonaVisualRendererCapabilities } from "../persona-visuals"
+import {
+  copyPersonaVisualStarterPack,
+  getPersonaVisualRendererCapabilities,
+  listPersonaVisualStarterPacks
+} from "../persona-visuals"
 
 describe("persona visuals service", () => {
   beforeEach(() => {
@@ -81,5 +85,77 @@ describe("persona visuals service", () => {
     await expect(getPersonaVisualRendererCapabilities()).resolves.toEqual({
       renderers: []
     })
+  })
+
+  it("loads bundled starter packs through the starter catalog endpoint", async () => {
+    const starterPack = {
+      id: "research-buddy-starter",
+      title: "Research Buddy Starter",
+      description: "A deterministic sprite-frame starter.",
+      renderer_type: "sprite_frames",
+      manifest_version: 1,
+      states_offered: ["idle", "listening", "thinking", "speaking", "error"],
+      asset_count: 1,
+      total_bytes: 92,
+      tags: ["starter", "sprite_frames"],
+      license_label: "bundled"
+    }
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ starter_packs: [starterPack] })
+    })
+
+    await expect(listPersonaVisualStarterPacks()).resolves.toEqual({
+      starter_packs: [starterPack]
+    })
+
+    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/visual-starter-packs",
+      expect.objectContaining({ method: "GET" })
+    )
+  })
+
+  it("copies a bundled starter pack into a target persona draft", async () => {
+    const copiedPack = {
+      id: "starter-copy-1",
+      persona_id: "persona-1",
+      title: "Research Buddy Starter",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: {
+        manifest_version: 1,
+        renderer_type: "sprite_frames",
+        states: {},
+        animations: {}
+      },
+      assets: []
+    }
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => copiedPack
+    })
+
+    await expect(
+      copyPersonaVisualStarterPack("research-buddy-starter", {
+        target_persona_id: "persona-1",
+        title: "Starter copy"
+      })
+    ).resolves.toEqual(copiedPack)
+
+    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json"
+        }),
+        body: JSON.stringify({
+          target_persona_id: "persona-1",
+          title: "Starter copy"
+        })
+      })
+    )
   })
 })

@@ -13,7 +13,10 @@ import {
 } from "@/store/persona-buddy-shell"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type { PersonaBuddyRenderContext } from "@/types/persona-buddy"
-import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
+import {
+  asPersonaVisualCustomStateId,
+  PERSONA_VISUAL_PACK_ACTIVATED_EVENT
+} from "@/types/persona-visuals"
 import { BuddyShellHost } from "../BuddyShellHost"
 
 const mocks = vi.hoisted(() => ({
@@ -504,6 +507,57 @@ describe("BuddyShellHost", () => {
 
     await waitFor(() => {
       expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "src",
+        expect.stringContaining("/assets/idle.png")
+      )
+    })
+  })
+
+  it("reloads the active visual pack when the persona editor activates one", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks
+      .mockResolvedValue({
+        packs: [visualPack],
+        active_pack: visualPack
+      })
+      .mockResolvedValueOnce({
+        packs: [],
+        active_pack: null
+      })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
+    })
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+
+    fireEvent(
+      window,
+      new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+        detail: {
+          personaId: "persona-1",
+          packId: visualPack.id
+        }
+      })
+    )
+
+    await waitFor(() => {
+      expect(visualMocks.listPersonaVisualPacks.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
     await waitFor(() => {
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
