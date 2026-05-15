@@ -10,6 +10,12 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
+from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
+    LlamaCppConfigResponse,
+    LlamaCppConfigUpdateRequest,
+    LlamaCppValidationRequest,
+    LlamaCppValidationResponse,
+)
 
 from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 
@@ -17,6 +23,7 @@ from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 # Local Imports
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError, ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager import LLMInferenceManager
+from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
 
 #
 ########################################################################################################################
@@ -94,6 +101,39 @@ def _log_sanitized_manager_error(llm_manager: LLMInferenceManager, message: str)
 
 
 # --- Llama.cpp Specific Endpoints ---
+@router.get(
+    "/llamacpp/config",
+    summary="Get llama.cpp Admin Config State",
+    response_model=LlamaCppConfigResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def get_llamacpp_config_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
+    return llamacpp_config_service.get_config_state(llm_manager)
+
+
+@router.put(
+    "/llamacpp/config",
+    summary="Update llama.cpp Admin Config",
+    response_model=LlamaCppConfigResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def update_llamacpp_config_endpoint(
+    payload: LlamaCppConfigUpdateRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+):
+    return llamacpp_config_service.update_config_state(payload, llm_manager)
+
+
+@router.post(
+    "/llamacpp/validate",
+    summary="Validate llama.cpp Binary",
+    response_model=LlamaCppValidationResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def validate_llamacpp_binary_endpoint(payload: LlamaCppValidationRequest):
+    return llamacpp_config_service.validate_binary(payload.binary_path, payload.timeout_seconds)
+
+
 @router.post(
     "/llamacpp/start_server",
     summary="Start or Swap Llama.cpp Server Model",
