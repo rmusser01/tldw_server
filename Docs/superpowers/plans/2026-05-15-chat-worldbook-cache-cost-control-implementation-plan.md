@@ -385,18 +385,18 @@ feat(llm): add opt-in provider prompt cache intents
   - `tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py`
 
 **Implementation Steps:**
-- [ ] Write failing diagnostics tests for vLLM:
+- [x] Write failing diagnostics tests for vLLM:
   - prefix-cache hint is diagnostic-only;
   - no billing-cache fields are invented;
   - request shape instability produces a warning.
-- [ ] Write failing diagnostics tests for llama.cpp:
+- [x] Write failing diagnostics tests for llama.cpp:
   - startup flags such as `prompt_cache`, `prompt_cache_all`, `prompt_cache_ro`, `cache_prompt`, and `cache_reuse` are surfaced when known;
   - request extensions remain behind existing allow/strict-filter rules;
   - prompt-cache read-only mode is reported distinctly from writable cache mode.
-- [ ] Implement `InferencePrefixCacheIntent` and local diagnostics separately from `BillingPromptCacheIntent`.
-- [ ] Attach diagnostics to internal usage metadata or response diagnostics where available.
-- [ ] Keep all local cache usage cost-neutral in `compute_costs(...)`.
-- [ ] Run focused local adapter tests.
+- [x] Implement `InferencePrefixCacheIntent` and local diagnostics separately from `BillingPromptCacheIntent`.
+- [x] Attach diagnostics to internal usage metadata or response diagnostics where available.
+- [x] Keep all local cache usage cost-neutral in `compute_costs(...)`.
+- [x] Run focused local adapter tests.
 
 **Tests:**
 ```bash
@@ -407,6 +407,39 @@ python -m pytest \
   tldw_Server_API/tests/LLM_Calls/test_vllm_strict_filter.py \
   tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py \
   -v
+```
+
+Verified on 2026-05-15:
+```bash
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+python -m pytest \
+  tldw_Server_API/tests/LLM_Calls/test_local_cache_diagnostics.py \
+  tldw_Server_API/tests/LLM_Calls/test_capability_registry.py \
+  tldw_Server_API/tests/Chat/unit/test_chat_request_schemas.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_vllm_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py \
+  -q --tb=short --disable-warnings
+# 61 passed, 5 warnings
+python -m py_compile \
+  tldw_Server_API/app/core/LLM_Calls/local_cache_diagnostics.py \
+  tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py \
+  tldw_Server_API/app/core/Chat/chat_orchestrator.py \
+  tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py \
+  tldw_Server_API/app/core/LLM_Calls/capability_registry.py \
+  tldw_Server_API/tests/LLM_Calls/test_local_cache_diagnostics.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_vllm_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py
+git diff --check
+python -m bandit -r \
+  tldw_Server_API/app/core/LLM_Calls/local_cache_diagnostics.py \
+  tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py \
+  tldw_Server_API/app/core/Chat/chat_orchestrator.py \
+  tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py \
+  tldw_Server_API/app/core/LLM_Calls/capability_registry.py \
+  -f json -o /tmp/bandit_local_cache_stage7.json
+# Bandit results: []
 ```
 
 **Commit Message:**

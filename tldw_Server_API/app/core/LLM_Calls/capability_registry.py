@@ -89,6 +89,7 @@ BASE_FIELDS: set[str] = {
     "extra_headers",
     "extra_body",
     "billing_prompt_cache_intent",
+    "inference_prefix_cache_intent",
 }
 
 # Provider-specific extension fields (non-OpenAI keys).
@@ -131,6 +132,7 @@ ALIASES: dict[str, dict[str, str]] = {
         "custom_prompt": "custom_prompt_arg",
         "custom_prompt_input": "custom_prompt_arg",
         "prompt_cache_intent": "billing_prompt_cache_intent",
+        "local_prefix_cache_intent": "inference_prefix_cache_intent",
     },
     "bedrock": {"maxp": "top_p", "topp": "top_p"},
     "openai": {"maxp": "top_p"},

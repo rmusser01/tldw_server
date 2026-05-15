@@ -69,6 +69,30 @@ def test_build_call_params_merges_llamacpp_inline_grammar_into_extra_body() -> N
     assert "grammar_inline" not in params
 
 
+def test_build_call_params_preserves_inference_prefix_cache_intent_for_local_diagnostics() -> None:
+    request = ChatCompletionRequest(
+        model="llama.cpp/local-model",
+        messages=[{"role": "user", "content": "hello"}],
+        inference_prefix_cache_intent={
+            "enabled": True,
+            "scope": ["world_books"],
+            "static_segment_fingerprint": "worldbook:v1",
+        },
+    )
+
+    params = build_call_params_from_request(
+        request_data=request,
+        target_api_provider="llama.cpp",
+        provider_api_key="test-key",
+        templated_llm_payload=[{"role": "user", "content": "hello"}],
+        final_system_message=None,
+        app_config={"llama_api": {"strict_openai_compat": False}},
+    )
+
+    assert params["inference_prefix_cache_intent"]["enabled"] is True
+    assert "billing_prompt_cache_intent" not in params
+
+
 def test_build_call_params_rejects_llamacpp_fields_for_non_llamacpp_provider() -> None:
     request = ChatCompletionRequest(
         model="gpt-4o-mini",
