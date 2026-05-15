@@ -24,8 +24,13 @@ export type VisualBuddySetupChoiceCardProps = {
   onOpenVisuals?: () => void
 }
 
-const formatStarterCount = (starterCount: number | undefined): string => {
-  if (!starterCount) return "No bundled defaults available."
+const formatStarterCount = (
+  starterCount: number | undefined,
+  starterCatalogLoading: boolean
+): string => {
+  if (starterCatalogLoading) return "Checking bundled defaults."
+  if (starterCount === undefined) return "Bundled default count unavailable."
+  if (starterCount <= 0) return "No bundled defaults available."
   if (starterCount === 1) return "1 bundled default available."
   return `${starterCount} bundled defaults available.`
 }
@@ -89,6 +94,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
           className="mt-3 justify-center"
           size="small"
           icon={<Images className="h-3.5 w-3.5" />}
+          disabled={!onOpenVisuals}
           onClick={onOpenVisuals}
         >
           Set up visual buddy
@@ -99,7 +105,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
 
   const hasDrafts = !hasActiveVisual && packCount > 0
   const defaultDisabled =
-    starterCatalogLoading || copyingDefault || !recommendedStarter
+    starterCatalogLoading || copyingDefault || !recommendedStarter || !onUseDefault
   const starterTitle = recommendedStarter?.title || "Recommended default"
 
   return (
@@ -129,7 +135,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
         </Tag>
       </div>
 
-      <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-4">
+      <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-3">
         <div className="rounded border border-border bg-bg p-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-text">Bundled default</span>
@@ -144,7 +150,9 @@ export const VisualBuddySetupChoiceCard: React.FC<
                 starterCatalogLoading
               })}
             </span>
-            <span className="block">{formatStarterCount(starterCount)}</span>
+            <span className="block">
+              {formatStarterCount(starterCount, starterCatalogLoading)}
+            </span>
           </div>
           <Button
             className="mt-2 w-full justify-center"
@@ -162,7 +170,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
               className="mt-2 w-full justify-center"
               size="small"
               icon={<Images className="h-3.5 w-3.5" />}
-              disabled={starterCatalogLoading}
+              disabled={starterCatalogLoading || !onChooseDefault}
               onClick={onChooseDefault}
             >
               Choose another default
@@ -183,6 +191,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
             className="mt-2 w-full justify-center"
             size="small"
             icon={<Upload className="h-3.5 w-3.5" />}
+            disabled={!onImportPack}
             onClick={onImportPack}
           >
             Import pack
@@ -202,6 +211,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
             className="mt-2 w-full justify-center"
             size="small"
             icon={<PenLine className="h-3.5 w-3.5" />}
+            disabled={!onStartBlank}
             onClick={onStartBlank}
           >
             Start blank
