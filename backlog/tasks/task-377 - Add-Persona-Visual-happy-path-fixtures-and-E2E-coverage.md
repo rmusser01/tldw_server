@@ -4,7 +4,7 @@ title: Add Persona Visual happy-path fixtures and E2E coverage
 status: In Progress
 assignee: []
 created_date: '2026-05-15 06:09'
-updated_date: '2026-05-15 07:01'
+updated_date: '2026-05-15 07:02'
 labels:
   - persona
   - webui
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1698'
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
+  - 'https://github.com/rmusser01/tldw_server/pull/1723'
 documentation:
   - Docs/Product/WebUI/Persona_Live_Visual_Packs_PRD.md
 priority: medium
