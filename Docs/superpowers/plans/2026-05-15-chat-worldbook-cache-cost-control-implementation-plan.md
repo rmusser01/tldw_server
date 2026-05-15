@@ -153,14 +153,14 @@ feat(character-chat): add world-book prompt diagnostics
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py` only at usage-log call sites.
 
 **Implementation Steps:**
-- [ ] Write failing tests for usage metadata shapes:
+- [x] Write failing tests for usage metadata shapes:
   - OpenAI-style nested prompt token details;
   - Anthropic-style cache creation/read fields;
   - Gemini-style cache metadata when present;
   - OpenRouter provider-routing metadata when present;
   - OpenAI-compatible local server with no cache fields;
   - malformed or oversized raw metadata.
-- [ ] Implement `NormalizedLLMUsage` with fields:
+- [x] Implement `NormalizedLLMUsage` with fields:
   - `input_tokens`
   - `output_tokens`
   - `total_tokens`
@@ -172,10 +172,10 @@ feat(character-chat): add world-book prompt diagnostics
   - `choice_count`
   - `estimate_source`
   - `raw_usage_metadata`
-- [ ] Implement provider-specific extractors that fail closed to standard token fields.
-- [ ] Bound `raw_usage_metadata` by size, key allowlist/denylist, and nesting depth.
-- [ ] Add `estimate_source` values such as `provider_usage`, `stream_estimate`, `disconnect_estimate`, and `missing_usage`.
-- [ ] Wire usage normalization into non-stream and stream completion logging without changing persisted schema yet. Store only in process-local structured data until Stage 4.
+- [x] Implement provider-specific extractors that fail closed to standard token fields.
+- [x] Bound `raw_usage_metadata` by size, key allowlist/denylist, and nesting depth.
+- [x] Add `estimate_source` values such as `provider_usage`, `stream_estimate`, `disconnect_estimate`, and `missing_usage`.
+- [x] Wire usage normalization into non-stream and stream completion logging without changing persisted schema yet. Store only in process-local structured data until Stage 4.
 
 **Tests:**
 ```bash

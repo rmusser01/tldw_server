@@ -120,6 +120,7 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
 )
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
 
@@ -4152,6 +4153,7 @@ async def execute_streaming_call(
                 request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                 conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
                 estimated=True,
+                estimate_source="stream_estimate",
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
@@ -4906,8 +4908,13 @@ async def execute_non_stream_call(
         usage = llm_response.get("usage")
         if usage:
             try:
-                prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
-                completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+                normalized_usage = normalize_llm_usage(
+                    provider=selected_provider,
+                    usage=usage if isinstance(usage, dict) else None,
+                    choices=choices if isinstance(choices, list) else None,
+                )
+                prompt_tokens = normalized_usage.input_tokens
+                completion_tokens = normalized_usage.output_tokens
                 metrics.track_tokens(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
@@ -4934,9 +4941,12 @@ async def execute_non_stream_call(
                     latency_ms=int((time.time() - llm_start_time) * 1000),
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    total_tokens=int((usage.get("total_tokens") or 0) or (prompt_tokens + completion_tokens)),
+                    total_tokens=normalized_usage.total_tokens,
                     request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                     conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
+                    usage_metadata=usage if isinstance(usage, dict) else None,
+                    choice_count=normalized_usage.choice_count,
+                    estimate_source=normalized_usage.estimate_source,
                 )
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -4974,6 +4984,7 @@ async def execute_non_stream_call(
                     request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                     conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
                     estimated=True,
+                    estimate_source="missing_usage",
                 )
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass

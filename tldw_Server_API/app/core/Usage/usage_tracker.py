@@ -14,7 +14,7 @@ import os
 import time
 from datetime import date, datetime, timezone
 from sqlite3 import Error as SQLiteError
-from typing import Any
+from typing import Any, Mapping
 
 from loguru import logger
 
@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics import increment_counter
 
+from .llm_usage_normalizer import normalize_llm_usage
 from .pricing_catalog import get_pricing_catalog
 
 try:  # pragma: no cover - ledger optional during upgrades/tests
@@ -259,6 +260,9 @@ async def log_llm_usage(
     user_agent: str | None = None,
     token_name: str | None = None,
     conversation_id: str | None = None,
+    usage_metadata: Mapping[str, Any] | None = None,
+    choice_count: int | None = None,
+    estimate_source: str | None = None,
 ) -> None:
     """
     Insert a single llm_usage_log row. Computes costs if needed.
@@ -272,6 +276,18 @@ async def log_llm_usage(
         pt = int(prompt_tokens or 0)
         ct = int(completion_tokens or 0)
         tt = int(total_tokens) if total_tokens is not None else pt + ct
+        # Stage 3 keeps provider cache/cost metadata process-local until the
+        # planned schema/API exposure slice. Legacy persistence remains
+        # prompt/completion/total token compatible.
+        _ = normalize_llm_usage(
+            provider=provider,
+            usage=usage_metadata,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            total_tokens=tt,
+            choice_count=choice_count,
+            estimate_source=estimate_source,
+        )
 
         p_cost, c_cost, t_cost, est_flag = compute_costs(provider, model, pt, ct)
         if estimated is None:
