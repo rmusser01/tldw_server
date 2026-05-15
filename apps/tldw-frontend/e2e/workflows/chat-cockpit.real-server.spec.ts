@@ -44,14 +44,17 @@ const parseApiJsonResponse = async <T>(
   method: string,
   path: string
 ): Promise<T> => {
+  if (response.status() === 204) {
+    return null as T;
+  }
   try {
     return (await response.json()) as T;
   } catch {
     let responseText = '<response body unavailable>';
     try {
-      const text = await response.text();
-      responseText = text.trim()
-        ? truncateForDiagnostics(text.trim())
+      const text = (await response.text()).trim();
+      responseText = text
+        ? truncateForDiagnostics(text)
         : '<empty response body>';
     } catch {
       // Keep the fallback marker when the response body cannot be read.
@@ -357,6 +360,22 @@ test.describe('/chat cockpit real-server parity', () => {
     ).rejects.toThrow(
       /POST \/api\/v1\/example returned non-JSON response \(502\): upstream gateway returned HTML/
     );
+  });
+
+  test('keeps successful 204 API POST responses as null bodies', async () => {
+    const fakeRequest = {
+      post: async () => ({
+        status: () => 204,
+        json: async () => {
+          throw new Error('empty body');
+        },
+        text: async () => '',
+      }),
+    } as unknown as APIRequestContext;
+
+    await expect(
+      apiPost(fakeRequest, '/api/v1/example', { sample: true })
+    ).resolves.toEqual({ status: 204, body: null });
   });
 
   test('does not intercept backend routes in this real-server spec', async ({}, testInfo) => {
