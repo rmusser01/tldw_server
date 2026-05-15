@@ -465,23 +465,32 @@ feat(llm): add local prompt cache diagnostics
 - Update relevant documentation under `Docs/` if the API surface changes.
 
 **Implementation Steps:**
-- [ ] Locate the current usage summary/reporting endpoints and services.
-- [ ] Write failing tests for aggregate cache metrics and redaction behavior.
-- [ ] Extend query layer to include cache-aware columns with backward-compatible defaults.
-- [ ] Add API response fields only where schema versioning/backward compatibility is clear.
-- [ ] Add docs for interpreting:
+- [x] Locate the current usage summary/reporting endpoints and services.
+- [x] Write failing tests for aggregate cache metrics and redaction behavior.
+- [x] Extend query layer to include cache-aware columns with backward-compatible defaults.
+- [x] Add API response fields only where schema versioning/backward compatibility is clear.
+- [x] Add docs for interpreting:
   - `cached_input_tokens`
   - `cache_write_input_tokens`
   - `cache_read_input_tokens`
   - `billable_input_tokens`
   - `estimate_source`
   - local diagnostic-only cache fields.
-- [ ] Run endpoint/reporting tests.
+- [x] Run endpoint/reporting tests.
 
 **Tests:**
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/Usage -v
+python -m pytest tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py -q --tb=short -x
+# Result: 1 passed, 2 warnings
+
+python -m pytest \
+  tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py \
+  tldw_Server_API/tests/Admin/test_admin_usage_service.py \
+  tldw_Server_API/tests/Usage/test_llm_usage_aggregator.py \
+  tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py \
+  -q --tb=short --disable-warnings
+# Result: 15 passed, 2 warnings
 ```
 
 **Commit Message:**

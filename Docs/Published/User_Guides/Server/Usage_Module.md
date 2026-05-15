@@ -49,6 +49,8 @@ LLM_USAGE_ENABLED=false
 
 - `llm_usage_log` (LLM): timestamp, user_id, key_id, endpoint, operation (chat|embeddings|...), provider, model, status, latency_ms, tokens and cost fields, `estimated` flag, `request_id`.
   - Costs are computed from a pricing catalog with safe defaults, and can be overridden via `PRICING_OVERRIDES` or `Config_Files/model_pricing.json`.
+  - Cache-aware fields are stored when providers return bounded usage metadata: `cached_input_tokens`, `cache_write_input_tokens`, `cache_read_input_tokens`, `billable_input_tokens`, and `estimate_source`.
+  - `raw_usage_metadata_json` is internal-only and is not exposed by admin list, summary, or CSV reporting.
 
 ## Aggregation
 
@@ -68,6 +70,8 @@ Manual triggers (Admin API):
 - LLM Summary: `GET /api/v1/admin/llm-usage/summary` with `group_by=user|provider|model|operation|day`
 - LLM Top Spenders: `GET /api/v1/admin/llm-usage/top-spenders`
 - LLM CSV Export: `GET /api/v1/admin/llm-usage/export.csv`
+
+LLM log and CSV responses include cache-aware token columns when available. Summary responses aggregate cached input tokens, cache write/read tokens, billable input tokens, estimated cost, and estimate-source counts. `provider_usage_count` means provider usage metadata proved the accounting source. `local_diagnostic_count` means a local inference provider such as vLLM or llama.cpp reported diagnostic-only prefix/prompt-cache information; it is not a paid-provider billing-cache discount.
 
 The WebUI’s Admin tab exposes these endpoints, including LLM usage charts for quick exploration.
 
