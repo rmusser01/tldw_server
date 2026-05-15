@@ -4,7 +4,7 @@ title: Implement Persona Visual custom-state runtime triggers
 status: Done
 assignee: []
 created_date: '2026-05-15 03:17'
-updated_date: '2026-05-15 03:42'
+updated_date: '2026-05-15 05:19'
 labels:
   - persona
   - buddy
@@ -39,12 +39,20 @@ Implement the frontend Stage 3 runtime/type slice for Persona Visual state catal
 Implemented frontend Persona Visual custom-state runtime support. Added custom visual state typing and state_catalog metadata, exact tool_name authored-trigger matching from structured activeToolName, active_tool_name render-context propagation from live voice, and custom state display/preservation in VisualPackEditor.
 
 Verification: bun run test src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx passed with 81 tests. VisualPackEditor default timeout run exposed two slow existing tests; rerun with --testTimeout=20000 passed all 24 editor tests. git diff --check passed. Package tsc was attempted and exited nonzero due existing repo-wide test type errors outside this slice, so it is recorded as a known non-clean baseline gate rather than a pass. Bandit is not applicable because this slice touched frontend TypeScript and Backlog task files only.
+
+Review follow-up started for PR #1717. Actionable comments found: branded custom-state ID typing, built-in-only runtime override type contract, stale generationTargetState clamp/submit guard, object-safe getPayloadToolName extraction, and explicit structured activeToolName guard for tool_name trigger matching.
+
+PR #1717 review follow-up addressed: branded PersonaVisualCustomStateId no longer widens PersonaVisualStateId to plain string; runtime visual_state_override is built-in-only in store, resolver, and incoming payload handling; tool_name triggers now require a present structured activeToolName; live voice tool payloads extract object-shaped tool.name/function.name safely; VisualPackEditor clamps stale generation target states after pack switches and guards submit payloads; import conflict commit eligibility now waits for an explicit target-mode choice for the active preview.
+
+Review follow-up verification: bun run test src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx -t "extracts activeToolName" passed; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "clamps stale generation" --testTimeout=20000 passed; bun run test src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx src/store/__tests__/persona-visual-runtime.test.ts passed with 86 tests; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000 passed with 25 tests; git diff --check passed. ./node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false still exits nonzero on existing repo-wide type drift outside this slice; no changed persona visual files were reported in the emitted errors. Bandit remains not applicable for this frontend-only TypeScript/task-file slice.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented Persona Visual custom-state runtime triggers for the WebUI. The buddy shell now carries structured active tool identity, resolves exact tool_name authored triggers from active visual packs, and can render custom state animations through the existing sprite-frame path. Frontend manifest types now include state_catalog/custom states and tool_name trigger sources, and the visual pack editor preserves/displays custom state mappings for imported or backend-validated packs.
+
+PR #1717 review follow-up tightened the runtime visual trigger contract: custom state ids are truly branded, incoming runtime overrides are built-in-only for this V1 path, tool_name matching uses structured active tool identity, generation jobs cannot submit stale custom target_state values after pack switches, and import conflict commits require an explicit target-mode choice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
 import { resolvePersonaVisualState } from "../personaVisualState"
 
 describe("resolvePersonaVisualState", () => {
@@ -79,6 +80,7 @@ describe("resolvePersonaVisualState", () => {
   })
 
   it("uses exact tool_name triggers from structured tool context", () => {
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
     expect(
       resolvePersonaVisualState({
         liveVoiceState: "thinking",
@@ -89,7 +91,7 @@ describe("resolvePersonaVisualState", () => {
             id: "notes-search",
             source: "tool_name",
             match: "notes.search",
-            state: "tool.notes_search",
+            state: customState,
             duration_ms: 500,
             priority: 90
           }
@@ -99,6 +101,7 @@ describe("resolvePersonaVisualState", () => {
   })
 
   it("does not infer exact tool_name triggers from status display text", () => {
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
     expect(
       resolvePersonaVisualState({
         liveVoiceState: "thinking",
@@ -108,7 +111,7 @@ describe("resolvePersonaVisualState", () => {
             id: "notes-search",
             source: "tool_name",
             match: "notes.search",
-            state: "tool.notes_search",
+            state: customState,
             duration_ms: 500,
             priority: 90
           }

@@ -1,10 +1,15 @@
 import type {
   PersonaVisualAuthoredTrigger,
+  PersonaVisualBuiltinStateId,
   PersonaVisualStateId
+} from "@/types/persona-visuals"
+import {
+  isPersonaVisualBuiltinStateId,
+  PERSONA_VISUAL_BUILTIN_STATES
 } from "@/types/persona-visuals"
 
 export type PersonaVisualRuntimeOverride = {
-  state: PersonaVisualStateId
+  state: PersonaVisualBuiltinStateId
   reason?: string | null
   expiresAt: number
 }
@@ -24,17 +29,9 @@ export type ResolvePersonaVisualStateInput = {
   now?: number
 }
 
-const BUILTIN_VISUAL_STATES = new Set<PersonaVisualStateId>([
-  "idle",
-  "wake_armed",
-  "listening",
-  "thinking",
-  "speaking",
-  "tool_running",
-  "approval_needed",
-  "error",
-  "offline"
-])
+const BUILTIN_VISUAL_STATES = new Set<PersonaVisualBuiltinStateId>(
+  PERSONA_VISUAL_BUILTIN_STATES
+)
 
 const toNormalizedToken = (value: string | null | undefined): string =>
   String(value || "")
@@ -43,11 +40,11 @@ const toNormalizedToken = (value: string | null | undefined): string =>
 
 const normalizeLiveVoiceState = (
   value: string | null | undefined
-): PersonaVisualStateId | null => {
+): PersonaVisualBuiltinStateId | null => {
   const normalized = toNormalizedToken(value).replace(/[\s-]+/g, "_")
   if (!normalized) return null
-  if (BUILTIN_VISUAL_STATES.has(normalized as PersonaVisualStateId)) {
-    return normalized as PersonaVisualStateId
+  if (isPersonaVisualBuiltinStateId(normalized)) {
+    return normalized
   }
   if (
     normalized === "recording" ||
@@ -78,7 +75,7 @@ const parseToolCategory = (activeToolStatus: string | null | undefined): string 
 const triggerMatches = (
   trigger: PersonaVisualAuthoredTrigger,
   input: ResolvePersonaVisualStateInput,
-  liveState: PersonaVisualStateId | null
+  liveState: PersonaVisualBuiltinStateId | null
 ): boolean => {
   const match = toNormalizedToken(trigger.match)
   if (!match) return false
@@ -91,7 +88,8 @@ const triggerMatches = (
     return match === category || toolStatus.startsWith(match)
   }
   if (trigger.source === "tool_name") {
-    return match === toNormalizedToken(input.activeToolName)
+    const activeToolName = toNormalizedToken(input.activeToolName)
+    return Boolean(activeToolName) && match === activeToolName
   }
   if (trigger.source === "mcp_runtime") {
     const runtimeReason =
@@ -104,7 +102,7 @@ const triggerMatches = (
 
 const resolveAuthoredTriggerState = (
   input: ResolvePersonaVisualStateInput,
-  liveState: PersonaVisualStateId | null
+  liveState: PersonaVisualBuiltinStateId | null
 ): PersonaVisualStateId | null => {
   const triggers = [...(input.authoredTriggers || [])]
     .filter((trigger) => triggerMatches(trigger, input, liveState))

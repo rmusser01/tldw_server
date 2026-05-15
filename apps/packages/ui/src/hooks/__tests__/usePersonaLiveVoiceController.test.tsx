@@ -2086,6 +2086,40 @@ describe("usePersonaLiveVoiceController", () => {
     expect((result.current as any).recoveryMode).toBe("thinking_stuck")
   })
 
+  it("extracts activeToolName from object-shaped tool payloads", () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-voice",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true
+      })
+    )
+
+    act(() => {
+      result.current.handlePayload({
+        event: "tool_call",
+        tool: {
+          name: "notes.search",
+          arguments: { query: "migu" }
+        },
+        why: "Looking through notes"
+      })
+    })
+
+    expect((result.current as any).activeToolName).toBe("notes.search")
+    expect((result.current as any).activeToolStatus).toBe(
+      "Running notes.search: Looking through notes"
+    )
+  })
+
   it("clears activeToolStatus and recovery on approval tool_result", async () => {
     vi.useFakeTimers()
 

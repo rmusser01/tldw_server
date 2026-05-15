@@ -50,6 +50,7 @@ import type {
   PersonaVisualAsset,
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
+  PersonaVisualBuiltinStateId,
   PersonaVisualCandidate,
   PersonaVisualDuplicateTarget,
   PersonaVisualLibraryItem,
@@ -67,6 +68,10 @@ import type {
   PersonaVisualPortabilityJobResponse,
   PersonaVisualRendererImportPreview,
   PersonaVisualStateId
+} from "@/types/persona-visuals"
+import {
+  asPersonaVisualCustomStateId,
+  asPersonaVisualStateId
 } from "@/types/persona-visuals"
 import { getDesignSystemState } from "@/design-system"
 import {
@@ -216,7 +221,7 @@ const getGenerationReadinessCopy = (
   }
 }
 
-const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
+const REQUIRED_VISUAL_STATES: PersonaVisualBuiltinStateId[] = [
   "idle",
   "listening",
   "thinking",
@@ -224,7 +229,7 @@ const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
   "error"
 ]
 
-const OPTIONAL_VISUAL_STATES: PersonaVisualStateId[] = [
+const OPTIONAL_VISUAL_STATES: PersonaVisualBuiltinStateId[] = [
   "wake_armed",
   "tool_running",
   "approval_needed",
@@ -472,6 +477,16 @@ const normalizeFrames = (
 
 const formatStateLabel = (state: PersonaVisualStateId): string =>
   state.replace(/_/g, " ")
+
+const resolveGenerationTargetState = (
+  current: PersonaVisualStateId,
+  availableStates: PersonaVisualStateId[]
+): PersonaVisualStateId => {
+  if (availableStates.includes(current)) return current
+  return availableStates.includes("thinking")
+    ? "thinking"
+    : availableStates[0] ?? "thinking"
+}
 
 const stringifyPreviewValue = (value: unknown): string => {
   if (value == null) return ""
@@ -786,6 +801,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   >(null)
   const [importTargetMode, setImportTargetMode] =
     React.useState<PersonaVisualImportTargetMode | "">("create_new")
+  const [importTargetChoicePreviewId, setImportTargetChoicePreviewId] =
+    React.useState("")
   const [importReplacePackId, setImportReplacePackId] = React.useState("")
   const [importDraftTitle, setImportDraftTitle] = React.useState("")
   const [importCommitJob, setImportCommitJob] = React.useState<
@@ -883,16 +900,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     () =>
       Object.keys(draftManifest.state_catalog || {}).sort((a, b) =>
         a.localeCompare(b)
-      ) as PersonaVisualStateId[],
+      ).map(asPersonaVisualCustomStateId),
     [draftManifest.state_catalog]
   )
-  const activeVisualStates = React.useMemo(
+  const activeVisualStates: PersonaVisualStateId[] = React.useMemo(
     () => [...VISUAL_STATES, ...customVisualStates],
     [customVisualStates]
   )
-  const editableFallbackStates = React.useMemo(
+  const editableFallbackStates: PersonaVisualStateId[] = React.useMemo(
     () => [...OPTIONAL_VISUAL_STATES, ...customVisualStates],
     [customVisualStates]
+  )
+  const normalizedGenerationTargetState = React.useMemo(
+    () => resolveGenerationTargetState(generationTargetState, activeVisualStates),
+    [activeVisualStates, generationTargetState]
   )
   const selectedAnimation =
     selectedAnimationId && draftManifest.animations[selectedAnimationId]
@@ -1161,6 +1182,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setSelectedAnimationId(animationIds[0] || "")
     }
   }, [animationIds, selectedAnimationId])
+
+  React.useEffect(() => {
+    if (generationTargetState !== normalizedGenerationTargetState) {
+      setGenerationTargetState(normalizedGenerationTargetState)
+    }
+  }, [generationTargetState, normalizedGenerationTargetState])
 
   React.useEffect(() => {
     setExportJob(null)
@@ -1511,6 +1538,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setImportPreview(preview)
       setImportCommitJob(null)
       setImportTargetMode("create_new")
+      setImportTargetChoicePreviewId("")
       setImportReplacePackId("")
       setImportDraftTitle("")
       setSelectedImportPreviewFile(null)
@@ -1557,7 +1585,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     if (!selectedPersonaId || !fullImportPreview?.preview_id) return
     if (fullImportPreview.status !== "completed") return
     if (!importPreviewCommitEligible) return
-    if (importConflictChoiceRequired && !importTargetMode) return
+    if (importConflictChoiceRequired && !importConflictChoiceValid) return
     importCommitInFlightRef.current = true
     setCommittingImport(true)
     setError(null)
@@ -1741,12 +1769,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setEnqueueingGeneration(true)
     setError(null)
     try {
+      const targetState = resolveGenerationTargetState(
+        generationTargetState,
+        activeVisualStates
+      )
+      if (targetState !== generationTargetState) {
+        setGenerationTargetState(targetState)
+      }
       const job = await createPersonaVisualGenerationJob(
         selectedPersonaId,
         selectedPack.id,
         {
           prompt: generationPrompt.trim(),
-          target_state: generationTargetState || null,
+          target_state: targetState || null,
           backend: generationBackend.trim() || null
         }
       )
@@ -1836,7 +1871,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const fallbacks = { ...(manifest.fallbacks || {}) }
       const nextValues = value
         .split(",")
-        .map((item) => item.trim() as PersonaVisualStateId)
+        .map((item) => asPersonaVisualStateId(item.trim()))
         .filter((item) => activeVisualStates.includes(item))
       if (nextValues.length) {
         fallbacks[state] = nextValues
@@ -2165,10 +2200,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importAllowedTargetModes = getAllowedImportTargetModes(importTargetChoice)
   const replaceableImportConflicts = getReplaceableImportConflicts(importPreviewConflicts)
   const importConflictChoiceRequired = Boolean(importTargetChoice)
+  const importConflictChoiceSelected =
+    !importConflictChoiceRequired ||
+    (Boolean(importTargetMode) &&
+      importTargetChoicePreviewId === fullImportPreview?.preview_id)
   const importConflictChoiceValid =
     !importConflictChoiceRequired ||
-    importTargetMode === "create_new" ||
-    Boolean(importReplacePackId)
+    (importConflictChoiceSelected &&
+      importAllowedTargetModes.includes(
+        importTargetMode as PersonaVisualImportTargetMode
+      ) &&
+      (importTargetMode !== "replace_draft" || Boolean(importReplacePackId)))
   const canCommitImportPreview = fullImportPreview?.status === "completed"
   const importPreviewCommitEligible = isImportPreviewCommitEligible(
     fullImportPreview,
@@ -2188,12 +2230,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     if (!fullImportPreview) {
       setImportTargetMode("create_new")
+      setImportTargetChoicePreviewId("")
       setImportReplacePackId("")
       setImportDraftTitle("")
       return
     }
     const choice = getImportTargetChoice(fullImportPreview)
     setImportTargetMode(choice ? "" : "create_new")
+    setImportTargetChoicePreviewId(choice ? "" : fullImportPreview.preview_id)
     setImportReplacePackId("")
     setImportDraftTitle(getDefaultImportDraftTitle(fullImportPreview))
   }, [fullImportPreview?.preview_id])
@@ -2802,6 +2846,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                                   const nextMode = event.target
                                     .value as PersonaVisualImportTargetMode | ""
                                   setImportTargetMode(nextMode)
+                                  setImportTargetChoicePreviewId(
+                                    nextMode ? fullImportPreview?.preview_id || "" : ""
+                                  )
                                   if (nextMode !== "replace_draft") {
                                     setImportReplacePackId("")
                                   } else if (!importReplacePackId) {
@@ -3254,7 +3301,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 onChange={(event) =>
                   setTriggerDraft((current) => ({
                     ...current,
-                    state: event.target.value as PersonaVisualStateId
+                    state: asPersonaVisualStateId(event.target.value)
                   }))
                 }
               >
@@ -3398,9 +3445,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 <select
                   data-testid="persona-visual-generation-target-state-select"
                   className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                  value={generationTargetState}
+                  value={normalizedGenerationTargetState}
                   onChange={(event) =>
-                    setGenerationTargetState(event.target.value as PersonaVisualStateId)
+                    setGenerationTargetState(asPersonaVisualStateId(event.target.value))
                   }
                 >
                   {activeVisualStates.map((state) => (

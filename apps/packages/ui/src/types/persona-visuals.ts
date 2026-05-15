@@ -1,18 +1,39 @@
-export type PersonaVisualBuiltinStateId =
-  | "idle"
-  | "wake_armed"
-  | "listening"
-  | "thinking"
-  | "speaking"
-  | "tool_running"
-  | "approval_needed"
-  | "error"
-  | "offline"
+export const PERSONA_VISUAL_BUILTIN_STATES = [
+  "idle",
+  "wake_armed",
+  "listening",
+  "thinking",
+  "speaking",
+  "tool_running",
+  "approval_needed",
+  "error",
+  "offline"
+] as const
 
-export type PersonaVisualCustomStateId = string & {}
+export type PersonaVisualBuiltinStateId =
+  (typeof PERSONA_VISUAL_BUILTIN_STATES)[number]
+
+declare const personaVisualCustomStateIdBrand: unique symbol
+export type PersonaVisualCustomStateId = string & {
+  readonly [personaVisualCustomStateIdBrand]: "PersonaVisualCustomStateId"
+}
 export type PersonaVisualStateId =
   | PersonaVisualBuiltinStateId
   | PersonaVisualCustomStateId
+
+export const isPersonaVisualBuiltinStateId = (
+  value: string
+): value is PersonaVisualBuiltinStateId =>
+  (PERSONA_VISUAL_BUILTIN_STATES as readonly string[]).includes(value)
+
+export const asPersonaVisualCustomStateId = (
+  value: string
+): PersonaVisualCustomStateId => value as PersonaVisualCustomStateId
+
+export const asPersonaVisualStateId = (value: string): PersonaVisualStateId =>
+  isPersonaVisualBuiltinStateId(value)
+    ? value
+    : asPersonaVisualCustomStateId(value)
 
 export type PersonaVisualRendererType =
   | "sprite_frames"

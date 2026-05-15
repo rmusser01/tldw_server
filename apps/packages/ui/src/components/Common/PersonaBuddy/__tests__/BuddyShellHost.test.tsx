@@ -13,6 +13,7 @@ import {
 } from "@/store/persona-buddy-shell"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type { PersonaBuddyRenderContext } from "@/types/persona-buddy"
+import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
 import { BuddyShellHost } from "../BuddyShellHost"
 
 const mocks = vi.hoisted(() => ({
@@ -713,19 +714,20 @@ describe("BuddyShellHost", () => {
 
   it("renders custom visual states from exact active tool names", async () => {
     const basePack = buildVisualPack("persona-1")
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
     const visualPack = {
       ...basePack,
       manifest: {
         ...basePack.manifest,
         state_catalog: {
-          "tool.notes_search": {
+          [customState]: {
             label: "Searching notes",
             kind: "tool_variant"
           }
         },
         states: {
           ...basePack.manifest.states,
-          "tool.notes_search": { animation_id: "tool-notes-search" }
+          [customState]: { animation_id: "tool-notes-search" }
         },
         animations: {
           ...basePack.manifest.animations,
@@ -738,7 +740,7 @@ describe("BuddyShellHost", () => {
             id: "notes-search",
             source: "tool_name",
             match: "notes.search",
-            state: "tool.notes_search",
+            state: customState,
             duration_ms: 500,
             priority: 90
           }

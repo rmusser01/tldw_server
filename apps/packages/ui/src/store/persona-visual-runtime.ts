@@ -1,12 +1,15 @@
 import { create } from "zustand"
 
 import type { PersonaVisualDiagnostic } from "@/components/Common/PersonaBuddy/personaVisualDiagnostics"
-import type { PersonaVisualStateId } from "@/types/persona-visuals"
+import type {
+  PersonaVisualBuiltinStateId,
+  PersonaVisualStateId
+} from "@/types/persona-visuals"
 
 export interface PersonaVisualRuntimeOverride {
   personaId: string
   sessionId: string | null
-  state: PersonaVisualStateId
+  state: PersonaVisualBuiltinStateId
   reason: string | null
   expiresAt: number
 }

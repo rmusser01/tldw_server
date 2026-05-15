@@ -126,9 +126,32 @@ const formatActiveToolStatus = (tool: unknown, why: unknown): string => {
   return `Running ${toolName}: ${whyText}`
 }
 
+const getRecordValue = (value: unknown, key: string): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  return (value as Record<string, unknown>)[key]
+}
+
+const normalizeToolNameCandidate = (value: unknown): string => {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim()
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return ""
+  }
+  return (
+    normalizeToolNameCandidate(getRecordValue(value, "tool_name")) ||
+    normalizeToolNameCandidate(getRecordValue(value, "name")) ||
+    normalizeToolNameCandidate(getRecordValue(getRecordValue(value, "function"), "name"))
+  )
+}
+
 const getPayloadToolName = (payload: PersonaLiveVoicePayload): string => {
   if (!payload || typeof payload !== "object") return ""
-  return String(payload.tool_name || payload.tool || payload.name || "").trim()
+  return (
+    normalizeToolNameCandidate(payload.tool_name) ||
+    normalizeToolNameCandidate(payload.tool) ||
+    normalizeToolNameCandidate(payload.name)
+  )
 }
 
 const WAKE_REJECTION_MESSAGES: Record<string, string> = {
