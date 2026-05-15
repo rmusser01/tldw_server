@@ -1,9 +1,10 @@
 ---
 id: TASK-368.2
 title: Implement llama.cpp model inventory resolver
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15 03:42'
+updated_date: '2026-05-15 04:42'
 labels:
   - implementation
   - backend
@@ -31,6 +32,12 @@ Implement the inventory/start-by-model backend slice from the implementation pla
 - [ ] #3 POST /api/v1/llamacpp/start-by-model resolves model_id to a validated path and starts through the managed handler.
 - [ ] #4 Existing /api/v1/llamacpp/start_server filename behavior and path hardening continue to pass tests.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started subagent-driven implementation for the backend inventory resolver and start-by-model slice after TASK-368.1 passed spec and code-quality review. Scope is limited to Task 2 backend files and tests from the implementation plan.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
