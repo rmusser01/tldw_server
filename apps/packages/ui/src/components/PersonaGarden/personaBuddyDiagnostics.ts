@@ -1,4 +1,5 @@
 import type { PersonaVisualDiagnostic } from "@/components/Common/PersonaBuddy/personaVisualDiagnostics"
+import { LOADING_STATE_LABEL, READY_STATE_LABEL } from "@/design-system"
 import type {
   PersonaLiveVoiceWarningReasonCode,
   PersonaWakeWarningReasonCode
@@ -113,7 +114,7 @@ const summarizeBuddy = (
   if (typeof buddySummary === "string" && buddySummary.trim()) {
     return {
       label: "Buddy",
-      value: "Ready",
+      value: READY_STATE_LABEL,
       state: "healthy",
       detail: buddySummary.trim()
     }
@@ -124,7 +125,7 @@ const summarizeBuddy = (
     if (buddySummary.has_buddy || roleSummary) {
       return {
         label: "Buddy",
-        value: "Ready",
+        value: READY_STATE_LABEL,
         state: "healthy",
         detail: roleSummary || "Buddy summary is attached to this persona."
       }
@@ -170,7 +171,7 @@ const summarizeVisual = (
   if (visual?.packLoadStatus === "loading") {
     return {
       label: "Visual pack",
-      value: "Loading",
+      value: LOADING_STATE_LABEL,
       state: "recovering",
       detail: joinDetails([packIdDetail, renderState])
     }
@@ -609,7 +610,7 @@ export const buildPersonaBuddyDiagnostics = ({
     profileState === "loading"
       ? {
           label: "Profile",
-          value: "Loading",
+          value: LOADING_STATE_LABEL,
           state: "recovering"
         }
       : profileState === "error"

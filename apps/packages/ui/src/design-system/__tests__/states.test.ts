@@ -3,6 +3,7 @@ import {
   BLOCKED_STATE_LABEL,
   DESIGN_SYSTEM_STATES,
   EMPTY_STATE_LABEL,
+  LOADING_STATE_LABEL,
   READY_STATE_LABEL,
   getDesignSystemState,
   isDesignSystemStateKey
@@ -183,6 +184,7 @@ describe("design-system state registry", () => {
   it("exports canonical state labels through defensive fallbacks", () => {
     expect(READY_STATE_LABEL).toBe(DESIGN_SYSTEM_STATES.ready.label)
     expect(EMPTY_STATE_LABEL).toBe(DESIGN_SYSTEM_STATES.empty.label)
+    expect(LOADING_STATE_LABEL).toBe(DESIGN_SYSTEM_STATES.loading.label)
     expect(BLOCKED_STATE_LABEL).toBe(DESIGN_SYSTEM_STATES.blocked.label)
   })
 })

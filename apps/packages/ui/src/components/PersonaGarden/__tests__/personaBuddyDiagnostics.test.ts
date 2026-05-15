@@ -1,8 +1,49 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+const registryLabels = vi.hoisted(() => ({
+  loading: "Registry Loading",
+  ready: "Registry Ready"
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+  return {
+    ...actual,
+    LOADING_STATE_LABEL: registryLabels.loading,
+    READY_STATE_LABEL: registryLabels.ready
+  }
+})
 
 import { buildPersonaBuddyDiagnostics } from "../personaBuddyDiagnostics"
 
 describe("buildPersonaBuddyDiagnostics", () => {
+  it("uses design-system registry labels for canonical ready and loading diagnostics", () => {
+    const diagnostics = buildPersonaBuddyDiagnostics({
+      selectedPersona: { id: "persona-1", name: "Ada" },
+      profileState: "loading",
+      buddySummary: "Uses the active persona profile.",
+      capabilities: { hasPersona: true, hasMcp: true },
+      liveSession: { connected: true, connecting: false, sessionId: "session-1" },
+      liveVoice: { state: "idle", recoveryMode: "none" },
+      wake: { armed: true, detectorState: "ready" },
+      visual: {
+        packId: "pack-1",
+        packTitle: "Animated Pack",
+        packLoadStatus: "loading",
+        visualState: "idle",
+        diagnostic: null
+      }
+    })
+
+    expect(diagnostics.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Buddy", value: registryLabels.ready }),
+        expect.objectContaining({ label: "Profile", value: registryLabels.loading }),
+        expect.objectContaining({ label: "Visual pack", value: registryLabels.loading })
+      ])
+    )
+  })
+
   it("returns healthy diagnostics for connected persona live state", () => {
     const diagnostics = buildPersonaBuddyDiagnostics({
       selectedPersona: { id: "persona-1", name: "Ada" },
