@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Alert } from "antd"
+import { Alert } from "@/components/ui"
 import { useStorageQuota } from "@/hooks/useStorageQuota"
 
 const DISMISS_KEY = "tldw:storage-quota-banner-dismissed"
@@ -38,25 +38,26 @@ export function StorageQuotaBanner() {
   if (level === "exceeded") {
     return (
       <Alert
-        type="error"
-        showIcon
+        variant="error"
         data-testid="storage-quota-banner-exceeded"
         title="Storage nearly full"
-        description={`Workspace storage is ${pct}% full (${usedMB}/${budgetMB} MB). New data may not save. Archive or delete old workspaces to free space.`}
-      />
+      >
+        {`Workspace storage is ${pct}% full (${usedMB}/${budgetMB} MB). New data may not save. Archive or delete old workspaces to free space.`}
+      </Alert>
     )
   }
 
   // warning level
   return (
     <Alert
-      type="warning"
-      showIcon
-      closable
-      onClose={handleDismiss}
+      variant="warning"
+      dismissible
+      onDismiss={handleDismiss}
+      dismissLabel="Close"
       data-testid="storage-quota-banner-warning"
       title="Storage getting full"
-      description={`Workspace storage is ${pct}% full (${usedMB}/${budgetMB} MB). Consider archiving old workspaces.`}
-    />
+    >
+      {`Workspace storage is ${pct}% full (${usedMB}/${budgetMB} MB). Consider archiving old workspaces.`}
+    </Alert>
   )
 }
