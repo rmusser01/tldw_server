@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -80,6 +81,145 @@ def test_migration_086_creates_prototype_workspace_tables() -> None:
         }.issubset(table_names)
     finally:
         conn.close()
+
+
+def test_migration_086_creates_risk_gate_2_query_indexes() -> None:
+    from tldw_Server_API.app.core.AuthNZ.migrations import (
+        migration_001_create_users_table,
+        migration_086_create_prototype_workspace_tables,
+    )
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        migration_001_create_users_table(conn)
+        migration_086_create_prototype_workspace_tables(conn)
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_prototype_%'"
+        ).fetchall()
+        index_names = {str(row[0]) for row in rows}
+        assert {
+            "idx_prototype_workspaces_owner_updated",
+            "idx_prototype_sessions_workspace_active_updated",
+            "idx_prototype_sessions_active_lookup",
+            "idx_prototype_shared_actors_active_lookup",
+            "idx_prototype_promotion_requests_workspace_status_updated",
+            "idx_prototype_preview_handles_workspace",
+            "idx_prototype_preview_handles_session",
+            "idx_prototype_preview_handles_scope_active",
+            "idx_prototype_preview_handles_active_scope",
+        }.issubset(index_names)
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_transaction_yields_repo_bound_to_transaction_connection() -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    class TxConn:
+        def __init__(self) -> None:
+            self.fetchall_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, str]]:
+            self.fetchall_calls.append((sql, params))
+            return [
+                {"name": "prototype_workspaces"},
+                {"name": "prototype_snapshots"},
+                {"name": "prototype_sessions"},
+                {"name": "prototype_shared_actors"},
+                {"name": "prototype_promotion_requests"},
+                {"name": "prototype_preview_handles"},
+            ]
+
+    class TxPool:
+        pool = None
+
+        def __init__(self) -> None:
+            self.conn = TxConn()
+            self.transaction_opened = False
+
+        @asynccontextmanager
+        async def transaction(self):
+            self.transaction_opened = True
+            yield self.conn
+
+        async def fetchall(self, _sql: str, _params: tuple[Any, ...] = ()) -> list[dict[str, str]]:
+            pytest.fail("transaction-bound repo should not use the top-level pool fetchall")
+
+    pool = TxPool()
+    repo = PrototypeWorkspacesRepo(db_pool=pool)  # type: ignore[arg-type]
+
+    async with repo.transaction() as tx_repo:
+        await tx_repo.ensure_tables()
+
+    assert pool.transaction_opened is True
+    assert pool.conn.fetchall_calls
+
+
+@pytest.mark.asyncio
+async def test_transaction_bound_postgres_repo_converts_question_mark_placeholders() -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    class PgConn:
+        def __init__(self) -> None:
+            self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        async def fetchrow(self, sql: str, *params: Any) -> dict[str, Any]:
+            self.fetchrow_calls.append((sql, tuple(params)))
+            return _workspace_row(id=params[0])
+
+    class PgPool:
+        pool = object()
+
+        def __init__(self) -> None:
+            self.conn = PgConn()
+
+        @asynccontextmanager
+        async def transaction(self):
+            yield self.conn
+
+        async def fetchone(self, _sql: str, _params: tuple[Any, ...] = ()) -> dict[str, Any]:
+            pytest.fail("transaction-bound repo should not use the top-level pool fetchone")
+
+    pool = PgPool()
+    repo = PrototypeWorkspacesRepo(db_pool=pool)  # type: ignore[arg-type]
+
+    async with repo.transaction() as tx_repo:
+        workspace = await tx_repo.get_workspace("pws_sql_review")
+
+    assert workspace is not None
+    query, params = pool.conn.fetchrow_calls[0]
+    assert "$1" in query
+    assert "?" not in query
+    assert params == ("pws_sql_review",)
+
+
+@pytest.mark.asyncio
+async def test_transaction_preserves_wrapped_domain_exception() -> None:
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    class TxPool:
+        pool = None
+
+        @asynccontextmanager
+        async def transaction(self):
+            try:
+                yield object()
+            except RuntimeError as exc:
+                raise TransactionError("SQLite transaction", str(exc)) from exc
+
+    repo = PrototypeWorkspacesRepo(db_pool=TxPool())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="domain failure"):
+        async with repo.transaction():
+            raise RuntimeError("domain failure")
 
 
 @pytest.mark.asyncio
@@ -414,6 +554,183 @@ async def test_find_active_session_filters_candidate_in_sql() -> None:
     assert "expires_at" in query
     assert "LIMIT 1" in query
     assert params[:3] == ("pws_sql_review", "snap_existing", "external_collaborator")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retained_state_revokes_expired_records_and_stales_pending_promotions(
+    repo,
+    prototype_db,
+) -> None:
+    old = "2026-01-01T00:00:00+00:00"
+    cutoff = "2026-01-15T00:00:00+00:00"
+    now = "2026-02-01T00:00:00+00:00"
+
+    workspace = await repo.create_workspace(owner_user_id=1, title="cleanup", creation_source="prompt")
+    base_snapshot = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_cleanup_base",
+        created_by_user_id=1,
+    )
+    actor = await repo.create_shared_actor(
+        prototype_workspace_id=workspace["id"],
+        share_link_id=71,
+        display_name="Expired collaborator",
+        runtime_policy_profile="locked_collab",
+        expires_at=old,
+    )
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=base_snapshot["snapshot_id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=actor["id"],
+        share_link_id=71,
+        expires_at=old,
+    )
+    preview = await repo.replace_active_preview_handle_record(
+        preview_handle="pph_cleanup_expired",
+        preview_scope="session",
+        scope_id=f"session:{session['id']}",
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        actor_key=f"shared_actor:{actor['id']}",
+        target_ref="runtime://expired",
+        runtime_policy_profile="locked_collab",
+        created_at=old,
+    )
+    candidate = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_cleanup_candidate",
+        created_by_shared_actor_id=actor["id"],
+        parent_snapshot_id=base_snapshot["snapshot_id"],
+        created_from_session_id=session["id"],
+    )
+    promotion = await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=candidate["snapshot_id"],
+        requested_by_shared_actor_id=actor["id"],
+    )
+    prototype_db.execute(
+        "UPDATE prototype_promotion_requests SET updated_at = ? WHERE id = ?",
+        (old, promotion["id"]),
+    )
+    prototype_db.commit()
+
+    result = await repo.cleanup_retained_state(
+        now=now,
+        expired_before=cutoff,
+        stale_promotion_before=cutoff,
+        inactive_preview_before=old,
+    )
+
+    assert result["expired_shared_actors_revoked"] == 1
+    assert result["expired_sessions_revoked"] == 1
+    assert result["preview_handles_revoked"] == 1
+    assert result["stale_promotion_requests_marked"] == 1
+    assert result["inactive_preview_handles_deleted"] == 0
+
+    updated_actor = await repo.get_shared_actor(actor["id"])
+    updated_session = await repo.get_session(session["id"])
+    updated_preview = await repo.get_preview_handle_record(preview["preview_handle"])
+    updated_promotion = await repo.get_promotion_request(promotion["id"])
+
+    assert updated_actor["is_revoked"] is True
+    assert updated_session["is_revoked"] is True
+    assert updated_session["runtime_status"] == "revoked"
+    assert updated_session["preview_status"] == "revoked"
+    assert updated_preview["is_active"] is False
+    assert updated_preview["revoked_at"] == now
+    assert updated_promotion["status"] == "stale"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retained_state_deletes_archived_workspaces_after_cutoff(repo) -> None:
+    workspace = await repo.create_workspace(owner_user_id=1, title="archived", creation_source="prompt")
+    snapshot = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_archived_cleanup",
+        created_by_user_id=1,
+    )
+    await repo.update_workspace_state(
+        workspace["id"],
+        canonical_snapshot_id=snapshot["snapshot_id"],
+    )
+    await repo.archive_workspace(
+        workspace["id"],
+        archived_at="2026-01-01T00:00:00+00:00",
+    )
+
+    result = await repo.cleanup_retained_state(
+        now="2026-02-01T00:00:00+00:00",
+        archived_workspace_before="2026-01-15T00:00:00+00:00",
+    )
+
+    assert result["archived_workspaces_deleted"] == 1
+    assert await repo.get_workspace(workspace["id"]) is None
+    assert await repo.get_snapshot(snapshot["snapshot_id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retained_state_preserves_active_recent_records(repo) -> None:
+    workspace = await repo.create_workspace(owner_user_id=1, title="active cleanup", creation_source="prompt")
+    base_snapshot = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_active_cleanup_base",
+        created_by_user_id=1,
+    )
+    actor = await repo.create_shared_actor(
+        prototype_workspace_id=workspace["id"],
+        share_link_id=72,
+        display_name="Active collaborator",
+        runtime_policy_profile="locked_collab",
+        expires_at="2026-03-01T00:00:00+00:00",
+    )
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=base_snapshot["snapshot_id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=actor["id"],
+        share_link_id=72,
+        expires_at="2026-03-01T00:00:00+00:00",
+    )
+    preview = await repo.replace_active_preview_handle_record(
+        preview_handle="pph_cleanup_active",
+        preview_scope="session",
+        scope_id=f"session:{session['id']}",
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        actor_key=f"shared_actor:{actor['id']}",
+        target_ref="runtime://active",
+        runtime_policy_profile="locked_collab",
+        created_at="2026-02-01T00:00:00+00:00",
+    )
+    candidate = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_active_cleanup_candidate",
+        created_by_shared_actor_id=actor["id"],
+        parent_snapshot_id=base_snapshot["snapshot_id"],
+        created_from_session_id=session["id"],
+    )
+    promotion = await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=candidate["snapshot_id"],
+        requested_by_shared_actor_id=actor["id"],
+    )
+
+    result = await repo.cleanup_retained_state(
+        now="2026-02-01T00:00:00+00:00",
+        expired_before="2026-01-15T00:00:00+00:00",
+        stale_promotion_before="2026-01-15T00:00:00+00:00",
+        inactive_preview_before="2026-01-15T00:00:00+00:00",
+        archived_workspace_before="2026-01-15T00:00:00+00:00",
+    )
+
+    assert all(count == 0 for count in result.values())
+    assert (await repo.get_shared_actor(actor["id"]))["is_revoked"] is False
+    assert (await repo.get_session(session["id"]))["is_revoked"] is False
+    assert (await repo.get_preview_handle_record(preview["preview_handle"]))["is_active"] is True
+    assert (await repo.get_promotion_request(promotion["id"]))["status"] == "pending"
 
 
 def test_apply_authnz_migrations_from_v85_includes_prototype_tables(tmp_path) -> None:

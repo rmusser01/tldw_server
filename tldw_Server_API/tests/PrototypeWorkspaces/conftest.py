@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -34,6 +35,40 @@ class _FakePool:
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row, strict=True)) for row in rows]
+
+    @asynccontextmanager
+    async def transaction(self):
+        """Yield a no-autocommit adapter over the in-memory SQLite connection."""
+
+        class _TxConn:
+            def __init__(self, conn: sqlite3.Connection) -> None:
+                self._conn = conn
+
+            async def execute(self, sql: str, params: tuple = ()):
+                return self._conn.execute(sql, params)
+
+            async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
+                cur = self._conn.execute(sql, params)
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cols = [d[0] for d in cur.description]
+                return dict(zip(cols, row, strict=True))
+
+            async def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
+                cur = self._conn.execute(sql, params)
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row, strict=True)) for row in rows]
+
+        self._conn.execute("BEGIN")
+        try:
+            yield _TxConn(self._conn)
+        except Exception:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
 
 
 @pytest.fixture

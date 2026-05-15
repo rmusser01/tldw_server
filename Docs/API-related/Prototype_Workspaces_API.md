@@ -210,6 +210,44 @@ The short version:
 
 Frontend/backend state names, HTTP status expectations, retryability, and Risk Gate 4 open questions live in `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`.
 
+## Risk Gate 2 Persistence Contract
+
+Prototype workspace persistence is owned by the AuthNZ repository boundary in `PrototypeWorkspacesRepo`.
+
+Transaction rules:
+
+- workspace creation and seed snapshot creation run in one AuthNZ transaction
+- session snapshot save and session pointer update run in one AuthNZ transaction
+- publish promotion still compensates around preview-broker side effects because preview grants include in-memory broker state plus persisted handles
+- repository transaction adapters preserve the existing `?` placeholder style and convert to PostgreSQL `$N` placeholders when the underlying `DatabasePool` is PostgreSQL-backed
+
+Cleanup and retention rules:
+
+- archived workspaces are soft-archived first and can be deleted after the configured archive-retention cutoff; cascading foreign keys remove related prototype rows
+- expired shared actors are soft-revoked by setting `revoked_at`; they are retained for audit until their workspace is deleted
+- expired sessions are soft-revoked by setting `revoked_at`, `runtime_status = "revoked"`, and `preview_status = "revoked"`
+- active preview handles attached to archived workspaces or revoked/expired sessions are deactivated and receive `revoked_at`
+- inactive preview handles can be deleted after their inactive-preview cutoff
+- old pending promotion requests can be marked `stale`; approved, rejected, promoted, or already stale requests are not rewritten by cleanup
+
+SQLite/PostgreSQL behavior:
+
+- migration 086 is the SQLite migration source for the prototype tables
+- PostgreSQL compatibility is through the AuthNZ `DatabasePool` execution contract and repository table discovery via `information_schema`
+- all repository SQL remains parameterized; no user input is interpolated into SQL strings
+- cleanup accepts explicit cutoff timestamps so callers own retention policy and scheduling
+
+Query/index review:
+
+| Path | Query shape | Index coverage |
+| --- | --- | --- |
+| owner workspace detail | `prototype_workspaces.id`, workspace snapshots by `prototype_workspace_id` | primary key plus `idx_prototype_snapshots_workspace_created` |
+| branch-session inventory | sessions by `prototype_workspace_id`, active first, ordered by update time | `idx_prototype_sessions_workspace_active_updated` |
+| active session reuse | workspace, base snapshot, actor type, actor identity, share link, revoked/expiry/runtime filters | `idx_prototype_sessions_active_lookup` |
+| active shared actor check | workspace-scoped actor activity and expiry checks | primary key plus `idx_prototype_shared_actors_active_lookup` |
+| promotion listings/review | workspace and status with update-time cleanup | `idx_prototype_promotion_requests_workspace_status_updated` |
+| preview handle lookup | handle id, active scope replacement, workspace/session cleanup scans | primary key plus preview handle workspace/session/scope indexes |
+
 ## Preview Broker Guarantees
 
 Preview access is brokered through `preview_handle` records and signed preview grants.
