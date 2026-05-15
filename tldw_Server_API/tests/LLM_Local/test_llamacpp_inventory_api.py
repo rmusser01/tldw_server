@@ -285,3 +285,46 @@ def test_start_by_model_resolves_model_id_and_uses_handler_path_start(monkeypatc
         "model_label": "launch.gguf",
         "server_args": {"port": 8123},
     }
+
+
+@pytest.mark.unit
+def test_start_by_model_rejects_outside_registered_path_before_fake_handler(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_model = outside_dir / "external.gguf"
+    outside_model.write_text("fake model")
+    registered_value = str(outside_model)
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, registered_model_paths=registered_value),
+    )
+    monkeypatch.setattr(
+        lp.llamacpp_config_service,
+        "get_config_state",
+        lambda llm_manager: _config_state(models_dir, registered_model_paths=registered_value),
+    )
+    model_id = llamacpp_inventory_service.model_id_for_path(outside_model)
+    manager = _Manager()
+    app = _make_app_with_manager(manager)
+
+    with TestClient(app) as client:
+        inventory_response = client.get("/api/v1/llamacpp/inventory")
+        start_response = client.post(
+            "/api/v1/llamacpp/start-by-model",
+            json={"model_id": model_id, "server_args": {"port": 8123}},
+        )
+
+    assert inventory_response.status_code == 200, inventory_response.text
+    item = inventory_response.json()["models"][0]
+    assert item["basename"] == "external.gguf"
+    assert any("outside allowed" in warning.lower() for warning in item["warnings"])
+    assert start_response.status_code == 400, start_response.text
+    assert "outside allowed" in start_response.json()["detail"].lower()
+    assert str(outside_model) not in start_response.text
+    assert manager.llamacpp.started is None

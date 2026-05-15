@@ -34,14 +34,13 @@ def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500)
     """Return a bounded GGUF inventory from configured and registered local paths."""
     saved_config = _saved_config_from_state(config_state)
     models_dir = _optional_path(saved_config.get("models_dir"))
-    allowed_paths = _path_list(saved_config.get("allowed_paths"))
     registered_paths = _path_list(saved_config.get("registered_model_paths"))
     warnings: list[str] = []
     items: list[LlamaCppInventoryItem] = []
     seen_ids: set[str] = set()
     scan_limited = False
 
-    allowed_bases = handler_utils.build_allowed_paths(models_dir, allowed_paths) if models_dir else allowed_paths
+    allowed_bases = _allowed_bases_for_config(saved_config)
     if models_dir is None:
         warnings.append("LlamaCpp.models_dir is not configured; only registered model paths were checked.")
     elif not models_dir.exists():
@@ -87,9 +86,7 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
         raise ServerError("Failed to persist registered llama.cpp model path.") from exc
 
     saved_config["registered_model_paths"] = [registered_value]
-    models_dir = _optional_path(saved_config.get("models_dir"))
-    allowed_paths = _path_list(saved_config.get("allowed_paths"))
-    allowed_bases = handler_utils.build_allowed_paths(models_dir, allowed_paths) if models_dir else allowed_paths
+    allowed_bases = _allowed_bases_for_config(saved_config)
     return _item_for_path(canonical, source="registered_path", allowed_bases=allowed_bases)
 
 
@@ -99,12 +96,16 @@ def resolve_model_id(model_id: str) -> Path:
     if not wanted:
         raise ModelNotFoundError("Model ID is required.")
 
+    saved_config = _read_saved_config()
+    allowed_bases = _allowed_bases_for_config(saved_config)
     inventory = scan_inventory(limit=500)
     for item in inventory.models:
         if item.model_id == wanted:
             path = Path(item.path).expanduser().resolve()
             if path.suffix.lower() != ".gguf" or not path.is_file():
                 raise ModelNotFoundError(f"Model ID {wanted} does not reference an available GGUF file.")
+            if not allowed_bases or not handler_utils.is_path_allowed(path, allowed_bases):
+                raise ServerError("Model path is outside allowed llama.cpp paths.")
             return path
     raise ModelNotFoundError(f"Model ID {wanted} was not found in the llama.cpp inventory.")
 
@@ -190,6 +191,12 @@ def _saved_config_from_state(config_state: dict[str, Any] | None) -> dict[str, A
     if config_state and isinstance(config_state.get("saved_config"), dict):
         return dict(config_state["saved_config"])
     return _read_saved_config()
+
+
+def _allowed_bases_for_config(saved_config: dict[str, Any]) -> list[Path]:
+    models_dir = _optional_path(saved_config.get("models_dir"))
+    allowed_paths = _path_list(saved_config.get("allowed_paths"))
+    return handler_utils.build_allowed_paths(models_dir, allowed_paths) if models_dir else allowed_paths
 
 
 def _read_saved_config() -> dict[str, Any]:
