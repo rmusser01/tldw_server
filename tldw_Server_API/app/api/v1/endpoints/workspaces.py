@@ -78,6 +78,7 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
 
 def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
     """Convert a workspace artifact DB row dict to a WorkspaceArtifactResponse schema."""
+    version = art.get("version") or 1
     return WorkspaceArtifactResponse(
         id=art["id"],
         workspace_id=art["workspace_id"],
@@ -95,7 +96,7 @@ def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
         task_id=art.get("task_id"),
         source_collection_id=art.get("source_collection_id"),
         root_artifact_id=art.get("root_artifact_id") or art["id"],
-        artifact_version_id=art.get("artifact_version_id") or f"{art['id']}:v{art.get('version', 1)}",
+        artifact_version_id=art.get("artifact_version_id") or f"{art['id']}:v{version}",
         previous_version_id=art.get("previous_version_id"),
         producer_metadata=art.get("producer_metadata") or {},
         source_lineage=art.get("source_lineage") or {},
@@ -108,7 +109,7 @@ def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
         total_cost_usd=art.get("total_cost_usd"),
         created_at=str(art.get("created_at", "")),
         completed_at=str(art["completed_at"]) if art.get("completed_at") else None,
-        version=art.get("version", 1),
+        version=version,
     )
 
 

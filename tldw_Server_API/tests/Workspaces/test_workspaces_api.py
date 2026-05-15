@@ -544,6 +544,22 @@ def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db):
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
 
 
+def test_workspace_artifact_response_defaults_null_version_for_version_id():
+    from tldw_Server_API.app.api.v1.endpoints.workspaces import _art_to_response
+
+    response = _art_to_response({
+        "id": "art-null-version",
+        "workspace_id": "ws-1",
+        "artifact_type": "summary",
+        "title": "Summary",
+        "version": None,
+        "created_at": "2026-05-15T00:00:00Z",
+    })
+
+    assert response.version == 1
+    assert response.artifact_version_id == "art-null-version:v1"
+
+
 def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
