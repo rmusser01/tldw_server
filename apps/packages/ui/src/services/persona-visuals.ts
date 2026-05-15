@@ -31,7 +31,9 @@ import type {
   PersonaVisualPortabilityJobResponse,
   PersonaVisualRendererCapabilitiesResponse,
   PersonaVisualStarterPackCopyRequest,
-  PersonaVisualStarterPackListResponse
+  PersonaVisualStarterPackDetail,
+  PersonaVisualStarterPackListResponse,
+  PersonaVisualStarterPackSummary
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -75,6 +77,14 @@ const visualLibraryPath = (
   suffix = ""
 ): `/api/v1/persona/visual-library${string}` =>
   `/api/v1/persona/visual-library${suffix}`
+
+const visualStarterPackPath = (
+  starterPackId?: string,
+  suffix = ""
+): `/api/v1/persona/visual-starter-packs${string}` => {
+  if (!starterPackId) return "/api/v1/persona/visual-starter-packs"
+  return `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterPackId)}${suffix}`
+}
 
 const normalizeBody = (
   body: PersonaVisualFetchInit["body"],
@@ -133,6 +143,17 @@ export const normalizePersonaVisualPackList = (
   }
 }
 
+export const normalizePersonaVisualStarterPackList = (
+  payload: PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
+): PersonaVisualStarterPackListResponse => {
+  if (Array.isArray(payload)) return { starter_packs: payload }
+  return {
+    starter_packs: Array.isArray(payload?.starter_packs)
+      ? payload.starter_packs
+      : []
+  }
+}
+
 export async function listPersonaVisualPacks(
   personaId: string
 ): Promise<PersonaVisualPackListResponse> {
@@ -140,6 +161,36 @@ export async function listPersonaVisualPacks(
     PersonaVisualPack[] | PersonaVisualPackListResponse
   >(personaVisualPath(personaId, "/visual-packs"))
   return normalizePersonaVisualPackList(payload)
+}
+
+export async function listPersonaVisualStarterPacks(): Promise<
+  PersonaVisualStarterPackListResponse
+> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
+  >(visualStarterPackPath())
+  return normalizePersonaVisualStarterPackList(payload)
+}
+
+export async function getPersonaVisualStarterPack(
+  starterPackId: string
+): Promise<PersonaVisualStarterPackDetail> {
+  return fetchPersonaVisualJson<PersonaVisualStarterPackDetail>(
+    visualStarterPackPath(starterPackId)
+  )
+}
+
+export async function copyPersonaVisualStarterPack(
+  starterPackId: string,
+  payload: PersonaVisualStarterPackCopyRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    visualStarterPackPath(starterPackId, "/copy"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
 }
 
 export async function getPersonaVisualRendererCapabilities(): Promise<
@@ -151,32 +202,6 @@ export async function getPersonaVisualRendererCapabilities(): Promise<
   return {
     renderers: Array.isArray(payload?.renderers) ? payload.renderers : []
   }
-}
-
-export async function listPersonaVisualStarterPacks(): Promise<
-  PersonaVisualStarterPackListResponse
-> {
-  const payload = await fetchPersonaVisualJson<PersonaVisualStarterPackListResponse>(
-    "/api/v1/persona/visual-starter-packs"
-  )
-  return {
-    starter_packs: Array.isArray(payload?.starter_packs)
-      ? payload.starter_packs
-      : []
-  }
-}
-
-export async function copyPersonaVisualStarterPack(
-  starterPackId: string,
-  payload: PersonaVisualStarterPackCopyRequest
-): Promise<PersonaVisualPack> {
-  return fetchPersonaVisualJson<PersonaVisualPack>(
-    `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterPackId)}/copy`,
-    {
-      method: "POST",
-      body: payload
-    }
-  )
 }
 
 export async function getPersonaVisualPack(

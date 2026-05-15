@@ -13,6 +13,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 import {
   copyPersonaVisualStarterPack,
   getPersonaVisualRendererCapabilities,
+  getPersonaVisualStarterPack,
   listPersonaVisualStarterPacks
 } from "../persona-visuals"
 
@@ -109,11 +110,22 @@ describe("persona visuals service", () => {
     await expect(listPersonaVisualStarterPacks()).resolves.toEqual({
       starter_packs: [starterPack]
     })
-
     expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
       "/api/v1/persona/visual-starter-packs",
       expect.objectContaining({ method: "GET" })
     )
+  })
+
+  it("normalizes direct-list starter pack responses for defensive tests", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [{ id: "starter-1", title: "Starter 1" }]
+    })
+
+    await expect(listPersonaVisualStarterPacks()).resolves.toEqual({
+      starter_packs: [expect.objectContaining({ id: "starter-1" })]
+    })
   })
 
   it("copies a bundled starter pack into a target persona draft", async () => {
@@ -157,5 +169,74 @@ describe("persona visuals service", () => {
         })
       })
     )
+  })
+
+  it("loads starter pack details with an encoded id", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "starter/with space",
+        title: "Starter Detail",
+        description: "Detail",
+        renderer_type: "sprite_frames",
+        manifest_version: 1,
+        states_offered: ["idle"],
+        asset_count: 1,
+        total_bytes: 128,
+        tags: [],
+        license_label: "bundled",
+        manifest: {
+          manifest_version: 1,
+          renderer_type: "sprite_frames",
+          states: {},
+          animations: {}
+        },
+        assets: []
+      })
+    })
+
+    await getPersonaVisualStarterPack("starter/with space")
+
+    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/visual-starter-packs/starter%2Fwith%20space",
+      expect.objectContaining({ method: "GET" })
+    )
+  })
+
+  it("copies a starter pack to a target persona without activation fields", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: "copied-pack",
+        persona_id: "persona-1",
+        title: "Research Buddy Starter",
+        renderer_type: "sprite_frames",
+        status: "draft",
+        manifest: {
+          manifest_version: 1,
+          renderer_type: "sprite_frames",
+          states: {},
+          animations: {}
+        }
+      })
+    })
+
+    await copyPersonaVisualStarterPack("starter-1", {
+      target_persona_id: "persona-1"
+    })
+
+    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/visual-starter-packs/starter-1/copy",
+      expect.objectContaining({ method: "POST" })
+    )
+    const [, init] = mocks.fetchWithAuth.mock.calls.at(-1) as [string, any]
+    expect(init.headers).toEqual(
+      expect.objectContaining({ "Content-Type": "application/json" })
+    )
+    expect(JSON.parse(String(init.body))).toEqual({
+      target_persona_id: "persona-1"
+    })
   })
 })

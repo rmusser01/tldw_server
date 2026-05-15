@@ -243,6 +243,42 @@ export interface PersonaVisualPackDuplicateRequest {
   title?: string | null
 }
 
+export interface PersonaVisualStarterPackAssetSummary {
+  asset_key: string
+  filename: string
+  mime_type: string
+  asset_role: PersonaVisualAssetRole | string
+  byte_size: number
+}
+
+export interface PersonaVisualStarterPackSummary {
+  id: string
+  title: string
+  description: string
+  renderer_type: PersonaVisualRendererType
+  manifest_version: number
+  states_offered: string[]
+  asset_count: number
+  total_bytes: number
+  tags: string[]
+  license_label: string
+}
+
+export interface PersonaVisualStarterPackDetail
+  extends PersonaVisualStarterPackSummary {
+  manifest: PersonaVisualManifest | Record<string, unknown>
+  assets: PersonaVisualStarterPackAssetSummary[]
+}
+
+export interface PersonaVisualStarterPackListResponse {
+  starter_packs: PersonaVisualStarterPackSummary[]
+}
+
+export interface PersonaVisualStarterPackCopyRequest {
+  target_persona_id: string
+  title?: string | null
+}
+
 export interface PersonaVisualDuplicateTarget {
   id: string
   name?: string | null
