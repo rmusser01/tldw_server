@@ -57,7 +57,7 @@ import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption } from "@/store/option";
 import { useArtifactsStore } from "@/store/artifacts";
-import { getDesignSystemState } from "@/design-system";
+import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
 import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
@@ -133,7 +133,6 @@ const renderArtifactsPanel = () => (
 
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
 type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
-const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
 const COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR =
   "[data-cockpit-assistant-select-trigger]";
 const COCKPIT_PROMPT_SELECT_TRIGGER_SELECTOR =
@@ -1776,7 +1775,9 @@ export const Playground = () => {
       readyDetail: toText(
         t("playground:cockpit.sessionReadyDetail", "Conversation ready"),
       ),
-      readyStatusLabel: toText(t("playground:cockpit.sessionReady", "Ready")),
+      readyStatusLabel: toText(
+        t("playground:cockpit.sessionReady", READY_STATE_LABEL),
+      ),
       serverChatLabel: toText(
         t("playground:cockpit.sessionServer", "Server chat"),
       ),

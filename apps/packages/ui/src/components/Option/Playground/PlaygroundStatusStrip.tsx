@@ -1,5 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { getDesignSystemState } from "@/design-system";
+import {
+  DEGRADED_STATE_LABEL,
+  ERROR_STATE_LABEL,
+  READY_STATE_LABEL,
+} from "@/design-system";
 import type { PlaygroundCockpitMode } from "./PlaygroundCockpitShell";
 import {
   formatCockpitMessageCount,
@@ -29,10 +33,6 @@ const pillClass =
   "inline-flex min-h-[24px] max-w-full items-center rounded-md border border-border bg-surface px-2 text-xs font-medium text-text";
 const actionClass =
   "inline-flex min-h-[26px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-
-const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
-const ERROR_STATE_LABEL = getDesignSystemState("error").label;
-const READY_STATE_LABEL = getDesignSystemState("ready").label;
 
 export const PlaygroundStatusStrip = ({
   mode,

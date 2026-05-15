@@ -204,6 +204,18 @@ export function getDesignSystemState(key: DesignSystemStateKey): DesignSystemSta
   return DESIGN_SYSTEM_STATES[key]
 }
 
+export function getDesignSystemStateLabel(
+  key: DesignSystemStateKey,
+  fallback: string
+): string {
+  return getDesignSystemState(key)?.label ?? fallback
+}
+
+export const READY_STATE_LABEL = getDesignSystemStateLabel("ready", "Ready")
+export const EMPTY_STATE_LABEL = getDesignSystemStateLabel("empty", "Empty")
+export const DEGRADED_STATE_LABEL = getDesignSystemStateLabel("degraded", "Degraded")
+export const ERROR_STATE_LABEL = getDesignSystemStateLabel("error", "Error")
+
 export function isDesignSystemStateKey(value: unknown): value is DesignSystemStateKey {
   return (
     typeof value === "string" &&

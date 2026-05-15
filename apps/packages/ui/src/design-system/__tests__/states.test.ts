@@ -1,6 +1,8 @@
 import {
   CANONICAL_STATE_KEYS,
   DESIGN_SYSTEM_STATES,
+  EMPTY_STATE_LABEL,
+  READY_STATE_LABEL,
   getDesignSystemState,
   isDesignSystemStateKey
 } from "../states"
@@ -175,5 +177,10 @@ describe("design-system state registry", () => {
 
   it("keeps state definitions aligned to the canonical key order", () => {
     expect(Object.keys(DESIGN_SYSTEM_STATES)).toEqual(CANONICAL_STATE_KEYS)
+  })
+
+  it("exports canonical state labels through defensive fallbacks", () => {
+    expect(READY_STATE_LABEL).toBe(DESIGN_SYSTEM_STATES.ready.label)
+    expect(EMPTY_STATE_LABEL).toBe(DESIGN_SYSTEM_STATES.empty.label)
   })
 })

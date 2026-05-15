@@ -10,7 +10,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import { getDesignSystemState } from "@/design-system";
+import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
 
 const railSectionClass = "rounded-md border border-border bg-surface px-3 py-2";
 const railHeadingClass = "text-[11px] font-semibold uppercase text-text-muted";
@@ -20,7 +20,6 @@ const railActionClass =
   "mt-3 inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 const clearActionClass =
   "inline-flex shrink-0 items-center rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
 const PROMPT_SELECT_TRIGGER_SELECTOR = "[data-cockpit-prompt-select-trigger]";
 
 type ContextCountItem = {
@@ -173,7 +172,7 @@ export const PlaygroundContextRail = ({
       : sessionStatus === "loading"
         ? t("cockpit.sessionLoading", "Loading conversation")
         : sessionStatus === "loaded"
-          ? t("cockpit.sessionReady", "Ready")
+          ? t("cockpit.sessionReady", READY_STATE_LABEL)
           : t("cockpit.sessionIdle", "Idle"));
   const sourceCountLabel =
     activeSourceCount === 1

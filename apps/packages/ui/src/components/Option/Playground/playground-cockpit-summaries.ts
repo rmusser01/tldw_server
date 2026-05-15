@@ -6,6 +6,7 @@ import type {
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
 import type { McpHealthState } from "@/store/mcp-tools";
+import { READY_STATE_LABEL } from "@/design-system";
 
 type LegacyCharacterSelection = {
   id?: string | number;
@@ -123,7 +124,7 @@ const defaultSessionCopy = {
   localHistoryStatusLabel: "Local history",
   noSavedHistoryDetail: "No saved history yet",
   readyDetail: "Conversation ready",
-  readyStatusLabel: "Ready",
+  readyStatusLabel: READY_STATE_LABEL,
   serverChatLabel: "Server chat",
   temporaryChatLabel: "Temporary chat",
   temporaryDetail: "Not saved",
