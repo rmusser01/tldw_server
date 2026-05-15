@@ -595,6 +595,106 @@ def test_launchd_argv_shapes(tmp_path: Path) -> None:
     )
 
 
+def test_launchd_drill_defaults_use_private_runtime_label_and_plist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    paths = helperctl.default_paths()
+    label = helperctl.default_launchd_drill_label(pid=12345)
+    plist_path = helperctl.default_launchd_drill_plist_path(paths, label)
+
+    CASE.assertEqual(label, "org.tldw.macos-vz-helper.drill.12345")
+    CASE.assertEqual(
+        plist_path,
+        paths.socket_path.parent / "launchd-drill" / "org.tldw.macos-vz-helper.drill.12345.plist",
+    )
+
+
+def test_launchd_service_loaded_returns_loaded_for_launchctl_print_zero() -> None:
+    helperctl = load_helperctl()
+
+    result = helperctl.launchd_service_loaded(
+        "org.tldw.test",
+        uid=501,
+        command_runner=lambda argv, **kwargs: 0,
+    )
+
+    CASE.assertEqual(
+        result,
+        helperctl.CheckResult(
+            ok=True,
+            reason="launchd_service_loaded",
+            message="gui/501/org.tldw.test",
+        ),
+    )
+
+
+def test_launchd_service_loaded_returns_absent_for_launchctl_print_nonzero() -> None:
+    helperctl = load_helperctl()
+
+    result = helperctl.launchd_service_loaded(
+        "org.tldw.test",
+        uid=501,
+        command_runner=lambda argv, **kwargs: 3,
+    )
+
+    CASE.assertEqual(
+        result,
+        helperctl.CheckResult(
+            ok=True,
+            reason="launchd_service_absent",
+            message="gui/501/org.tldw.test",
+        ),
+    )
+
+
+def test_launchd_service_loaded_returns_unavailable_for_launchctl_127() -> None:
+    helperctl = load_helperctl()
+
+    result = helperctl.launchd_service_loaded(
+        "org.tldw.test",
+        uid=501,
+        command_runner=lambda argv, **kwargs: 127,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="launchd_launchctl_unavailable"))
+
+
+def test_launchd_service_loaded_dry_run_invokes_runner_with_dry_run_true() -> None:
+    helperctl = load_helperctl()
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        calls.append((argv, kwargs))
+        return 0
+
+    result = helperctl.launchd_service_loaded(
+        "org.tldw.test",
+        uid=501,
+        dry_run=True,
+        command_runner=runner,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="dry_run"))
+    CASE.assertEqual(calls, [(["launchctl", "print", "gui/501/org.tldw.test"], {"dry_run": True})])
+
+
+def test_launchd_service_loaded_dry_run_reports_absent_for_nonzero_runner() -> None:
+    helperctl = load_helperctl()
+
+    result = helperctl.launchd_service_loaded(
+        "org.tldw.test",
+        uid=501,
+        dry_run=True,
+        command_runner=lambda argv, **kwargs: 3,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="launchd_service_absent"))
+
+
 def test_launchd_bootstrap_requires_existing_plist_without_write(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     commands: list[list[str]] = []

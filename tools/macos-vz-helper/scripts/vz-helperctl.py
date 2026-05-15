@@ -270,6 +270,17 @@ def launchd_service_target(label: str, *, uid: int | None = None) -> str:
     return f"{launchd_domain(uid)}/{label}"
 
 
+def default_launchd_drill_label(*, pid: int | None = None) -> str:
+    """Return the isolated launchd label used by the validation drill."""
+    suffix = os.getpid() if pid is None else pid
+    return f"{DEFAULT_LAUNCHD_LABEL}.drill.{suffix}"
+
+
+def default_launchd_drill_plist_path(paths: HelperPaths, label: str) -> Path:
+    """Return the private runtime plist path used by the validation drill."""
+    return paths.socket_path.parent / "launchd-drill" / f"{label}.plist"
+
+
 def launchd_argv(
     action: str,
     *,
@@ -289,6 +300,35 @@ def launchd_argv(
     if action == "kickstart":
         return ["launchctl", "kickstart", "-k", launchd_service_target(label, uid=uid)]
     return ["launchctl", "bootout", launchd_service_target(label, uid=uid)]
+
+
+def launchd_service_loaded(
+    label: str,
+    *,
+    uid: int | None = None,
+    dry_run: bool = False,
+    command_runner: Callable[..., int] | None = None,
+) -> CheckResult:
+    """Check whether launchd currently has the helper service loaded."""
+    runner = command_runner or run_command
+    target = launchd_service_target(label, uid=uid)
+    argv = launchd_argv("status", label=label, uid=uid)
+
+    if dry_run:
+        code = runner(argv, dry_run=True)
+        if code == 0:
+            return CheckResult(ok=True, reason="dry_run")
+        return CheckResult(ok=True, reason="launchd_service_absent")
+
+    if _is_default_run_command(runner) and shutil.which("launchctl") is None:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+
+    code = runner(argv, dry_run=False)
+    if code == 0:
+        return CheckResult(ok=True, reason="launchd_service_loaded", message=target)
+    if code == 127:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+    return CheckResult(ok=True, reason="launchd_service_absent", message=target)
 
 
 def _prepare_launchd_plist(
