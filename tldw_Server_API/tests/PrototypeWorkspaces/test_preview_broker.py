@@ -67,6 +67,7 @@ async def _seed_preview_scope(repo, prototype_db):
         base_snapshot_id="snap_preview_base",
         actor_type="external_collaborator",
         actor_shared_actor_id=actor["id"],
+        share_link_id=11,
     )
     prototype_db.execute(
         """
@@ -148,11 +149,10 @@ async def test_revoked_shared_actor_blocks_future_preview_grants(repo, prototype
         snapshot_id="snap_preview_base",
         runtime_target_url="http://127.0.0.1:9011",
     )
-    prototype_db.execute(
-        "UPDATE prototype_shared_actors SET revoked_at = ? WHERE id = ?",
-        (datetime.now(timezone.utc).isoformat(), actor["id"]),
+    await repo.revoke_shared_actor(
+        actor["id"],
+        revoked_at=datetime.now(timezone.utc).isoformat(),
     )
-    prototype_db.commit()
 
     with pytest.raises(RuntimeError, match="revoked"):
         await preview_broker.issue_preview_grant(
@@ -166,11 +166,10 @@ async def test_revoked_shared_actor_blocks_future_preview_grants(repo, prototype
 @pytest.mark.asyncio
 async def test_expired_session_blocks_preview_grants(repo, prototype_db, preview_broker):
     workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
-    prototype_db.execute(
-        "UPDATE prototype_sessions SET expires_at = ? WHERE id = ?",
-        ((datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(), session["id"]),
+    await repo.update_session_expiry(
+        session["id"],
+        expires_at=(datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
     )
-    prototype_db.commit()
 
     with pytest.raises(RuntimeError, match="expired"):
         await preview_broker.issue_preview_grant(
@@ -194,11 +193,10 @@ async def test_revoked_actor_invalidates_existing_preview_grant(repo, prototype_
     query = parse_qs(parsed.query)
     exp = int(query["exp"][0])
 
-    prototype_db.execute(
-        "UPDATE prototype_shared_actors SET revoked_at = ? WHERE id = ?",
-        (datetime.now(timezone.utc).isoformat(), actor["id"]),
+    await repo.revoke_shared_actor(
+        actor["id"],
+        revoked_at=datetime.now(timezone.utc).isoformat(),
     )
-    prototype_db.commit()
 
     record = await preview_broker.validate_preview_grant(
         preview_handle=grant["preview_handle"],

@@ -102,10 +102,29 @@ async def test_create_workspace_snapshot_and_session_enforce_single_actor_identi
         base_snapshot_id=snapshot["snapshot_id"],
         actor_shared_actor_id=actor["id"],
         actor_type="external_collaborator",
+        share_link_id=11,
     )
 
     assert session["actor_shared_actor_id"] == actor["id"]
     assert session["actor_user_id"] is None
+    assert session["share_link_id"] == 11
+
+    with pytest.raises(ValueError, match="external_collaborator requires share_link_id"):
+        await repo.create_session(
+            prototype_workspace_id=workspace["id"],
+            base_snapshot_id=snapshot["snapshot_id"],
+            actor_shared_actor_id=actor["id"],
+            actor_type="external_collaborator",
+        )
+
+    with pytest.raises(ValueError, match="share_link_id must match actor_shared_actor_id"):
+        await repo.create_session(
+            prototype_workspace_id=workspace["id"],
+            base_snapshot_id=snapshot["snapshot_id"],
+            actor_shared_actor_id=actor["id"],
+            actor_type="external_collaborator",
+            share_link_id=12,
+        )
 
     with pytest.raises(
         ValueError, match="owner/internal_collaborator requires actor_user_id and forbids actor_shared_actor_id"
@@ -382,6 +401,7 @@ async def test_find_active_session_filters_candidate_in_sql() -> None:
         base_snapshot_id="snap_existing",
         actor_type="external_collaborator",
         actor_shared_actor_id="psa_sql_review",
+        share_link_id=101,
     )
 
     assert session is not None
@@ -389,6 +409,7 @@ async def test_find_active_session_filters_candidate_in_sql() -> None:
     assert "base_snapshot_id = ?" in query
     assert "actor_type = ?" in query
     assert "actor_shared_actor_id = ?" in query
+    assert "share_link_id = ?" in query
     assert "runtime_status" in query
     assert "expires_at" in query
     assert "LIMIT 1" in query

@@ -211,12 +211,12 @@ async def test_revoked_external_collaborator_cannot_reuse_branch_session(
         base_snapshot_id=canonical["snapshot_id"],
         actor_type="external_collaborator",
         actor_shared_actor_id=actor["id"],
+        share_link_id=51,
     )
-    prototype_db.execute(
-        "UPDATE prototype_shared_actors SET revoked_at = ? WHERE id = ?",
-        (datetime.now(timezone.utc).isoformat(), actor["id"]),
+    await repo.revoke_shared_actor(
+        actor["id"],
+        revoked_at=datetime.now(timezone.utc).isoformat(),
     )
-    prototype_db.commit()
 
     service_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
     service_cls = _load_attr(service_module, "PrototypeWorkspaceService", "PrototypePromotionService")
