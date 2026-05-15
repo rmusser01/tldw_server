@@ -2464,7 +2464,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/GovernancePacksTab.tsx:Alert#antd-alert-governancepackstab-type-error-line-631-1s1abkv",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/GovernancePacksTab.tsx:Alert#antd-alert-governancepackstab-type-error-line-632-1sb9x9u",
     "path": "src/components/Option/MCPHub/GovernancePacksTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -2475,7 +2475,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/GovernancePacksTab.tsx:Alert#antd-alert-governancepackstab-type-success-line-632-6pmctl",
+    "id": "antd-product-state-import:src/components/Option/MCPHub/GovernancePacksTab.tsx:Alert#antd-alert-governancepackstab-type-success-line-633-6fmr4m",
     "path": "src/components/Option/MCPHub/GovernancePacksTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -5101,28 +5101,6 @@
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/WorkflowEditor/NodePalette.tsx before the guard.",
     "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/MCPHub/GovernancePacksTab.tsx:Blocked#label-blocked-governancepackstab-line-919-jq7i8j",
-    "path": "src/components/Option/MCPHub/GovernancePacksTab.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Blocked",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Blocked\" state label in src/components/Option/MCPHub/GovernancePacksTab.tsx before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "canonical-state-label:src/components/Option/MCPHub/GovernancePacksTab.tsx:Blocked#label-blocked-governancepackstab-line-962-p0o8il",
-    "path": "src/components/Option/MCPHub/GovernancePacksTab.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Blocked",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing hardcoded \"Blocked\" state label in src/components/Option/MCPHub/GovernancePacksTab.tsx before the stable duplicate-id guard.",
-    "replacement": "getDesignSystemState(...)",
     "migrationQueue": "shared-product-state"
   },
   {
