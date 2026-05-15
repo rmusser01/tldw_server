@@ -731,18 +731,49 @@ def _kill_process(pid: int) -> None:
         return
 
 
+def _request_helper_ping(socket_path: Path, *, timeout_sec: float = 5.0) -> dict[str, object]:
+    payload = {
+        "operation": "ping",
+        "protocol_version": str(EXPECTED_HELPER_PROTOCOL_VERSION),
+        "request": {},
+    }
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(timeout_sec)
+        client.connect(str(socket_path))
+        client.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+        response_bytes = bytearray()
+        while b"\n" not in response_bytes:
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            response_bytes.extend(chunk)
+
+    response_text = bytes(response_bytes).split(b"\n", 1)[0].decode("utf-8")
+    response = json.loads(response_text)
+    if not isinstance(response, dict):
+        raise RuntimeError("macos_virtualization_helper_protocol_error")
+    return response
+
+
 def ping_helper_state(
     socket_path: Path,
     *,
     client_factory: Callable[[Path], object] | None = None,
 ) -> PingState:
     try:
-        from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
-            MacOSVirtualizationHelperClient,
-        )
-
-        factory = client_factory or (lambda path: MacOSVirtualizationHelperClient(socket_path=str(path)))
-        reply = factory(socket_path).ping()
+        if client_factory is not None:
+            reply = client_factory(socket_path).ping()
+            protocol_version = str(getattr(reply, "protocol_version", "") or "")
+            helper_version = str(getattr(reply, "helper_version", "") or "")
+        else:
+            payload = _request_helper_ping(socket_path)
+            error_code = str(payload.get("error_code") or "").strip()
+            if error_code:
+                message = str(payload.get("message") or "").strip() or error_code
+                raise RuntimeError(f"{error_code}: {message}")
+            protocol_version = str(payload.get("protocol_version") or "")
+            helper_version = str(payload.get("helper_version") or "")
     except Exception as exc:
         if (
             exc.__class__.__name__ == "MacOSVirtualizationHelperProtocolError"
@@ -752,8 +783,6 @@ def ping_helper_state(
                 result=CheckResult(ok=False, reason="helper_protocol_mismatch", message=str(exc)),
             )
         return PingState(result=CheckResult(ok=False, reason="helper_ping_failed", message=str(exc)))
-    protocol_version = str(getattr(reply, "protocol_version", "") or "")
-    helper_version = str(getattr(reply, "helper_version", "") or "")
     if protocol_version != str(EXPECTED_HELPER_PROTOCOL_VERSION):
         return PingState(
             result=CheckResult(ok=False, reason="helper_protocol_mismatch"),
