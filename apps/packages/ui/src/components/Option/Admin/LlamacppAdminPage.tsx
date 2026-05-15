@@ -199,7 +199,6 @@ export const LlamacppAdminPage: React.FC = () => {
       const data = await tldwClient.getLlamacppHardware()
       setHardware(data)
     } catch (error: unknown) {
-      markAdminGuardFromError(error)
       setHardware({
         gpus: [],
         warnings: [
@@ -207,7 +206,7 @@ export const LlamacppAdminPage: React.FC = () => {
         ]
       })
     }
-  }, [markAdminGuardFromError])
+  }, [])
 
   React.useEffect(() => {
     if (initialLoadRef.current) return
@@ -224,6 +223,12 @@ export const LlamacppAdminPage: React.FC = () => {
   const effectiveState =
     status?.state || status?.status || status?.backend || "unknown"
   const isRunning = effectiveState === "running" || effectiveState === "online"
+  const selectedModel = React.useMemo(
+    () => inventory?.models.find((item) => item.model_id === selectedModelId),
+    [inventory?.models, selectedModelId]
+  )
+  const selectedModelLabel =
+    selectedModel?.display_name || selectedModel?.basename || selectedModelId
   const hardwareWarnings = hardware?.warnings || []
   const inventoryUnavailable = Boolean(inventoryError) || (!loadingInventory && !inventory)
   const inventoryLoadedOrUnavailable = Boolean(inventory) || inventoryUnavailable
@@ -231,20 +236,29 @@ export const LlamacppAdminPage: React.FC = () => {
   React.useEffect(() => {
     if (isRunning) {
       setChatActionVisible(true)
+      return
     }
-  }, [isRunning])
 
-  const handleRegisterPath = async (path: string) => {
+    if (status && !loadingStatus && !actionLoading) {
+      setChatActionVisible(false)
+      setChatNotice(null)
+      setChatWarnings([])
+    }
+  }, [actionLoading, isRunning, loadingStatus, status])
+
+  const handleRegisterPath = async (path: string): Promise<boolean> => {
     try {
       setRegisteringPath(true)
       setInventoryError(null)
       await tldwClient.registerLlamacppModelPath(path)
       await loadInventory()
+      return true
     } catch (error: unknown) {
       setInventoryError(
         sanitizeAdminErrorMessage(error, "Failed to register Llama.cpp model path.")
       )
       markAdminGuardFromError(error)
+      return false
     } finally {
       setRegisteringPath(false)
     }
@@ -486,7 +500,7 @@ export const LlamacppAdminPage: React.FC = () => {
                 settings={settings}
                 onSettingsChange={setSettings}
                 selectedModelId={selectedModelId}
-                selectedModelLabel={undefined}
+                selectedModelLabel={selectedModelLabel}
                 isRunning={isRunning}
                 actionLoading={actionLoading}
                 inventoryUnavailable={inventoryUnavailable}

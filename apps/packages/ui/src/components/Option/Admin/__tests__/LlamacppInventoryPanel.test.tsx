@@ -1,6 +1,6 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { LlamacppInventoryPanel } from "../LlamacppInventoryPanel"
 
 describe("LlamacppInventoryPanel", () => {
@@ -48,5 +48,35 @@ describe("LlamacppInventoryPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select" }))
 
     expect(onSelect).toHaveBeenCalledWith("gguf:stable-id")
+  })
+
+  it("keeps registered path text when registration fails", async () => {
+    const onRegister = vi.fn().mockResolvedValue(false)
+
+    render(
+      <LlamacppInventoryPanel
+        inventory={{
+          models: [],
+          warnings: [],
+          scan_limited: false
+        }}
+        selectedModelId={undefined}
+        activeModel={null}
+        loading={false}
+        registering={false}
+        onSelectModel={vi.fn()}
+        onRegisterPath={onRegister}
+        onReload={vi.fn()}
+      />
+    )
+
+    const input = screen.getByLabelText("Register local GGUF path") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "/external/model.gguf" } })
+    fireEvent.click(screen.getByRole("button", { name: "Register path" }))
+
+    await waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith("/external/model.gguf")
+    })
+    expect(input.value).toBe("/external/model.gguf")
   })
 })

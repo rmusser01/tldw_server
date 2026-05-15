@@ -279,6 +279,18 @@ describe("LlamacppAdminPage", () => {
   })
 
   it("shows explicit chat wiring after start and never calls it automatically", async () => {
+    apiMock.getLlamacppStatus
+      .mockResolvedValueOnce({
+        state: "stopped",
+        model: null,
+        port: 8080
+      })
+      .mockResolvedValueOnce({
+        state: "running",
+        model: "toy-7b-q4_k_m.gguf",
+        port: 8080
+      })
+
     render(<LlamacppAdminPage />)
 
     expect(await screen.findByRole("button", { name: "Start Server" })).toBeTruthy()
@@ -308,6 +320,42 @@ describe("LlamacppAdminPage", () => {
 
     expect(await screen.findByRole("button", { name: "Use this in Chat" })).toBeTruthy()
     expect(apiMock.useLlamacppInChat).not.toHaveBeenCalled()
+  })
+
+  it("hides chat wiring when a later status refresh reports stopped", async () => {
+    apiMock.getLlamacppStatus
+      .mockResolvedValueOnce({
+        state: "running",
+        model: "toy-7b-q4_k_m.gguf",
+        port: 8080
+      })
+      .mockResolvedValueOnce({
+        state: "stopped",
+        model: null,
+        port: 8080
+      })
+
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByRole("button", { name: "Use this in Chat" })).toBeTruthy()
+
+    fireEvent.click(await screen.findByTitle("Refresh status"))
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Use this in Chat" })).toBeNull()
+    })
+  })
+
+  it("keeps launch available when only hardware probing fails", async () => {
+    apiMock.getLlamacppHardware.mockRejectedValueOnce(
+      new Error("Request failed: 503 (GET /api/v1/admin/llamacpp/hardware)")
+    )
+
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Inventory")).toBeTruthy()
+    expect(await screen.findByRole("button", { name: "Start Server" })).toBeTruthy()
+    expect(screen.queryByText("Admin APIs not available")).toBeNull()
   })
 
   it("registers a local model path and reloads inventory", async () => {

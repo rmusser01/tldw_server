@@ -16,7 +16,7 @@ interface LlamacppInventoryPanelProps {
   registering?: boolean
   error?: string | null
   onSelectModel: (modelId: string) => void
-  onRegisterPath: (path: string) => void | Promise<void>
+  onRegisterPath: (path: string) => boolean | Promise<boolean>
   onReload: () => void
 }
 
@@ -54,8 +54,14 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
   const handleRegister = async () => {
     const trimmed = path.trim()
     if (!trimmed) return
-    await onRegisterPath(trimmed)
-    setPath("")
+    try {
+      const registered = await onRegisterPath(trimmed)
+      if (registered) {
+        setPath("")
+      }
+    } catch {
+      // Keep the path available for correction/retry. Parent owns the error display.
+    }
   }
 
   return (
