@@ -581,6 +581,11 @@ def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> Non
     pragma_by_name = {row[1]: row for row in pragma_rows}
     current_columns = [row[1] for row in pragma_rows]
 
+    def _quote_sqlite_identifier(identifier: str) -> str:
+        """Quote a SQLite identifier derived from trusted schema metadata."""
+        escaped_identifier = identifier.replace('"', '""')
+        return f'"{escaped_identifier}"'
+
     def _fallback_definition(column_name: str) -> str:
         row = pragma_by_name[column_name]
         column_type = row[2] or "TEXT"
@@ -588,7 +593,7 @@ def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> Non
         default = row[4]
         primary_key = bool(row[5])
 
-        parts = [column_name, column_type]
+        parts = [_quote_sqlite_identifier(column_name), column_type]
         if primary_key:
             parts.append("PRIMARY KEY")
         elif not_null:
@@ -598,6 +603,7 @@ def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> Non
         return " ".join(parts)
 
     column_defs = [desired_defs.get(name, _fallback_definition(name)) for name in current_columns]
+    quoted_current_columns = ", ".join(_quote_sqlite_identifier(name) for name in current_columns)
 
     # Use the foreign-key-off rebuild pattern to avoid FK cascade
     # actions (e.g. ON DELETE CASCADE on api_key_audit_log, ON DELETE
@@ -612,13 +618,18 @@ def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> Non
             )
             """
         )
-        conn.execute(
-            f"""
-            INSERT INTO api_keys_new ({', '.join(current_columns)})
-            SELECT {', '.join(current_columns)}
-            FROM api_keys
-            """
+        # SECURITY: SQL identifiers cannot be bound parameters; the column
+        # names here come from trusted PRAGMA metadata and are SQLite-quoted.
+        insert_api_keys_rebuild_sql = " ".join(
+            (
+                "INSERT INTO api_keys_new",
+                f"({quoted_current_columns})",
+                "SELECT",
+                quoted_current_columns,
+                "FROM api_keys",
+            )
         )
+        conn.execute(insert_api_keys_rebuild_sql)
         conn.execute("DROP TABLE IF EXISTS api_keys")
         conn.execute("ALTER TABLE api_keys_new RENAME TO api_keys")
 
@@ -675,6 +686,10 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
         "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_owner_updated "
         "ON prototype_workspaces(owner_user_id, updated_at)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_archived_at_cleanup "
+        "ON prototype_workspaces(archived_at) WHERE archived_at IS NOT NULL"
+    )
 
     conn.execute(
         """
@@ -729,6 +744,15 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
         "ON prototype_shared_actors(prototype_workspace_id)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_active_lookup "
+        "ON prototype_shared_actors(prototype_workspace_id, revoked_at, expires_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_expires_revoked_cleanup "
+        "ON prototype_shared_actors(expires_at, revoked_at) "
+        "WHERE expires_at IS NOT NULL AND revoked_at IS NULL"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_share_link_revoked "
         "ON prototype_shared_actors(share_link_id, revoked_at)"
     )
@@ -780,6 +804,25 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
         "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_workspace_updated "
         "ON prototype_sessions(prototype_workspace_id, updated_at)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_workspace_active_updated "
+        "ON prototype_sessions(prototype_workspace_id, revoked_at, updated_at, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_active_lookup "
+        "ON prototype_sessions("
+        "prototype_workspace_id, base_snapshot_id, actor_type, actor_user_id, "
+        "actor_shared_actor_id, share_link_id, revoked_at, expires_at, updated_at"
+        ")"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_revoked_at_cleanup "
+        "ON prototype_sessions(revoked_at) WHERE revoked_at IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_expires_at_cleanup "
+        "ON prototype_sessions(expires_at) WHERE expires_at IS NOT NULL"
+    )
 
     conn.execute(
         """
@@ -819,6 +862,11 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_prototype_preview_handles_active_scope "
         "ON prototype_preview_handles(scope_id) WHERE is_active = 1"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_inactive_revoked_cleanup "
+        "ON prototype_preview_handles(is_active, revoked_at) "
+        "WHERE is_active = 0 AND revoked_at IS NOT NULL"
+    )
 
     conn.execute(
         """
@@ -851,6 +899,10 @@ def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) ->
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_prototype_promotion_requests_workspace_status "
         "ON prototype_promotion_requests(prototype_workspace_id, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_promotion_requests_workspace_status_updated "
+        "ON prototype_promotion_requests(prototype_workspace_id, status, updated_at)"
     )
 
     conn.commit()
