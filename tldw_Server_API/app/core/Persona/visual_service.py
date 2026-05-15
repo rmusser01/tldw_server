@@ -433,8 +433,34 @@ class PersonaVisualService:
                 details={"target_persona_id": target_persona_id},
             )
 
-        source_manifest = starter_pack.manifest if isinstance(starter_pack.manifest, dict) else {}
-        starter_assets_by_id = {str(asset.id): asset for asset in starter_pack.assets}
+        if not isinstance(starter_pack.manifest, dict):
+            raise PersonaVisualServiceError(
+                "invalid_starter_pack",
+                "Persona visual starter manifest must be an object.",
+                details={"starter_pack_id": starter_pack.id},
+            )
+        source_manifest = deepcopy(starter_pack.manifest)
+        seen_asset_ids: set[str] = set()
+        duplicate_asset_ids: set[str] = set()
+        starter_assets_by_id: dict[str, Any] = {}
+        for asset in starter_pack.assets:
+            source_asset_id = str(asset.id or "").strip()
+            if not source_asset_id:
+                raise PersonaVisualServiceError(
+                    "invalid_starter_pack",
+                    "Persona visual starter pack contains a bundled asset without an ID.",
+                    details={"starter_pack_id": starter_pack.id},
+                )
+            if source_asset_id in seen_asset_ids:
+                duplicate_asset_ids.add(source_asset_id)
+            seen_asset_ids.add(source_asset_id)
+            starter_assets_by_id[source_asset_id] = asset
+        if duplicate_asset_ids:
+            raise PersonaVisualServiceError(
+                "invalid_starter_pack",
+                "Persona visual starter pack contains duplicate bundled asset IDs.",
+                details={"starter_pack_id": starter_pack.id, "asset_ids": sorted(duplicate_asset_ids)},
+            )
         referenced_asset_ids = collect_visual_manifest_asset_ids(source_manifest)
         missing_asset_ids = sorted(referenced_asset_ids - set(starter_assets_by_id))
         if missing_asset_ids:
@@ -449,6 +475,18 @@ class PersonaVisualService:
                 "Persona visual starter manifest does not reference any bundled assets.",
                 details={"starter_pack_id": starter_pack.id},
             )
+        try:
+            validate_visual_manifest(
+                source_manifest,
+                available_asset_ids=referenced_asset_ids,
+                require_activatable=False,
+            )
+        except PersonaVisualManifestError as exc:
+            raise PersonaVisualServiceError(
+                "invalid_starter_pack",
+                str(exc),
+                details={"starter_pack_id": starter_pack.id},
+            ) from exc
 
         title_value = str(title or "").strip() or starter_pack.title
         target_pack = self._db.create_persona_visual_pack(

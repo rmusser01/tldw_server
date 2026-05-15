@@ -194,6 +194,21 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
     assert starter["asset_count"] == 1
 
 
+def test_persona_visual_starter_catalog_returns_isolated_manifest_copies() -> None:
+    from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+        get_persona_visual_starter_pack,
+    )
+
+    first = get_persona_visual_starter_pack("research-buddy-sprite-frames-v1")
+    assert first is not None
+    first.manifest["states"]["idle"]["animation_id"] = "mutated"
+
+    second = get_persona_visual_starter_pack("research-buddy-sprite-frames-v1")
+
+    assert second is not None
+    assert second.manifest["states"]["idle"]["animation_id"] == "idle"
+
+
 def test_use_persona_visual_starter_pack_creates_inactive_user_owned_draft(
     persona_db: CharactersRAGDB,
 ) -> None:
@@ -284,6 +299,125 @@ def test_use_persona_visual_starter_pack_rejects_malformed_catalog_entry(
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "invalid_starter_pack"
+
+
+def test_use_persona_visual_starter_pack_rejects_duplicate_bundled_asset_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Persona import visual_service
+    from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+        PersonaVisualStarterAsset,
+        PersonaVisualStarterPack,
+    )
+
+    duplicate_pack = PersonaVisualStarterPack(
+        id="duplicate-starter",
+        title="Duplicate starter",
+        description="Contains two bundled assets with the same stable ID.",
+        renderer_type="sprite_frames",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "states": {"idle": {"animation_id": "idle"}},
+            "animations": {
+                "idle": {
+                    "frames": [{"asset_id": "duplicate-source-asset", "duration_ms": 100}],
+                    "frame_rate": 1,
+                }
+            },
+        },
+        assets=(
+            PersonaVisualStarterAsset(
+                id="duplicate-source-asset",
+                filename="one.png",
+                mime_type="image/png",
+                asset_role="frame",
+                content=_png_bytes(),
+            ),
+            PersonaVisualStarterAsset(
+                id="duplicate-source-asset",
+                filename="two.png",
+                mime_type="image/png",
+                asset_role="frame",
+                content=_png_bytes(),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        visual_service,
+        "get_persona_visual_starter_pack",
+        lambda starter_pack_id: duplicate_pack if starter_pack_id == "duplicate-starter" else None,
+    )
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Duplicate Starter Target")
+
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/duplicate-starter/use",
+            json={"target_persona_id": persona_id},
+        )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_starter_pack"
+    assert detail["details"]["asset_ids"] == ["duplicate-source-asset"]
+    assert persona_db.list_persona_visual_packs(persona_id=persona_id, user_id="1") == []
+
+
+def test_use_persona_visual_starter_pack_prevalidates_manifest_before_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.Persona import visual_service
+    from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+        PersonaVisualStarterAsset,
+        PersonaVisualStarterPack,
+    )
+
+    invalid_manifest_pack = PersonaVisualStarterPack(
+        id="invalid-manifest-starter",
+        title="Invalid manifest starter",
+        description="Has bundled assets but an unsupported renderer type.",
+        renderer_type="sprite_frames",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "unsupported_renderer",
+            "states": {"idle": {"animation_id": "idle"}},
+            "animations": {
+                "idle": {
+                    "frames": [{"asset_id": "source-asset", "duration_ms": 100}],
+                    "frame_rate": 1,
+                }
+            },
+        },
+        assets=(
+            PersonaVisualStarterAsset(
+                id="source-asset",
+                filename="source.png",
+                mime_type="image/png",
+                asset_role="frame",
+                content=_png_bytes(),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        visual_service,
+        "get_persona_visual_starter_pack",
+        lambda starter_pack_id: invalid_manifest_pack
+        if starter_pack_id == "invalid-manifest-starter"
+        else None,
+    )
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Invalid Manifest Starter Target")
+
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/invalid-manifest-starter/use",
+            json={"target_persona_id": persona_id},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_starter_pack"
+    assert persona_db.list_persona_visual_packs(persona_id=persona_id, user_id="1") == []
 
 
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:

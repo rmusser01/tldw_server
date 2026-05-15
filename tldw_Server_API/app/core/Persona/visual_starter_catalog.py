@@ -7,6 +7,7 @@ assets into user-owned draft storage before any activation can happen.
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,16 +90,16 @@ _STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
 
 
 def list_persona_visual_starter_packs() -> list[PersonaVisualStarterPack]:
-    """Return immutable bundled Persona Visual starter packs."""
-    return list(_STARTER_PACKS)
+    """Return bundled Persona Visual starter packs with isolated mutable fields."""
+    return [deepcopy(starter_pack) for starter_pack in _STARTER_PACKS]
 
 
 def get_persona_visual_starter_pack(starter_pack_id: str) -> PersonaVisualStarterPack | None:
-    """Return one bundled starter pack by stable ID."""
+    """Return one bundled starter pack by stable ID with isolated mutable fields."""
     normalized_id = str(starter_pack_id or "").strip()
     for starter_pack in _STARTER_PACKS:
         if starter_pack.id == normalized_id:
-            return starter_pack
+            return deepcopy(starter_pack)
     return None
 
 

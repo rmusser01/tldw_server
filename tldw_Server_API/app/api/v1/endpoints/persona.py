@@ -2004,12 +2004,14 @@ def _persona_visual_asset_to_response(asset: dict[str, Any]) -> PersonaVisualAss
 
 
 def _persona_visual_starter_pack_to_response(starter_pack: Any) -> PersonaVisualStarterPackResponse:
+    """Convert one bundled starter-pack catalog entry into its public API summary."""
+
     return PersonaVisualStarterPackResponse(
-        id=str(starter_pack.id),
-        title=str(starter_pack.title),
-        description=str(starter_pack.description or "") or None,
-        renderer_type=str(starter_pack.renderer_type or "sprite_frames"),
-        manifest_version=int(starter_pack.manifest_version),
+        id=starter_pack.id,
+        title=starter_pack.title,
+        description=starter_pack.description or None,
+        renderer_type=starter_pack.renderer_type,
+        manifest_version=starter_pack.manifest_version,
         asset_count=len(starter_pack.assets),
     )
 

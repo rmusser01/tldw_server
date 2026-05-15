@@ -187,6 +187,8 @@ class PersonaVisualLibraryUseRequest(BaseModel):
 
 
 class PersonaVisualStarterPackResponse(BaseModel):
+    """Summary of one server-bundled Persona Visual starter pack."""
+
     id: str
     title: str
     description: str | None = None
@@ -196,10 +198,14 @@ class PersonaVisualStarterPackResponse(BaseModel):
 
 
 class PersonaVisualStarterPackListResponse(BaseModel):
+    """List response for server-bundled Persona Visual starter packs."""
+
     items: list[PersonaVisualStarterPackResponse] = Field(default_factory=list)
 
 
 class PersonaVisualStarterPackUseRequest(BaseModel):
+    """Request body for copying a starter pack into a user-owned draft."""
+
     target_persona_id: str = Field(min_length=1, max_length=128)
     title: str | None = Field(default=None, max_length=200)
 
