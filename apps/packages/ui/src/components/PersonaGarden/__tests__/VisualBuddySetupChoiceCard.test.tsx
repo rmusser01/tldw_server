@@ -93,5 +93,7 @@ describe("VisualBuddySetupChoiceCard", () => {
 
     expect(onOpenVisuals).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole("button", { name: /use default/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /import pack/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /start blank/i })).not.toBeInTheDocument()
   })
 })
