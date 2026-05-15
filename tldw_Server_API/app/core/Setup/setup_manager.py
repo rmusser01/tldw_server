@@ -48,6 +48,18 @@ _USER_DB_BASE_DIR_ALLOWED_ROOT_ENVS = (
 )
 _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOTS_KEY = "ingestion_source_allowed_roots"
+_OPTIONAL_EMPTY_VALUE_FIELDS = {
+    ("LlamaCpp", "executable_path"),
+    ("LlamaCpp", "models_dir"),
+    ("LlamaCpp", "default_host"),
+    ("LlamaCpp", "default_port"),
+    ("LlamaCpp", "default_threads"),
+    ("LlamaCpp", "default_n_gpu_layers"),
+    ("LlamaCpp", "default_ctx_size"),
+    ("LlamaCpp", "port_probe_max"),
+    ("LlamaCpp", "allowed_paths"),
+    ("LlamaCpp", "log_output_file"),
+}
 
 _remote_access_hook: Callable[[bool], None] | None = None
 
@@ -666,6 +678,8 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
 
             current_value = parser.get(section, key, fallback="")
             expected_type = _infer_type(current_value)
+            if str(new_value).strip() == "" and (section, key) in _OPTIONAL_EMPTY_VALUE_FIELDS:
+                continue
 
             # Accept any string when expected type is string
             if expected_type == "string":

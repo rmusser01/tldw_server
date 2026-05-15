@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LlamaCppSavedConfig(BaseModel):
@@ -60,6 +60,19 @@ class LlamaCppConfigUpdateRequest(BaseModel):
     port_probe_max: int | None = Field(default=None, ge=0)
     allowed_paths: list[str] | None = None
     log_output_file: str | None = None
+
+    @model_validator(mode="after")
+    def reject_boolean_null_clears(self) -> "LlamaCppConfigUpdateRequest":
+        boolean_fields = {
+            "enabled",
+            "allow_unvalidated_args",
+            "allow_cli_secrets",
+            "port_autoselect",
+        }
+        for field in boolean_fields & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} must be true or false; null clears are not supported for boolean fields.")
+        return self
 
 
 class LlamaCppValidationRequest(BaseModel):

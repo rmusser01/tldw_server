@@ -355,6 +355,70 @@ def test_llamacpp_config_put_explicit_null_clears_nullable_scalar(monkeypatch):
 
 
 @pytest.mark.unit
+def test_llamacpp_config_put_explicit_null_clears_nullable_integer_through_setup_validation(monkeypatch):
+    from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppConfigUpdateRequest
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+    from tldw_Server_API.app.core.Setup import setup_manager
+
+    calls: list[tuple[str, Any]] = []
+    payload = LlamaCppConfigUpdateRequest(default_port=None)
+    updates = llamacpp_config_service._payload_to_updates(payload)
+    parser = _llamacpp_parser(default_port="8080")
+
+    assert updates == {"default_port": ""}
+    setup_manager._validate_updates(parser, {"LlamaCpp": updates})
+
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+
+    def _capture_update(update_payload):  # noqa: ANN001
+        calls.append(("update_config", update_payload))
+
+    monkeypatch.setattr(llamacpp_config_service.setup_manager, "update_config", _capture_update)
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "refresh_config_cache",
+        lambda: calls.append(("refresh_config_cache", None)),
+    )
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_config_state",
+        lambda llm_manager: {
+            "saved_config": {"enabled": False, "default_port": None, "allowed_paths": []},
+            "active_config": {"handler_configured": False},
+            "restart_required": False,
+            "restart_reasons": [],
+            "env_overrides": {},
+            "warnings": [],
+        },
+    )
+
+    llamacpp_config_service.update_config_state(
+        payload,
+        _ManagerWithoutHandler(),
+    )
+
+    assert calls == [
+        ("update_config", {"LlamaCpp": {"default_port": ""}}),
+        ("refresh_config_cache", None),
+    ]
+
+
+@pytest.mark.unit
+def test_llamacpp_config_schema_rejects_boolean_null_clears():
+    from pydantic import ValidationError
+    from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppConfigUpdateRequest
+
+    # Boolean fields are not semantically clearable: they are concrete feature
+    # flags in [LlamaCpp], so clients must set true/false instead of null.
+    with pytest.raises(ValidationError):
+        LlamaCppConfigUpdateRequest(enabled=None)
+
+
+@pytest.mark.unit
 def test_llamacpp_config_put_returns_safe_error_when_config_write_fails(monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
 
