@@ -4,7 +4,7 @@ title: Design cache-aware cost controls for chat and world-book prompts
 status: Done
 assignee: []
 created_date: '2026-05-15 07:00'
-updated_date: '2026-05-15 07:07'
+updated_date: '2026-05-15 07:03'
 labels:
   - design
   - chat
@@ -42,16 +42,12 @@ Approved design-spec task only. 1. Create a Backlog task before repo edits. 2. W
 Created design spec at Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md. The spec incorporates the user-approved revision separating billing prompt caches from local inference caches and explicitly includes vLLM and llama.cpp. Verification run so far: git diff --check on the spec, targeted rg coverage for required providers/cache concepts, and ASCII scan with rg -nP "[^\\x00-\\x7F]". Bandit is not applicable because this task only adds documentation.
 
 Final verification: git diff --no-index --check returned no whitespace output for the new spec and TASK-377 Backlog file; targeted rg confirmed OpenAI, Anthropic, Gemini, OpenRouter, vLLM, llama.cpp, BillingPromptCacheIntent, InferencePrefixCacheIntent, world-book, and streaming coverage; ASCII scan returned no matches. No code was changed, so Bandit was documented as not applicable.
-
-Reopened after user requested an additional design review before continuing. Planned updates: patch the existing design spec with review findings around prompt preview/send parity, streaming fallback accounting, output-token multiplier guardrails, raw usage metadata redaction, versioned prompt fingerprints, and passthrough cache-control boundaries.
-
-Applied additional design-review hardening requested by the user. The spec now covers preview/send prompt parity, versioned prompt fingerprint canonicalization, output-token and n-choice multiplier guardrails, reasoning-token risk, stream-disconnect fallback accounting, raw usage metadata redaction/size bounds, and boundaries around raw extra_body/extra_headers passthrough. Verification after patch: git diff --check returned no output, targeted rg confirmed the new concepts, and ASCII scan returned no matches. No code changed, so Bandit remains not applicable.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created and then hardened Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md for cache-aware cost controls in chat and world-book prompt injection. The final spec separates paid provider billing prompt caches from local vLLM/llama.cpp inference prefix/KV cache diagnostics, defines prompt envelopes and usage normalization, adds world-book diagnostics and guardrails, and outlines staged implementation boundaries plus testing expectations. The follow-up design review added preview/send fingerprint parity, versioned prompt canonicalization, output-token and n-choice multiplier guardrails, reasoning-token risk, stream-disconnect fallback accounting, bounded/redacted raw usage metadata, and explicit raw passthrough boundaries for extra_body/extra_headers. Verification: git diff --check, targeted rg coverage for required cache/provider concepts, and ASCII scan. Bandit skipped as not applicable because the changes are documentation and Backlog metadata only.
+Created Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md to capture the approved cache-aware cost-control design for chat and world-book prompt injection. The spec separates paid provider prompt-cache accounting from local vLLM/llama.cpp inference prefix/KV cache diagnostics, defines prompt envelopes and usage normalization, adds world-book diagnostics and guardrails, and outlines staged implementation boundaries plus testing expectations. Verification: git diff --no-index --check on the new spec and Backlog task file, targeted rg coverage for required providers/cache concepts, ASCII scan with rg -nP "[^\\x00-\\x7F]". Bandit skipped as not applicable because the change is documentation and Backlog metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

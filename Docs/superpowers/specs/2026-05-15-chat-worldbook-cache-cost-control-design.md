@@ -68,14 +68,10 @@ impact differ by cache class.
 - Distinguish stable prompt prefix, volatile prompt tail, world-book
   contribution, history contribution, RAG contribution, and tool/schema
   contribution.
-- Keep prompt preview and provider-send accounting on the same assembly model so
-  diagnostics cannot describe a different prompt from the one sent to the
-  provider.
 - Normalize provider usage fields into a cache-aware internal usage shape.
 - Preserve conservative cost estimation when provider pricing, cache discounts,
   or usage fields are missing.
-- Detect prompt growth, world-book token bursts, output-token bursts, and
-  reasoning-token risk before they become expensive.
+- Detect prompt growth and world-book token bursts before they become expensive.
 - Support local engine cache diagnostics for vLLM and llama.cpp without
   pretending they are paid provider cache discounts.
 - Keep provider adapters thin: translate supported cache knobs and normalize
@@ -90,8 +86,6 @@ impact differ by cache class.
 - No provider-specific cache-control injection unless outbound shape support is
   explicit and tested.
 - No attempt to make cache pricing exact for unknown or unpriced models.
-- No unrestricted persistence of raw prompts, raw provider usage payloads, or
-  provider-specific request bodies.
 - No broad rewrite of chat, character chat, or world-book storage.
 
 ## Conceptual Model
@@ -111,12 +105,9 @@ The envelope records:
 - final ordered messages or a redacted/hash-only representation
 - estimated prompt tokens
 - estimated completion cap
-- requested choice count and output-token multiplier risk
-- reasoning-token controls or defaults, where the provider exposes them
 - stable prefix fingerprint
 - dynamic tail fingerprint
 - full prompt fingerprint
-- prompt fingerprint version and canonicalization method
 - history token estimate
 - world-book token estimate
 - RAG token estimate, if applicable
@@ -129,11 +120,6 @@ The envelope should avoid storing raw sensitive content by default. It can store
 hashes, counts, ids, and bounded diagnostics, with raw prompt capture reserved
 for explicit local debugging modes.
 
-Prompt fingerprints should be versioned. The implementation should canonicalize
-message role, order, and content in a stable way before hashing so that
-insignificant JSON key ordering does not create false cache-busting signals. The
-fingerprint version must change if canonicalization rules change.
-
 ### Billing Prompt Cache Lane
 
 `BillingPromptCacheIntent` describes paid-provider cache behavior:
@@ -144,8 +130,6 @@ fingerprint version must change if canonicalization rules change.
 - `cached_content_reference`: provider uses a separately created cached object
 - `provider_passthrough`: caller supplied provider-specific controls through
   `extra_body` or `extra_headers`
-- `unsupported_or_unknown`: provider is paid or remote, but cache semantics are
-  unknown or unsupported in the app
 
 This lane applies to OpenAI, Anthropic, Gemini, OpenRouter, and future paid
 providers with billable cache semantics.
@@ -162,17 +146,9 @@ providers with billable cache semantics.
 - `runtime_disabled`: deployment reports support disabled
 - `passthrough_requested`: caller or config requested engine-specific cache
   behavior
-- `remote_compat_unknown`: provider uses an OpenAI-compatible local/custom
-  surface, but runtime cache capabilities cannot be discovered
 
 This lane applies to vLLM, llama.cpp, and similar local backends. It is a
 performance and capacity signal, not a billing discount signal.
-
-`extra_body` and `extra_headers` remain raw escape hatches, not the cache
-contract. First-class cache controls should be represented in the internal
-intent model, audited, redacted, and translated by provider-aware code. Raw
-passthrough values may be recorded only as bounded key names or redacted
-summaries.
 
 ## Prompt Layout Policy
 
@@ -192,10 +168,6 @@ This is a policy target, not an immediate mandate. Existing behavior should be
 measured first, then changed in staged implementation only where tests prove the
 model-visible outcome is preserved or the behavior change is explicitly
 intended.
-
-Prompt preview and provider-send paths must share the same prompt assembly
-primitive or the same envelope builder. If preview remains separate from send,
-the design must record preview/send fingerprints and warn when they diverge.
 
 ## World-Book Diagnostics
 
@@ -221,11 +193,6 @@ Extend world-book diagnostics with:
 Static or pinned entries may be cache-friendly if intentionally placed near the
 stable prefix. Dynamic triggered entries should normally remain near the prompt
 tail because they are likely to change turn by turn.
-
-Pinned/static classification can be derived from existing fields in the first
-implementation. Adding a new world-book schema field is optional and should not
-block the measurement stage. Deterministic ordering should include explicit
-priority, existing ordering fields, and a stable id tie-breaker.
 
 ## Provider Handling
 
@@ -322,8 +289,6 @@ cache_lane
 cache_hit_ratio
 raw_usage_metadata
 prompt_envelope_id
-usage_normalizer_version
-estimated_reason
 ```
 
 For local engines, cost fields can remain zero or estimated according to the
@@ -332,19 +297,12 @@ useful.
 
 Persisted schemas should add nullable fields so older rows and fallback inserts
 remain compatible. Admin summaries can roll up new fields only when present.
-`raw_usage_metadata` must be size-bounded and redacted. It should preserve
-provider token/cost fields and omit prompt text, response text, request headers,
-API keys, user identifiers, and arbitrary provider payload bodies.
 
 ## Guardrails
 
 Pre-dispatch guardrails should include:
 
 - total prompt token warning and hard cap
-- estimated completion token warning and hard cap
-- `n`/choice-count cost multiplier warning
-- reasoning-token budget warning where the provider supports hidden or separate
-  reasoning tokens
 - world-book token warning and hard cap
 - per-conversation prompt growth anomaly detection
 - provider/model context window safety checks when known
@@ -353,8 +311,6 @@ Pre-dispatch guardrails should include:
 - local compute-risk warning for vLLM and llama.cpp when a large prefix is not
   cache-eligible or runtime cache support is disabled
 - conservative cost estimate when exact provider cache fields are unavailable
-- stream-disconnect accounting fallback so a partially streamed request is not
-  silently counted as zero usage
 
 Hard blocks should be rare and reserved for configured safety limits. Most first
 pass behavior should warn, log, and expose diagnostics rather than silently
@@ -377,11 +333,6 @@ changing prompt content.
 10. Usage persistence writes the existing token totals plus cache-aware fields.
 11. Admin/reporting surfaces aggregate cache and prompt-growth data.
 
-For streaming calls, the envelope should be recorded at dispatch time. Final
-provider usage should update the same record when available. If the stream
-disconnects, errors, or never returns final usage, accounting should fall back to
-the preflight estimate and mark the row as estimated with a specific reason.
-
 ## Staged Implementation Boundary
 
 ### Stage 1: Measurement Only
@@ -390,15 +341,11 @@ Add prompt envelopes, prompt fingerprints, world-book diagnostics, and
 cache-aware usage normalization without changing outbound prompt layout or
 injecting provider-specific cache controls.
 
-This stage should also add preview/send fingerprint comparison for character
-chat prompt preview and completion paths.
-
 ### Stage 2: Guardrails
 
 Add warning and hard-cap policy for total prompt tokens, world-book tokens,
 context-window risk, prompt growth, provider routing changes, and local
-compute-risk cases. Include output-token and choice-count multipliers in the
-same guardrail pass.
+compute-risk cases.
 
 ### Stage 3: Provider Billing Cache Controls
 
@@ -423,19 +370,14 @@ in admin usage views.
 Tests should cover:
 
 - deterministic prompt assembly for identical inputs
-- prompt preview and provider-send fingerprint parity
 - stable prefix, dynamic tail, and full prompt fingerprints
-- fingerprint versioning and canonicalization stability
 - world-book ordering, token budget enforcement, and dropped-entry diagnostics
 - pinned/static lore versus dynamic triggered lore classification
 - generic chat and character chat prompt envelope creation
 - streaming and non-streaming usage accounting parity
-- stream disconnect/error fallback accounting
 - provider usage normalization for OpenAI, Anthropic, Gemini, OpenRouter, vLLM,
   llama.cpp, and unknown providers
 - conservative cost fallback when cache pricing is unknown
-- redaction and size limits for raw usage metadata
-- output-token and `n`/choice multiplier guardrails
 - strict OpenAI-compatible filtering for llama.cpp/local extension fields
 - local compute-risk warnings independent from billing cost warnings
 
@@ -449,54 +391,22 @@ Tests should cover:
 - Risk: Raw prompt diagnostics leak sensitive content.
   Mitigation: store hashes, ids, and counts by default; raw capture is opt-in
   local debugging only.
-- Risk: Raw provider usage metadata becomes an unbounded or sensitive data sink.
-  Mitigation: persist only bounded, redacted usage fields and version the
-  normalizer.
-- Risk: Prompt preview and provider-send prompts drift.
-  Mitigation: share assembly primitives or compare fingerprints and surface a
-  warning when preview and send diverge.
-- Risk: Streaming requests are undercounted when final provider usage is absent.
-  Mitigation: log a dispatch-time envelope and fall back to marked estimates on
-  disconnects, errors, or missing final usage.
 - Risk: Local cache telemetry is unavailable or misleading.
   Mitigation: record eligibility and runtime capability separately from proven
   hits.
 - Risk: Schema migration adds admin/reporting complexity.
   Mitigation: nullable columns and backward-compatible fallback inserts.
 
-## Resolved V2 Direction
+## Open Questions
 
-The initial implementation answered the measurement, accounting, guardrail,
-provider-cache, local-diagnostic, and usage-reporting questions. The remaining
-product questions are resolved for a follow-up v2 implementation:
-
-- Raw prompt envelopes may be persisted only behind an explicit debug mode.
-  Debug persistence must be disabled by default, clearly marked as sensitive,
-  bounded by size and retention limits, excluded from normal exports, and
-  subject to the same redaction/canonicalization constraints as the request-local
-  envelope diagnostics. Normal usage rows should continue to store hashes,
-  counts, ids, and bounded metadata by default.
-- Users should be able to pin specific world-book entries into the stable
-  prefix. The UI and API must make this explicit, not infer it silently from
-  activation metadata. Pinned entries should be ordered deterministically ahead
-  of dynamic triggered entries, surfaced in diagnostics, and bounded by existing
-  world-book prompt budgets so pinning cannot create invisible token bursts.
-- Cache-aware reporting should stay in the existing usage analytics surface.
-  A dedicated cost-control page is not needed for the next iteration. Existing
-  usage list, summary, and CSV/reporting paths should gain the new debug-envelope,
-  pinned-prefix, and local-latency fields where they are useful and safe.
-- Local engines should report prefill latency when reliable signal exists. The
-  product must distinguish:
-  - `observed_exact`: response-level timing returned by the engine, such as
-    llama.cpp prompt timing fields when present.
-  - `observed_metrics`: server metrics or tracing correlated to the request,
-    such as vLLM metrics where correlation is possible.
-  - `app_observed_ttft`: application-measured time-to-first-token for streaming
-    calls, which can include queueing and scheduling and is not pure prefill.
-  - `estimated`: token-count or throughput-derived projections.
-
-Estimated local latency must never be presented as authoritative. It is a
-capacity and UX signal, not billing evidence.
+- Should raw prompt envelopes ever be persisted, or should they remain
+  request-local unless an explicit debug mode is enabled?
+- Should users be able to pin specific world-book entries into the stable prefix,
+  or should pinned/static classification remain internal at first?
+- Which admin surface should own cache-aware cost reporting: existing usage
+  analytics, chat diagnostics, or a dedicated LLM cost-control view?
+- Should local engines expose compute-risk budgets in tokens only, or also in
+  estimated prefill latency once enough telemetry exists?
 
 ## Approval State
 
