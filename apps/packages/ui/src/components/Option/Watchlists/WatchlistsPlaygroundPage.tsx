@@ -24,7 +24,10 @@ import { useServerOnline } from "@/hooks/useServerOnline"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
 import {
+  bulkCreateSources,
   createWatchlist,
+  createWatchlistJob,
+  createWatchlistSource,
   fetchWatchlistRuns,
   fetchWatchlists,
   triggerWatchlistRun,
@@ -34,11 +37,17 @@ import { useWatchlistsStore } from "@/store/watchlists"
 import type {
   WatchlistContainer,
   WatchlistDomain,
+  WatchlistJobCreate,
   WatchlistPriority,
   WatchlistRun,
+  WatchlistSourceCreate,
   WatchlistStatus
 } from "@/types/watchlists"
 import type { WatchlistTab } from "@/types/watchlists"
+import {
+  WatchlistSetupWizard,
+  type WatchlistSetupCompleteResult
+} from "./SetupWizard"
 import {
   WATCHLISTS_ISSUE_REPORT_URL,
   WATCHLISTS_MAIN_DOCS_URL,
@@ -254,6 +263,12 @@ const WATCHLIST_PRIORITY_LABELS: Record<WatchlistPriority, string> = {
   medium: "Medium",
   high: "High",
   critical: "Critical"
+}
+
+const SETUP_DESTINATION_TAB: Record<WatchlistSetupCompleteResult["destination"], WatchlistsTabKey> = {
+  sources: "sources",
+  jobs: "jobs",
+  outputs: "outputs"
 }
 
 const toWatchlistFormState = (watchlist: WatchlistContainer | null): WatchlistFormState => {
@@ -484,6 +499,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [settingsDrawerOpen, setSettingsDrawerOpen] = React.useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false)
+  const [setupWizardOpen, setSetupWizardOpen] = React.useState(false)
   const [watchlistFormOpen, setWatchlistFormOpen] = React.useState(false)
   const [watchlistFormMode, setWatchlistFormMode] = React.useState<WatchlistFormMode>("create")
   const [watchlistFormSaving, setWatchlistFormSaving] = React.useState(false)
@@ -516,9 +532,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   }, [loadWatchlists])
 
   const openCreateWatchlistForm = useCallback(() => {
-    setWatchlistFormMode("create")
-    setWatchlistForm(WATCHLIST_FORM_DEFAULTS)
-    setWatchlistFormOpen(true)
+    setSetupWizardOpen(true)
   }, [])
 
   const openEditWatchlistForm = useCallback(() => {
@@ -595,6 +609,55 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     watchlistForm,
     watchlistFormMode
   ])
+
+  const createSetupSources = useCallback(async (
+    watchlistId: number,
+    sources: WatchlistSourceCreate[]
+  ): Promise<number[]> => {
+    const scopedSources = sources.map((source) => ({
+      ...source,
+      watchlist_id: watchlistId
+    }))
+
+    if (scopedSources.length === 0) return []
+    if (scopedSources.length === 1) {
+      const created = await createWatchlistSource(scopedSources[0])
+      return [created.id]
+    }
+
+    const response = await bulkCreateSources(scopedSources)
+    const createdIds = response.items
+      .filter((item) => item.status === "created" && typeof item.id === "number")
+      .map((item) => item.id as number)
+
+    if (createdIds.length !== scopedSources.length) {
+      throw new Error(t("watchlists:setupWizard.errors.sources", "Failed to create all Watchlist sources"))
+    }
+
+    return createdIds
+  }, [t])
+
+  const createSetupJob = useCallback(async (
+    watchlistId: number,
+    job: WatchlistJobCreate
+  ) => {
+    return createWatchlistJob({
+      ...job,
+      watchlist_id: watchlistId
+    })
+  }, [])
+
+  const completeSetupWizard = useCallback((result: WatchlistSetupCompleteResult) => {
+    addWatchlist(result.watchlist)
+    setSelectedWatchlistId(result.watchlist.id)
+    setActiveTab(SETUP_DESTINATION_TAB[result.destination])
+    setSetupWizardOpen(false)
+    notification.success({
+      message: t("watchlists:containers.created", "Watchlist created"),
+      placement: "bottomRight",
+      duration: 5
+    })
+  }, [addWatchlist, notification, setActiveTab, setSelectedWatchlistId, t])
 
   const toggleShowAllViews = useCallback(() => {
     setShowAllViews((prev) => {
@@ -2213,6 +2276,15 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           <div className="text-sm text-text-muted">{guidedTourStep.description}</div>
         </div>
       </Modal>
+
+      <WatchlistSetupWizard
+        open={setupWizardOpen}
+        onCancel={() => setSetupWizardOpen(false)}
+        onCreateWatchlist={createWatchlist}
+        onCreateSources={createSetupSources}
+        onCreateJob={createSetupJob}
+        onComplete={completeSetupWizard}
+      />
 
       <Modal
         open={watchlistFormOpen}

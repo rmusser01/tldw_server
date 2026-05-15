@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -70,6 +70,9 @@ const mocks = vi.hoisted(() => {
 
   return {
     createWatchlistMock: vi.fn(),
+    bulkCreateSourcesMock: vi.fn(),
+    createWatchlistJobMock: vi.fn(),
+    createWatchlistSourceMock: vi.fn(),
     fetchWatchlistRunsMock: vi.fn(),
     fetchWatchlistsMock: vi.fn(),
     updateWatchlistMock: vi.fn(),
@@ -202,7 +205,10 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  bulkCreateSources: (...args: unknown[]) => mocks.bulkCreateSourcesMock(...args),
   createWatchlist: (...args: unknown[]) => mocks.createWatchlistMock(...args),
+  createWatchlistJob: (...args: unknown[]) => mocks.createWatchlistJobMock(...args),
+  createWatchlistSource: (...args: unknown[]) => mocks.createWatchlistSourceMock(...args),
   fetchWatchlistRuns: (...args: unknown[]) => mocks.fetchWatchlistRunsMock(...args),
   fetchWatchlists: (...args: unknown[]) => mocks.fetchWatchlistsMock(...args),
   updateWatchlist: (...args: unknown[]) => mocks.updateWatchlistMock(...args),
@@ -266,6 +272,26 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
       has_more: false
     })
     mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.bulkCreateSourcesMock.mockResolvedValue({ items: [], total: 0, created: 0, errors: 0 })
+    mocks.createWatchlistJobMock.mockResolvedValue({
+      id: 88,
+      name: "Monitor",
+      watchlist_id: 77,
+      scope: { sources: [] },
+      active: true,
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    })
+    mocks.createWatchlistSourceMock.mockResolvedValue({
+      id: 901,
+      name: "example.com",
+      url: "https://example.com/feed.xml",
+      source_type: "rss",
+      active: true,
+      tags: [],
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    })
     mocks.recordWatchlistsIaExperimentTelemetryMock.mockResolvedValue({ accepted: true })
     mocks.trackWatchlistsOnboardingTelemetryMock.mockResolvedValue(undefined)
     mocks.state.activeTab = "sources"
@@ -293,7 +319,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText("High")).toBeInTheDocument()
   })
 
-  it("creates a new Watchlist from the shell and selects it", async () => {
+  it("creates a topic-only Watchlist from the shell wizard, selects it, and opens Feeds", async () => {
     const created = {
       ...container,
       id: 77,
@@ -303,28 +329,118 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
       tags: ["elections"]
     }
     mocks.createWatchlistMock.mockResolvedValue(created)
+    mocks.state.activeTab = "overview"
 
     render(<WatchlistsPlaygroundPage />)
 
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Election integrity" } })
-    fireEvent.change(screen.getByLabelText("Objective"), {
+    const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
+    fireEvent.click(wizard.getByRole("button", { name: "News" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Start from topic" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Watchlist name"), { target: { value: "Election integrity" } })
+    fireEvent.change(wizard.getByLabelText("Objective"), {
       target: { value: "Track source diversity and recency" }
     })
-    fireEvent.click(screen.getByText("Create"))
+    fireEvent.change(wizard.getByLabelText("Tracked scope"), {
+      target: { value: "election officials, state courts" }
+    })
+    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Create Watchlist" }))
 
     await waitFor(() =>
-      expect(mocks.createWatchlistMock).toHaveBeenCalledWith({
-        name: "Election integrity",
-        description: undefined,
-        objective: "Track source diversity and recency",
-        domain: "general",
-        priority: "medium",
-        status: "active",
-        tags: []
-      })
+      expect(mocks.createWatchlistMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Election integrity",
+          objective: "Track source diversity and recency",
+          domain: "news",
+          priority: "medium",
+          status: "active",
+          tags: expect.arrayContaining(["news", "election officials", "state courts"])
+        })
+      )
     )
     expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created)
     expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(77)
+    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
+  })
+
+  it("creates source-backed setup payloads with watchlist_id and opens Monitors", async () => {
+    const created = {
+      ...container,
+      id: 88,
+      name: "Healthcare ransomware"
+    }
+    mocks.createWatchlistMock.mockResolvedValue(created)
+    mocks.bulkCreateSourcesMock.mockResolvedValue({
+      items: [
+        { url: "https://example.com/feed.xml", id: 901, status: "created" },
+        { url: "https://advisories.example.org/rss", id: 902, status: "created" }
+      ],
+      total: 2,
+      created: 2,
+      errors: 0
+    })
+    mocks.createWatchlistJobMock.mockResolvedValue({
+      id: 990,
+      name: "Healthcare ransomware monitor",
+      watchlist_id: 88,
+      scope: { sources: [901, 902] },
+      active: true,
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    })
+    mocks.state.activeTab = "overview"
+
+    render(<WatchlistsPlaygroundPage />)
+
+    fireEvent.click(await screen.findByTestId("watchlists-create-container"))
+    const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
+    fireEvent.click(wizard.getByRole("button", { name: "CTI / OSINT" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Start from sources" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Watchlist name"), {
+      target: { value: "Healthcare ransomware" }
+    })
+    fireEvent.change(wizard.getByLabelText("Objective"), {
+      target: { value: "Find ransomware reports affecting hospitals" }
+    })
+    fireEvent.change(wizard.getByLabelText("Tracked scope"), {
+      target: { value: "hospitals, Germany" }
+    })
+    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Source URLs"), {
+      target: { value: "https://example.com/feed.xml\nhttps://advisories.example.org/rss" }
+    })
+    fireEvent.change(wizard.getByLabelText("Monitor name"), {
+      target: { value: "Healthcare ransomware monitor" }
+    })
+    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Create Watchlist" }))
+
+    await waitFor(() =>
+      expect(mocks.bulkCreateSourcesMock).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            url: "https://example.com/feed.xml",
+            watchlist_id: 88
+          }),
+          expect.objectContaining({
+            url: "https://advisories.example.org/rss",
+            watchlist_id: 88
+          })
+        ])
+      )
+    )
+    expect(mocks.createWatchlistJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Healthcare ransomware monitor",
+        watchlist_id: 88,
+        scope: { sources: [901, 902] }
+      })
+    )
+    expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(88)
+    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("jobs")
   })
 })

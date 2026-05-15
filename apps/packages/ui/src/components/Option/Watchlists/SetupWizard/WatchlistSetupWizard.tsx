@@ -194,6 +194,13 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
         sourceIds,
         job
       })
+    } catch (error) {
+      console.error("Failed to create Watchlist setup:", error)
+      setValidationError(
+        error instanceof Error && error.message
+          ? error.message
+          : t("watchlists:setupWizard.errors.createFailed", "Failed to create Watchlist setup.")
+      )
     } finally {
       setInternalSubmitting(false)
     }
