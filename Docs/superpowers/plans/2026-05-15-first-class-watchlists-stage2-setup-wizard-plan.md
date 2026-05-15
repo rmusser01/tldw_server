@@ -503,7 +503,7 @@ git commit -m "fix: make quick setup watchlist-first"
 - Modify: relevant Backlog task files through MCP/CLI.
 - Modify docs only if behavior needs user-facing documentation.
 
-- [ ] **Step 1: Run focused frontend suite**
+- [x] **Step 1: Run focused frontend suite**
 
 Run from `apps/packages/ui`:
 
@@ -520,11 +520,35 @@ Run from `apps/packages/ui`:
 
 Expected: Stage 2 focused frontend suite passes.
 
-- [ ] **Step 2: Run TypeScript check for touched package scope if practical**
+Progress: passed on 2026-05-15:
+
+```bash
+./node_modules/.bin/vitest run \
+  src/components/Option/Watchlists/SetupWizard/__tests__/watchlist-setup-model.test.ts \
+  src/components/Option/Watchlists/SetupWizard/__tests__/WatchlistSetupWizard.test.tsx \
+  src/components/Option/Watchlists/__tests__/watchlists-stage2-copy-contract.test.ts \
+  src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.first-class.test.tsx \
+  src/components/Option/Watchlists/__tests__/watchlists-selected-scope-contract.test.ts \
+  src/components/Option/Watchlists/OverviewTab/__tests__/quick-setup.test.ts \
+  src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx \
+  --maxWorkers=1 --no-file-parallelism --reporter=verbose --testTimeout=90000
+```
+
+Result: 7 files passed, 48 tests passed.
+
+- [x] **Step 2: Run TypeScript check for touched package scope if practical**
 
 Prefer the repo's existing package command. If package-wide TypeScript has unrelated baseline failures, record exact failure summary and keep focused Vitest as the gate for this slice.
 
-- [ ] **Step 3: Run browser/CDP smoke**
+Progress: passed on 2026-05-15:
+
+```bash
+bun run test:watchlists:typecheck
+```
+
+Result: 1 file passed, 3 tests passed.
+
+- [x] **Step 3: Run browser/CDP smoke**
 
 Start the WebUI in the current worktree. Use CDP/Playwright, not Computer Use, to verify:
 
@@ -535,7 +559,15 @@ Start the WebUI in the current worktree. Use CDP/Playwright, not Computer Use, t
 
 Expected: page renders nonblank, setup wizard controls are reachable, no horizontal overflow of critical controls.
 
-- [ ] **Step 4: Run diff hygiene**
+Progress: passed on 2026-05-15 after a bounded retry. CDP/Playwright loaded the real `/watchlists` route from the current worktree, dismissed the directly required first-run gate, mocked only the required Watchlists API calls, and verified:
+
+- Desktop opened the Watchlist setup wizard from the create control, reached source-backed review, and submitted.
+- `390x844` reached topic-only review without document-level horizontal overflow.
+- Source and job POST payloads both included `watchlist_id: 900`.
+
+Screenshots were captured at `/tmp/watchlists-stage2-desktop-cdp.png` and `/tmp/watchlists-stage2-mobile-cdp.png`. Computer Use was not used.
+
+- [x] **Step 4: Run diff hygiene**
 
 ```bash
 git diff --check
@@ -543,7 +575,9 @@ git diff --check
 
 Expected: clean.
 
-- [ ] **Step 5: Final Backlog updates**
+Progress: passed on 2026-05-15.
+
+- [x] **Step 5: Final Backlog updates**
 
 Record:
 
@@ -552,12 +586,16 @@ Record:
 - CDP smoke viewport and evidence.
 - Any deferred Stage 3/5 boundaries.
 
-- [ ] **Step 6: Commit closeout**
+Progress: recorded in `TASK-375`, including focused test results, static guard result, CDP smoke evidence, diff hygiene, Bandit skip rationale, and Stage 3+ boundaries.
+
+- [x] **Step 6: Commit closeout**
 
 ```bash
 git add backlog/tasks/<stage-2-task-files> Docs/API-related/Watchlists_API.md Docs/Published/API-related/Watchlists_API.md
 git commit -m "chore: close watchlists setup wizard stage"
 ```
+
+Progress: committed as the final Stage 2E closeout commit.
 
 ## Rollout Gates
 

@@ -169,6 +169,8 @@ const getPipelineDialog = () => screen.getByRole("dialog", { name: "Briefing pip
 
 const pipelineQueries = () => within(getPipelineDialog())
 
+const getQuickSetupDialog = () => screen.getByRole("dialog", { name: "Add initial collection" })
+
 const clickPipelineNext = () => {
   fireEvent.click(pipelineQueries().getByRole("button", { name: "Next" }))
 }
@@ -268,7 +270,7 @@ describe("OverviewTab quick setup flow", () => {
     render(<OverviewTab />)
 
     await waitFor(() => {
-      expect(screen.getByText("Add initial collection")).toBeInTheDocument()
+      expect(screen.getByTestId("watchlists-overview-cta-guided-setup")).toHaveTextContent("Add initial collection")
     })
 
     fireEvent.click(screen.getByTestId("watchlists-overview-cta-add-feed"))
@@ -971,7 +973,7 @@ describe("OverviewTab quick setup flow", () => {
 
     fireEvent.click(trigger)
     await waitFor(() => {
-      expect(screen.getByText("Add initial collection")).toBeInTheDocument()
+      expect(getQuickSetupDialog()).toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
