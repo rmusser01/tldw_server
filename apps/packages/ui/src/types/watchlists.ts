@@ -8,6 +8,45 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type SourceType = "rss" | "site" | "forum"
+export type WatchlistDomain = "cti_osint" | "news" | "general"
+export type WatchlistStatus = "active" | "paused" | "archived"
+export type WatchlistPriority = "low" | "medium" | "high" | "critical"
+
+export interface WatchlistContainer {
+  id: number
+  name: string
+  description?: string | null
+  objective?: string | null
+  domain: WatchlistDomain
+  status: WatchlistStatus
+  priority: WatchlistPriority
+  tags: string[]
+  archived_at?: string | null
+  deleted_at?: string | null
+  restore_expires_at?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface WatchlistCreate {
+  name: string
+  description?: string | null
+  objective?: string | null
+  domain?: WatchlistDomain
+  status?: WatchlistStatus
+  priority?: WatchlistPriority
+  tags?: string[]
+}
+
+export interface WatchlistUpdate {
+  name?: string
+  description?: string | null
+  objective?: string | null
+  domain?: WatchlistDomain
+  status?: WatchlistStatus
+  priority?: WatchlistPriority
+  tags?: string[]
+}
 
 export interface WatchlistSource {
   id: number
@@ -17,6 +56,7 @@ export interface WatchlistSource {
   active: boolean
   tags: string[]
   group_ids?: number[]
+  watchlist_ids?: number[]
   settings?: Record<string, unknown> | null
   last_scraped_at?: string | null
   status?: string | null
@@ -32,6 +72,7 @@ export interface WatchlistSourceCreate {
   tags?: string[]
   settings?: Record<string, unknown>
   group_ids?: number[]
+  watchlist_id?: number
 }
 
 export interface WatchlistSourceUpdate {
@@ -151,6 +192,7 @@ export interface WatchlistJob {
   id: number
   name: string
   description?: string | null
+  watchlist_id?: number | null
   scope: JobScope
   schedule_expr?: string | null
   timezone?: string | null
@@ -179,6 +221,7 @@ export interface WatchlistJobCreate {
   retry_policy?: Record<string, unknown>
   output_prefs?: JobOutputPrefs
   job_filters?: WatchlistFiltersPayload
+  watchlist_id?: number
 }
 
 export interface WatchlistJobUpdate {
@@ -193,6 +236,7 @@ export interface WatchlistJobUpdate {
   retry_policy?: Record<string, unknown> | null
   output_prefs?: JobOutputPrefs | null
   job_filters?: WatchlistFiltersPayload | null
+  watchlist_id?: number | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -239,6 +239,74 @@ describe("watchlists overview service", () => {
     expect(result.systemHealth).toBe("degraded")
   })
 
+  it("forwards selected Watchlist scope into aggregate fetches", async () => {
+    mocks.fetchWatchlistSources.mockResolvedValue({
+      items: [],
+      total: 0,
+      has_more: false
+    })
+    mocks.fetchWatchlistJobs.mockResolvedValue({
+      items: [],
+      total: 0,
+      has_more: false
+    })
+    mocks.fetchScrapedItems.mockResolvedValue({
+      items: [],
+      total: 0
+    })
+    mocks.fetchWatchlistRuns.mockResolvedValue({
+      items: [],
+      total: 0
+    })
+    mocks.fetchWatchlistOutputs.mockResolvedValue({
+      items: [],
+      total: 0,
+      has_more: false
+    })
+
+    await fetchWatchlistsOverviewData({ watchlist_id: 42 })
+
+    expect(mocks.fetchWatchlistSources).toHaveBeenCalledWith({
+      watchlist_id: 42,
+      page: 1,
+      size: 200
+    })
+    expect(mocks.fetchWatchlistJobs).toHaveBeenCalledWith({
+      watchlist_id: 42,
+      page: 1,
+      size: 200
+    })
+    expect(mocks.fetchScrapedItems).toHaveBeenCalledWith({
+      watchlist_id: 42,
+      reviewed: false,
+      page: 1,
+      size: 1
+    })
+    expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(1, {
+      watchlist_id: 42,
+      q: "running",
+      page: 1,
+      size: 1
+    })
+    expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(2, {
+      watchlist_id: 42,
+      q: "pending",
+      page: 1,
+      size: 1
+    })
+    expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(3, {
+      watchlist_id: 42,
+      q: "failed",
+      page: 1,
+      size: 5
+    })
+    expect(mocks.fetchWatchlistOutputs).toHaveBeenCalledWith({
+      watchlist_id: 42,
+      page: 1,
+      size: 100
+    })
+  })
+
   it("derives health model and tab badges from aggregate counters", () => {
     const model = buildOverviewHealthModel({
       sources: { total: 3, degraded: 0, inactive: 3 },

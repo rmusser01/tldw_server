@@ -29,6 +29,8 @@ import type {
   WatchlistsIaExperimentTelemetryResponse,
   WatchlistsIaExperimentTelemetrySummaryResponse,
   WatchlistsRcTelemetrySummaryResponse,
+  WatchlistContainer,
+  WatchlistCreate,
   WatchlistJob,
   WatchlistJobCreate,
   WatchlistJobUpdate,
@@ -42,7 +44,8 @@ import type {
   WatchlistTag,
   WatchlistTemplate,
   WatchlistTemplateCreate,
-  WatchlistTemplateVersionSummary
+  WatchlistTemplateVersionSummary,
+  WatchlistUpdate
 } from "@/types/watchlists"
 
 // Helper to build query string (supports array params)
@@ -64,12 +67,58 @@ const buildQuery = (params?: Record<string, unknown> | object | null): string =>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sources API
+// Watchlists API
 // ─────────────────────────────────────────────────────────────────────────────
+
+export interface FetchWatchlistsParams {
+  status?: "active" | "paused" | "archived"
+  include_deleted?: boolean
+  page?: number
+  size?: number
+}
+
+export const fetchWatchlists = async (
+  params?: FetchWatchlistsParams
+): Promise<PaginatedResponse<WatchlistContainer>> => {
+  const qs = buildQuery(params || {})
+  return bgRequest<PaginatedResponse<WatchlistContainer>>({
+    path: `/api/v1/watchlists${qs}` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlist = async (watchlistId: number): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: `/api/v1/watchlists/${watchlistId}` as any,
+    method: "GET"
+  })
+}
+
+export const createWatchlist = async (
+  watchlist: WatchlistCreate
+): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: "/api/v1/watchlists",
+    method: "POST",
+    body: watchlist
+  })
+}
+
+export const updateWatchlist = async (
+  watchlistId: number,
+  updates: WatchlistUpdate
+): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: `/api/v1/watchlists/${watchlistId}` as any,
+    method: "PATCH",
+    body: updates
+  })
+}
 
 export interface FetchSourcesParams {
   q?: string
   tags?: string[]
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -83,6 +132,32 @@ export interface ReversibleDeleteResponse {
 export interface SourceDeleteResponse extends ReversibleDeleteResponse {
   source_id: number
 }
+
+export interface WatchlistDeleteResponse extends ReversibleDeleteResponse {
+  watchlist_id: number
+}
+
+export const deleteWatchlist = async (
+  watchlistId: number
+): Promise<WatchlistDeleteResponse> => {
+  return bgRequest<WatchlistDeleteResponse>({
+    path: `/api/v1/watchlists/${watchlistId}` as any,
+    method: "DELETE"
+  })
+}
+
+export const restoreWatchlist = async (
+  watchlistId: number
+): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: `/api/v1/watchlists/${watchlistId}/restore` as any,
+    method: "POST"
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sources API
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const fetchWatchlistSources = async (
   params?: FetchSourcesParams
@@ -152,12 +227,13 @@ export const bulkCreateSources = async (
 
 export const importOpml = async (
   file: File,
-  options?: { active?: boolean; tags?: string[]; group_id?: number }
+  options?: { active?: boolean; tags?: string[]; group_id?: number; watchlist_id?: number }
 ): Promise<SourcesImportResponse> => {
   const data = await file.arrayBuffer()
   const fields: Record<string, unknown> = {}
   if (options?.active != null) fields.active = String(options.active)
   if (options?.group_id != null) fields.group_id = String(options.group_id)
+  if (options?.watchlist_id != null) fields.watchlist_id = String(options.watchlist_id)
   if (options?.tags?.length) fields.tags = options.tags
   return bgUpload<SourcesImportResponse>({
     path: "/api/v1/watchlists/sources/import",
@@ -302,6 +378,7 @@ export const fetchWatchlistTags = async (
 
 export interface FetchJobsParams {
   q?: string
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -431,6 +508,7 @@ export const addJobFilters = async (
 
 export interface FetchRunsParams {
   q?: string
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -523,6 +601,7 @@ export interface FetchItemsParams {
   run_id?: number
   job_id?: number
   source_id?: number
+  watchlist_id?: number
   status?: string
   reviewed?: boolean
   queued_for_briefing?: boolean
@@ -547,6 +626,7 @@ export interface FetchItemSmartCountsParams {
   run_id?: number
   job_id?: number
   source_id?: number
+  watchlist_id?: number
   status?: string
   q?: string
   since?: string
@@ -589,6 +669,7 @@ export const updateScrapedItem = async (
 export interface FetchOutputsParams {
   job_id?: number
   run_id?: number
+  watchlist_id?: number
   page?: number
   size?: number
 }

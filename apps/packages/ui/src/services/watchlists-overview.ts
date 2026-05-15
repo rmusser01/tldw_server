@@ -102,6 +102,10 @@ export interface WatchlistsOverviewData {
   systemHealth: "healthy" | "degraded"
 }
 
+export interface FetchWatchlistsOverviewParams {
+  watchlist_id?: number
+}
+
 const normalizeStatus = (value: string | null | undefined): string =>
   String(value || "")
     .trim()
@@ -340,7 +344,12 @@ export const getOverviewTabBadges = (
   return model.tabBadges
 }
 
-export const fetchWatchlistsOverviewData = async (): Promise<WatchlistsOverviewData> => {
+export const fetchWatchlistsOverviewData = async (
+  params: FetchWatchlistsOverviewParams = {}
+): Promise<WatchlistsOverviewData> => {
+  const scopedParams = params.watchlist_id != null
+    ? { watchlist_id: params.watchlist_id }
+    : {}
   const [
     sourcesResult,
     jobsResult,
@@ -350,13 +359,13 @@ export const fetchWatchlistsOverviewData = async (): Promise<WatchlistsOverviewD
     failedResult,
     outputsResult
   ] = await Promise.all([
-    fetchAllPages((params) => fetchWatchlistSources(params)),
-    fetchAllPages((params) => fetchWatchlistJobs(params)),
-    fetchScrapedItems({ reviewed: false, page: 1, size: 1 }),
-    fetchWatchlistRuns({ q: "running", page: 1, size: 1 }),
-    fetchWatchlistRuns({ q: "pending", page: 1, size: 1 }),
-    fetchWatchlistRuns({ q: "failed", page: 1, size: 5 }),
-    fetchWatchlistOutputs({ page: 1, size: 100 })
+    fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
+    fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams })),
+    fetchScrapedItems({ ...scopedParams, reviewed: false, page: 1, size: 1 }),
+    fetchWatchlistRuns({ ...scopedParams, q: "running", page: 1, size: 1 }),
+    fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
+    fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
+    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 })
   ])
 
   let healthy = 0
