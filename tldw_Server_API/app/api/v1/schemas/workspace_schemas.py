@@ -1,9 +1,9 @@
 """Pydantic schemas for workspace CRUD."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class WorkspaceUpsertRequest(BaseModel):
@@ -97,18 +97,71 @@ class StatusResponse(BaseModel):
 
 # --- Artifact schemas ---
 
+WorkspaceArtifactReviewState = Literal[
+    "draft",
+    "reviewing",
+    "accepted",
+    "needs_revision",
+    "rejected",
+    "exported",
+    "assigned",
+    "archived",
+]
+
+
+class WorkspaceArtifactRedaction(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    support_safe: StrictBool = True
+    redacted: StrictBool = False
+    retention_class: str | None = None
+    redacted_fields: list[str] = Field(default_factory=list)
+
+
 class WorkspaceArtifactCreateRequest(BaseModel):
     id: str
     artifact_type: str
     title: str
     status: str = "pending"
     content: str | None = None
+    content_type: str = "text/markdown"
+    preview_text: str | None = None
+    summary: str | None = None
+    review_state: WorkspaceArtifactReviewState = "draft"
+    owner_scope: str = "user"
+    owner_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_collection_id: str | None = None
+    producer_metadata: dict[str, Any] = Field(default_factory=dict)
+    source_lineage: dict[str, Any] = Field(default_factory=dict)
+    review_metadata: dict[str, Any] = Field(default_factory=dict)
+    version_metadata: dict[str, Any] = Field(default_factory=dict)
+    export_refs: list[dict[str, Any]] = Field(default_factory=list)
+    redaction: WorkspaceArtifactRedaction = Field(default_factory=WorkspaceArtifactRedaction)
+    schema_version: int = 1
 
 
 class WorkspaceArtifactUpdateRequest(BaseModel):
     title: str | None = None
     status: str | None = None
     content: str | None = None
+    content_type: str | None = None
+    preview_text: str | None = None
+    summary: str | None = None
+    review_state: WorkspaceArtifactReviewState | None = None
+    owner_scope: str | None = None
+    owner_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_collection_id: str | None = None
+    producer_metadata: dict[str, Any] | None = None
+    source_lineage: dict[str, Any] | None = None
+    review_metadata: dict[str, Any] | None = None
+    version_metadata: dict[str, Any] | None = None
+    export_refs: list[dict[str, Any]] | None = None
+    redaction: WorkspaceArtifactRedaction | None = None
+    schema_version: int | None = None
     total_tokens: int | None = None
     total_cost_usd: float | None = None
     completed_at: str | None = None
@@ -122,6 +175,25 @@ class WorkspaceArtifactResponse(BaseModel):
     title: str
     status: str = "pending"
     content: str | None = None
+    content_type: str = "text/markdown"
+    preview_text: str | None = None
+    summary: str | None = None
+    review_state: WorkspaceArtifactReviewState = "draft"
+    owner_scope: str = "user"
+    owner_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_collection_id: str | None = None
+    root_artifact_id: str
+    artifact_version_id: str
+    previous_version_id: str | None = None
+    producer_metadata: dict[str, Any] = Field(default_factory=dict)
+    source_lineage: dict[str, Any] = Field(default_factory=dict)
+    review_metadata: dict[str, Any] = Field(default_factory=dict)
+    version_metadata: dict[str, Any] = Field(default_factory=dict)
+    export_refs: list[dict[str, Any]] = Field(default_factory=list)
+    redaction: WorkspaceArtifactRedaction = Field(default_factory=WorkspaceArtifactRedaction)
+    schema_version: int = 1
     total_tokens: int | None = None
     total_cost_usd: float | None = None
     created_at: str

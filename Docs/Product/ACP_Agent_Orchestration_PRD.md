@@ -349,7 +349,7 @@ Implementation should be split into:
 
 | Slice | Scope |
 | --- | --- |
-| Storage/API | Add or map work-product artifact records, version chains, source-lineage records, review metadata, and ACP producer references. |
+| Storage/API | Backend foundation implemented by #1703 on `workspace_artifacts`: traceable artifact fields, version rows, source-lineage metadata, review metadata, export references, redaction posture, schema version, and ACP producer references. |
 | UI detail | Show artifact detail, source lineage, ACP provenance, review state, revise/retry/reject/accept controls, exports, and authenticated ACP drill-through links. |
 | Verification | Contract tests for ACP-to-artifact promotion, redacted support-safe views, reviewer-loop state mapping, versioning, and export identity. |
 
@@ -395,3 +395,6 @@ minimum, a release candidate needs:
 - 2026-05-14 artifact contract closeout: linked ACP output promotion to the
   traceable work-product artifact contract and split #1538 implementation into
   storage/API, UI detail, and verification slices.
+- 2026-05-14 storage/API foundation: #1703 added traceable workspace artifact
+  fields, API exposure, and per-version storage while leaving UI detail, ACP
+  promotion, export adapters, and broader signoff checks as follow-up slices.

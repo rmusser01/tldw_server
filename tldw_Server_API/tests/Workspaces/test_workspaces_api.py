@@ -544,6 +544,132 @@ def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db):
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
 
 
+def test_workspace_artifact_response_defaults_null_version_for_version_id():
+    from tldw_Server_API.app.api.v1.endpoints.workspaces import _art_to_response
+
+    response = _art_to_response({
+        "id": "art-null-version",
+        "workspace_id": "ws-1",
+        "artifact_type": "summary",
+        "title": "Summary",
+        "version": None,
+        "created_at": "2026-05-15T00:00:00Z",
+    })
+
+    assert response.version == 1
+    assert response.artifact_version_id == "art-null-version:v1"
+
+
+def test_workspace_artifact_redaction_schema_requires_typed_posture():
+    from pydantic import ValidationError
+
+    from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
+        WorkspaceArtifactCreateRequest,
+        WorkspaceArtifactResponse,
+    )
+
+    with pytest.raises(ValidationError):
+        WorkspaceArtifactCreateRequest(
+            id="brief-1",
+            artifact_type="workspace_brief",
+            title="Brief",
+            redaction={"support_safe": "yes", "redacted": False},
+        )
+
+    schema = WorkspaceArtifactResponse.model_json_schema()
+    redaction_ref = schema["properties"]["redaction"]["$ref"]
+    redaction_schema = schema["$defs"][redaction_ref.rsplit("/", 1)[-1]]
+    assert redaction_schema["properties"]["support_safe"]["type"] == "boolean"
+    assert redaction_schema["properties"]["redacted"]["type"] == "boolean"
+
+
+@pytest.mark.integration
+def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-art-api", "Workspace Artifacts")
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            add_response = client.post(
+                "/api/v1/workspaces/ws-art-api/artifacts",
+                json={
+                    "id": "brief-1",
+                    "artifact_type": "workspace_brief",
+                    "title": "ACP Research Brief",
+                    "status": "completed",
+                    "content": "# Brief\nGrounded answer.",
+                    "content_type": "text/markdown",
+                    "preview_text": "Grounded answer.",
+                    "summary": "Executive summary",
+                    "review_state": "accepted",
+                    "owner_scope": "workspace",
+                    "owner_id": "ws-art-api",
+                    "producer_metadata": {
+                        "producer_type": "acp",
+                        "producer_id": "task-42",
+                        "run_id": "run-7",
+                        "session_id": "session-abc",
+                    },
+                    "source_lineage": {
+                        "sources": [
+                            {"source_id": "src-1", "source_type": "media", "label": "Transcript"}
+                        ]
+                    },
+                    "root_artifact_id": "forged-root",
+                    "artifact_version_id": "forged:v99",
+                    "previous_version_id": "forged:v98",
+                    "review_metadata": {"reviewer_id": "reviewer-1", "decision": "accepted"},
+                    "version_metadata": {"revision_reason": "initial"},
+                    "export_refs": [{"format": "md", "file_id": 101}],
+                    "redaction": {"support_safe": True, "redacted": False, "retention_class": "standard"},
+                },
+            )
+
+            assert add_response.status_code == 201, add_response.text
+            added = add_response.json()
+            assert added["review_state"] == "accepted"
+            assert added["root_artifact_id"] == "brief-1"
+            assert added["artifact_version_id"] == "brief-1:v1"
+            assert added["producer_metadata"]["producer_type"] == "acp"
+            assert added["source_lineage"]["sources"][0]["source_id"] == "src-1"
+            assert added["redaction"]["support_safe"] is True
+
+            fetch_response = client.get("/api/v1/workspaces/ws-art-api/artifacts")
+            assert fetch_response.status_code == 200, fetch_response.text
+            fetched = fetch_response.json()[0]
+            assert fetched["artifact_version_id"] == "brief-1:v1"
+            assert fetched["review_metadata"]["decision"] == "accepted"
+            assert fetched["export_refs"][0]["file_id"] == 101
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+
 @pytest.mark.integration
 def test_list_workspace_artifacts_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:

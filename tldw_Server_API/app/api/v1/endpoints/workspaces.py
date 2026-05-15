@@ -78,6 +78,7 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
 
 def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
     """Convert a workspace artifact DB row dict to a WorkspaceArtifactResponse schema."""
+    version = art.get("version") or 1
     return WorkspaceArtifactResponse(
         id=art["id"],
         workspace_id=art["workspace_id"],
@@ -85,11 +86,30 @@ def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
         title=art["title"],
         status=art.get("status", "pending"),
         content=art.get("content"),
+        content_type=art.get("content_type") or "text/markdown",
+        preview_text=art.get("preview_text"),
+        summary=art.get("summary"),
+        review_state=art.get("review_state") or "draft",
+        owner_scope=art.get("owner_scope") or "user",
+        owner_id=art.get("owner_id"),
+        project_id=art.get("project_id"),
+        task_id=art.get("task_id"),
+        source_collection_id=art.get("source_collection_id"),
+        root_artifact_id=art.get("root_artifact_id") or art["id"],
+        artifact_version_id=art.get("artifact_version_id") or f"{art['id']}:v{version}",
+        previous_version_id=art.get("previous_version_id"),
+        producer_metadata=art.get("producer_metadata") or {},
+        source_lineage=art.get("source_lineage") or {},
+        review_metadata=art.get("review_metadata") or {},
+        version_metadata=art.get("version_metadata") or {},
+        export_refs=art.get("export_refs") or [],
+        redaction=art.get("redaction") or {"support_safe": True, "redacted": False},
+        schema_version=art.get("schema_version") or 1,
         total_tokens=art.get("total_tokens"),
         total_cost_usd=art.get("total_cost_usd"),
         created_at=str(art.get("created_at", "")),
         completed_at=str(art["completed_at"]) if art.get("completed_at") else None,
-        version=art.get("version", 1),
+        version=version,
     )
 
 
