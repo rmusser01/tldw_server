@@ -354,6 +354,10 @@ const normalizeExportRefs = (
 
       return {
         ...record,
+        id: pickValue(record, "id", "export_id", "exportId") as
+          | number
+          | string
+          | undefined,
         format,
         fileId: pickValue(record, "fileId", "file_id") as number | string | undefined,
         jobId: pickValue(record, "jobId", "job_id") as number | string | undefined,

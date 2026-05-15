@@ -1,11 +1,42 @@
 import React from "react"
 import { fireEvent, render, screen, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 import type { ArtifactReviewStatus, GeneratedArtifact } from "@/types/workspace"
 import {
+  hasTraceableArtifactMetadata,
   TraceableArtifactDetail,
   TraceableArtifactSummary
 } from "../TraceableArtifactDetail"
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      optionsOrDefault?:
+        | string
+        | {
+            defaultValue?: string
+            defaultValue_plural?: string
+            count?: number
+            id?: string
+            format?: string
+            status?: string
+          }
+    ) => {
+      if (typeof optionsOrDefault === "string") return optionsOrDefault
+      const defaultValue =
+        optionsOrDefault?.count !== 1 && optionsOrDefault?.defaultValue_plural
+          ? optionsOrDefault.defaultValue_plural
+          : optionsOrDefault?.defaultValue ?? key
+      return defaultValue
+        .replace("{{count}}", String(optionsOrDefault?.count ?? ""))
+        .replace("{{id}}", String(optionsOrDefault?.id ?? ""))
+        .replace("{{format}}", String(optionsOrDefault?.format ?? ""))
+        .replace("{{status}}", String(optionsOrDefault?.status ?? ""))
+    }
+  })
+}))
 
 const baseArtifact = (
   overrides: Partial<GeneratedArtifact> = {}
@@ -60,9 +91,16 @@ const baseArtifact = (
   ...overrides
 })
 
+const renderDetail = (artifact: GeneratedArtifact) =>
+  render(
+    <MemoryRouter>
+      <TraceableArtifactDetail artifact={artifact} />
+    </MemoryRouter>
+  )
+
 describe("TraceableArtifactDetail", () => {
   it("renders review state, provenance, lineage, versioning, redaction, and export details", () => {
-    render(<TraceableArtifactDetail artifact={baseArtifact()} />)
+    renderDetail(baseArtifact())
 
     expect(screen.getByTestId("traceable-artifact-review-state")).toHaveTextContent(
       "Accepted"
@@ -118,33 +156,88 @@ describe("TraceableArtifactDetail", () => {
   })
 
   it("renders unavailable metadata states without leaking raw support payloads", () => {
-    render(
-      <TraceableArtifactDetail
-        artifact={baseArtifact({
-          producerMetadata: undefined,
-          sourceLineage: undefined,
-          exportRefs: undefined,
-          exportTargets: undefined,
-          redaction: { supportSafe: false, redacted: true }
-        })}
-      />
+    renderDetail(
+      baseArtifact({
+        producerMetadata: undefined,
+        sourceLineage: undefined,
+        exportRefs: undefined,
+        exportTargets: undefined,
+        redaction: { supportSafe: true, redacted: false }
+      })
     )
 
     expect(screen.getByText("No ACP provenance recorded")).toBeInTheDocument()
     expect(screen.getByText("No source lineage recorded")).toBeInTheDocument()
     expect(screen.getByText("No exports recorded")).toBeInTheDocument()
-    expect(screen.getAllByText("Restricted").length).toBeGreaterThan(0)
-    expect(screen.getByText("Redacted")).toBeInTheDocument()
+    expect(screen.getAllByText("Support safe").length).toBeGreaterThan(0)
+    expect(screen.getByText("Not redacted")).toBeInTheDocument()
     expect(screen.queryByText("{")).not.toBeInTheDocument()
+  })
+
+  it("suppresses provenance and lineage details when redaction posture is restricted", () => {
+    renderDetail(
+      baseArtifact({
+        redaction: { supportSafe: false, redacted: true, retentionClass: "restricted" }
+      })
+    )
+
+    expect(screen.getByText("Provenance hidden by redaction posture")).toBeInTheDocument()
+    expect(screen.getByText("Source lineage hidden by redaction posture")).toBeInTheDocument()
+    expect(screen.queryByText("task-42")).not.toBeInTheDocument()
+    expect(screen.queryByText("run-7")).not.toBeInTheDocument()
+    expect(screen.queryByText("session-abc")).not.toBeInTheDocument()
+    expect(screen.queryByText("Transcript")).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Open session" })).not.toBeInTheDocument()
+  })
+
+  it("treats schema version zero as traceable metadata", () => {
+    expect(
+      hasTraceableArtifactMetadata(
+        baseArtifact({
+          reviewStatus: undefined,
+          producerMetadata: undefined,
+          sourceLineage: undefined,
+          reviewMetadata: undefined,
+          versionMetadata: undefined,
+          exportRefs: undefined,
+          redaction: undefined,
+          rootArtifactId: undefined,
+          artifactVersionId: undefined,
+          previousVersionId: undefined,
+          schemaVersion: 0
+        })
+      )
+    ).toBe(true)
+  })
+
+  it("renders duplicate-format export refs without duplicate React keys", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    try {
+      renderDetail(
+        baseArtifact({
+          exportRefs: [{ format: "markdown" }, { format: "markdown" }]
+        })
+      )
+
+      const duplicateKeyWarnings = consoleError.mock.calls.filter(([message]) =>
+        String(message).includes("Encountered two children with the same key")
+      )
+      expect(duplicateKeyWarnings).toHaveLength(0)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it("exposes review-state controls when a transition handler is provided", () => {
     const onReviewStateChange = vi.fn()
     render(
-      <TraceableArtifactDetail
-        artifact={baseArtifact({ reviewStatus: "reviewing" })}
-        onReviewStateChange={onReviewStateChange}
-      />
+      <MemoryRouter>
+        <TraceableArtifactDetail
+          artifact={baseArtifact({ reviewStatus: "reviewing" })}
+          onReviewStateChange={onReviewStateChange}
+        />
+      </MemoryRouter>
     )
 
     const controls = screen.getByRole("group", {

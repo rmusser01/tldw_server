@@ -196,6 +196,7 @@ export interface TraceableArtifactVersionMetadata {
 }
 
 export interface TraceableArtifactExportRef {
+  id?: number | string
   format: string
   fileId?: number | string
   jobId?: number | string
