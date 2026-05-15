@@ -57,6 +57,11 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { getWorkspaceStudioNoSourcesHint } from "../source-location-copy"
 import { WorkProductTemplateChooser } from "./WorkProductTemplateChooser"
 import {
+  hasTraceableArtifactMetadata,
+  TraceableArtifactDetail,
+  TraceableArtifactSummary
+} from "./TraceableArtifactDetail"
+import {
   useArtifactGeneration,
   useAudioTtsSettings,
   useQuizParsing,
@@ -1010,15 +1015,22 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       return
     }
 
-    if (artifact.content) {
+    if (artifact.content || hasTraceableArtifactMetadata(artifact)) {
       Modal.info({
         title: artifact.title,
         content: (
-          <div className="max-h-96 overflow-y-auto whitespace-pre-wrap">
-            {artifact.content}
+          <div className="max-h-[70vh] space-y-4 overflow-y-auto">
+            {hasTraceableArtifactMetadata(artifact) && (
+              <TraceableArtifactDetail artifact={artifact} />
+            )}
+            {artifact.content && (
+              <div className="whitespace-pre-wrap rounded border border-border bg-surface p-3 text-sm text-text">
+                {artifact.content}
+              </div>
+            )}
           </div>
         ),
-        ...responsiveModalProps(600)
+        ...responsiveModalProps(760)
       })
     }
   }
@@ -2083,6 +2095,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             {artifact.errorMessage}
                           </p>
                         )}
+                        {hasTraceableArtifactMetadata(artifact) && (
+                          <TraceableArtifactSummary
+                            artifact={artifact}
+                            className="mt-2"
+                          />
+                        )}
                       </div>
                     </div>
                     {artifact.status === "completed" && (
@@ -2096,7 +2114,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           )}
                           className="flex flex-wrap items-center gap-1 rounded border border-border/70 bg-surface/70 px-1.5 py-1"
                         >
-                          {(artifact.content || artifact.audioUrl) && (
+                          {(artifact.content ||
+                            artifact.audioUrl ||
+                            hasTraceableArtifactMetadata(artifact)) && (
                             <Tooltip title={t("common:view", "View")}>
                               <button
                                 type="button"
