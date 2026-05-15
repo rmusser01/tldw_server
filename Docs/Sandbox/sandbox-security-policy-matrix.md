@@ -142,7 +142,7 @@ truth in the helper.
 
 | Runtime | Allowlisting expectation |
 | --- | --- |
-| `vz_linux` | Python admits only supported trust/network/runtime requests; helper independently rejects unsupported VM creation, unsafe sockets, and unsupported protocol versions. |
+| `vz_linux` | Python admits only supported trust/network/runtime requests; helper independently rejects unsupported VM creation, malformed `create_vm` request shape, unsafe sockets, and unsupported protocol versions. |
 | `vz_macos` | Must follow the same Python/helper split when real execution lands. |
 | `lima` | Python must revalidate strict policy at execution time before dispatch. |
 | `firecracker` | Runtime config paths must be validated before VM start. |

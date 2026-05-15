@@ -216,6 +216,12 @@ item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
   rejects unsupported policies before dispatch, and the Swift helper rejects
   direct `create_vm` requests unless `network_policy=deny_all`. The helper also
   echoes the accepted policy in VM metadata/status details for diagnostics.
+  Direct `create_vm` requests are also shape-checked before boot: unsupported
+  runtimes, invalid VM ids, non-absolute or NUL-bearing paths, symlink leaf
+  paths or user-controlled symlinked parent components, oversized metadata, and
+  out-of-range startup timeouts are rejected without registering a VM. Root-level
+  macOS compatibility prefixes such as `/tmp` and `/var` are allowed and
+  subsequent components are still checked.
 - The current `vz_linux` Virtualization.framework configuration omits network
   device attachment; guest command transport uses vsock rather than guest
   network access.
